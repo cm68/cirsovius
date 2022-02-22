@@ -1,0 +1,39 @@
+	title	Module from library BASE_3 : DEC255
+	name	('DEC255')
+	include	baselib.lib
+
+; Convert ASCII decimal string to 8 bit hex number
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, September 1986
+
+; ENTRY DE points to string
+;	B holds end marker of string
+;	(usually zero or $)
+;	If B holds 255 (hex 0FFH), routine ends at first
+;	non numeric character found
+
+; EXIT	HL holds 16 bit, accu 8 bit number
+;	DE points to delimiter or first non numeric character
+;	Carry set on overflow (number > 255) or illegal digit
+
+	entry	dec255
+
+	extrn	decin
+
+dec255:
+	call	decin		; Fetch number
+	ret	c		; Aha, error
+	ld	a,h		; Test high byte
+	or	a
+	ld	a,l		; Fetch result
+	ret	z		; Ok, no overflow
+	scf			; Set overflow
+	ret
+
+	end
+

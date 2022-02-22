@@ -1,0 +1,225 @@
+	title	PARSE Emulator for CP/M 2.2 - PARSE22
+	name	('PARS22')
+	include	baselib.lib
+
+; Parse a line
+
+; This routine emulates the most usefull BDOS function PARSE
+; for CP/M 3.0 on a CP/M 2.2 machine
+; The user interface works exactly as the module PARSE
+; from library BASELIB
+; Running on a CP/M 2.2 machine, linkage of PARSE22 MUST be
+; performed before calling the library, e.g.
+
+;	LINK program=...,PARSE22,BASELIB[S],...
+
+; Because of libray references, BASELIB MUST be searched
+; solving these references
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 September 1987
+
+; ENTRY	Reg pair <DE> points to a two address parse
+;	parameter block. The first address points to ASCII
+;	buffer closed by zero, the second address points to
+;	a 36 byte file control block (FCB)
+
+; EXIT	On normal return, carry will be reset and reg pair <HL>
+;	points either to next item or holds zero on end. The
+;	FCB is filled properly
+;	On error return, the carry flag will be set
+
+	entry	parse
+
+	extrn	upplin
+
+; ===== Start the emulator =====
+
+parse:
+	push	bc
+	call	gethl		; Fetch ASCII buffer
+	push	hl
+	ld	(?bufer),hl
+	call	gethl		; Fetch FCB
+	ld	(?fcb),hl
+	pop	de		; Get ASCII
+	ld	b,0		; String end
+	call	upplin		; Convert string to upper case
+	call	parsdo		; Go parse
+	pop	bc
+	ret	nc		; .. success
+	ld	hl,_ERR
+	ret
+; 
+; Fetch reg pair HL from pointer in reg pair DE
+; ENTRY	Reg pair DE points to 16 bit value
+; EXIT	Reg pair HL holds 16 bit value
+; 	Reg pair DE incremented by 2
+; 
+gethl:
+	ex	de,hl
+	ld	e,(hl)		; Fetch 16 bit address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	ret
+; 
+; Blank a piece of memory
+; ENTRY	Reg pair HL points to memory to be blanked
+; 	Reg B holds number of blanks
+; EXIT	Memory blanked, Reg HL incremented by content
+; 	of register B
+; 
+blnk:
+	inc	hl
+	ld	(hl),' '	; Blank buffer
+	djnz	blnk
+	ret
+; 
+; Get next non blank character
+; ENTRY	Reg pair DE holds string pointer
+; EXIT	Reg pair DE updated, Zero flag set on end
+; 	of string, otherwise reset
+; 
+gtnxcr:
+	ld	a,(de)		; Get next character
+	or	a
+	ret	z		; End on end of line
+	cp	' '		; Test blank
+	ret	nz
+	inc	de		; Skip blanks
+	jr	gtnxcr
+; 
+; Get special character
+; ENTRY	Reg pair DE points to character
+; EXIT	Zero flag set on special character found
+; 	On error, stack level will be fixed and
+; 	the carry flag will be set
+; 
+gtchk:
+	ld	a,(de)		; Get character
+	or	a		; Test end
+	ret	z
+	cp	' '		; Check special
+	ret	z
+	jr	c,cmderr	; Aha, error
+	cp	'='
+	ret	z
+	cp	'_'
+	ret	z
+	cp	'.'
+	ret	z
+	cp	':'
+	ret	z
+	cp	';'
+	ret	z
+	cp	'<'
+	ret	z
+	cp	'>'
+	ret	z
+	or	a		; No carry
+	ret
+cmderr:
+	pop	hl		; Set level
+	ret
+; 
+; *** The MAIN parse loop ***
+; 
+parsdo:
+	ld	hl,(?fcb)	; Get FCB
+	push	hl
+	ld	(hl),0		; Set current drive
+	ld	hl,(?bufer)	; Get pointer
+	ex	de,hl
+	call	gtnxcr		; Get next character
+	pop	hl
+	ld	a,(de)		; Get character
+	or	a		; Test end
+	jr	z,setfil
+	sub	'@'		; Make drive
+	cp	_MAXDRV+1
+	jr	nc,setfil	; Check A..P
+	ld	b,a
+	inc	de
+	ld	a,(de)
+	cp	':'		; Test delimiter
+	jr	z,setnwd
+	dec	de
+	jr	setfil
+setnwd:
+	ld	(hl),b		; .. into FCB
+	inc	de
+setfil:
+	ld	b,.nam		; Set loop counter
+@stfil:
+	call	gtchk		; Get character
+	jr	z,fifcsp	; Fill rest with space
+	inc	hl
+	cp	'*'		; Test wild card
+	jr	nz,sechfc
+	ld	(hl),$WILD	; Expand to '?'
+	jr	nefich
+sechfc:
+	ld	(hl),a		; Store character
+	inc	de
+nefich:
+	djnz	@stfil		; Test end of name
+seafil:
+	call	gtchk		; Get next character
+	jr	z,sefilt
+	inc	de
+	jr	seafil
+fifcsp:
+	call	blnk
+sefilt:
+	ld	b,.ext		; Set extension counter
+	cp	'.'		; Test delimiter
+	jr	nz,fitysp
+	inc	de
+@sefil:
+	call	gtchk		; Test character
+	jr	z,fitysp	; Aha, end
+	inc	hl
+	cp	'*'		; Test wildcard
+	jr	nz,sctoty
+	ld	(hl),$WILD	; Expand it
+	jr	nefty
+sctoty:
+	ld	(hl),a		; Set character
+	inc	de
+nefty:
+	djnz	@sefil		; Test done
+@eotyp:
+	call	gtchk		; Get character
+	jr	z,clrest
+	inc	de
+	jr	@eotyp
+fitysp:
+	call	blnk
+clrest:
+	ld	b,4
+@clr:
+	inc	hl		; Clear next 3 bytes
+	ld	(hl),0
+	djnz	@clr
+	ex	de,hl
+	ld	a,(hl)
+	or	a		; Reset carry, test end
+	ret	nz
+	ld	hl,_NUL		; Clear result
+	ret
+
+	dseg
+
+?fcb:
+	ds	2
+?bufer:
+	ds	2
+
+	end
+

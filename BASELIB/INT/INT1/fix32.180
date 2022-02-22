@@ -1,0 +1,66 @@
+	title	Module from library INTEGER_1 : FIX32
+	name	('FIX32')
+	include	baselib.lib
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; Subroutine for divide and modulo of 32 bit integers
+
+; ENTRY	Regs <HL,IY> and <BC,DE> hold numbers
+
+; EXIT	A little bit of division performed
+
+	entry	$fix32
+
+$fix32:
+	push	hl		; Save entry
+	ld	a,h		; Test part
+	or	l
+	jr	z,fix1		; .. 16 bit
+	ld	a,32		; Set 32 bit
+	ld	hl,0
+	jr	fix2
+fix1:	
+	ld	a,16
+	ex	(sp),iy
+fix2:	
+	pop	ix
+	push	hl
+fix6:	
+	add	iy,iy		; Now go thru the loop
+	rla
+	add	ix,ix
+	ex	(sp),hl
+	adc	hl,hl
+	ex	(sp),hl
+	adc	hl,hl
+	rra
+	jr	nc,fix3
+	inc	ix
+fix3:	
+	ex	(sp),hl
+	or	a
+	sbc	hl,de
+	ex	(sp),hl
+	sbc	hl,bc
+	jp	p,fix4
+	ex	(sp),hl
+	add	hl,de
+	ex	(sp),hl
+	adc	hl,bc
+	jr	fix5
+fix4:	
+	inc	iy
+fix5:	
+	dec	a		; Check done
+	jr	nz,fix6
+	pop	af
+	ret
+
+	end
+

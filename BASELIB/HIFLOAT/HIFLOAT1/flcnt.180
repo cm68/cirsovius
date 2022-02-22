@@ -1,0 +1,54 @@
+	title	Module from library HIFLOAT_1 : FLCNT
+	name	('FLCNT')
+	include	baselib.lib
+
+; Count length of floating point characters
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Reg pair DE points to numeric ASCII string,
+;	Reg B holds end of string character, usually
+;	zero or $
+;	String may contain ., +, -,E or 0..9. All other
+;	characters are illegal and stop counting
+
+; EXIT	Reg B and accu hold length of numeric string,
+;	Zero flag indicates empty string
+
+	entry	flcnt
+
+flcnt:
+	_push_
+	ld	c,-1		; Init the counter
+@count:
+	inc	c
+	ld	a,(de)		; Fetch character
+	inc	de
+	cp	b		; Test delimiter
+	jr	z,exit
+	push	bc
+	ld	hl,table
+	ld	bc,tablen
+	cpir			; Find character
+	pop	bc
+	jr	z,@count	; Go on
+exit:
+	ld	a,c		; Get count
+	_pop_
+	ld	b,a
+	or	a		; Test zero
+	ret
+
+	dseg
+
+table:
+	db	'.+-eE0123456789'
+tablen	equ	$-table
+
+	end
+

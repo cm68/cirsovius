@@ -1,0 +1,49 @@
+	title	PRLPRP
+	subttl	Module from library CPX_1 : PRLPRP
+	.z80
+
+; Prepare the load of a PRL file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1988
+
+; ENTRY	: Reg DE holds FCB of PRL file to be loaded
+;	  Reg HL holds first possible load address
+
+; EXIT	: Reg HL holds fixed start address (Set to page
+;	  boundary). Reg DE holds new top address.
+;	  Carry flag set indicates error, either file not
+;	  found or memory overflow
+
+	public	prlprp
+
+	ext	open,dskred,curdma
+
+prlprp:
+	ld	a,l		; Test boundary
+	or	a
+	jr	z,.boundok
+	ld	l,0		; Set it
+	inc	h
+.boundok:
+	push	hl
+	call	open		; Open PRL file
+	call	nc,dskred	; Read 1st record if found
+	pop	de
+	ret	c		; Exit on error
+	call	curdma		; Get DMA
+	inc	hl		; Point to length of PRL file
+	ld	a,(hl)		; Get it
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	add	hl,de		; Get top
+	ex	de,hl
+	ret
+
+	end
+

@@ -1,0 +1,83 @@
+	title	Module from library HIFLOAT_4 : FLMANT
+	name	('FLMANT')
+	include	baselib.lib
+
+; Execute some base mantissa functions for the floating
+; point package
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+	entry	mant10,mantst
+
+	ext	?flmul
+
+;
+; Multiply mantissa by 10
+; ENTRY	Reg HL and DE hold mantissa HI and LO
+; EXIT	Reg HL and DE hold mantissa * 10
+;
+mant10:
+	add	hl,hl		; * 2
+	rl	e
+	rl	d
+	push	de		; .. onto stack
+	push	hl
+	add	hl,hl		; * 4
+	rl	e
+	rl	d
+	add	hl,hl		; * 8
+	rl	e
+	rl	d
+	pop	bc
+	add	hl,bc		; * 8 + * 2
+	ex	de,hl		; .. is * 10
+	pop	bc
+	adc	hl,bc
+	ex	de,hl
+	ret
+;
+; Get factor 1Exx, xx=1 .. 32
+; ENTRY	Accu holds entry value, each bit
+;	corresponds to squaring
+;
+mantst:
+	ld	hl,4000h	; Init 1.0
+	ld	d,l
+	ld	e,l
+	ld	iy,man.tab	; Init table
+man.shf:	
+	srl	a		; Get bit
+	jr	nc,no.bit	; .. skip if none
+	push	af
+	push	iy
+	push	hl
+	push	de
+	ld	h,(iy+0)	; Load multiplier
+	ld	l,(iy+1)
+	ld	e,(iy+2)
+	ld	d,(iy+3)
+	call	?flmul		; Multiply by 1Exx
+	pop	iy
+	pop	af
+no.bit:	
+	ret	z		; End on all bits shifted
+	ld	bc,4
+	add	iy,bc		; Fix table
+	jr	man.shf
+
+	dseg
+
+man.tab:
+	db	050h,000h,000h,003h	; 1 E01
+	db	064h,000h,000h,006h	; 1 E02
+	db	04eh,020h,000h,00dh	; 1 E04
+	db	05fh,05eh,010h,01ah	; 1 E08
+	db	047h,00dh,0e4h,035h	; 1 E16
+	db	04eh,0e2h,0d4h,06ah	; 1 E32
+
+	end
+

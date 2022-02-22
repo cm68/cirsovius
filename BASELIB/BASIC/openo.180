@@ -1,0 +1,53 @@
+	title	Module from library HILIB_3 : @OPENO
+	name	('@OPENO')
+	include	baselib.lib
+
+; Language : BASIC
+
+; Open new file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, August 1987
+
+; ENTRY	Reg pair HL points to string describing file
+;	Reg pair DE points to FCB or channel parameter block
+;	Reg C holds channel in range 1 up to 15 on channel
+;	transfer or 0 on simple FCB set up
+
+; EXIT	Carry set on error and accu holds error code
+;	- 52 file number error
+;	- 55 file already open
+;	- 64 file name invalid
+;	- 67 directory full
+
+	entry	@openo
+
+	extrn	creatd,chnini,@ftcfl,@tstch
+
+@openo:
+	push	de
+	call	@ftcfl		; Get file
+	pop	de
+	ret	c		; Aha, error
+	ld	a,c		; Test kinda transfer
+	or	a
+	jr	nz,opnch	; Go open channel
+	call	creatd		; Create file
+	ret	nc
+	ld	a,67		; Set error
+	ret
+opnch:
+	call	@tstch		; Test channel ok
+	ret	c
+	ld	b,2
+	call	chnini		; Init channel
+	ret	nc
+	ld	a,67		; Set error
+	ret
+
+	end
+

@@ -1,0 +1,170 @@
+	title	Module from library C_3 : FPUTC
+	name	('FPUTC')
+
+; Put character/byte to file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair DE points to file block
+;	Reg pair HL holds character
+
+; EXIT	Reg HL holds character. -1 maps to end of file
+
+	maclib	c.lib
+
+	entry	fputc
+
+	extrn	$stdout,$bdos,u$bdos,$flags
+
+fputc:
+	inc	d		; Test stream device
+	dec	d
+	jr	nz,out.dev	; .. yeap
+	dec	e		; Test standard output
+	dec	e
+	jp	nz,out.char	; .. nope
+	ld	de,($stdout)
+	jr	fputc
+out.dev:
+	ld	c,l		; Get character
+	ld	hl,_Ctrl
+	add	hl,de
+	bit	_wr,(hl)	; Test write
+	jr	z,err.put	; .. nope, error
+	ld	a,c
+	cp	lf		; Test new line
+	jr	nz,no.lf	; .. nope
+	bit	_bin,(hl)	; Test binary
+	jr	nz,no.lf	; .. yeap, do not map
+	push	hl
+	push	de
+	push	bc
+	ld	l,cr
+	call	fputc		; .. give return
+	pop	bc
+	pop	de
+	pop	hl
+	ld	a,c		; Get back character
+no.lf:
+	inc	hl
+	ld	c,(hl)		; Get current buffer
+	inc	hl
+	ld	b,(hl)
+	inc	bc		; .. bump
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	inc	hl
+	inc	hl
+	ld	c,(hl)		; Get address
+	inc	hl
+	ld	b,(hl)
+	ld	(bc),a		; .. save character
+	inc	bc		; Bump address
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	c,a
+	dec	hl
+	ld	a,(hl)		; Get high pointer
+	xor	HIGH buflen	; Test buffer filled
+	jr	nz,ch.ret	; .. still room
+	inc	hl		; Fix to start of buffer
+	inc	hl
+	inc	hl
+	push	bc
+	push	de
+	ex	de,hl
+	ld	b,bufrec	; Load record count
+wr.loop:
+	ld	c,.setdma
+	call	$bdos		; Set disk buffer
+	ld	hl,reclng
+	add	hl,de		; Point to next
+	ex	(sp),hl		; Get FCB
+	ex	de,hl
+	ld	c,.wrseq
+	call	u$bdos		; Write buffer to disk
+	ex	de,hl
+	ex	(sp),hl
+	ex	de,hl
+	or	a		; Test success
+	jr	nz,wr.err	; .. nope, write error
+	djnz	wr.loop
+	pop	de
+	ld	hl,_Buff
+	add	hl,de
+	ld	(hl),b		; .. clear current
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	e,l
+	ld	d,h
+	inc	de
+	inc	de
+	ld	(hl),e		; Set start of buffer
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	de
+	ld	bc,buflen-1
+	ld	(hl),eof
+	ldir			; Clear entire buffer
+	pop	bc
+ch.ret:
+	ld	l,c
+ch..ret:
+	ld	h,0
+	ret
+wr.err:
+	pop	de
+	pop	bc
+	ld	hl,_Ctrl
+	add	hl,de
+	set	_eof.,(hl)	; Set end of file
+	res	_wr,(hl)	; .. clear write
+err.put:
+	ld	hl,_ERR
+	ret
+out.char:
+	ld	b,e		; Get device number
+	djnz	is.AUX?		; Test CON:
+	ld	de,00000100b*256+.conout
+	jr	do.chr
+is.AUX?:
+	dec	b
+	djnz	is.LST?		; Test AUX:
+	ld	de,00010000b*256+.auxout
+	jr	do.chr
+is.NUL?:
+	dec	b
+	djnz	err.put		; Test NUL:
+	jr	os.ret
+is.LST?:
+	djnz	is.NUL?		; Test LST:
+	ld	de,00000000b*256+.lstout
+do.chr:
+	ld	c,e		; Get BDOS code
+	ld	e,l		; .. get character
+	ld	a,($flags)
+	and	d		; Test binary
+	jr	nz,os.call	; .. yeap
+	ld	a,e
+	cp	lf		; Test new line
+	jr	nz,os.call
+	ld	e,cr
+	call	$bdos		; .. give new line
+	ld	e,lf
+os.call:
+	call	$bdos		; .. print character
+os.ret:
+	ex	de,hl		; Get character
+	jr	ch..ret
+
+	end
+

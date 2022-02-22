@@ -1,0 +1,45 @@
+	title	Module from library BASE_1 : STRNGF
+	name	('STRNGF')
+	include	baselib.lib
+
+; Put line to disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 March 1989
+
+; ENTRY	Reg pair DE points to input buffer, reg B holds
+;	character which indicates the end of line
+;	(Usually $ or zero)
+;	Location STRNGF-2 must be initialized to address
+;	of character put routine.
+;	Address defaults to warm start
+
+; EXIT	Carry set on error and extended error processed if
+;	selected. Otherwise carry reset.
+
+	public	strngf
+
+put:
+	jp	$-$		; *** Defaults to restart	
+strngf:
+	push	de
+eml??:
+	ld	a,(de)		; Fetch character
+	inc	de
+	cp	b		; Test selected end
+	jr	z,endofl
+	call	put		; Put a character
+	jr	nc,eml??	; Loop on
+	pop	de
+	ret			; End on error
+endofl:
+	pop	de
+	or	a		; Set success
+	ret
+
+	end
+

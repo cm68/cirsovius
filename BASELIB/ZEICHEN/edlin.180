@@ -1,0 +1,55 @@
+	title	Module from library BASE_2 : EDLIN
+	name	('EDLIN')
+	include	baselib.lib
+
+; Fill an possible existing line with characters from keyboard
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 September 1991
+
+; ENTRY	Reg pair <DE> points to start of buffer
+;	Location <DE>+0 must hold maximal number for input
+
+; EXIT	Location <DE>+1 holds number of characters
+;	Location <DE>+2 is the character start point
+;	Carry set if buffer empty
+;	Byte behind last character is set to zero
+
+	entry	edlin
+
+	ext	curdma,setdma
+
+edlin:
+	push	hl
+	push	bc
+	call	curdma		; Get current buffer
+	push	hl		; .. save
+	push	de
+	call	setdma		; Set ours
+	_OSCAL_	.rdcon,0	; Get and/or edit line
+	pop	hl
+	push	hl
+	inc	hl		; Point to length
+	ld	c,(hl)
+	ld	b,0
+	inc	hl
+	add	hl,bc		; Point to end
+	ld	(hl),b		; .. close end
+	pop	hl
+	pop	de		; Get old
+	call	setdma		; .. reset it
+	ex	de,hl
+	ld	a,c		; Get length
+	pop	bc
+	pop	hl
+	or	a
+	ret	nz
+	scf
+	ret
+
+	end
+

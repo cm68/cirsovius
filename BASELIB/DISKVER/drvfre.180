@@ -1,0 +1,57 @@
+	title	Module from library BASE_4 : DRVFRE
+	name	('DRVFRE')
+	include	baselib.lib
+
+; Compute disk size in kBytes
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1988
+
+; ENTRY	Accu holds drive
+;	0 -> A ... 15 -> P
+
+; EXIT	Reg pair HL holds 16 bit value of disk free kBytes
+
+;	On normal return carry is reset
+;	On error carry will be set and extended error
+;	will be processed
+
+	entry	drvfre
+
+	extrn	dsksiz,curdma
+
+drvfre:
+	push	bc
+	push	de
+	call	dsksiz		; Get free space
+	push	af		; Save result
+	call	curdma		; Get my DMA
+	ld	e,(hl)		; Fetch 18 bit
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	ex	de,hl
+	ld	e,a
+	call	div2		; Divide by eight
+	call	div2
+	call	div2
+	pop	af
+	pop	de
+	pop	bc
+	ret
+;
+; Shift 24bit <E-H-L> right one place
+;
+div2:
+	srl	e		; Shift 18 bit right
+	rr	h
+	rr	l
+	ret
+
+	end
+

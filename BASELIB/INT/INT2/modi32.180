@@ -1,0 +1,107 @@
+	title	Module from library INTEGER_2 : MODI32
+	name	('MODI32')
+	include	baselib.lib
+
+; Get remainder of division of 32 bit integers
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Regs HL,BC hold 2nd operand and result
+;	Stack hold 1st number
+
+; EXIT	Result filled with product
+;	Carry set on zero divisor or overflow
+
+	entry	$mod32
+
+	extrn	$neg32,$fix32
+
+$mod32:
+	ld	a,h
+	pop	iy
+	pop	de
+	ex	(sp),hl
+	ex	(sp),iy
+	or	a
+	jp	m,moderr2
+	sub	a
+	push	bc
+	ld	b,d
+	ld	c,e
+	bit	sign,h		; Test sign
+	jr	z,modpos
+	call	$neg32
+	or	10000000b
+modpos:	
+	pop	de
+	push	ix
+	push	af
+	push	bc
+	ex	(sp),iy
+	pop	bc
+	ld	a,b
+	or	c
+	or	d
+	jr	nz,mod1
+	or	e
+	jr	z,moderr1
+	cp	2
+	jr	nz,mod1
+	push	iy
+	pop	hl
+	rr	l
+	ld	hl,0
+	rl	l
+	pop	af
+	push	hl
+	ld	hl,0
+	jr	mod2
+mod1:	
+	call	$fix32
+	push	af
+	pop	iy
+	pop	af
+	push	iy
+mod2:	
+	rla
+	jr	nc,mod3
+	rla
+	jr	nc,mod4
+	ld	bc,0
+	ld	d,b
+	ld	e,b
+mod4:	
+	ld	a,h
+	or	l
+	ex	(sp),hl
+	or	h
+	or	l
+	ex	(sp),hl
+	jr	z,mod3
+	ex	de,hl
+	push	bc
+	pop	iy
+	pop	bc
+	or	a
+	sbc	hl,bc
+	push	iy
+	ex	(sp),hl
+	sbc	hl,de
+mod3:	
+	pop	bc
+	pop	ix
+	ret
+moderr1:	
+	pop	de
+	pop	de
+moderr2:	
+	scf
+	ret
+
+	end
+

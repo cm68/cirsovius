@@ -1,0 +1,55 @@
+	title	Module from library HILIB_2 : @COPY
+	name	('@COPY')
+	include	baselib.lib
+
+; Language : PASCAL
+
+; Copy part of one string to another
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.:040/4223247
+
+;		Version 1.0, August 1987
+
+; ENTRY	Reg pair HL points to target
+;	Reg pair DE points to destination
+;	Reg B holds length to be copied
+;	Reg C points to position within target
+
+; EXIT	Carry set if position out of range
+;	Carry reset if destination filled properly
+
+	entry	@copy
+
+	extrn	@leng
+
+@copy:
+	xor	a
+	ld	(de),a
+	push	bc
+	call	@leng		; Get length of target
+	ld	a,b
+	cp	c		; Test in range
+	pop	bc
+	ret	c		; Out of range
+	push	bc
+	ld	b,0
+	add	hl,bc		; Position string
+	dec	hl		; .. fix
+	pop	bc
+@ascnb:
+	ld	a,(hl)		; Unpack
+	ld	(de),a
+	inc	de
+	inc	hl
+	or	a		; Test end
+	ret	z
+	djnz	@ascnb
+	xor	a
+	ld	(de),a		; Close destination
+	ret
+
+	end
+

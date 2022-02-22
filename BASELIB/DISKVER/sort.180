@@ -1,0 +1,160 @@
+	title	Module from library BASE_2 : SORT
+	name	('SORT')
+	include	baselib.lib
+
+; Sort list of files
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 June 1993
+
+; ENTRY	Reg pair HL points to start of memory
+;	Reg pair BC holds  number of files to be sorted
+
+; EXIT	Reg pair HL points to start of memory
+;	Reg pair BC holds  number of files to be sorted
+
+; NOTE	Each item has a default length of 12 bytes as generated
+;	by library routine FILES.
+;	This length may be changed by location <SORT-2>
+;	This amount will be allocated on stack for dynamic use
+
+	entry	sort
+
+	ext	multip
+
+;
+; Perform sort by the linear sort algorithm
+;
+SLen:
+	dw	.nam+1+.ext	; Default length
+sort:
+	ld	(@n),bc		; Save count
+	ld	(i$),hl		; .. and address
+	dec	bc		; Test only one item
+	ld	a,c
+	or	b
+	inc	bc
+	ret	z		; .. yeap
+	call	malloc		; Get data
+	ld	hl,2
+	ld	(@i),hl		; Init loop
+main.loop:
+	ld	hl,(@i)
+	call	ptr		; Get pointer
+	ld	de,(h$)
+	call	.ldir		; Save item
+	ld	hl,(@i)
+	dec	hl
+	ld	(@j),hl		; Set sub loop
+sort.loop:
+	call	cmp.item	; Compare
+	jr	nc,skp.swap	; .. skip
+	ld	hl,(@j)
+	inc	hl
+	call	ptr		; Get pointers
+	push	hl
+	ld	hl,(@j)
+	call	ptr		; Get pointers
+	pop	de
+	call	.ldir		; .. unpack
+	ld	hl,(@j)
+	dec	hl
+	ld	(@j),hl
+	ld	a,l
+	or	h		; Test end
+	jr	nz,sort.loop	; .. nope
+skp.swap:
+	ld	hl,(@j)
+	inc	hl
+	call	ptr
+	ex	de,hl
+	ld	hl,(h$)
+	call	.ldir		; Set item
+	ld	hl,(@i)
+	inc	hl
+	ld	(@i),hl		; Set new loop
+	ex	de,hl
+	ld	hl,(@n)
+	or	a
+	sbc	hl,de
+	jr	nc,main.loop
+	pop	hl		; Get old stack
+	ld	sp,hl
+	ld	bc,(@n)		; Get back count
+	ld	hl,(i$)		; .. and address
+	ret
+;
+; Get pointer
+; ENTRY	Reg HL holds index
+; EXIT	Reg HL holds address
+;
+ptr:
+	dec	hl		; Fix
+	ld	de,(SLen)
+	call	multip		; Multiply
+	ld	de,(i$)
+	add	hl,de		; .. get pointer
+	ret
+;
+; Compare items
+; EXIT	Carry set for swapping
+;
+cmp.item:
+	ld	hl,(@j)
+	call	ptr		; Get pointer
+	ld	de,(h$)
+	ld	bc,(SLen)
+..cmp:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	ret	nz
+	inc	hl
+	inc	de
+	dec	bc		; Count down
+	ld	a,c
+	or	b
+	jr	nz,..cmp
+	ret
+;
+; Move bytes from <HL> to <DE>
+;
+.ldir:
+	ld	bc,(SLen)	; Get length
+	ldir			; .. move
+	ret
+;
+; Allocate dynamic memory for item save
+;
+malloc:
+	pop	ix		; Get caller
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	e,l		; .. save
+	ld	d,h
+	ld	bc,(SLen)
+	or	a
+	sbc	hl,bc		; Calculate gap
+	ld	(h$),hl		; .. save
+	ld	sp,hl
+	push	de		; .. save old stack
+	jp	(ix)
+
+	dseg
+
+@n:
+	dw	0
+@i:
+	dw	0
+@j:
+	dw	0
+i$:
+	dw	0
+h$:
+	dw	0
+
+	end
+

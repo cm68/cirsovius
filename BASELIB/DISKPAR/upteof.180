@@ -1,0 +1,47 @@
+	title	Module from library BASE_5 : UPTEOF
+	name	('UPTEOF')
+	include	baselib.lib
+
+; Module writes an end of file and outputs current record
+; Enhanced version for multiple channel I/O
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 December 1996
+
+; ENTRY	As described in module UDSKPT, location
+;	must be set up properly
+;	Location UPTEOF-1 defines mode of closure
+;	 Bit 0	Set   indicates text   file closure (Default)
+;	 Bit 0	Reset indicates binary file closure
+
+; EXIT	On normal return the carry flag is reset
+;	On error the carry will be set
+
+	entry	upteof
+
+	extrn	@wrmpx,udskpt,wrpblk
+
+	db	00000001b
+upteof:
+	ld	a,(upteof-1)	; Get mode bit
+	rra
+	jr	nc,.upteob
+.upteof:
+	ld	a,eof		; Output end of file
+	call	udskpt
+	ret	c		; Stop on error
+.upteob:
+	push	ix
+	ld	ix,(wrpblk)
+	ld	a,(ix+2)
+	pop	ix
+	cp	reclng		; Test end of file
+	jr	nz,.upteof	; Fill buffer
+	jp	@wrmpx		; Output current block
+
+	end
+

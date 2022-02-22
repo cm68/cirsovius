@@ -1,0 +1,70 @@
+	title	Module from library BASE_2 : FPARSE
+	name	('FPARSE')
+	include	baselib.lib
+
+; Parse a line with check of dot
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 September 1990
+
+; ENTRY	Reg pair <DE> points to a two address parse
+;	parameter block
+
+; EXIT	On normal return, carry will be reset and reg pair <HL>
+;	points either to next item or holds zero on end.
+;	Accu holds 0 if no dot found or one if dot found in
+;	file name
+;	On error return, the carry flag will be set
+
+	entry	fparse
+
+	ext	parse
+
+fparse:
+	call	parse		; .. parse
+	ret	c		; End on error
+	_push_
+	push	af
+	jr	nz,no.term	; Test terminator
+	ld	hl,(parse-2)	; Get start of string
+	dec	hl
+term?:
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	z,no.term	; Search terminator
+	cp	cr
+	jr	nz,term?
+no.term:
+	ld	de,(parse-2)
+	call	dot?		; Look for dot
+	pop	af		; Get back flags
+	ld	a,b
+	_pop_
+	ret
+;
+; Find dot in parse string
+; ENTRY	Reg DE points to start of string
+;	Reg HL points to  end  of string
+;
+dot?:
+	ld	b,0
+	or	a
+	sbc	hl,de		; Get length
+	ret	z		; .. none
+	ld	c,l		; Get difference
+	ld	b,h
+	ex	de,hl
+	ld	a,'.'
+	cpir			; Find delimiter
+	ld	b,1
+	ret	z
+	dec	b
+	ret
+
+	end
+

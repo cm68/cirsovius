@@ -1,0 +1,39 @@
+	title	MOVEU
+	subttl	Module from library C_1 : MOVEU
+	maclib	SYSEQU.LIB
+
+; FILE:	MOVEU.MAC
+; DATE: 820818:1321
+; FOR:	Move BC bytes from <HL> to <DE>, down
+
+; Move from <HL> to <DE>, BC bytes
+; Move is performed top down
+; ENTRY	: Reg HL points to low of source
+;	  Reg DE points to low of dest.
+;	  Reg BC contains length to copy
+; EXIT	: Reg BC contains 0
+
+	entry	moveu
+
+moveu:
+	push	af		; A is preserved
+	add	hl,bc		; start at top
+	ex	de,hl
+	add	hl,bc		; ..of both areas
+	ex	de,hl
+ml0:
+	ld	a,b		; While count <> 0
+	or	c
+	jr	z,ml1		; ..do begin
+	dec	hl		; byte to move
+	dec	de		; space to fill
+	ld	a,(hl)		; move 1 byte
+	ld	(de),a
+	dec	bc		; count down
+	jr	ml0		; end do
+ml1:
+	pop	af
+	ret
+
+	end
+

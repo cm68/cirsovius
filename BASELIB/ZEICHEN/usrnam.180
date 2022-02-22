@@ -1,0 +1,44 @@
+	title	Module from library BASE_2 : USRNAM
+	name	('USRNAM')
+	include	baselib.lib
+
+; Print user
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 July 1987
+
+; ENTRY	None
+;	See module COMOUT for further details
+
+; EXIT	None
+
+	entry	usrnam
+
+	extrn	usrget,comout
+
+usrnam:
+	push	bc
+	call	usrget		; Fetch user
+	and	LoMask		; .. remember 0..15
+	ld	b,'0'-1		; Init counter
+usrfin:
+	inc	b
+	sub	10		; Count tens
+	jr	nc,usrfin	; Till found
+	push	af
+	ld	a,b		; Get tens
+	cp	'0'		; No leading zero
+	call	nz,comout
+	pop	af
+	add	a,'0'+10	; Fix units
+	call	comout
+	pop	bc
+	ld	a,'/'
+	jp	comout		; Set delimiter
+
+	end
+

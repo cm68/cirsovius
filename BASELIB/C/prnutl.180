@@ -1,0 +1,96 @@
+	title	Module from library C_1 : PRNUTL
+	name	('PRNUTL')
+
+; Utilities for modules PRINTF and PRINTN
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, December 1996
+
+	entry	$contr,$StCh
+
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+ff	equ	0ch
+cr	equ	0dh
+
+;
+; Convert control to real control character
+; ENTRY	Reg HL points to string
+; EXIT	Accu holds control
+;
+; Control special sequences supported:
+;	\t Convert to horizontal tabulator
+;	\b Convert to backspace
+;	\f Convert to form feed
+;	\r Convert to carriage return
+;	\n Convert to carriage return and line feed
+;	\\ Convert to single '\'
+;	   All other sequences untouched
+;
+$contr:
+	inc	hl
+	ld	a,(hl)		; Test control twice
+	cp	'\'
+	ret	z		; .. yeap
+	cp	't'		; Test tab
+	jr	nz,??not.t
+	ld	a,tab		; Get it
+	ret
+??not.t:
+	cp	'b'		; Test backspace
+	jr	nz,??not.b
+	ld	a,bs		; Get it
+	ret
+??not.b:
+	cp	'r'		; Test carriage return
+	jr	nz,??not.r
+	ld	a,cr		; Get it
+	ret
+??not.r:
+	cp	'f'		; Test formfeed
+	jr	nz,??not.f
+	ld	a,ff		; Get it
+	ret
+??not.f:
+	cp	'n'		; Test new line
+	jr	nz,??orig
+	ld	a,cr
+	call	$StCh		; Set CR
+	ld	a,lf		; .. and LF
+	ret
+??orig:
+	ld	a,'\'
+	call	$StCh		; Store old sequence
+	ld	a,(hl)
+	ret
+;
+; Store character into buffer
+; ENTRY	Accu holds character
+;	Reg BC points to buffer
+;	Reg IX points to remaining buffer size
+; EXIT	Zero set on zero character
+;
+$StCh:
+	push	af
+	ld	a,(ix)
+	or	a		; Test remainder
+	jr	z,popCh		; .. nope
+	dec	(ix)		; Count down
+	pop	af
+	ld	(bc),a		; Store
+	inc	bc
+	push	af
+	xor	a
+	ld	(bc),a		; .. close
+popCh:
+	pop	af
+	or	a		; Fix exit
+	ret
+
+	end
+

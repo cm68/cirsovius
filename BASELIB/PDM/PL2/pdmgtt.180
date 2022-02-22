@@ -1,0 +1,84 @@
+	title	PDMGTT
+	subttl	Module from library PULL_DOWN_2 : PDMGTT
+
+; Get key string from token table
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	: Accu holds token code #80 .. #9E
+;	  Reg HL points to buffer to be filled by string
+
+; EXIT	: Carry set on invalid token
+;	  Carry reset on valid token, buffer filled with tokens
+;	  Reg HL holds buffer address started with token count
+
+	public	pdmgtt
+
+	ext	pdmxbs,pdmtop
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmgtt:
+	and	7fh		; Mask for #00 .. #1E
+	cp	1fh		; Test max
+	ccf
+	ret	c		; .. invalid
+	push	hl
+	push	hl
+	ld	b,a		; Save fixed key
+	push	bc
+	ld	de,(pdmtop)	; Get bottom for Common
+	push	de
+	ld	hl,rout
+	ld	bc,routln
+	ldir			; Unpack code
+	ex	de,hl		; Get Common buffer
+	pop	bc		; Get real routine address
+	pop	de		; Get key code
+	push	hl		; Save Common buffer
+	call	pdmxbs
+	dw	scrrun
+	pop	hl		; Get buffer in Common
+	pop	de		; Get user buffer
+	ld	c,(hl)		; Get length
+	call	movit	; Load code
+	pop	hl
+	or	a
+	ret
+
+; ===== Routine in Common =====
+
+rout:	; Reg HL holds buffer in Common
+	; Reg D holds normalized key #00..#1E
+
+	ld	a,d		; Get key
+	push	hl
+	ld	hl,(cnvstr)	; Get start of table
+	ld	de,0		; Init increment
+	inc	a
+srcexs:
+	add	hl,de		; Point to token
+	ld	e,(hl)		; Get length
+	inc	hl
+	dec	a
+	jr	nz,srcexs	; Test found
+	dec	hl
+	ld	c,e
+	pop	de
+movit:
+	ld	b,0
+	inc	bc
+	ldir			; Get tokens
+	ret
+
+routln	equ	$-rout
+
+	end
+

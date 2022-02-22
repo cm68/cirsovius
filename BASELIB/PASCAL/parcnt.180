@@ -1,0 +1,67 @@
+	title	Module from library HILIB_1 : @PARCN
+	name	('@PARCN')
+	include	baselib.lib
+
+; Language : PASCAL
+
+; Count items in line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.4, September 1993
+
+; ENTRY	The default DMA filled with any characters or none
+
+; EXIT	Reg B and Accu hold number of parameters separated
+;	by blanks. Zero set on exit reflects no parameters
+
+; NOTE	Buffer defaults to CP/M standard buffer but may be
+;	changed to any buffer, stored at @PARCN-2
+
+	entry	@parcn
+
+	extrn	skpblk,skpitm
+
+	dw	dma		; .. default
+@parcn:
+	ld	de,(@parcn-2)	; Load buffer
+	ld	a,(de)
+	ld	b,a		; Get count
+	or	a		; Test any
+	ret	z		; .. nope
+	ld	l,a
+	ld	h,0
+	add	hl,de		; Set end
+	inc	de
+@parlp:
+	ld	a,(hl)		; Test blank at the end
+	cp	' '
+	jr	nz,skpbeg
+	ld	(hl),0		; Overwrite it
+	dec	hl
+	djnz	@parlp
+get.A:
+	ld	a,b
+	or	a		; .. reflect state
+	ret
+skpbeg:
+	call	skpblk		; No blanks at the beginning
+	ld	b,0		; Init the counter
+	ld	a,(de)		; Test empty line
+	or	a
+	jr	z,get.A
+parpls:
+	inc	b
+parnx:
+	call	skpitm
+	ld	a,(de)		; Get character
+	or	a		; Test end
+	jr	z,get.A
+	call	skpblk		; No blanks
+	jr	parpls
+
+	end
+

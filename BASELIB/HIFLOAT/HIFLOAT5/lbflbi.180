@@ -1,0 +1,46 @@
+	title	Module from library HIFLOAT_5 : LBFLBI
+	name	('LBFLBI')
+	include	baselib.lib
+
+; Convert floating point to 16 bit signed integer
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Reg pair DE points to floating point number
+
+; EXIT	Number exchanged against 16 bit extended integer
+;	Carry set on overflow error
+
+	entry	cflbin
+
+	ext	?cflbin,flperr
+
+cflbin:
+	push	de		; Save pointer
+	push	de
+	pop	ix
+	ld	h,(ix+0)	; Load FLP
+	ld	l,(ix+1)
+	ld	d,(ix+2)
+	ld	e,(ix+3)
+	call	?cflbin		; Convert
+	pop	ix
+	ld	a,0
+	bit	sign,h		; Test result
+	jr	z,gt.0
+	dec	a		; .. set -1
+gt.0:
+	ld	(ix+0),a	; Save result
+	ld	(ix+1),a
+	ld	(ix+2),h
+	ld	(ix+3),l
+	ld	a,(flperr)	; Get error
+	rra
+	ret
+
+	end
+

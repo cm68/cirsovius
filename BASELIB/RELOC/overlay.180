@@ -1,0 +1,1556 @@
+	title	Overlay function
+	name	('OVLAY')
+
+; DASMed version of the PLI module OVLAY
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	1
+
+?BOOT	equ	0000h
+?BDOS	equ	0005h
+?DBUFF	equ	0080h
+
+TPATOP	equ	?BDOS+1
+
+;?DFCB0	equ	005ch
+;?DFCB1	equ	006ch
+
+_LEN	equ	1		; Reference to length of code
+_ADR	equ	7		; Reference to load address
+
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.rdseq	equ	20
+.wrseq	equ	21
+.dskget	equ	25
+.setdma	equ	26
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+FCBlen	equ	33
+
+reclng	equ	128
+
+null	equ	00h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+LOMASK	equ	00001111b
+NOMSB	equ	01111111b
+UPPMASK	equ	11011111b
+
+OVLnam	equ	8		; Length of overlay name
+OVLpar	equ	4		; Length of overlay parameters
+OVLlen	equ	OVLnam+OVLpar	; Length of overlay entry
+OVLmax	equ	5		; Max number of overlays
+
+; Modul PL1OVL
+
+	entry	?OVLA0,?OVLAY,?MEMRY
+
+; Modul PLIPRL
+
+	entry	?BOOT,?BDOS,?DBUFF	; ?DFCB0,?DFCB1
+
+; Modul TERMIN
+
+	entry	?SIGNA			; ?SIGOP
+
+; Modul WRCHR
+
+	entry	?WRCHR
+
+; Modul SETUP
+
+	entry	?DFDRV			; ?START,?STOPX,?ERMSG,?BEGIN,?RECLS
+					; ?ADDIO,?SUBIO,?STACK
+
+; Modul QIOOP
+
+					; ?QIOOP,?FPBIN,?FPBOU
+
+; Modul CONCOD
+
+					; ?ONCOP,?REVOP,?ONCPC
+
+; Modul ????
+					; ?FPBST,?FPB,?CONSP,?CNCO,?FILAT,?FPBNX
+
+l0005	equ	05h
+l000e	equ	0eh
+l001f	equ	1fh
+l002b	equ	2bh
+l002f	equ	2fh
+
+	call	?OVLAY
+	jp	?BOOT
+;
+; Entry 1
+;
+; Register BC points to filename
+;
+?OVLA0:
+	push	hl
+	ld	a,(?DFDRV)	; Fetch overlay disk
+	ld	(l09a2),a	; Save
+	ld	l,c
+	ld	h,b
+	ld	(l099b),hl	; Save address of filename
+	ld	hl,l09a1
+	ld	a,(hl)		; Get load flag
+	rra			; Test first call
+	ld	(hl),0
+	jp	c,l0123		; Nope, overlay already loaded
+	call	l0160		; Find overlay
+	rra			; Test active found
+	call	nc,l0194	; Nope
+l0123:
+	ld	hl,(l099d)	; Get start of memory
+	ex	(sp),hl		; Exchange
+	ret			; Go
+;
+; Entry 2
+;
+; Register HL points to parameter block
+; PB+0 holds pointer to filename
+; PB+2 holds pointer to flag - if 0 find overlay
+;
+?OVLAY:
+	ld	a,(?DFDRV)	; Fetch overlay disk
+	ld	(l09a2),a	; Save
+	ld	c,(hl)		; Fetch parameter 1 - pointer to filename
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	e,(hl)		; Fetch parameter 2 - Overlay load flag
+	inc	hl
+	ld	d,(hl)
+	inc	bc		; Skip possible drive
+	ld	a,(bc)
+	cp	':'		; Test drive delimiter
+	dec	bc
+	jp	nz,l0148	; Nope
+	ld	a,(bc)
+	call	l02e9		; Get UPPER case
+	sub	'A'-1		; Make binary
+	ld	(l09a2),a	; Change disk
+	inc	bc		; Skip drive
+	inc	bc
+l0148:
+	ld	h,b		; Get parameter
+	ld	l,c
+	ld	(l099b),hl	; Save address of filename
+	ld	a,1
+	ld	(l09a1),a	; Force load proceeded
+	ld	a,(de)		; Get flag
+	rra
+	jp	c,l015c
+	call	l0160		; Find overlay
+	rra			; Test active found
+	ret	c		; Yeap
+l015c:
+	call	l0194
+	ret
+;
+; Find active overlay
+;
+; Accu holds TRUE if found
+;
+l0160:
+	ld	a,OVLmax
+	ld	(l0998),a	; Set max number of overlays
+	ld	hl,l09c3	; Init overlay field
+l0168:
+	or	a		; Test remainder
+	ret	z		; Nope, that's it
+	ld	a,(hl)		; Test overlay free
+	or	a
+	jp	z,l017a		; Yeap, try next
+	push	hl
+	push	bc
+	call	l02c8		; Compare overlay names
+	pop	bc
+	pop	hl
+	or	a		; Test match
+	jp	nz,l0188	; Yeap
+l017a:
+	ld	de,OVLlen
+	add	hl,de		; Point to next overlay field
+	ld	a,(l0998)	; Get overlay count
+	dec	a		; Count it down
+	ld	(l0998),a
+	jp	l0168
+l0188:
+	ld	de,OVLnam
+	add	hl,de		; Point behind name
+	ld	e,(hl)		; Fetch start of overlay
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l099d),hl	; Save start address of overlay
+	ret
+;
+;
+;
+l0194::
+	ld	hl,l09a2+.drv
+	ld	e,OVLnam
+	call	l02dd		; Copy name
+	ld	a,(l09a2)	; Get disk
+	cp	'P'+1-'A'+1	; Verify correct range
+	ld	bc,l0a36
+	call	nc,l034e	; Nope, drive error
+	ld	bc,l09a2
+	call	l032e		; Prepare overlay file
+	call	l0320		; Read 1st record of overlay file
+	ld	hl,?DBUFF+_ADR	; Point to address field
+	ld	e,(hl)		; Fetch start address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l099d),hl	; Save start address of overlay
+	push	hl
+	ld	hl,?DBUFF+_LEN	; Point to length field
+	ld	e,(hl)		; Fetch length
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	add	hl,de		; Build end address
+	dec	hl
+	ld	a,l
+	and	reclng		; Make record boundary
+	add	a,reclng-1	; Fix length
+	ld	l,a
+	ld	(l099f),hl	; Save end address of overlay
+	call	l0320		; Read 2nd record of overlay file
+	ld	hl,(l099f)	; Get end address of overlay
+	ex	de,hl
+	ld	hl,(?MEMRY)	; Get heap address
+	ld	a,e
+	sub	l		; Test enough space
+	ld	a,d
+	sbc	a,h
+	jp	c,l01e4		; Yeap
+	ld	bc,l0a3f
+	call	l034e		; Size error
+l01e4:
+	ld	a,OVLmax
+	ld	(l0998),a	; Set max number of overlays
+	ld	hl,l09c3	; Init overlay field
+	ld	(l0999),hl
+l01ef:
+	or	a		; Test end of chain
+	jp	z,l0236		; Yeap
+	ld	a,(hl)
+	or	a
+	jp	z,l021d
+	ld	de,OVLnam
+	add	hl,de		; Position after name
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(l099f)	; Get end address of overlay
+	call	l0231		; Compare HL:DE
+	jp	c,l021d		; HL < DE
+	ld	hl,(l099d)	; Get start address of overlay
+	ex	de,hl
+	ld	l,c
+	ld	h,b
+	call	l0231		; Compare HL:DE
+	jp	c,l021d		; HL < DE
+	ld	hl,(l0999)
+	ld	(hl),0
+l021d:
+	ld	hl,(l0999)
+	ld	de,OVLlen
+	add	hl,de		; Point to next overlay entry
+	ld	(l0999),hl
+	ld	a,(l0998)	; Get overlay count
+	dec	a		; Count down
+	ld	(l0998),a
+	jp	l01ef
+;
+; Compare HL:DE - C set if HL < DE
+;
+l0231:
+	ld	a,l
+	sub	e		; Simple subtract
+	ld	a,h
+	sbc	a,d
+	ret
+;
+;
+;
+l0236::
+	ld	hl,l09c3	; Init overlay field
+	ld	e,OVLmax	; Set max number of overlays
+l023b:
+	ld	a,(hl)
+	or	a
+	jp	z,l024e
+	dec	e
+	ld	bc,l0a48
+	call	z,l034e		; Nesting error
+	ld	bc,OVLlen
+	add	hl,bc		; Point to next overlay entry
+	jp	l023b
+l024e:
+	push	hl
+	ld	hl,(l099b)	; Get address of filename
+	ld	c,l
+	ld	b,h
+	ld	e,OVLnam
+	pop	hl
+	call	l02dd		; Copy name
+	ld	e,OVLpar
+	ld	bc,l099d	; Point to parameter field
+l025f:
+	ld	a,(bc)
+	ld	(hl),a		; Unpack it
+	inc	bc
+	inc	hl
+	dec	e
+	jp	nz,l025f
+	ld	hl,(l099d)	; Save start address of overlay
+	push	hl
+	ex	de,hl
+	ld	hl,(l099f)	; Save end address of overlay
+	ld	a,l
+	sub	e		; Calculate length
+	ld	c,a
+	ld	a,h
+	sbc	a,d
+	ld	b,a
+	inc	bc
+	ld	de,l09a2	; Get FCB
+	call	l027d		; Load file
+	ret
+;
+; Load file into memory
+; Reg DE points to FCB
+; Reg BC holds byte count
+; <SP> points to memory start address
+;
+l027d::
+	pop	hl
+	ex	(sp),hl		; Get disk buffer
+	ld	(l09ff),hl	; Save it
+	ex	de,hl
+	ld	(l0a01),hl	; Save FCB
+	ld	a,c		; Get byte count
+	and	reclng		; Truncate for record boundary
+	ld	l,a
+	ld	h,b
+	ld	(l0a03),hl	; Save fixed length
+l028e:
+	ld	hl,(l0a03)	; Get length
+	ld	a,h		; Test remaining
+	or	l
+	jp	z,l02c1
+	ld	bc,-reclng
+	add	hl,bc		; Count down
+	ld	(l0a03),hl
+	ld	hl,(l09ff)	; Get disk buffer
+	ld	e,l
+	ld	d,h
+	call	l0376		; Set disk buffer
+	ld	hl,(l0a01)	; Get FCB
+	ld	d,h
+	ld	e,l
+	call	l0371		; Read record from file
+	or	a		; Test success
+	ld	bc,l0a5a
+	call	nz,l034e	; Read error if not
+	ld	hl,(l09ff)	; Get disk buffer
+	ld	de,reclng
+	add	hl,de		; Advance
+	ld	(l09ff),hl
+	jp	l028e
+l02c1:
+	ld	bc,?DBUFF
+	call	l0376		; Reset to standard disk buffer
+	ret
+;
+; Compare overlay names ^BC:^HL
+;
+; Accu holds TRUE on match
+;
+l02c8:
+	ld	e,OVLnam	; Set length
+l02ca:
+	ld	a,(bc)		; Get from line
+	call	l02e9		; Get UPPER case
+	cp	(hl)		; Compare against field
+	jp	nz,l02db	; No match
+	inc	hl
+	inc	bc
+	dec	e
+	jp	nz,l02ca
+	ld	a,TRUE
+	ret
+l02db:
+	xor	a
+	ret
+;
+; Copy E bytes from ^BC to ^HL
+;
+l02dd:
+	ld	a,(bc)		; Get character
+	call	l02e9		; Get UPPER case
+	ld	(hl),a		; Unpack
+	inc	hl
+	inc	bc
+	dec	e
+	ret	z
+	jp	l02dd
+;
+; Get UPPER case character
+;
+l02e9:
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	UPPMASK		; Make UPPER case
+	ret
+;
+; Convert FCB to string ^HL
+;
+l02f2:
+	ld	bc,l09a2
+	ld	a,(bc)		; Get disk
+	or	a
+	jp	nz,l02fd
+	ld	a,(?DFDRV)	; Fetch overlay disk
+l02fd:
+	add	a,'A'-1		; Make ASCII
+	ld	(hl),a
+	inc	hl
+	ld	(hl),':'	; Set delimiter
+	inc	hl
+	ld	e,.nam+.ext	; Set length
+	inc	bc
+l0307:
+	ld	a,(bc)		; Get character from FCB
+	and	NOMSB		; Strip off attribute
+	cp	' '
+	jp	z,l0311		; Filter blanks
+	ld	(hl),a
+	inc	hl
+l0311:
+	dec	e
+	ret	z
+	inc	bc
+	ld	a,e
+	cp	.ext		; Test at extension position
+	jp	nz,l0307
+	ld	(hl),'.'	; Indicate it
+	inc	hl
+	jp	l0307
+;
+; Read overlay record
+;
+l0320:
+	ld	hl,?DBUFF	; Load buffer
+	push	hl
+	ld	bc,reclng	; Load length
+	ld	de,l09a2	; Load FCB
+	call	l027d		; Read record
+	ret
+;
+; Prepare overlay file
+;
+l032e:
+	push	bc
+	call	l0340		; Prepare FCB
+	pop	de
+	push	de
+	call	l036c		; Open file
+	inc	a		; Test success
+	pop	de
+	ret	nz		; Yeap
+	ld	bc,l0a51
+	call	l034e		; No file error
+;
+; Prepare FCB pointed to by reg HL
+;
+l0340::
+	ld	hl,_EX
+	add	hl,bc		; Set pointer
+	xor	a
+	ld	c,FCBlen-_EX
+l0347:
+	ld	(hl),a		; Clear bytes
+	dec	c
+	inc	hl
+	jp	nz,l0347
+	ret
+;
+; Perform error message ^BC and halt
+;
+l034e::
+	ld	a,(bc)		; Fetch error number
+	ld	(l0a10),a	; Save
+	inc	bc
+	ld	e,8
+	ld	hl,l0a1f
+l0358:
+	ld	a,(bc)
+	ld	(hl),a		; Unpack error message
+	inc	hl
+	inc	bc
+	dec	e
+	jp	nz,l0358
+	call	l02f2		; Convert FCB to string
+	ld	hl,l0a07
+	call	?SIGNA
+	jp	?BOOT
+;
+; Open file ^DE
+;
+l036c:
+	ld	c,.open
+	jp	?BDOS
+;
+; Read record from file ^DE
+;
+l0371:
+	ld	c,.rdseq
+	jp	?BDOS
+;
+; Set disk buffer ^DE
+;
+l0376:
+	ld	c,.setdma
+	jp	?BDOS
+;
+; *** NOT USED HERE ***
+;
+?SIGOP:
+	ld	b,a
+	ld	de,0
+	ld	c,e
+	cp	5
+	jp	nc,l03a3
+	ld	c,l
+	ld	h,d
+	ld	l,e
+	jp	l03a3
+;
+;
+;
+?SIGNA:
+	call	l0570		; HL:=^HL
+	ld	b,(hl)		; Fetch mode
+	call	l056f		; HL:=^DE
+	ld	c,(hl)		; Fetch error number
+	push	bc
+	call	l056f		; HL:=^DE
+	ld	c,(hl)		; Fetch address
+	inc	hl
+	ld	b,(hl)
+	push	bc
+	call	l056f		; HL:=^DE
+	ld	e,(hl)		; Fetch pointer
+	inc	hl
+	ld	d,(hl)
+	pop	hl		; Get back address
+	pop	bc		; Get back error number and mode
+l03a3:
+	ld	(?ONCOD+1),hl	; Save address
+	ld	a,c
+	ld	(?ONCOD),a	; Save error number
+	push	bc
+	push	de
+	push	hl
+	ld	a,b
+	cp	5
+	jp	nc,l03b6
+	ld	l,c
+	ld	h,0
+l03b6:
+	call	?ONCPC
+	jp	z,l03ed
+	ld	de,l03c1
+	push	de
+	jp	(hl)
+l03c1:
+	pop	hl
+	pop	de
+	pop	bc
+	ld	a,b
+	cp	8
+	jp	nz,l03cd
+	ld	a,0ffh
+	ret
+l03cd:
+	cp	5
+	jp	c,l03f0
+	ex	de,hl
+	ld	hl,?FPBST
+	ld	a,e
+	sub	(hl)
+	ret	nz
+	inc	hl
+	ld	a,d
+	sub	(hl)
+	ret	nz
+	ld	hl,(l0939)
+	push	hl
+	ld	hl,(l093b)
+	push	hl
+	call	?QIOOP
+	pop	hl
+	pop	de
+	ld	sp,hl
+	ex	de,hl
+	jp	(hl)
+l03ed:
+	pop	hl
+	pop	de
+	pop	bc
+l03f0:
+	ld	a,b
+	sub	8
+	ret	z
+	ld	a,c
+	or	a
+	ld	a,b
+	jp	p,l03fc
+	or	a
+	ret	z
+l03fc:
+	push	de
+	push	hl
+	push	bc
+	push	af
+	call	l0454		; Give new line
+	pop	af		; Get error number
+	ld	e,a		; For index
+	ld	d,0
+	ld	hl,l058c
+	add	hl,de
+	add	hl,de
+	ld	e,(hl)		; Fetch address of error message
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	call	l04ab
+	call	l044e		; Write blank
+	ld	a,'('
+	call	l0450		; Write parenthesis
+	pop	bc
+	ld	a,c
+	call	l0487		; Print decimal
+	ld	a,')'
+	call	l0450
+	pop	hl
+	ld	a,h
+	or	l
+	jp	z,l0431
+	call	l0443
+	call	l0518
+l0431:
+	pop	hl
+	ld	a,h
+	or	l
+	jp	z,l043d
+	call	l0443
+	call	l04ab
+l043d:
+	call	l04bd
+	jp	?STOPX
+l0443:
+	push	hl
+	ld	a,','
+	call	l0450		; Write comma
+	call	l044e		; Write blank
+	pop	hl
+	ret
+;
+; Write blank on console
+;
+l044e:
+	ld	a,' '		; Get blank
+;
+; Write Accu on console
+;
+l0450:
+	ld	e,a		; Get Accu
+	jp	?WRCHR		; Write it
+;
+; Give new line on console
+;
+l0454:
+	ld	e,cr
+	call	?WRCHR		; Just do it
+	ld	e,lf
+	jp	?WRCHR
+;
+; Print nibble in Accu as hex
+;
+l045e:
+	and	LOMASK		; Get bits
+	add	a,'0'		; Make ASCII
+	cp	'9'+1		; Verify 0..9
+	jp	c,l0450		; Write character
+	add	a,'A'-'0'-10	; Convert to hex
+	jp	l0450
+;
+; Print byte in Accu as hex
+;
+l046c:
+	push	af
+	rrca			; Get hi bits
+	rrca
+	rrca
+	rrca
+	call	l045e		; Print hi nibble
+	pop	af
+	jp	l045e		; Print lo nibble
+;
+; Print word in HL as hex
+;
+l0478:
+	push	hl
+	call	l044e		; Write blank
+	pop	hl
+	push	hl
+	ld	a,h
+	call	l046c		; Print hi byte
+	pop	hl
+	ld	a,l
+	jp	l046c		; Print lo byte
+;
+; Print byte in Accu as decimal
+;
+l0487:
+	cp	10		; Test 0..9
+	jp	c,l0497		; Yeap
+	ld	c,100
+	cp	c		; Test 100..255
+	call	nc,l0499	; Yeap
+	ld	c,10
+	call	l0499		; Convert 10..99
+l0497:
+	ld	c,1		; Convert 1..9
+;
+; Divide Accu by C and print result as decimal
+;
+l0499:
+	ld	b,0		; Init result
+l049b:
+	cp	c		; Test in range
+	jp	c,l04a4		; Done
+	sub	c		; Divide
+	inc	b		; Update result
+	jp	l049b
+l04a4:
+	push	af
+	ld	a,b		; Get result
+	call	l045e		; Print digit
+	pop	af
+	ret
+;
+;
+;
+l04ab:
+	ld	c,(hl)
+	inc	c
+l04ad:
+	dec	c
+	ret	z
+	inc	hl
+	ld	a,(hl)
+	or	a
+	ret	z
+	push	bc
+	push	hl
+	call	l0450		; Write character
+	pop	hl
+	pop	bc
+	jp	l04ad
+l04bd:
+	ld	hl,l057e
+	call	l04ab
+	ld	hl,(?STACK)
+	ex	de,hl
+	ld	hl,2
+	add	hl,sp
+	ld	a,e
+	sub	l
+	ld	e,a
+	ld	a,d
+	sbc	a,h
+	jp	nz,l04de
+	ld	a,e
+	or	a
+	rra
+	jp	c,l04de
+	cp	9
+	jp	c,l04f2
+l04de:
+	call	l04f0
+	call	l044e		; Write blank
+	ld	a,'#'
+	call	l0450		; Write character
+	ld	hl,(?STACK)
+	ld	de,-8
+	add	hl,de
+l04f0:
+	ld	a,4
+l04f2:
+	or	a
+	ret	z
+	dec	a
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	push	af
+	ex	de,hl
+	call	l0478		; Print word
+	pop	af
+	pop	hl
+	jp	l04f2
+l0504:
+	call	l0509
+	ld	a,':'
+l0509:
+	push	hl
+	and	7fh
+	cp	' '
+	jp	nc,l0513
+	ld	a,'?'
+l0513:
+	call	l0450		; Write character
+	pop	hl
+	ret
+l0518:
+	push	hl
+	ld	hl,l0576
+	call	l04ab
+	pop	hl
+	push	hl
+	ld	de,l001f
+	add	hl,de
+	call	l04ab
+	ld	a,'='
+	call	l0450		; Write character
+	pop	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,h
+	or	a
+	jp	nz,l0548
+	ld	a,l
+	cp	6
+	jp	c,l053f
+	ld	l,6
+l053f:
+	add	hl,hl
+	add	hl,hl
+	ld	de,l05f7
+	add	hl,de
+	jp	l04ab
+l0548:
+	inc	hl
+	ld	b,(hl)
+	dec	b
+	ld	a,'A'
+	add	a,b
+	inc	b
+	call	nz,l0504
+	ld	a,0bh
+l0554:
+	inc	hl
+	push	af
+	cp	3
+	jp	nz,l0563
+	ld	a,(hl)
+	cp	' '
+	ld	a,'.'
+	call	nz,l0509
+l0563:
+	ld	a,(hl)
+	cp	' '
+	call	nz,l0509
+	pop	af
+	dec	a
+	ret	z
+	jp	l0554
+;
+; HL:=^DE
+;
+l056f:
+	ex	de,hl
+;
+; HL:=^HL
+;
+l0570:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	ret
+l0576:
+	db	' File: ',null
+l057e:
+	db	' '
+	db	cr,lf
+	db	'Traceback:',null
+l058c:
+	dw	l059c,l05a3,l05b3,l05bd
+	dw	l05c8,l05d5,l05e2,l05f2
+l059c:
+	db	' ERROR',null
+l05a3:
+	db	' FIXED OVERFLOW',null
+l05b3:
+	db	' OVERFLOW',null
+l05bd:
+	db	' UNDERFLOW',null
+l05c8:
+	db	' ZERO DIVIDE',null
+l05d5:
+	db	' END OF FILE',null
+l05e2:
+	db	' UNDEFINED FILE',null
+l05f2:
+	db	' KEY',null
+l05f7:
+	db	3,'NUL'
+	db	3,'CON'
+	db	3,'CON'
+	db	3,'RDR'
+	db	3,'PUN'
+	db	3,'LST'
+	db	3,'BAD'
+;
+; *** NOT USED HERE ***
+;
+?ONCOP:
+	ld	b,a
+	ex	de,hl
+	ld	hl,?CONSP
+	ld	a,(hl)
+	cp	10h
+	jp	c,l063f
+	ld	de,l0624
+	jp	?ERMSG
+;
+l0624:
+	db	cr,lf
+	db	'Condition Stack Overflow',eot
+;
+l063f:
+	inc	(hl)
+	ld	c,a
+	ld	a,b
+	ld	b,0
+	ld	hl,l0a63
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	ld	(hl),a
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	pop	de
+	push	de
+	inc	de
+	inc	de
+	inc	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,2
+	add	hl,sp
+	ex	de,hl
+	ld	hl,l095e
+	add	hl,bc
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; *** NOT USED HERE ***
+;
+?REVOP:
+	ex	de,hl
+	ld	hl,?CONSP
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,l0a63
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	inc	c
+l0678:
+	dec	c
+	ret	z
+	inc	b
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	cp	(hl)
+	jp	nz,l0678
+	inc	hl
+	ld	a,e
+	cp	(hl)
+	jp	nz,l0691
+	inc	hl
+	ld	a,d
+	cp	(hl)
+	jp	z,l0696
+	dec	hl
+l0691:
+	dec	hl
+	ld	a,(hl)
+	jp	l0678
+l0696:
+	dec	hl
+	dec	hl
+	ex	de,hl
+	ld	hl,?CONSP
+	dec	(hl)
+	ld	hl,l0005
+	add	hl,de
+l06a1:
+	dec	b
+	ret	z
+	ld	c,5
+l06a5:
+	ld	a,(hl)
+	ld	(de),a
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,l06a5
+	jp	l06a1
+;
+; *** NOT USED HERE ***
+;
+?ONCPC:
+	ex	de,hl
+	ld	hl,?CONSP
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,l0a63
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	inc	c
+l06c0:
+	dec	c
+	ret	z
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	cp	(hl)
+	jp	nz,l06c0
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	or	(hl)
+	jp	z,l06e4
+	dec	hl
+	ld	a,e
+	cp	(hl)
+	jp	nz,l06df
+	inc	hl
+	ld	a,d
+	cp	(hl)
+	jp	z,l06e4
+	dec	hl
+l06df:
+	dec	hl
+	ld	a,(hl)
+	jp	l06c0
+l06e4:
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	xor	a
+	dec	a
+	ret
+;
+; *** NOT USED HERE ***
+;
+?QIOOP:
+	ld	hl,l091b
+	ld	a,(hl)
+	or	a
+	ret	z
+	push	hl
+	call	?FPBOU
+	pop	hl
+	dec	(hl)
+;
+; *** NOT USED HERE ***
+;
+?FPBIN:
+	ld	a,(l091b)
+	or	a
+	ret	z
+	ld	e,a
+	ld	d,0
+	dec	de
+	ld	hl,l091c
+	add	hl,de
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(?FPBST),hl
+	ld	de,?FPB
+	ld	c,'.'
+l0712:
+	ld	a,(hl)
+	ld	(de),a
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,l0712
+	ld	hl,(l0949)
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	ld	de,?FILAT
+	ld	c,9
+l0727:
+	add	hl,hl
+	ld	a,h
+	ld	(de),a
+	inc	de
+	dec	c
+	jp	nz,l0727
+	ld	hl,(?FPB)
+	ld	a,h
+	or	a
+	ret	nz
+	ld	a,l
+	cp	3
+	ret	nc
+	ld	hl,(?CNCOL)	; Get character count
+	ld	(l0930),hl
+	ret
+;
+; *** NOT USED HERE ***
+;
+?FPBOU:
+	ld	a,(l091b)
+	or	a
+	ret	z
+	ld	hl,(?FPBST)
+	ld	de,?FPB
+	ld	c,1fh
+l074d:
+	ld	a,(de)
+	ld	(hl),a
+	inc	de
+	inc	hl
+	dec	c
+	jp	nz,l074d
+	ret
+;
+; Put character in reg E to console
+;
+?WRCHR:
+	ld	hl,(?CNCOL)	; Get character count
+	ld	a,e		; Get character
+	cp	' '		; Test printable
+	jp	nc,l0767	; Yeap, do it
+	cp	cr		; Test new line
+	jp	nz,l076b	; Nope
+	ld	hl,0		; Reset character count
+l0767:
+	inc	hl		; Advance count
+	ld	(?CNCOL),hl	; Save character count
+l076b:
+	ld	c,.conout
+	jp	?BDOS		; Put to console
+;
+; *** NOT USED HERE ***
+;
+?START:
+	jp	l079d
+;
+l0773:
+	db	'Copyright (c) 1980 Digital Research, v1.3 '
+;
+l079d:
+	ld	hl,0
+	ld	(l0ab7),hl
+	ld	(l0ab5),hl
+	ld	(?RECLS),hl
+	xor	a
+	ld	(?CONSP),a
+	ld	(l091b),a
+	ld	hl,(?MEMRY)	; Get heap address
+	add	hl,bc
+	jp	c,l07dc		; Not enough memory
+	pop	de
+	ld	sp,hl
+	ld	(?STACK),hl
+	push	de
+	ld	bc,0
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	inc	hl
+	ld	a,l
+	and	0feh
+	ld	l,a
+	ld	(?BEGIN),hl
+	ex	de,hl
+	ld	hl,(TPATOP)
+	ld	a,l
+	and	0feh
+	ld	l,a
+	and	0f8h
+	sub	e
+	ld	a,h
+	sbc	a,d
+	jp	nc,l07e2
+l07dc:
+	ld	de,l08dc
+	jp	?ERMSG		; Tell not enough memory
+l07e2:
+	xor	a
+	dec	hl
+	ld	(hl),a
+	dec	hl
+	ld	(hl),a
+	dec	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	inc	(hl)
+	ex	de,hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	c,.dskget
+	call	?BDOS		; Get logged disk
+	inc	a
+	ld	(?DFDRV),a	; Set overlay disk
+	ret
+;
+; *** NOT USED HERE ***
+;
+?ADDIO:
+	push	hl
+	dec	hl
+	dec	hl
+	ex	de,hl
+	ld	hl,(l0ab7)
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	ld	(l0ab7),hl
+	ld	hl,(l0ab5)
+	inc	hl
+	ld	(l0ab5),hl
+	ret
+;
+; *** NOT USED HERE ***
+;
+?SUBIO:
+	ex	de,hl
+	ld	hl,(l0ab5)
+	ld	b,h
+	ld	c,l
+	ld	hl,l0ab7
+l081e:
+	ld	a,b
+	or	c
+	ret	z
+	ld	a,(hl)
+	cp	e
+	jp	nz,l08af
+	inc	hl
+	or	(hl)
+	ret	z
+	ld	a,(hl)
+	dec	hl
+	cp	d
+	jp	nz,l08af
+	ex	de,hl
+	push	hl
+	dec	hl
+	ld	b,(hl)
+	dec	hl
+	ld	c,(hl)
+	pop	hl
+	ex	de,hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ld	hl,(l0ab5)
+	dec	hl
+	ld	(l0ab5),hl
+	ld	a,(de)
+	or	a
+	jp	z,l08aa
+	cp	3
+	jp	nc,l08ad
+	ld	bc,0
+	dec	a
+	jp	nz,l0860
+	ld	hl,l002b
+	add	hl,de
+	ld	a,(hl)
+	and	7fh
+	ld	c,a
+	ld	a,(hl)
+	rla
+	inc	hl
+	ld	a,(hl)
+	rla
+	ld	b,a
+l0860:
+	ld	hl,l000e
+	add	hl,de
+	ld	a,80h
+	sub	c
+	and	7fh
+	ld	(hl),a
+	ld	hl,l002f
+	add	hl,de
+	inc	de
+l086f:
+	ld	a,b
+	or	a
+	jp	nz,l0888
+	ld	a,c
+	or	a
+	jp	z,l08a5
+	push	hl
+	add	hl,bc
+	ld	a,80h
+	sub	c
+	ld	c,a
+l087f:
+	ld	(hl),1ah
+	inc	hl
+	dec	c
+	jp	nz,l087f
+	pop	hl
+	inc	b
+l0888:
+	dec	b
+	push	bc
+	push	hl
+	ld	bc,reclng
+	add	hl,bc		; Advance to next buffer address
+	ex	(sp),hl
+	push	de
+	ex	de,hl
+	ld	c,.setdma
+	call	?BDOS		; Set disk buffer
+	pop	de
+	push	de
+	ld	c,.wrseq
+	call	?BDOS		; Write record
+	pop	de
+	pop	hl
+	pop	bc
+	or	a
+	jp	z,l086f
+l08a5:
+	ld	c,.close
+	call	?BDOS		; Close file
+l08aa:
+	xor	a
+	dec	a
+	ret
+l08ad:
+	xor	a
+	ret
+l08af:
+	dec	bc
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	dec	hl
+	dec	hl
+	jp	l081e
+;
+; *** NOT USED HERE ***
+;
+?STOPX:
+	ld	hl,l0ab5
+	ld	a,(hl)
+	inc	hl
+	or	(hl)
+	jp	z,l08d1		; End of execution
+	ld	hl,(l0ab7)
+	call	?SUBIO
+	jp	nz,?STOPX
+	ld	de,l08f2
+	jp	?ERMSG		; Invalid I/O list
+l08d1:
+	ld	de,l0904	; Tell end of execution
+;
+; *** NOT USED HERE ***
+;
+?ERMSG:
+	ld	c,.string
+	call	?BDOS		; Give final string
+	jp	?BOOT
+;
+l08dc:
+	db	cr,lf,'Insufficient Memory',eot
+l08f2:
+	db	cr,lf,'Invalid I/O List'
+l0904:
+	db	cr,lf,'End of Execution',eot
+l0917:
+	dw	?FPBNX
+?FPBST:
+	dw	0
+l091b:
+	db	0
+l091c:
+	ds	16
+?FPB:
+	ds	4
+l0930:
+	ds	9
+l0939:
+	dw	0
+l093b:
+	ds	14
+l0949:
+	ds	17
+?ONCOD:
+	ds	3
+?CONSP:
+	db	0
+l095e:
+	ds	32
+?CNCOL:
+	dw	1		; Character count
+?FILAT:
+	ds	9
+?FPBNX:
+	ds	6
+	db	1,7,0aeh
+	ds	6
+l0998:
+	db	0		; Overlay count
+l0999:
+	dw	0
+l099b:
+	dw	0		; Address of filename
+;
+; Next four bytes saved into overlay area
+;
+l099d:
+	dw	0		; Start address of overlay
+l099f:
+	dw	0		; End address of overlay
+;
+l09a1:
+	db	0		; Overlay load flag - 1 means already loaded
+l09a2:
+	db	0,'        OVL'
+	ds	21
+l09c3:
+	ds	OVLmax*OVLlen	; Overlay save area
+l09ff:
+	dw	0		; Disk buffer pointer
+l0a01:
+	dw	0		; File Control Block pointer
+l0a03:
+	dw	0		; Length of overlay
+	dw	0
+l0a07:
+	dw	l0a0f,l0a10,l0a11,l0a13
+l0a0f:
+	db	0
+l0a10:
+	db	0		; Message number
+l0a11:
+	dw	0
+l0a13:
+	dw	l0a15
+l0a15:
+	db	0ffh,'OVERLAY, '
+l0a1f:
+	ds	23
+l0a36:
+	db	 9,'DRIVE   '
+l0a3f:
+	db	10,'SIZE    '
+l0a48:
+	db	11,'NESTING '
+l0a51:
+	db	 8,'NO FILE '
+l0a5a:
+	db	12,'READ    '
+l0a63:
+	ds	16*5
+?STACK:
+	dw	0
+l0ab5:
+	dw	0
+l0ab7:
+	dw	0
+?BEGIN:
+	dw	0
+?RECLS:
+	dw	0
+?DFDRV:
+	db	0		; Overlay disk
+?MEMRY:	
+	dw	l0ac0		; Start of heap
+
+l0ac0	equ	$
+
+	end
+

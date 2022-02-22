@@ -1,0 +1,206 @@
+	title	PDMSWD
+	subttl	Module from library PULL_DOWN_2 : PDMSWD
+
+; The screen restore/saver interface
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	Accu holds mode to be performed : 0 for saving lines
+;					  1 for loading lines
+;	In load mode, user buffer must be filled properly
+
+; EXIT	Window saved in user buffer on save mode,
+;	Carry set on any error condition, so no load/save
+;	is performed
+
+; NOTE : The User Parameter Block UPB must be set properly
+
+	public	pdmswd
+
+	ext	pdmtop,pdmxbs
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmswd:
+	ld	de,(pdmtop)
+	ld	hl,rout
+	ld	bc,routln
+	ldir			; Shift routine into Common
+	ld	(buff),de	; Save top
+	ld	d,a
+	call	pbget		; Test correct dimensions
+	ret	c		; Opps, error
+	ld	a,d		; Test mode
+	cp	scrput
+	jr	nz,restor	; Aha, rsetore
+
+; ===== Save window lines =====
+
+save:
+	call	getlin		; Get a line into buffer
+	ex	de,hl
+	call	movlin		; Get part
+	ex	de,hl
+	call	update		; Bump a lot
+	jr	nz,save
+	jr	endok
+
+; ===== Restore window lines =====
+
+restor:
+	call	getlin		; Get current line
+	call	movlin		; Insert partial pixels
+	call	savlin		; Save line
+	call	update		; Bump counter
+	jr	nz,restor
+endok:
+	or	a
+	ret
+
+pbget:	; Test legal Window Parameter block
+	; ENTRY	: User Parameter Block filled properly
+	; 	  UPB+7,8 --> Reg HL - user buffer
+	;	  UPB+11  --> Reg C  - characters per line
+	;	  UPB+12  --> Reg B  - number of lines
+	;	  UPB+13  --> <WX>   - X-start coordinate
+	;	  UPB+14  --> <WY>   - Y-start coordinate
+	; EXIT	: Carry set on screen overflow else reset
+
+	ld	c,(ix+wdwchr)	; Characters in line
+	ld	b,(ix+wdwlin)	; Number of lines
+	ld	a,(ix+wdwpbx)
+	ld	(wx),a		; Cursor start column
+	add	a,c
+	ret	c		; Test overflow
+	cp	maxcol+1
+	ccf
+	ret	c
+	ld	a,(ix+wdwpby)
+	ld	(wy),a		; Cursor start line
+	add	a,b
+	ret	c
+	cp	maxlin+1
+	ccf	
+	ret	c		; End on exit
+	ld	l,(ix+savpon)	; Get buffer
+	ld	h,(ix+savpon+1)
+	ret	
+
+movlin:	; Move partial pixel to buffer
+	; ENTRY	: Reg C  holds count
+	;	  Reg HL points to sourve
+	;	  Reg DE points to destination
+
+	push	bc
+	push	hl
+	push	bc
+	pop	hl		; Copy count
+	ld	h,0		; Clear high end
+	add	hl,hl		; Times eight
+	add	hl,hl
+	add	hl,hl
+	ld	b,h		; Copy into count
+	ld	c,l
+	pop	hl		; Restore source
+	ldir			; Move
+	pop	bc
+	ret	
+
+savlin:	; Move one line into video RAM
+
+	ld	d,scrput	; Set function
+	jr	comcom
+
+getlin:	; Move one line into common memory
+
+	ld	d,scrget
+comcom:
+	push	bc
+	push	hl
+	ld	a,(wy)		; Get requested line
+	ld	e,a
+	ld	bc,(pdmtop)	; Get SCR_Routine address
+	ld	hl,(buff)
+	call	pdmxbs		; Get it
+	dw	scrrun
+	ld	a,(wx)
+	ld	l,a
+	ld	h,0
+	add	hl,hl		; *8 to fix element
+	add	hl,hl
+	add	hl,hl
+	ld	de,(buff)
+	add	hl,de
+	ex	de,hl		; Set pointer
+	pop	hl
+	pop	bc
+	ret	
+
+update:	; Bump a lot
+
+	ld	a,(wy)		; Bump line
+	inc	a
+	ld	(wy),a
+	dec	b		; Test end
+	ret	
+
+; ===== Routine in Common =====
+
+rout:	; ENTRY	: Reg HL points to buffer
+	;	  Reg E  holds requested line
+	;	  Reg D  holds mode, 0=save,#0=load
+	; EXIT	: Buffer transferred
+
+	push	hl
+	ld	c,d
+	ld	l,e		; Copy line
+	ld	h,0
+	add	hl,hl		; *16 because 8 lines
+	add	hl,hl		; (but word=2 byte address)
+	add	hl,hl
+	add	hl,hl
+	ld	de,roller
+	add	hl,de		; Get roller RAM access
+	ld	e,(hl)		; Now perform mysterious things
+	inc	hl		; computing real address
+	ld	d,(hl)
+	ld	a,e
+	and	0111b
+	ld	l,a
+	ld	a,e
+	rla	
+	ld	e,a
+	ld	a,d
+	rla	
+	ld	d,a
+	ld	a,e
+	and	11110000b
+	or	l
+	ld	e,a
+	pop	hl		; Get pointer
+	ld	a,c		; Test mode
+	cp	scrput
+	jr	z,noswap
+	ex	de,hl
+noswap:
+	ld	bc,frmlng; Then get into Common
+	ldir	
+	ret	
+routln	equ	$-rout
+
+	dseg
+
+wx:	ds	1		; Window coordinates
+wy:	ds	1
+
+buff:	ds	2		; Temporay buffer pointer
+
+	end
+

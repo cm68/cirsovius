@@ -1,0 +1,98 @@
+	title	PDMTXA
+	subttl	Module from library PULL_DOWN_8 : PDMTXA
+
+; Select window text and set requested mode
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.2 August 1991
+
+; ENTRY	Reg pair DE holds user control block (UPB)
+;	Reg pair HL points to complete window text line
+;	Reg B indicates mode
+;		Bit 0 :	Defines colour on start of text
+;			Reset : normal
+;			  Set : invers
+;		Bit 1 :	Defines colour on end of text
+;			Reset : normal
+;			  Set : invers
+;	Reg C selects window element started with 1
+
+; EXIT	User Parameter Block filled with cursor
+;	and selected text position
+
+	public	pdmtxa
+
+	extrn	pdmcur,pdmtxt,pdmcod,pdmmax
+
+; ****** NOTE: From LIB BASELIB
+
+	extrn	multip
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmtxa:
+	push	de
+	push	hl
+	push	de
+	pop	ix		; Fetch UCB
+	call	pdmmax
+	dec	c		; Fix window pointer
+	ld	a,(ix+xcor)	; Fetch cursor
+	ld	(ix+txcur),a
+	ld	a,(ix+ycor)
+	ld	(ix+tycur),a
+	ld	l,(ix+lenele)	; Get length
+	ld	e,c		; And element
+	ld	h,0
+	ld	d,0
+	call	multip		; Get relative text pointer
+	pop	de
+	push	hl
+	add	hl,de		; .. make absolute
+	ld	(ix+txfld),l
+	ld	(ix+txfld+1),h
+	ex	de,hl
+	pop	hl
+	bit	direc,(ix+mode)	; Test direction
+	jr	nz,vertic
+	bit	delim,(ix+mode)	; Test delimiter
+	jr	z,nofixh
+	ld	a,l
+	add	a,c		; Fix pointer
+	ld	l,a
+nofixh:
+	ld	a,(ix+txcur)
+	add	a,l		; Convert to cursor
+	ld	(ix+txcur),a
+	jr	comix
+vertic:
+	bit	delim,(ix+mode)	; Test delimiter
+	jr	z,nofixv
+	rlc	c		; Fix index
+nofixv:
+	ld	a,(ix+tycur)
+	add	a,c		; Adjust cursor
+	ld	(ix+tycur),a
+comix:
+	ld	l,(ix+txcur)
+	ld	h,(ix+tycur)
+	call	pdmcur		; Position text element
+	push	bc
+	bit	stxinv,b	; Test mode
+	call	pdmcod		; .. select it
+	ld	b,(ix+lenele)	; Get element length
+	call	pdmtxt		; Print element
+	pop	bc
+	bit	etxinv,b
+	call	pdmcod		; Select mode
+	pop	de
+	ret
+
+	end
+

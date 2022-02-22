@@ -1,0 +1,88 @@
+	title	Module from library BASE_1 : GETLNF
+	name	('GETLNF')
+	include	baselib.lib
+
+; Get line from disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 March 1989
+
+; ENTRY	Reg pair DE points to input buffer, reg B holds
+;	character which will be stored at the end of line
+;	(Usually $ or zero)
+;	Location GETLNF-2 must be initialized to address
+;	of character fetch routine.
+;	Address defaults to warm start
+;	The first element in <DE>+0 holds number
+;	of characters to be inputted
+
+; EXIT	Line closed by character in reg B. Accu holds
+;	characater count (C.R. and L.F. also counted)
+;	Count will be stored in <DE>+1, too
+;	Characters filled from <DE>+2 on
+;	Condition code set as follows:
+;	Carry : Set on end of file found
+;	Zero  : Set on empty line (Only C.R./L.F. or none)
+;	(For example : Carry and zero set means real end
+;	 of file found, no character found on disk)
+;	Register C holds last character read
+
+	entry	getlnf
+
+get:
+	jp	$-$		; *** Defaults to restart	
+getlnf:
+	ld	a,(de)		; Get max characters
+	inc	de
+	push	de
+	push	hl
+	push	bc
+	ld	b,a
+	inc	b
+	ld	l,false		; Reset character flag
+	ld	h,0		; Clear character count
+inl??:
+	inc	de
+	call	get		; Get a character
+	jr	c,end??		; Test physical end
+	ld	(de),a		; Store character
+	inc	h		; Count all characters
+	dec	b		; Test limit
+	jr	z,endl??
+	cp	cr		; Ignore C.R.
+	jr	z,inl??
+	cp	lf		; End on L.F.
+	jr	z,endlf?
+	ld	l,true		; Set character flag
+	jr	inl??
+endlf?:
+	inc	de		; L.F., too
+endl??:
+	ld	c,a
+	ld	a,l		; Get flag
+	or	a		; Reset carry
+	jr	pop??
+end??:
+	ld	c,a
+	ld	a,l
+	or	a		; Process zero
+	scf			; Set end of file
+pop??:
+	ld	a,c
+	pop	bc
+	ld	c,a
+	ex	de,hl
+	ld	(hl),b		; Close line
+	ld	a,d		; Return count
+	pop	hl
+	pop	de
+	ld	(de),a		; Set real length
+	dec	de
+	ret
+
+	end
+

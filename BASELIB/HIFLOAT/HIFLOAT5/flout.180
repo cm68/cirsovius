@@ -1,0 +1,265 @@
+	title	Module from library HIFLOAT_5 : FLOUT
+	name	('FLOUT')
+	include	baselib.lib
+
+; Floating Point Output
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Number to be converted in regs DE,HL
+;	Pointer to ASCII buffer in reg BC
+;	Accu holds character to be stored at last,
+;	usually $ or 0
+
+; EXIT	Buffer filled with number
+
+	entry	?flout,?flo1,?flo2
+
+	ext	?chrout,?floini,mant10,mantst,?sign
+	ext	?fladd,?flmul,?fldiv
+
+?flout:	
+	call	?floini		; Save entry
+?flo1:
+	ld	a,out.digits	; Set default length
+?flo2:
+	ld	(?sign+1),a
+	sub	out.digits+1	; Check max
+	jr	c,no.fill
+	inc	a		; Fix count
+	call	leader		; .. fill leading blanks
+	jr	?flo1
+no.fill:	
+	bit	zero,h		; Test zero number
+	jp	z,null.out	; .. tell it
+	bit	sign,h		; Test number <0
+	jr	z,no.minus	; .. no
+	res	sign,h		; Make >0
+	ld	a,'-'		; Tell sign
+	jr	out.1st
+no.minus:	
+	ld	a,' '		; Give blank
+out.1st:	
+	call	?chrout		; Output 1st character
+	ld	a,d
+	or	a		; Get status of exponent
+	push	hl
+	push	de
+	ld	de,004dh	; Set default addend
+	ld	h,d
+	ld	l,d
+	jp	m,neg.exp
+	call	shf.exp		; Shift exponent
+	ld	(?sign),a
+	call	mantst
+	call	?fldiv
+	call	div.by.10
+	push	hl
+	push	de
+pr.num:	
+	ld	a,(?sign+1)	; Get count
+	add	a,a		; .. as index
+	add	a,a
+	ld	e,a
+	ld	d,0
+	ld	hl,out.tab	; .. into table
+	add	hl,de
+	ld	e,(hl)		; Load numbers
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,c
+	call	?fladd		; Add rounding
+	call	div.by.10	; .. get carry
+	ld	b,d
+	inc	b
+	inc	b
+	ld	d,e
+	ld	e,h		; Unpack numbers
+	ld	h,l
+	ld	l,d
+	ld	d,0		; Init BCD
+BCD:	
+	add	hl,hl		; Shift mantissa
+	rl	e
+	rl	d		; .. into BCD
+	djnz	BCD
+	call	chr.BCD		; Put it out
+	ld	a,'.'		; Set dp
+	call	?chrout
+	ld	a,(?sign+1)	; Get decimal places
+	inc	a
+	ld	b,a
+chr.mant:	
+	push	bc
+	call	mant10		; Get BCD for fraction
+	call	chr.BCD
+	pop	bc
+	djnz	chr.mant
+	ld	a,'E'		; Set Exponent
+	call	?chrout
+	ld	a,(?sign)	; Test sign of exponent
+	or	a
+	jp	p,pos.exp
+	neg			; Negate if < 0
+	ld	c,a
+	ld	a,'-'		; .. give sign
+	jr	exp.sign
+pos.exp:	
+	ld	c,a
+	ld	a,'+'
+exp.sign:	
+	call	?chrout
+	ld	a,c		; Load exponent
+	ld	b,10		; .. and divisor
+	ld	c,'0'		; .. and ASCII bias
+div.10:	
+	sub	b		; Subtract
+	jr	c,exp.fnd	; .. till < 10
+	inc	c
+	jr	div.10
+exp.fnd:	
+	add	a,b
+	add	a,'0'		; Set tens to ASCII
+	ld	b,a
+	ld	a,c
+	call	?chrout		; .. output exponent
+	ld	a,b
+	call	?chrout
+	ret
+neg.exp:	
+	cpl			; Found exponent < 0, make > 0
+	call	shf.exp		; Shift exponent
+	cpl
+	ld	(?sign),a	; Save it
+	neg
+	call	mantst		; Fix number
+	call	?flmul
+	push	hl
+	push	de
+	ld	a,d
+	or	a
+	jp	p,pr.num	; Check range
+	ld	hl,5000h	; Load 10.0
+	ld	de,0300h
+	call	?flmul		; Add by ten
+	push	hl
+	push	de
+	ld	hl,?sign	; Fix exponent
+	dec	(hl)
+	jp	pr.num
+;
+; Fix value for exponent
+; ENTRY	Regs HL and DE hold fix value
+;	Accu holds exponent
+; EXIT	Accu holds fixed exponent
+;
+shf.exp:
+	srl	a		; Shift exponent
+	jr	nc,no.exp.cy	; Test carry
+	add	hl,de		; Add value if set
+exp.cy:
+	ex	de,hl
+	add	hl,hl		; Shift fix value
+	ex	de,hl
+	jr	shf.exp
+no.exp.cy:	
+	jr	nz,exp.cy	; Test zero
+	ld	a,h		; Get result
+	ret
+;
+; Output blanks
+; ENTRY	Accu holds count
+;
+leader:
+	ld	b,a		; Save count
+	ld	a,' '
+leader.:
+	call	?chrout		; .. output blanks
+	djnz	leader.
+	ret
+;
+; Fix numbers denpending on exponent
+;
+div.by.10:
+	ld	a,d		; Get exponent
+	cp	3
+	ret	c		; End check
+	push	hl
+	push	de
+	ld	bc,5000h
+	jr	nz,div.do.10	; Test equal
+	or	a
+	sbc	hl,bc		; Check mantissa
+	jr	nc,div.do.10
+	pop	de		; Let number unchanged
+	pop	hl
+	ret
+div.do.10:	
+	ld	h,b
+	ld	l,c
+	ld	de,0300h	; Complete 10.0
+	call	?fldiv		; .. divide number
+	ld	a,(?sign)	; .. fix digits
+	inc	a
+	ld	(?sign),a
+	ret
+;
+; Output 0.0...
+;
+null.out:
+	ld	hl,$null$	; Load pre-comma
+	call	$str.
+	ld	a,(?sign+1)	; Get after dp
+	inc	a
+	ld	b,a
+	ld	a,'0'
+null.lop:	
+	call	?chrout		; Fill zeroes
+	djnz	null.lop
+	inc	hl
+;
+; Output string closed by zero
+; ENTRY	Reg HL points to string
+;
+$str.:	
+	ld	a,(hl)
+	or	a		; Test zero
+	ret	z
+	call	?chrout		; .. output if not
+	inc	hl
+	jr	$str.
+;
+; Output BCD as ASCII
+; ENTRY	Reg D holds BCD
+; EXIT	ASCII stored into buffer
+;	Reg D cleared
+;
+chr.BCD:
+	ld	a,'0'
+	add	a,d		; Add ASCII offset
+	call	?chrout		; .. to buffer
+	ld	d,0		; Clear reg D
+	ret
+
+	dseg
+
+out.tab:	
+	db	066h,0fbh,066h,066h	; 5.0 E-2
+	db	085h,0f8h,0ebh,051h	; 5.0 E-3
+	db	036h,0f5h,085h,041h	; 5.0 E-4
+	db	08bh,0f1h,0dbh,068h	; 5.0 E-5
+	db	0d6h,0eeh,0e2h,053h	; 5.0 E-6
+$null$:
+	db	' 0.',0
+	db	'E+00',0
+
+	end
+

@@ -1,0 +1,52 @@
+	title	Module from library HIFLOAT_1 : CBINFL
+	name	('CBINFL')
+	include	baselib.lib
+
+; INTEGER to Floating point converter
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Reg HL holds signed integer
+
+; EXIT	Operand in regs DE,HL
+
+	entry	?cbinfl
+
+?cbinfl:
+	ld	a,SIGNB		; Test sign of integer
+	and	h
+	jr	z,pos.int	; .. >= 0
+	ex	de,hl
+	ld	hl,0
+	sbc	hl,de		; Negate it
+	or	a
+pos.int:	
+	ld	de,0
+	adc	hl,de
+	ret	z		; .. ends on zero
+	bit	sign,h		; Test special 8000H
+	jr	z,nor.con
+	ld	hl,04000h	; Set special 32768.0
+	ld	de,00f00h
+	ret
+nor.con:
+	ld	d,exp.max	; Init exponent
+cnv.lop:	
+	bit	zero,h		; Test normalized
+	jr	nz,normal	; .. ok
+	add	hl,hl		; .. else shift
+	dec	d
+	jr	cnv.lop
+normal:	
+	ld	e,0		; Clear LSByte
+	or	h
+	ld	h,a		; Set sign
+	ret
+
+	end
+	

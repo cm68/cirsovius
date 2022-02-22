@@ -1,0 +1,61 @@
+	title	Module from library BASE_1 : CALJMP
+	name	('CALJMP')
+	include	baselib.lib
+
+; Compute table access via character
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.0 November 1986
+
+; ENTRY	Accu holds character to be searched for
+;	Reg pair HL points to table with:
+;	Byte 0 : Number of characters in table
+;	Byte 1 : First character
+;	    ....
+;	Byte n : Last character
+;	Word 0 : Address corresponding to last character
+;	    ....
+;	Word n : Address corresponding to first character
+
+; EXIT	Reg pair HL holds routine address found in table if
+;	zero set or address from top of stack if zero reset
+
+	entry	@caljp
+
+@caljp:
+	push	bc
+	push	de
+	ld	e,(hl)		; Fetch table pointer
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(defpc+1),hl	; Set as default return
+	ex	de,hl
+	ld	c,(hl)		; Get count
+	ld	b,0		; Expand to 16 bit
+	ld	e,c
+	ld	d,b
+	inc	hl
+	push	hl
+	cpir			; Search
+	pop	hl
+	jr	nz,defpc	; End if not found
+	add	hl,de
+	add	hl,bc
+	add	hl,bc		; Get real table pointer
+	ld	(f+1),hl
+f:
+	ld	hl,($-$)	; And fetch routine
+	ld	(defpc+1),hl	; ** Dummy
+defpc:
+	ld	hl,$-$		; Get default if not found
+	pop	de
+	pop	bc
+	ret			; Do it
+
+	end
+

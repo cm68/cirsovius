@@ -1,0 +1,136 @@
+	title	Module from library INTEGER_2 : MULI32
+	name	('MULI32')
+	include	baselib.lib
+
+; Multiply 32 bit integers
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Regs HL,BC hold 2nd operand and result
+;	Stack hold 1st number
+
+; EXIT	Result filled with product
+;	Carry set on overflow
+
+	entry	$mul32
+
+	ext	$neg32
+
+$mul32:
+	sub	a
+	bit	sign,h		; Check sign of 2nd
+	jr	z,mulpos1
+	call	$neg32		; .. fix it
+	ld	a,10000000b
+mulpos1:	
+	pop	iy
+	pop	de
+	ex	(sp),hl
+	ex	(sp),iy
+	push	bc
+	ld	b,d
+	ld	c,e
+	bit	sign,h		; .. same for 2nd
+	jr	z,mulpos2
+	add	a,11000000b
+	call	$neg32
+mulpos2:	
+	pop	de
+	push	af
+	push	bc
+	push	de
+	push	bc
+	push	iy
+	ld	a,h
+	or	l
+	jr	z,mul1
+	pop	bc
+	ld	a,b
+	or	c
+	jr	nz,mulerr1
+	pop	bc
+	ld	b,h
+	ld	c,l
+	call	shft
+	jr	mul3
+mul1:	
+	pop	bc
+	pop	de
+	ld	a,b
+	or	c
+	jr	z,mul4
+	call	shft
+mul3:	
+	ld	a,b
+	and	SIGNB
+	or	h
+	or	l
+	jr	nz,mulerr2
+	ld	h,b
+	ld	l,c
+mul4:	
+	pop	bc
+	pop	de
+	push	hl
+	call	shft
+	pop	de
+	add	hl,de
+	pop	af
+	or	a
+	call	m,$neg32	; Check result
+	or	a
+	ret
+mulerr1:	
+	pop	de
+mulerr2:	
+	pop	de
+	pop	de
+	pop	de
+	scf			; Set error
+	ret
+;
+; Shift number
+;
+shft:	
+	ld	hl,0
+	ld	a,b		; Check part
+	or	a
+	jr	z,shl1
+	ld	b,16		; .. 16 bit
+shl3:	
+	or	a
+	bit	0,c
+	jr	z,shl2
+	add	hl,de
+shl2:	
+	rr	h
+	rr	l
+	rra
+	rr	c
+	djnz	shl3
+	ld	b,a
+	ret
+shl1:	
+	ld	b,8		; .. 8 bit
+shl5:	
+	or	a
+	bit	0,c
+	jr	z,shl4
+	add	hl,de
+shl4:	
+	rr	h
+	rr	l
+	rr	c
+	djnz	shl5
+	ld	b,l
+	ld	l,h
+	ld	h,0
+	ret
+
+	end
+

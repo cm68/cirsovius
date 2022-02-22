@@ -1,0 +1,149 @@
+	title	Module from library HIFLOAT_5 : FLEXP
+	name	('FLEXP')
+	include	baselib.lib
+
+; Calculate the EXPONENTIATION
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 February 1997
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Exponentiation in regs DE,HL
+
+	entry	?flexp
+
+	ext	?fladd,?flmul,?fldiv,?cflbin,?flfrac
+	ext	flperr,?sign
+
+?flexp:
+	ld	a,false
+	ld	(flperr),a
+	push	hl
+	push	de
+	ld	hl,05c55h	; Load 1.28644
+	ld	de,0001eh
+	call	?flmul
+	push	hl
+	push	de
+	call	?cflbin
+	ld	(?sign),hl	; Save integer
+	pop	de
+	pop	hl
+	call	?flfrac		; Get fraction
+	bit	zero,h
+	jr	z,exp.0		; Zero means 1.0
+	call	sub.05		; Subtract 0.5
+	exx
+	or	a		; Test result
+	jp	m,exp.neg
+	jp	z,exp.sqr.2
+	ld	hl,exp.tb1
+tab.fix:	
+	ld	b,(hl)		; Load +-0.25
+	inc	hl
+	ld	c,0
+	push	bc
+	ld	b,0feh
+	push	bc
+	exx
+	call	?fladd		; Add it
+	bit	zero,h		; Test zero result
+	jr	nz,exp.not.0
+	ld	h,040h		; Set 5.42101 E-20
+	ld	d,0c0h
+exp.not.0:	
+	exx
+	ld	c,(hl)		; Load 1.68179/1.18921
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	push	bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,0
+	push	bc
+	ld	c,(hl)		; Load 29.1158/20.5880
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	push	bc
+	ld	c,(hl)
+	ld	b,4
+	push	bc
+	exx
+	push	hl
+	push	de
+	ld	bc,0c53fh	; Load -8.6547
+	push	bc
+	ld	bc,003d6h
+	push	bc
+	ld	bc,063e7h	; Load 24.9764
+	push	bc
+	ld	bc,004dch
+	push	bc
+	call	?fldiv		; Now calculate
+	call	?fladd
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+chk.result:	
+	ld	a,(?sign+1)	; Test integer number
+	or	a
+	jr	z,lt.256	; .. less 256
+	inc	a
+	jr	nz,SYS.OVL
+	ld	a,(?sign)
+	or	a
+	jp	p,SYS.OVL
+	ld	d,a
+	ret
+lt.256:	
+	ld	a,(?sign)	; Test negative
+	or	a
+	jp	m,SYS.OVL
+	ld	d,a		; Get exponent from here
+	ret
+exp.neg:	
+	ld	hl,exp.tb2	; Set table
+	jr	tab.fix
+exp.0:	
+	ld	h,040h		; Set mantissa for 1.0
+	jr	chk.result
+exp.sqr.2:	
+	ld	hl,05a82h	; Set 1.41420
+	ld	e,04fh
+	jr	chk.result
+sub.05:
+	ld	bc,0c000h	; Load -0.5
+	push	bc
+	ld	b,0ffh
+	push	bc
+	call	?fladd		; Add it
+	ret
+SYS.OVL:
+	ld	l,true
+	ld	h,0
+	ld	(flperr),hl	; Set error
+	ret
+
+	dseg
+
+;
+; Exponentiation table
+;
+exp.tb1:	
+	db	0c0h		; Hi mantissa byte
+	db	0a2h,06bh,07fh	; Mantissa 1, exp=00
+	db	076h,074h,08ch	; Mantissa 2, exp=04
+exp.tb2:	
+	db	040h
+	db	01bh,04ch,0f7h
+	db	05ah,052h,012h
+
+	end
+

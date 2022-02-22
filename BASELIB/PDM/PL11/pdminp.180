@@ -1,0 +1,52 @@
+	title	PDMINP
+	subttl	Module from library PULL_DOWN_11 : PDMINP
+
+; Get input from window line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 2.0 August 1991
+
+; ENTRY	Reg DE holds User Parameter Block
+
+; EXIT	UPBs input text pointer filled
+;	Flag set as defined by input routine
+;	On BASELIB: Zero set on empty line
+
+; NOTE:	The standard input vector must be set by caller.
+;	Store it into PDMINP-2
+
+	public	pdminp
+
+	ext	pdmman,pdmswd,pdmcur,pdmrcu
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+@lvc:
+	jp	$-$		; May be user defined
+pdminp:
+	call	pdmman		; Build window
+	ld	l,(ix+xcor)	; Get cursor
+	ld	h,(ix+ycor)
+	inc	l		; .. fix it
+	call	pdmcur		; Set it
+	ld	e,(ix+lininx)	; Load pointer
+	ld	d,(ix+lininx+1)
+	push	ix
+	call	@lvc		; Get the line
+	pop	ix
+	push	af
+	bit	reswin,(ix+mode); Test to restore
+	ld	a,scrget
+	call	nz,pdmswd	; .. do it
+	call	pdmrcu		; Restore cursor
+	pop	af
+	ret
+
+	end
+

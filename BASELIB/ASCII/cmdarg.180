@@ -1,0 +1,69 @@
+	title	Module from library BASE_2 : CMDARG
+	name	('CMDARG')
+	include	baselib.lib
+
+; Get arguments from command line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, August 1991
+
+; ENTRY	Reg HL points to string pointer array array
+;	Reg DE points to string line, starting with length
+;	of line
+;	Reg B  holds max expected arguments
+
+; EXIT	Array well filled
+;	Accu holds argument count
+;	Carry set on too many arguments or none found
+
+	entry	cmdarg
+
+	extrn	skpblk,skpitm
+
+cmdarg:
+	push	hl
+	ld	a,(de)		; Get length
+	ld	l,a
+	xor	a
+	ld	h,a
+	inc	de		; Fix pointer
+	add	hl,de		; Point to end
+	ld	(hl),a		; .. close it
+	pop	hl
+	ld	c,a		; Clear count
+argloop:
+	call	skpblk		; No blanks so far
+	ld	a,(de)
+	or	a		; Test end
+	jr	z,endarg
+	ld	a,b
+	or	a		; Test more
+	scf
+	ret	z
+	ld	(hl),e		; Save pointer
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	c		; .. bump count
+	dec	b
+	call	skpitm		; Skip item
+	ld	a,(de)
+	or	a		; Test end here
+	jr	z,endarg
+	xor	a
+	ld	(de),a		; Clear line
+	inc	de
+	jr	argloop		; .. try next
+endarg:
+	ld	a,c
+	or	a
+	ret	nz		; .. or zero
+	scf
+	ret
+
+	end
+

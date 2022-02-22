@@ -1,0 +1,57 @@
+	title	Module from library BASE_3 : SGNIN
+	name	('SGNIN')
+	include	baselib.lib
+
+; Convert signed ASCII decimal string to hex number
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1, August 1986
+
+; ENTRY DE points to string
+;	B holds end marker of string
+;	(usually zero or $)
+
+; EXIT	HL holds hex number
+;	Carry set on overflow or illegal digit
+
+	entry	sgnin
+
+	extrn	skpblk,neghl,decin
+
+sgnin:
+	call	skpblk		; No leading blanks
+	ld	a,(de)		; Test sign
+	inc	de
+	cp	'-'
+	jr	z,dinmin
+	cp	'+'
+	jr	z,dinu
+	dec	de
+dinu:
+	ld	a,false
+	jr	din???
+dinmin:
+	ld	a,true
+din???:
+	ld	(dinsin),a	; Save sign
+	call	decin		; Get number
+	ret	c		; Aha, any error
+	ld	a,(dinsin)
+	cp	false		; Test unsigned
+	ret	z
+	ld	a,h
+	rla			; Test MSB
+	jp	nc,neghl
+	ret			; It's overflow
+
+	dseg
+
+dinsin:
+	ds	1
+
+	end
+

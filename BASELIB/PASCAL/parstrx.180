@@ -1,0 +1,88 @@
+	title	Module from library HILIB_2 : @PARSX
+	name	('@PARSX')
+	include	baselib.lib
+
+; Language : PASCAL
+
+; Select string out of command input string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.0, July 1994
+
+; ENTRY	Reg pair DE points to resulting substring
+;	Reg B holds number of string to be selected
+;	Reg C holds max characters to be read
+
+; EXIT	Substring filled or empty - closed by zero
+;	Zero set if all read
+;	On non zero set, reg C holds unread characters
+;	Reg HL points to next substring
+;	Reg DE points to end of selected substring
+
+; NOTE	Buffer defaults to CP/M standard buffer but may be
+;	changed to any buffer, stored at @PARCN-2
+
+	entry	@parsx
+
+	extrn 	@parcn,skpblk,skpitm
+
+@parsx:
+	ex	de,hl
+	ld	(hl),0		; Close result
+	ld	de,(@parcn-2)	; Fetch address
+	inc	de
+	call	skpblk		; No blanks this time
+	ld	a,b		; Look for zero
+	or	a
+	jr	z,strget	; Get first
+	jr	tststr		; .. fall into the job
+strnx:
+	ld	a,(de)		; Look for delimiter
+	or	a
+	jr	z,..end		; It's the end, bye
+	call	skpitm		; Skip parameter
+	call	skpblk
+tststr:
+	djnz	strnx		; Found ?
+strget:
+	ld	a,(de)		; Unpack cause we got it
+	ld	(hl),a
+	or	a		; Till end
+	jr	z,..end
+	inc	hl
+	inc	de
+	ld	(hl),0
+	dec	c
+	jr	z,.end		; .. or no more room
+	call	delimiter	; .. or tab, blank
+	jr	nz,strget
+	dec	hl
+	ld	(hl),a		; Close result
+..end:
+	ld	a,c
+	or	a		; Set result
+	ex	de,hl
+	ret
+.end:
+	ld	a,(de)
+	or	a		; Test total end
+	call	nz,delimiter	; .. or tab, blank
+	jr	z,..end
+	inc	de
+	inc	c
+	jr	.end
+;
+; Test character in Accu a delimiter - Z flag set says yes
+;
+delimiter:
+	sub	tab		; Test tab
+	ret	z
+	sub	' '-tab		; .. or blank
+	ret
+
+	end
+

@@ -1,0 +1,71 @@
+	title	Module from library BASE_6 : ATTRND
+	name	('ATTRND')
+	include	baselib.lib
+
+; Change size of file with variable record length
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 June 1987
+
+; ENTRY	Accu 	    holds record length (1 .. 255)
+;	Reg pair BC holds max record number (1 .. 65535)
+;	Reg pair DE holds FCB of new file
+;	Reg pair HL holds pointer to 128 byte scratch area
+
+; EXIT	Carry set on error, either disk or parameter error
+;	New empty (filled with blanks) file created
+;	if carry reset, file opened
+
+	entry	attrnd
+
+	extrn	open,create,@rndpr,@blrec,@outrc
+	extrn filsiz,close,subhd2,@rnrec,trncat,rndwrt
+
+attrnd:
+	call	@rndpr		; Test parameter ok
+	call	nc,open		; Test file here
+	ret	c
+	push	hl
+	push	de
+	call	filsiz		; Get size of file
+	ex	de,hl
+	ld	hl,(@rnrec)	; Get new size
+	call	subhd2		; Compare
+	jr	c,trunc		; Truncate if new<old
+	ld	(@rnrec),hl	; Set count
+	pop	de
+	pop	hl
+	ret	z		; End if new=old
+	call	rndwrt		; Write new record
+	ret	c
+	call	@blrec		; Prepare buffer
+	jp	@outrc		; Write records
+trunc:
+	ld	hl,_RRN
+	pop	de
+	push	de
+	add	hl,de		; Point to random
+	ex	de,hl
+	ld	hl,(@rnrec)	; Get new
+	ld	a,h		; Test illegal zero
+	or	l
+	dec	hl		; Set to last
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	de
+	pop	hl
+	scf
+	ret	z		; End on zero
+	call	close		; Close file
+	call	nc,trncat	; Then truncate
+	call	nc,open		; Re-open it
+	ret
+
+	end
+

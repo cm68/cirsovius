@@ -1,0 +1,72 @@
+	title	Module from library BASE_4 : UDSKGT
+	name	('UDSKGT')
+	include	baselib.lib
+
+; Module reads a byte from disk input buffer and if
+; buffer empty, fills it with a new record
+; This enhanced module allows multiple channel I/O
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	The location RDPBLK must point to a parameter block
+;	defined as follows:
+;	PB+0,1	: Record buffer          - default standard
+;	PB+2	: Record pointer         - default 128
+;	PB+3,4	: File control block     - default standard
+;	PB+5	: Current user (-1 none) - default none
+
+; EXIT	Accu holds byte if carry flag reset
+;	On error or physical end of file carry will be set
+
+	entry	udskgt
+
+; The following entry must be set up by the caller:
+
+	entry	rdpblk		; Parameter block
+
+	extrn	dskred,@cmdsk
+
+udskgt:
+	push	ix
+	push	hl
+	ld	ix,(rdpblk)
+	ld	a,(ix+2)	; Get pointer
+	cp	reclng		; Buffer filled ?
+	jr	nz,get		; No, skip
+	ld	hl,dskred
+	call	@cmdsk		; Execute function
+	jr	c,rderr		; End on error
+get:
+	push	de
+	ld	d,0
+	ld	e,a
+	ld	l,(ix+0)	; Get base buffer
+	ld	h,(ix+1)
+	add	hl,de	; Point to byte
+	inc	a
+	ld	(ix+2),a; Save pointer
+	ld	a,(hl)	; Get byte
+	or	a	; Reset error
+	pop	de
+rderr:
+	pop	hl
+	pop	ix
+	ret
+
+	dseg
+
+rdpblk:
+	dw	ourblk
+ourblk:
+	dw	dma		; Default values
+	db	reclng
+	dw	fcb
+	db	none		; No user swap
+
+	end
+

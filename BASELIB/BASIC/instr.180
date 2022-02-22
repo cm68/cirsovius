@@ -1,0 +1,65 @@
+	title	Module from library HILIB_3 : @INSTR
+	name	('@INSTR')
+	include	baselib.lib
+
+; Language : BASIC
+
+; Find substring from target string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1, July 1989
+
+; ENTRY	Reg pair HL points to target string
+;	Reg pair DE points to substring
+;	Reg C holds optional offset within target (0 is none)
+
+; EXIT	Reg B holds position of substring if zero flag set
+;	It holds 0 if not found and zero flag is not set
+
+	entry	@instr
+
+	extrn	@pos,@leng
+
+@instr:
+	push	bc		; Save offset
+	call	instr		; Get position
+	ld	a,b
+	pop	bc
+	ld	b,a
+	ret	nz		; .. not found
+	ld	a,c
+	or	a		; Test offset
+	ret	z		; .. no
+	add	a,b		; Make real
+	ld	b,a
+	dec	b
+	xor	a		; Set zero
+	ret
+;
+; Get position of string
+;
+instr:
+	ld	a,c		; Test offset
+	or	a
+	jp	z,@pos		; No, go copy
+	call	@leng		; Get length of target
+	ld	a,b
+	cp	c		; Test overflow
+	push	af
+	ld	b,0
+	add	hl,bc		; Position pointer
+	dec	hl
+	pop	af
+	jp	nc,@pos
+	xor	a
+	ld	(de),a
+	ld	a,1
+	or	a
+	ret
+
+	end
+

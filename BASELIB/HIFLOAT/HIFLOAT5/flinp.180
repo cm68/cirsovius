@@ -1,0 +1,285 @@
+	title	Module from library HIFLOAT_5 : FLINP
+	name	('FLINP')
+	include	baselib.lib
+
+; Floating Point Input
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Reg BC points to zero closed string
+;	Accu holds length of string
+
+; EXIT	Result in regs DE,HL
+
+	entry	?flinp
+
+	ext	?fliini,?chrget,?ptrbmp
+	ext	?flmul,?fldiv,flperr,mantst,mant10
+
+?flinp:
+	call	?fliini		; Save pointer
+	ld	a,false
+	ld	(flperr),a	; Reset error
+.flinp:
+	call	chr.in		; Skip blanks
+	cp	' '
+	jr	z,.flinp
+	cp	'-'		; Check sign
+	jr	z,minus.		; .. it's a MINUS
+	cp	'+'
+	call	z,chr.in	; Skip PLUS
+	call	do.convert	; .. convert
+	ret
+minus.:	
+	call	chr.in		; Load character
+	call	do.convert	; .. convert
+	ld	a,SIGNB		; Toggle sign
+	xor	h
+	ld	h,a
+	ret
+;
+; *** The REAL converter ***
+;
+do.convert:	
+	call	tstdig		; Test 1st character
+	ld	hl,0		; Init result
+	ld	d,h
+	ld	e,l
+	ld	b,digits	; Init counter
+	jr	c,do..
+	cp	'.'
+	jr	z,dig.frac
+	jp	ERR.1		; .. should be digit or D.P.
+do..:
+	push	bc
+	jr	mantissa.entry	; Start conversion
+dig.loop:	
+	push	bc
+	call	mant10		; Multiply mantissa by 10
+mantissa.entry:	
+	sub	'0'		; Strip off ASCII offset
+	ld	c,a
+	ld	b,d
+	add	hl,bc		; Insert into mantissa
+	jr	nc,skp.carr.1
+	inc	de		; .. insert carry
+skp.carr.1:	
+	call	dig.get		; Get next digit
+	pop	bc
+	dec	b
+	jr	nc,digit.end	; .. that's it
+	call	?ptrbmp
+	jr	nz,dig.loop	; .. no
+sample.mant:	
+	inc	d
+	call	dig.get		; Sample digits
+	jr	nc,digit.end
+	call	?ptrbmp
+	jr	sample.mant
+digit.end:	
+	cp	'.'		; Check fraction
+	jr	nz,tst.exp	; .. maybe exponent
+	call	?ptrbmp
+dig.frac:
+	call	chr.in
+	call	tstdig
+	jp	nc,ERR.2	; .. should be digit here
+	dec	b
+	inc	b
+	ld	c,d
+	jr	z,skp.dig	; The rest is for trash
+sample.fraction:	
+	push	bc
+	call	mant10		; Fix mantissa
+	sub	'0'		; Get digit
+	ld	c,a
+	ld	b,d
+	add	hl,bc		; Fix mantissa
+	jr	nc,skp.carr.2
+	inc	e		; .. think of carry
+skp.carr.2:	
+	pop	bc
+	dec	c
+	call	dig.get		; Get more
+	jr	nc,end.digit	; .. till end
+	call	?ptrbmp
+	djnz	sample.fraction
+skp.dig:	
+	call	dig.get		; Skip remaining digits
+	jr	nc,end.digit
+	call	?ptrbmp
+	jr	skp.dig
+end.digit:	
+	ld	d,c
+	call	expo		; Test exponent found
+	jr	nz,no.exponent
+exponent:	
+	push	de
+	call	?ptrbmp
+	call	chr.in
+	cp	'-'		; Test negative exponent
+	jr	nz,pos.expo
+	call	chr.in		; Get character
+	call	get.exponent	; Get exponent
+	pop	af
+	sub	b		; Build resulting exponent
+	jr	build.number
+tst.exp:	
+	call	expo
+	jr	z,exponent
+no.exponent:	
+	ld	a,d
+	jr	build.number
+pos.expo:	
+	cp	'+'
+	call	z,chr.in
+	call	get.exponent	; Get exponent
+	pop	af
+	add	a,b
+build.number:	
+	ld	d,numcount
+	ld	c,a
+	bit	sign,e		; Check sign
+	jr	nz,sign.do	; .. process it
+	xor	a
+	cp	e
+	jr	nz,normalize	; Test mantissa
+	cp	l
+	jr	nz,norm.loop
+	cp	h
+	jr	nz,norm.loop
+	ld	d,0
+	ret
+normalize:	
+	bit	zero,e		; Test normalized
+	jr	nz,zero.set
+norm.loop:	
+	add	hl,hl
+	rl	e
+	dec	d
+	jr	normalize
+zero.set:	
+	ld	b,e		; Unpack number
+	ld	e,l
+	ld	l,h
+	ld	h,b
+	ld	a,c
+	or	a		; Check all done
+	ret	z		; .. yes, end
+	push	hl
+	push	de
+	jp	m,fix.number
+	call	mantst		; Fix result
+	call	?flmul		; Get reulting product
+	ret
+fix.number:	
+	neg
+	cp	expcount
+	jr	nc,.less
+	call	mantst
+	call	?fldiv
+	ret
+.less:	
+	sub	expcount
+	call	mantst
+	call	?fldiv
+	push	hl
+	push	de
+	ld	hl,04ee2h	; Load 1.0E+32
+	ld	de,06ad4h
+	call	?fldiv
+	ret
+sign.do:	
+	inc	hl
+	jr	nz,sig.carry
+	inc	e
+sig.carry:	
+	srl	e
+	rr	h
+	rr	l
+	inc	d
+	jr	zero.set
+get.exponent:	
+	call	tstdig
+	jp	nc,exp.err
+	sub	'0'
+	ld	b,a
+	call	dig.get
+	ret	nc
+	call	?ptrbmp
+	sub	'0'
+	ld	c,a		; Get times 10
+	ld	a,b
+	add	a,a
+	ld	b,a
+	add	a,a
+	add	a,a
+	add	a,b
+	add	a,c
+	ld	b,a
+	call	dig.get
+	ret	nc
+	jr	large.err
+;
+; Get character and test if digit
+; EXIT	Carry set if in range 0..9
+;
+dig.get:
+	call	?chrget		; Load character
+;
+; Test if character a digit
+; ENTRY	Accu holds character
+; EXIT	Carry set if in range 0..9
+;
+tstdig:
+	cp	'0'		; Test <0
+	ccf
+	ret	nc
+	cp	'9'+1		; Fix >9
+	ret
+;
+; Get character, bump pointer
+;
+chr.in:
+	call	?chrget		; Load character
+	call	?ptrbmp		; Bump pointer
+	ret
+;
+; Test exponent
+; ENTRY	Accu holds character
+; EXIT	Zero set if 'E' or 'e'
+;
+expo:
+	cp	'E'		; Test character
+	ret	z
+	cp	'e'
+	ret
+;
+; **** ERROR hook ****
+;
+exp.err:	
+	pop	bc
+	pop	bc
+	pop	bc
+	ld	h,4		; Set error
+	jr	SYS.err
+ERR.2:
+	pop	bc
+ERR.1:
+	ld	h,6
+	jr	SYS.err
+large.err:
+	pop	bc
+	pop	bc
+	ld	h,8
+SYS.err:
+	ld	l,true
+	ld	(flperr),hl	; Set error code
+	ret
+
+	end
+

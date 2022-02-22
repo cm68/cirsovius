@@ -1,0 +1,41 @@
+	title	Module from library BASE_2 : FILEOP
+	name	('FILEOP')
+	include	baselib.lib
+
+; Entry module for open an existing file or
+; create a new directory entry function
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 3.0 October 1988
+
+; ENTRY	Reg pair <DE> points to FCB
+;	Accu holds BDOS function
+
+; EXIT	On normal return carry is reset
+;	On error carry will be set 
+;	Accu holds content of reg H
+
+	public	@filop
+
+	extrn	@BDOS
+
+@filop:
+	push	hl
+	push	ix
+	push	de
+	pop	ix		; .. copy FCB
+	ld	(ix+_EX),0	; Clear extent
+	ld	(ix+_CR),0	; Clear record
+	call	@BDOS		; Execute function
+	rla			; Fix for error
+	ld	a,h		; Get extended error
+	pop	ix
+	pop	hl
+	ret
+
+	end
+

@@ -1,0 +1,89 @@
+	title	Module from library BASE_1 : COMOUT
+	name	('COMOUT')
+	include	baselib.lib
+
+; Output character to multiple devices or into memory
+; selected by an I/O control word
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 3.0 March 1989
+
+; If the corresponding bit is set, character will be sent
+; to selected device, otherwise that device service will
+; be skipped. Default is console output
+
+; Bit definition of I/O control word
+
+;  -------------------------------------------------
+;  I  x  I  x  I  x  I  x  I RAM I AUX I LST I CON I
+;  -------------------------------------------------
+
+; CON is the console device
+; LST is the list device
+; AUX is the auxiliary device
+; RAM is the main memory
+
+; ENTRY	Accu holds byte to be sent to device(s)
+;	Reg pair HL points to memory location to be filled
+;	Location DEFIO below must be set up prior
+;	calling the module
+
+; EXIT	Reg pair HL incremented by one in RAM storage mode
+
+	entry	comout,defio
+
+comout:
+	_push_
+	ld	b,a		; Save character
+	ld	a,(defio)
+	ld	c,a		; Fetch I/O control
+;
+; Test console
+;
+	ld	e,.conout
+	call	@bdos		; Test console
+;
+; Test list
+;
+	ld	e,.lstout
+	call	@bdos		; Test printer
+;
+; Test auxiliary
+;
+	ld	e,.auxout
+	call	@bdos		; Test auxiliary
+;
+; Test RAM
+;
+	pop	hl		; Get possible memory pointer
+	rr	c
+	jr	nc,comex	; Skip if reset
+	ld	(hl),b		; Store character
+	inc	hl		; Update pointer
+comex:
+	pop	de
+	pop	bc
+	ret
+;
+; Perform OS function in reg E with parameter in reg B if LSB set in reg C
+;
+@bdos:
+	rr	c		; Get bit
+	push	bc
+	ld	c,e		; Get function
+	ld	e,b		; .. and character
+	call	c,BDOS		; Do via OS if set
+	pop	bc
+	ret
+
+	dseg
+
+defio:
+	db	conbit		; I/O word - default console
+
+	end
+

@@ -1,0 +1,48 @@
+	title	Module from library BASE_5 : EMPLIN
+	name	('EMPLIN')
+	include	baselib.lib
+
+; Put line to disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 April 1987
+
+; ENTRY	Reg pair DE points to input buffer, reg B holds
+;	character which indicates the end of line
+;	(Usually $ or zero)
+;	Location EMPMOD holds address of character put
+;	routine which defaults to DSKPUT, the entry point
+;	of single channel transfer
+
+; EXIT	Carry set on error and extended error processed if
+;	selected. Otherwise carry reset.
+
+	entry	emplin,empmod
+
+	extrn	dskput
+
+emplin:
+	push	de
+eml??:
+	ld	a,(de)		; Fetch character
+	inc	de
+	cp	b		; Test selected end
+	jr	z,endofl
+	call	empmod-1	; Put a character
+	jr	nc,eml??	; Loop on
+	pop	de
+	ret			; End on error
+endofl:
+	pop	de
+	or	a		; Clear error
+	ret
+
+empmod	equ	$+1
+	jp	dskput		; Jump vector
+
+	end
+

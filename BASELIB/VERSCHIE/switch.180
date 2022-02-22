@@ -1,0 +1,50 @@
+	title	Module from library BASE_1 : SWITCH
+	name	('SWITCH')
+	include	baselib.lib
+
+; Compute table access via character
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1988
+
+; ENTRY	Accu holds character to be searched for
+;	Reg pair HL points to table with:
+;	Byte 0 : Character 1
+;	Word 0 : Execution address of character 1
+;	    ....
+;	Byte n : -1, last "character", indicates end of table
+;	Word n : Address corresponding to -1 character
+;		 (e.g. error routine)
+
+; EXIT	Selected routine executed by CALL
+
+	entry	switch
+
+switch:
+	push	bc
+@swtch:
+	ld	b,(hl)		; Get key
+	inc	hl
+	cp	b		; Compare
+	jr	z,@swfnd
+	inc	b		; Test end of table
+	jr	z,@swfnd
+	inc	hl		; Skip entry
+	inc	hl
+	jr	@swtch
+@swfnd:
+	push	de
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	pop	de
+	pop	bc
+	jp	(hl)		; Execute
+
+	end
+

@@ -1,0 +1,89 @@
+	title	Module from library BASE_4 : DSKPUT
+	name	('DSKPUT')
+	include	baselib.lib
+
+; Module writes a byte to disk output buffer and if
+; buffer filled, writes record to disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.3 March 1990
+
+; ENTRY	Accu holds byte to be outputted
+;	The three locations below must be set up prior
+;	calling the module
+
+;	Defaults : Standard DMA buffer
+;		   Standard FCB
+;		   Pointer set to 0
+
+; EXIT	On normal return the carry flag is reset
+;	On error the carry will be set
+
+	entry	dskput
+	entry	@wrrec
+
+; The following entries must be set up by the caller:
+
+	entry	wrbuf		; 16 bit write buffer address
+	entry	wrbfp		;  8 bit relative pointer
+	entry	wrfcb		; 16 bit FCB address
+
+	extrn	curdma,setdma,dskwrt
+
+dskput:
+	push	bc
+	ld	c,a		; Save entry
+	ld	a,(wrbfp)	; Get buffer count
+	cp	reclng		; Test full
+	jr	nz,put
+	call	@wrrec		; Write record
+	jr	c,popb?
+put:
+	push	de
+	push	hl
+	ld	d,0
+	ld	e,a		; Get pointer
+	ld	hl,(wrbuf)	; Get buffer base
+	add	hl,de		; Make real
+	inc	a
+	ld	(wrbfp),a	; Update pointer
+	ld	(hl),c		; Store character
+	or	a
+	pop	hl
+	pop	de
+popb?:
+	pop	bc
+	ret
+;
+; Write a record to disk with proper buffer setup
+;
+@wrrec:
+	_push_
+	call	curdma		; Get old buffer
+	push	hl
+	ld	de,(wrbuf)	; Get buffer address
+	call	setdma
+	ld	de,(wrfcb)	; Get FCB
+	call	dskwrt		; Write to disk
+	pop	de
+	push	af
+	call	setdma		; Set old buffer
+	pop	af
+	_pop_
+	ret
+
+	dseg
+
+wrbuf:
+	dw	dma		; Address of buffer
+wrbfp:
+	db	0		; Buffer pointer
+wrfcb:
+	dw	fcb		; FCB Address
+
+	end
+

@@ -1,0 +1,364 @@
+	title	Module from library BASE_3 : EMULIN
+	name	('EMULIN')
+	include	baselib.lib
+
+; Emulate line input from keyboard (Similar to BDOS function 10)
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1986
+
+; ENTRY	Reg pair <DE> points to start of buffer
+;	Location <DE>+0 must hold maximal number for input
+;	Reg pair <HL> points to list of break characters
+;	which breaks routine if character found on 1st position
+;	The first location must hold length of list
+;	If break should not be emulated, set number to zero
+;	Reg <B> holds special conversion byte, defined as:
+;		Bit 0 : Convert to upper case if set
+;		Bit 1 : Make cursor invisible if set
+;		Bit 2 : Turn on reverse video if set
+
+; EXIT	Location <DE>+1 holds number of characters
+;	Location <DE>+2 is the character start point
+;	Carry set if buffer empty - Accu is zero - or
+;	break character detected - Accu holds character
+;	Byte behind after last character is set to zero
+
+	extrn	conino,conout,uppcon,jmptab,subhd2
+
+	entry	emulin,@ctab,@etab
+
+emulin:
+	push	bc
+	push	de
+	push	hl
+	ld	(break),hl	; Save table pointer
+	ld	a,b
+	and	upbit
+	ld	(uppmod),a	; Save upper mode flag
+	ld	hl,curinv
+	ld	a,b		; Test cursor set
+	and	curbit
+	ld	(curflg),a
+	call	nz,presc	; Reset cursor
+	ld	hl,invon
+	ld	a,b
+	and	invbit		; Test inverse
+	ld	(invflg),a
+	call	nz,presc	; Set invers
+	ex	de,hl
+	ld	c,(hl)		; Get max
+	inc	hl
+	inc	hl
+	ld	b,0		; Clear counts
+	ld	d,b
+readnx:
+	call	conino		; Get character
+	and	NoMSB		; Strip off MSB
+	ld	e,a
+	call	jmptab		; Jump to control
+	dw	chrtab
+	ld	a,e
+	cp	' '		; Test range
+	jr	c,readnx
+	ld	a,(uppmod)	; Test conversion
+	or	a
+	ld	a,e
+	call	nz,uppcon
+	ld	e,a		; Save character
+	ld	a,b
+	cp	c		; Test max
+	jr	nz,chrsav
+	ld	a,bell
+	call	conout		; Ring the bell
+	jr	readnx
+chrsav:
+	ld	a,b
+	or	a		; Test start of line
+	jr	nz,bmpcnt
+	push	bc
+	push	hl
+	ld	hl,(break)	; Test break
+	ld	a,(hl)
+	or	a
+	jr	z,nobrk
+	inc	hl
+	ld	c,a
+	ld	b,0		; Get count
+	ld	a,e
+	cpir			; Search
+	jr	nz,nobrk
+	call	crlf		; Close line
+	ld	a,e		; Get break character
+	pop	hl
+	pop	bc
+	pop	hl
+	pop	de
+	pop	bc
+	scf			; Set break
+	ret
+nobrk:
+	pop	hl
+	pop	bc
+bmpcnt:
+	call	insert		; Insert into buffer
+	inc	hl
+	inc	d
+	inc	b		; Bump a lot
+	jr	readnx
+;
+; ===== Control character set up =====
+;
+; End of line character found
+;
+doend:
+	ld	(hl),null	; Set end delimiter
+	call	crlf		; Close line
+	pop	hl
+	pop	de
+	inc	de
+	ld	a,b
+	ld	(de),a		; Save count
+	dec	de
+	pop	bc
+	or	a		; Test any input
+	ret	nz
+	scf
+	ret
+;
+; Break character found
+;
+doboot:
+	call	crlf		; Close line
+	jp	OS		; Exit program
+;
+; Cursor left found
+;
+docurl:
+	ld	a,d		; Test limit
+	or	a
+	jr	z,readnx
+	dec	d
+	push	hl
+	ld	hl,cursl
+comcur:
+	call	presc		; Do cursor motion
+	pop	hl
+	jr	readnx
+;
+; Cursor right found
+;
+docurr:	ld	a,d		; Test limit
+	cp	b
+	jr	z,readnx
+	inc	d
+	push	hl
+	ld	hl,cursr
+	jr	comcur		; Move cursor
+;
+; Delete character left
+;
+dodell:
+	ld	a,d		; Any here ?
+	or	a
+	jp	z,readnx
+	inc	b
+	call	delete		; Ok, delete it
+	dec	b
+	dec	d		; Now fix
+	jp	p,dodelz
+	ld	d,0		; Set zero on underflow
+dodelz:
+	push	hl
+	ld	hl,cursl
+	call	presc
+	ld	hl,escdel
+	jr	comcur		; Move cursor
+;
+; Delete character right
+;
+dodelr:
+	ld	a,d
+	cp	b		; Test possible
+	jp	z,readnx
+	call	delete
+	ld	a,b
+	cp	d		; Test limit
+	jr	nc,doderm
+	ld	d,b		; Set max
+doderm:
+	push	hl
+	ld	hl,escder
+	jr	comcur
+;
+; ===== Subroutines =====
+;
+; Close line, reset attributes
+;
+crlf:
+	ld	a,cr
+	call	conout		; Close line
+	ld	a,lf
+	call	conout
+	ld	hl,curvis
+	ld	a,(curflg)
+	or	a		; Test attributes
+	call	nz,presc	; Reset mode
+	ld	hl,invoff
+	ld	a,(invflg)
+	or	a
+	ret	z
+	;
+; Print control string
+; ENTRY	: HL poits to string, 1st byte must be count
+;
+presc:
+	ld	a,(hl)		; Get count
+	or	a
+	ret	z		; None, exit
+preson:
+	push	af
+	inc	hl
+	ld	a,(hl)		; Get it
+	call	conout		; Print it
+	pop	af
+	dec	a
+	jr	nz,preson	; Test ready
+	ret
+;
+; Insert character into current location of buffer
+; ENTRY	HL points to end of buffer
+; 	D  is cursor position
+; 	B  holds last position
+;
+insert:
+	ld	(hl),e		; Save character
+	ld	a,d
+	cp	b		; Test same position
+	push	af
+	ld	a,e
+	call	z,conout	; Echo now
+	pop	af
+	ret	z		; End if end of buffer
+	push	hl
+	push	bc
+	push	de
+	ld	a,b
+	sub	d		; Get move counter
+	ld	b,a
+	ld	c,a
+	push	hl
+	pop	de		; Get end of buffer
+nxins:
+	dec	hl
+	ld	a,(hl)
+	ld	(de),a		; Unpack characters
+	dec	de
+	dec	c
+	jr	nz,nxins
+	pop	de
+	ld	(hl),e		; Store new on middle position
+	ld	c,b
+	inc	c
+	dec	hl
+echo:
+	inc	hl
+	ld	a,(hl)
+	call	conout		; Echo new buffer
+	dec	c
+	jr	nz,echo
+curset:
+	ld	a,bs
+	call	conout		; Position cursor
+	djnz	curset
+	pop	bc
+	pop	hl
+	ret
+;
+; Delete character from buffer
+;
+delete:
+	push	bc
+	push	de
+	push	hl
+	ld	a,b
+	sub	d		; Get move counter
+	jr	z,deldon
+	ld	e,a
+	ld	c,a
+	ld	d,0
+	call	subhd2		; Position pointer
+	push	hl
+	pop	de		; Copy it
+delnx:
+	inc	de
+	ld	a,(de)
+	ld	(hl),a		; Unpack
+	inc	hl
+	dec	c
+	jr	nz,delnx
+deldon:
+	pop	hl
+	pop	de
+	pop	bc
+	dec	b		; Fix counters and pointer
+	dec	hl
+	ret
+;
+; ===== Data area =====
+;
+	dseg
+;
+; Table of control characters
+;
+chrtab:
+	db	ct.len
+@ctab:
+	db	cr,lf,ctrlc,curlef,currig,del,bs,delrig
+ct.len	equ	$-@ctab
+	dw	dodelr,dodell,dodell,docurr
+	dw	docurl,doboot,doend,doend
+;
+; Table of escape sequences of 8 bytes each
+;
+@etab	equ	$
+;
+escder:
+	db	2,esc,'N'
+	ds	8-($-escder)
+escdel:
+	db	2,esc,'N'
+	ds	8-($-escdel)
+cursr:
+	db	2,esc,'C'
+	ds	8-($-cursr)
+cursl:
+	db	2,esc,'D'
+	ds	8-($-cursl)
+curinv:
+	db	2,esc,'f'
+	ds	8-($-curinv)
+curvis:
+	db	2,esc,'e'
+	ds	8-($-curvis)
+invon:
+	db	2,esc,'p'
+	ds	8-($-invon)
+invoff:
+	db	2,esc,'q'
+	ds	8-($-invoff)
+curflg:
+	ds	1		; Cursor flag
+invflg:
+	ds	1		; Invers flag
+break:
+	ds	2		; Caller's table
+uppmod:
+	ds	1		; Conversion mode
+
+	end
+

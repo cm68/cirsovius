@@ -1,0 +1,85 @@
+	title	Module from library INTEGER_2 : DIVI32
+	name	('DIVI32')
+	include	baselib.lib
+
+; Divide 32 bit integers
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Regs HL,BC hold 2nd operand and result
+;	Stack hold 1st number
+
+; EXIT	Result filled with product
+;	Carry set on zero divisor or overflow
+
+	entry	$div32
+
+	extrn	$neg32,$fix32
+
+$div32:
+	sub	a
+	bit	sign,h		; Test sign
+	jr	z,divpos1
+	call	$neg32
+	ld	a,10000000b
+divpos1:	
+	pop	iy
+	pop	de
+	ex	(sp),hl
+	ex	(sp),iy
+	push	bc
+	ld	b,d
+	ld	c,e
+	bit	sign,h		; .. test 2nd
+	jr	z,divpos2
+	add	a,11000000b
+	call	$neg32
+divpos2:	
+	pop	de
+	push	ix
+	push	af
+	push	bc
+	ex	(sp),iy
+	pop	bc
+	ld	a,b
+	or	c
+	or	d
+	jr	nz,div1
+	or	e
+	jr	z,div2
+	cp	2
+	jr	nz,div1
+	push	iy
+	pop	bc
+	pop	af
+	sra	h
+	rr	l
+	rr	b
+	rr	c
+	jr	div3
+div1:	
+	call	$fix32
+	pop	af
+	push	ix
+	pop	hl
+	push	iy
+	pop	bc
+div3:	
+	rla
+	call	c,$neg32
+	pop	ix
+	or	a
+	ret
+div2:	
+	pop	de
+	pop	de
+	scf
+	ret
+
+	end
+

@@ -1,0 +1,78 @@
+	title	Module from library BASE_4 : CREBAK
+	name	('CREBAK')
+	include	baselib.lib
+
+; Create backup file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 June 1987
+
+; ENTRY	Reg pair DE points to new FCB area
+;	Reg pair HL points to proper set original FCB
+
+; EXIT	A new file created with extension .BAK if carry
+;	reset. Only name field copied to new FCB, so
+;	different drives may be used. Any existing file
+;	with extension .BAk will be deleted. Carry set on
+;	error either physical or if original file holds
+;	extension .BAK and both files resides on same drive
+;	or original file not on disk
+;	On error, akku holds the following code:
+
+;		0 : if file reg HL pointed to does not exist
+;		1 : if .BAK cannot be created
+;		2 : on extension .BAK and same drive
+
+	entry	crebak,$$BAK
+
+	extrn	open,delete,create,comp3
+
+crebak:
+	_push_
+	ex	de,hl
+	call	open		; Find original file
+	ld	a,0
+	jr	c,popbak	; Error if not here
+	ex	de,hl
+	ld	a,(de)
+	xor	(hl)		; Get different drives
+	ld	b,a
+	push	bc
+	inc	de
+	inc	hl		; Skip drive
+	ld	bc,.nam
+	ldir			; Unpack name
+	push	de
+	ld	de,$$BAK
+	ld	c,.ext
+	call	comp3		; Test .BAK
+	pop	de
+	pop	bc
+	jr	nz,nobak
+	ld	a,b		; Test same drive
+	or	a
+	ld	a,2
+	scf
+	jr	z,popbak	; Error if so
+nobak:
+	ld	hl,$$BAK
+	ld	bc,.ext
+	ldir			; Set .BAK
+	pop	de
+	push	de
+	call	delete		; Delete .BAK
+	call	create		; Make new .BAK
+	ld	a,1
+popbak:
+	_pop_
+	ret
+
+	dseg
+
+$$BAK:
+	db	'BAK'
+

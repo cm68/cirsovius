@@ -1,0 +1,140 @@
+	title	Module from library C_2 : FCB
+	name	('FCB')
+
+; Parse file name
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair DE points to name of file DU:FN.EXT
+;	Reg pair HL points to file control block
+
+; EXIT	Zero set indicates parsing ok
+
+	maclib	c.lib
+
+	entry	du$fcb
+
+	extrn	$bdos,uppcon
+
+du$fcb:
+	push	hl		; Save input
+	push	de
+	ld	d,h		; Copy pointer
+	ld	e,l
+	inc	de
+	ld	bc,DIRlen-1
+	ld	(hl),b
+	ldir			; Init FCB
+	pop	hl
+	push	hl
+	ld	a,(hl)		; Get first character
+	call	uppcon		; Convert to upper case
+	cp	'A'		; Test range
+	jr	nc,is.drv?	; .. may be drive
+	ld	c,.retdsk
+	push	hl
+	call	$bdos		; Get current disk
+	pop	hl
+	inc	a
+	ld	b,a		; .. save
+	ld	a,(hl)
+	jr	is.usr?		; Test user
+is.drv?:
+	cp	'P'+1		; Verify valid disk
+	jr	nc,no.du	; .. nope
+	sub	'A'-1		; Fix disk
+	ld	b,a		; .. save
+	inc	hl
+	ld	a,(hl)
+	cp	':'		; Test delimiter
+	jr	z,no.u
+is.usr?:
+	sub	'0'		; Test valid user range
+	cp	9+1
+	jr	nc,no.du	; .. nope
+usr.loop:
+	ld	c,a
+	inc	hl
+	ld	a,(hl)
+	cp	':'		; Test delimiter
+	jr	z,end.u		; .. yeap
+	sub	'0'
+	cp	9+1		; Test valid range
+	jr	nc,no.du	; .. nope
+	ld	e,a		; *10
+	ld	a,c
+	add	a,a
+	add	a,a
+	add	a,c
+	add	a,a
+	add	a,e
+	and	max.usr-1	; Truncate for max
+	jr	usr.loop
+no.du:
+	ld	c,.retdsk
+	call	$bdos		; Get current disk
+	inc	a
+	ld	b,a		; .. save
+	pop	hl
+	dec	hl
+	push	hl
+no.u:
+	push	hl
+	ld	e,_get
+	ld	c,.usrcod
+	call	$bdos		; Get current user
+	pop	hl
+	ld	c,a		; .. save
+end.u:
+	inc	c		; Get user 1 relative
+	inc	hl
+	pop	de
+	pop	de
+	ld	a,b
+	ld	(de),a		; Set drive
+	inc	de
+	ld	b,.nam		; .. parse name
+	call	parse
+	ld	a,(hl)
+	cp	'.'		; Test delimiter
+	jr	nz,no.delim	; .. nope
+	inc	hl		; Skip it
+no.delim:
+	ld	b,.ext		; Parse extension
+	call	parse
+	ld	hl,_U-.drv-.nam-.ext
+	add	hl,de
+	ld	(hl),c		; Store user
+	xor	a
+	ret
+;
+; Parse name or extension
+;
+parse:
+	ld	a,(hl)
+	call	uppcon		; Convert to upper case
+	cp	'.'		; Test end
+	jr	z,fill.blnk
+	cp	' '+1
+	jr	c,fill.blnk
+	cp	'~'+1
+	jr	nc,fill.blnk
+	inc	hl
+	ld	(de),a		; Unpack
+	inc	de
+	djnz	parse
+	ret
+fill.blnk:
+	ld	a,' '
+	ld	(de),a		; .. blank remainder
+	inc	de
+	djnz	fill.blnk
+	ret
+
+	end
+

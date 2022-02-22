@@ -1,0 +1,175 @@
+	title	Module from library INTEGER_2 : DIN32
+	name	('DIN32')
+	include	baselib.lib
+
+; Convert ASCII decimal string to 32 bit integer
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.1 December 1989
+
+; ENTRY	Reg pair DE points to string
+;	Reg pair HL points to 32 bit result
+;	Reg B holds end marker of string
+;	(usually zero or $)
+;	If B holds 255 (hex 0FFH), routine ends at first
+;	non numeric character found
+
+; EXIT	Result filled with value
+;	Reg pair DE points to delimiter or first
+;	non numeric character
+;	Carry set on overflow or illegal digit
+
+	entry	din32
+
+	extrn	skpblk,tstdig
+
+din32:
+	push	bc
+	push	hl
+	push	hl
+	push	de
+	push	bc
+	ld	hl,..res	; Set temporary value
+	ld	(hl),0
+	ld	de,..res+1
+	ld	bc,res.len-1
+	ldir			; Clear it
+	pop	bc
+	ld	c,0		; Clear counter
+	pop	de
+	ld	hl,..res
+	call	skpblk		; Skip blanks here
+dig???:
+	ld	a,(de)
+	cp	b		; Check end
+	jr	z,convert
+	call	tstdig		; Should be number here
+	jr	nc,nxt.dig
+	inc	b		; 0FFH is valid here
+	jr	z,convert	; Start
+	scf
+	jr	end.bin		; .. error
+nxt.dig:
+	ld	(hl),a		; Save digit
+	inc	hl
+	inc	c		; Count digits
+	inc	de
+	jr	dig???
+convert:
+	ld	a,c
+	or	a
+	scf			; Check no digit
+	jr	z,end.bin
+	ld	de,..res
+	ld	a,(de)
+	ld	($$num+2),a	; Init digit
+	inc	de
+cnv.loop:
+	dec	c
+	jr	z,end.dig	; Test end
+	call	@copy32		; Copy old value
+	call	@shl32		; * 2
+	call	nc,@shl32	; * 4
+	call	nc,@add32	; * 5
+	call	nc,@shl32	; *10
+	jr	c,end.bin	; Check overflow
+	call	add.dig		; Add new digit
+	jr	nc,cnv.loop
+	jr	end.bin
+end.dig:	
+	or	a		; Reset carry
+end.bin:
+	pop	hl		; Get result pointer
+	ld	de,($$num)
+	ld	(hl),d		; Save result
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	de,($$num+2)
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	pop	hl
+	pop	bc
+	ret
+;
+; Shift 32-bit number times 2
+;
+@shl32:
+	push	hl
+	ld	hl,($$num+2)
+	add	hl,hl		; Shift times 2
+	ld	($$num+2),hl
+	ld	hl,($$num)
+	adc	hl,hl
+	ld	($$num),hl
+	pop	hl
+	ret
+;
+; Copy 32-bit number
+;
+@copy32:
+	push	hl
+	ld	hl,($$num)
+	ld	($num),hl	; Simple copy
+	ld	hl,($$num+2)
+	ld	($num+2),hl
+	pop	hl
+	ret
+;
+; Add 32-bit numbers
+;
+@add32:
+	push	hl
+	push	de
+	ld	hl,($$num+2)
+	ld	de,($num+2)
+	add	hl,de		; Add
+	ld	($$num+2),hl
+	ld	hl,($$num)
+	ld	de,($num)
+	adc	hl,de
+	ld	($$num),hl
+	pop	de
+	pop	hl
+	ret
+;
+; Add digit to 32-bit number
+;
+add.dig:
+	ld	a,(de)		; Get new digit
+	inc	de
+	push	hl
+	push	de
+	ld	e,a
+	ld	d,0
+	ld	hl,($$num+2)
+	add	hl,de		; Add
+	ld	($$num+2),hl
+	ld	hl,($$num)
+	ld	e,d
+	adc	hl,de
+	ld	($$num),hl
+	pop	de
+	pop	hl
+	ret
+
+	COMMON	/DATA/
+
+$$C	equ	$
+	ds	1		; Reserved for SIN32
+..res:
+	ds	10
+$$num:
+	ds	4
+res.len	equ	$-..res		; Clear all
+$num:
+	ds	4
+$$CL	equ	$-$$C
+	ds	COMMLEN-$$CL
+
+	end
+

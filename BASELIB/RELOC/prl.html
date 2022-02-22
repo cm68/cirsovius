@@ -1,0 +1,186 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 //EN">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/BASELIB/RELOC/PRL.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:11:24 GMT -->
+<head>
+<title>Overlays mit (S)PR(L) Dateien</title>
+<style type="text/css">
+<!--
+.fn1 {
+      font-size: 75%;
+      position:relative;
+      top:-7px;
+      margin-right:2px;
+      }
+//-->
+</style>
+<meta name="description" content="Overlays">
+<meta name="keywords" content="Overlays, CP/M">
+<meta name="author" content="Werner Cirsovius">
+</head>
+
+<body style="font-family:Arial;font-size:10pt;line-height:110%;margin-top:2cm" bgcolor="#000000"
+      text="#00FF00"
+      link="#00FFFF"
+      alink="#FF00FF"
+      vlink="#FF00FF">
+
+<h1 align="center">Overlays aus .SPR Dateien</h1>
+
+Das DRI Programm <code>LINK.COM</code><a href="#1" class="fn1">1</a><a name="1t"></a> erlaubt zwar das Erzeugen von Overlay-Dateien<a href="#2" class="fn1">2</a><a name="2t"></a>, jedoch wird nach dem Linken ausgegeben, dass zwei Labels fehlen, n&auml;mlich <code>?ovlay</code> und <code>?ovla0</code>.
+Dies sind zwei Entry-Punkte, die aus der PL/I Bibliothek stammen.
+Im Public Domainbereich gab es eine alternative <a href="../CPX/OVLMNGR-MAC.txt">Quelle</a> in der SIG/M Vol. 236<a href="#3" class="fn1">3</a><a name="3t"></a>.
+(Sp&auml;ter habe ich die Bibliothek <code>PLILIB.IRL</code> gefunden, in der sich das gesuchte Modul befand<a href="#4" class="fn1">4</a><a name="4t"></a>).
+
+<p>
+Da ich die SIG/M Quelle anfangs nicht kannte und auch nicht wusste, welche Parameter f&uuml;r den Aufruf zu den PL/I Bibliotheks-Routinen &uuml;bergeben werden mussten, habe ich eine andere L&ouml;sung gesucht.
+Die Idee war, das von <code>LINK.COM</code> erzeugte PRL bzw. SPR-Format zu verwenden.
+Im vorliegenden Fall werden SPR-Module vorausgesetzt, die mit dem Kommando &ldquo;<code>LINK Datei [OS]</code>&rdquo; erzeugt werden.
+</p>
+ 
+<p>
+Dazu habe ich zwei Hilfsprogramme und das eigentliche Lademodul geschrieben, das aus einer Overlay-Datei das entsprechende Modul l&auml;dt.
+</p>
+
+<p>
+<span style="text-decoration:underline">Beschreibung der Programme und des Moduls:</span>
+</p>
+
+<p>
+<table border align="center" width="75%">
+<tr><th>Name</th><th>Aufruf</th><th>Beschreibung</th></tr>
+<tr><td valign="top"><a href="PRL2OVR-MAC.txt"><b>PRL2OVR</b></a></td><td valign="top">
+<code>PRL2OVR prl_file [ovm_file]</code>
+</td><td valign="top">
+Dieses Hilfsprogramm verkleinert den Header der .SPR-Datei.
+Urspr&uuml;nglich ist diese 256 Bytes lang und beinhaltet lediglich die L&auml;nge des Programmcodes.
+<code>PRL2OVR</code> kopiert nur die ersten 128 Bytes des Headers und h&auml;ngt daran den Programmcode an.
+</td></tr>
+<tr><td valign="top"><a href="OVLBLDPR-MAC.txt"><b>OVLBLDPR</b></a></td><td valign="top">
+<code>OVLBLDPR [-] ovr_file list_of_ovm_files</code>
+</td><td valign="top">
+Dieses Hilfsprogramm erstellt aus den Overlay-Modulen das komplette Overlay.
+Weiterhin wird eine Textdatei erstellt, in der die L&auml;nge und der Startrekord des jeweiligen Moduls definiert sind.
+Diese Datei kann dann in das Hauptprogramm &uuml;benommen werden (z.B. mit <code>INCLUDE</code>).
+Mit der Option &ldquo;&ndash;&rdquo; kann die Erzeugung dieser Datei unterdr&uuml;ckt werden.
+</td></tr>
+<tr><td valign="top"><a href="LDPRL-MAC.txt"><b>LDPRL</b></a></td><td valign="top">
+Diverse Parameter
+</td><td valign="top">
+Dies ist das Modul, das in einem Programm ein Overlay-Modul in den Speicher l&auml;dt.
+Im Assembler muss dazu das Symbol <code>LODOVL</code> als <code>EXTERN</code> deklariert werden.
+Die Parameter werden unten genauer erkl&auml;rt.
+</td></tr>
+</table>
+</p>
+
+<p>
+<span style="text-decoration:underline">Beschreibung der Parameter f&uuml;r das Modul <code>LDPRL</code>:</span>
+</p>
+
+<p>
+<table border align="center" width="75%">
+<tr><th colspan="3">Aufruf</th></tr>
+<tr><th>Parameter</th><th>&Uuml;bergabe&nbsp;im&nbsp;Register</th><th>Beschreibung</th></tr>
+<tr><td valign="top">Startrekord</td>
+<td valign="top"><code>L</code></td>
+<td valign="top">Gibt den Startrekord f&uuml;r das zu ladende Modul im Overlay an</td></tr>
+<tr><td valign="top">Modull&auml;nge</td>
+<td valign="top"><code>H</code></td>
+<td valign="top">Gibt die L&auml;nge f&uuml;r das zu ladende Modul im Overlay an</td></tr>
+<tr><td valign="top">Externe Tabelle</td>
+<td valign="top"><code>^BC</code></td>
+<td valign="top">Adresse einer Tabelle, die Zugriff auf Routinen ausserhalb des Moduls erlaubt</td></tr>
+<tr><td valign="top">Ladeadresse und FCB</td>
+<td valign="top"><code>^DE</code></td>
+<td valign="top">
+Adresse eines Parameterblocks mit
+<ol>
+<li>Zeiger auf den File Control Block des Overlays</li>
+<li>Erste freie Ladeadresse f&uuml;r das Modul</li>
+</ol>
+</td></tr>
+<tr><th colspan="3">R&uuml;cksprung</th></tr>
+<tr><th>Parameter</th><th>Register/Carry-Flag</th><th>Beschreibung</th></tr>
+<tr><td valign="top">Ergebnis</td>
+<td valign="top"><code>Carry</code></td>
+<td valign="top">Im Fehlerfall ist die Carry-Flag gesetzt</td></tr>
+<tr><td valign="top">Ladeadresse</td>
+<td valign="top"><code>^HL</code></td>
+<td valign="top">Wirkliche Ladeadresse, beginnend mit einer Seitengrenze (<code>0xPP00</code>)</td></tr>
+<tr><td valign="top">Endadresse</td>
+<td valign="top"><code>^DE</code></td>
+<td valign="top">Erste freie Adresse nach dem Modul</td></tr>
+</table>
+</p>
+
+<p>
+<span style="text-decoration:underline">Aufbau eines Overlay-Modules:</span>
+</p>
+
+Das erste Byte in einem Overlay-Modul definiert, ob externe Routinen verwendet werden oder nicht:
+
+<p>
+<table border align="center" width="75%">
+<tr><th>Ohne&nbsp;externe&nbsp;Aufrufe</th><th>Mit&nbsp;externen&nbsp;Aufrufen</th><th>Beschreibung</th></tr>
+<tr><td valign="top">
+<pre>
+       NOP
+</pre>
+</td>
+<td valign="top">
+<pre>
+       JP   START
+       JP   EXT_1
+       JP   EXT_2
+        ...
+       JP   EXT_n
+       NOP
+START:..........
+</pre>
+</td>
+<td valign="top">
+<ol type="a">
+<li>Ein <code>NOP</code> als erste Anweisung zeigt an, dass der folgende Code einfach geladen werden kann.</li>
+<li>Beginnt die erste Anweisung mit einem &ldquo;<code>JP addr</code>&rdquo;, dann werden die folgenden <code>JP</code>-Anweisungen bis zum <code>NOP</code> als externe Spr&uuml;nge behandelt.
+Die Adressen der <code>JP</code>-Anweisungen sind relativ zur externen Tabelle, die im Register <code>BC</code> &uuml;bergeben wird.
+</li>
+</ol>
+</td></tr>
+</table>
+</p>
+
+<hr />
+
+<table>
+<tr><td valign="top"><b><a name="1">1.</a></b></td><td valign="top">
+Im <a href="../../Disassembler/RMAC/Link80/index-de.html">Handbuch</a> <img src="../../../../gif/flag_en.gif" /> findet sich eine Beschreibung von <b>LINK.COM</b>
+<a href="#1t"><img width="10" height="11" src="../../../../gif/back_h.gif" /></a></td></tr>
+<tr><td valign="top"><b><a name="2">2.</a></b></td><td valign="top">
+Im <a href="../../Disassembler/RMAC/Link80/link80-e-de.html">Anhang E</a> <img src="../../../../gif/flag_en.gif" /> wird die Erzeugung von Overlay-Dateien beschrieben
+<a href="#2t"><img width="10" height="11" src="../../../../gif/back_h.gif" /></a></td></tr>
+<tr><td valign="top"><b><a name="3">3.</a></b></td><td valign="top">
+Die Gruppe SIG/M (<b><i>S</i></b>pecial <b><i>I</i></b>nterest <b><i>G</i></b>roup<b><i>/M</i></b>icrocomputers), ein Teil des Amateur Computer Clubs aus New Jersey, hatte zur regul&auml;ren Ausgabe von Public Domain Software diese auf Disketten zusammengestellt.
+Die SIG/M Disketten entstanden ab 1980 und die Ausgaben 000 bis 310 sind <a href="http://www.retroarchive.org/cpm/cdrom/SIMTEL/SIGM/">hier</a> zu finden.
+<a href="#3t"><img width="10" height="11" src="../../../../gif/back_h.gif" /></a></td></tr>
+<tr><td valign="top"><b><a name="4">4.</a></b></td><td valign="top">
+Das PL/I Paket besteht aus <a href="../../Assembler/Download/pli80_13.zip">pli80_13</a>
+(beinhaltet <code>PLILIB.IRL</code>) und <a href="../../Assembler/Download/plm80x80.zip">plm80x80</a> (mit <code>PLMLANG.DOC</code> (<i>PL/M-80 Language Summary</i>)).
+Ich habe das Modul zum Laden aus einem Overlay disassembliert und <a href="OVERLAY-MAC.txt">hier</a> zur Information ausgestellt.
+<a href="#4t"><img width="10" height="11" src="../../../../gif/back_h.gif" /></a></td></tr>
+</table>
+
+<hr />
+
+<font face="Arial" color="#FFFFFF" size="-1">
+<table width="100%"><tr>
+<td align="left"><a href="mailto:werner@cirsovius.de?subject=Antwort auf Overlays mit (S)PR(L) Dateien">Werner Cirsovius</a></td>
+<td align="right">1989, zusammengestellt August&nbsp;2009, erweitert November&nbsp;2012</td>
+</tr></table>
+</font>
+
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/BASELIB/RELOC/PRL.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:11:24 GMT -->
+</html>
+

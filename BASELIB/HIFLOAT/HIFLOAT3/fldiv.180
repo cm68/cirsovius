@@ -1,0 +1,118 @@
+	title	Module from library HIFLOAT_3 : FLDIV
+	name	('FLDIV')
+	include	baselib.lib
+
+; Floating point DIVIDE
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Operand 1 on stack
+;	Operand 2 in regs DE,HL
+
+; EXIT	Result OP1/OP2 in regs DE,HL
+
+	entry	?fldiv
+
+	ext	?ovfl,?zero,flperr
+
+ovfl:
+	ld	l,true
+	ld	h,2
+	ld	(flperr),hl	; Set divide by zero error
+	pop	bc
+	pop	af
+	pop	af
+	push	bc
+	ret
+?fldiv:
+	ld	a,false
+	ld	(flperr),a
+	bit	zero,h		; Test zero divisor
+	jr	z,ovfl		; .. error if so
+	ld	iy,0
+	add	iy,sp
+	ld	b,(iy+mant.hi)	; Test zero dividend
+	bit	zero,b
+	jp	z,?zero
+	ld	a,(iy+exp)
+	sub	d		; Get resulting exponent
+	jp	pe,?ovfl	; .. error
+	push	af
+	ld	d,b
+	ld	c,e
+	ld	e,(iy+mant.mid)
+	ld	a,d
+	xor	h
+	and	SIGNB
+	res	sign,d		; Reset bits
+	res	sign,h
+	push	af
+	ex	de,hl
+	ld	a,(iy+mant.lo)
+	ld	b,bitlen
+shift.lo:	
+	sub	c
+	sbc	hl,de
+	jr	nc,skip.lo
+	add	a,c		; Shift lo byte
+	adc	hl,de
+skip.lo:	
+	rl	(iy-lo.)
+	add	a,a
+	adc	hl,hl
+	djnz	shift.lo
+	ld	b,bitlen
+shift.1:	
+	sbc	hl,de
+	jr	nc,skip.1
+	add	hl,de
+skip.1:	
+	rla
+	add	hl,hl
+	djnz	shift.1
+	cpl
+	ld	l,a
+	ld	a,h
+	ld	b,bitlen
+shift.2:	
+	sub	d
+	jr	nc,skip.2
+	add	a,d
+skip.2:	
+	rl	e
+	add	a,a
+	djnz	shift.2
+	pop	bc
+	ld	a,c
+	cpl
+	ld	h,a
+	ld	a,e
+	pop	de
+	cpl
+	bit	sign,h		; Test bit set
+	jr	nz,normalize
+	dec	d
+	jp	pe,?ovfl
+	jr	norm.go
+normalize:	
+	srl	h		; Divide mantissa by 2
+	rr	l
+	rra
+norm.go:	
+	ld	e,a		; Set LSByte
+	ld	a,h
+	or	b		; Get sign
+	ld	h,a
+	pop	bc
+	pop	af		; Fix stack
+	pop	af
+	push	bc		; .. bring back caller
+	ret
+
+	end
+

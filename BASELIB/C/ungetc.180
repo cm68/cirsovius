@@ -1,0 +1,83 @@
+	title	Module from library C_3 : UNGETC
+	name	('UNGETC')
+
+; Unget character/byte from file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair DE points to file block
+;	Reg HL holds byte/character.
+
+; EXIT	Reg HL holds byte. -1 maps to end of file
+
+	maclib	c.lib
+
+	entry	ungetc
+
+	extrn	$stdin,$rdrpc,$kbdpc
+
+ungetc:
+	inc	d		; Test character device
+	dec	d
+	jr	nz,ung.fp	; .. it's a file
+	ld	a,e
+	dec	a		; Test standard input
+	jr	nz,un.dev	; .. nope
+	ld	de,($stdin)	; Get input pointer
+	jr	ungetc		; .. retry
+un.dev:
+	cp	4-1		; Test RDR:
+	jr	nz,is.CON?	; .. nope
+	ld	a,l
+	ld	($rdrpc),a	; .. save
+	jr	u.ret
+is.CON?:
+	cp	7-1		; Test CON:
+	jr	nz,u.err	; .. should be
+	ld	a,l
+	ld	($kbdpc),a	; .. save
+u.ret:
+	ld	l,a		; Set result
+	ld	h,0
+	ret
+u.err:
+	ld	hl,_ERR		; Return error
+	ret
+ung.fp:
+	ld	c,l		; Save character
+	ld	hl,_Ctrl
+	add	hl,de
+	bit	_rd,(hl)	; Test read
+	jr	z,u.err		; .. nope, should be
+	inc	hl
+	ld	c,a		; Save character
+	ld	e,(hl)		; Get index
+	inc	hl
+	ld	d,(hl)
+	ld	a,d		; Test not first character
+	or	e
+	jr	z,u.err		; .. error if so
+	dec	hl
+	dec	de		; Count down index
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	e,(hl)		; Get buffer address
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	a,c
+	ld	(de),a		; .. unget character
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	u.ret
+
+	end
+

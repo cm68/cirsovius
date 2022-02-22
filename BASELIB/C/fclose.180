@@ -1,0 +1,83 @@
+	title	Module from library C_3 : FCLOSE
+	name	('FCLOSE')
+
+; Close file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair DE points to file pointer
+
+; EXIT	Reg HL holds result
+;	If HL holds zero, file closed successfully
+
+	maclib	c.lib
+
+	entry	fclose
+
+	extrn	u$bdos,$bdos,free
+
+fclose:
+	inc	d		; Test character device
+	dec	d
+	ret	z		; .. yeap, skip
+	push	de		; .. save it
+	call	.fclose		; Do the job
+	ex	(sp),hl
+	call	free		; Release memory
+	pop	hl
+	ret
+.fclose:
+	ld	hl,_Ctrl
+	add	hl,de
+	bit	_wr,(hl)	; Test write enabled
+	ret	z		; .. nope, do not flush
+	push	de
+	inc	hl
+	ld	e,(hl)		; Get pointer
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	inc	h
+	jr	z,f.close	; .. empty buffer, simple close
+	ld	b,h		; Get record count
+	inc	de		; Fix to buffer
+	inc	de
+	inc	de
+wr.loop:
+	ld	c,.setdma
+	call	$bdos		; Set disk buffer
+	ld	hl,reclng
+	add	hl,de		; Bump to next
+	ex	(sp),hl
+	ex	de,hl
+	ld	c,.wrseq
+	call	u$bdos		; Write record
+	or	a
+	jr	nz,wr.err	; .. error
+	ex	de,hl
+	ex	(sp),hl
+	ex	de,hl
+	djnz	wr.loop
+f.close:
+	pop	de		; Get back pointer
+	ld	c,.close
+	call	u$bdos		; Close file
+	inc	a
+	jr	z,cls.err	; .. error
+	ld	hl,_NUL		; .. return succes
+	ret
+wr.err:
+	pop	de
+cls.err:
+	ld	hl,_ERR
+	ret
+
+	end
+

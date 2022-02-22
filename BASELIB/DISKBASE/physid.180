@@ -1,0 +1,50 @@
+	title	Module from library BASE_3 : PHYSID
+	name	('PHYSID')
+	include	baselib.lib
+
+; Check physical error on selected drive
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.3 September 1991
+
+; ENTRY	Reg pair DE points to FCB
+
+; EXIT	Carry set on physical error
+
+	entry	physid
+
+	ext	errpc,@ercod,curdrv,seldrv,resdrv,geterr,seterr
+
+physid:
+	_push_
+	ld	hl,(errpc)	; Save error PC
+	push	hl
+	ld	hl,0
+	ld	(errpc),hl
+	call	geterr		; Fetch current error mode
+	ld	(@ercod),a
+	ld	b,a
+	ld	a,phyerr
+	call	seterr		; Set extent error
+	ld	a,(de)		; Test drive
+	dec	a		; Test current
+	call	m,curdrv	; Get logged drive if so
+	push	af
+	call	resdrv		; Reset it
+	pop	af
+	call	seldrv		; Select it
+	push	af		; Save error code
+	ld	a,b		; Get old error mode
+	call	seterr		; Reset mode
+	pop	af		; Get real error code
+	pop	hl
+	ld	(errpc),hl	; Set old PC
+	_pop_
+	ret
+
+	end
+

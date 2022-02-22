@@ -1,0 +1,55 @@
+	title	Module from library C_1 : SBRK
+	name	('SBRK')
+
+; Allocate memory
+
+; ENTRY	Reg HL holds bytes to be requested
+
+; EXIT	Reg HL holds pointer to cntiguous block of memory
+;	If not enough memory available, reg HL returns 0
+
+; NOTE	Routine assumes stack growing down from top of memory
+;	Location at SBRK-2 holds number of bytes to be reserved
+;	for the stack - it defaults to 1024
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1994
+
+BDOS	equ	0005h
+
+	entry	sbrk
+
+	extrn	$memry
+
+	dw	1024
+sbrk:
+	ex	de,hl
+	push	bc
+	ld	hl,(BDOS+1)	; Get top of memory
+	ld	bc,(sbrk-2)	; .. fetch stack reserve
+	or	a
+	sbc	hl,bc		; .. calculate max top
+	ld	b,h
+	ld	c,l
+	ld	hl,($memry)	; Get current top of heap
+	ex	de,hl
+	add	hl,de		; .. calculate new top
+	push	hl
+	or	a
+	sbc	hl,bc		; Test enough memory
+	pop	hl
+	pop	bc
+	jr	c,got.mem
+	ld	hl,0		; Return no space
+	ret
+got.mem:
+	ld	($memry),hl	; Save new heap
+	ex	de,hl		; .. get back start
+	ret
+
+	end
+

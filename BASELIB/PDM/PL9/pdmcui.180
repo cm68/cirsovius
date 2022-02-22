@@ -1,0 +1,154 @@
+	title	Module from library PULL_DOWN_9 : PDMCUI
+	name	('PDMCUI')
+
+; Select window element by key input
+; Selecting element by cursor and page keys,
+; end with ENTER or RETURN
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.3 March 1993
+
+; ENTRY	Reg pair DE holds user control block (UPB)
+;	Reg pair HL points to complete window text line
+;	Reg B indicates mode
+;		Bit 0 :	Defines colour on start of text
+;			Reset : normal
+;			  Set : invers
+;		Bit 1 :	Defines colour on end of text
+;			Reset : normal
+;			  Set : invers
+;		Bit 2 :	Defines to make cursor invisible
+;			on start of text
+;			Reset : make invisible
+;			  Set : do'nt change
+;		Bit 3 :	Defines to make cursor visible
+;			on end of text
+;			Reset : make visible
+;			  Set : do'nt change
+;		Bit 4 :	Defines end on any other key
+;			than RETURN/ENTER except cursor keys
+;			Reset : end on RETURN/ENTER only
+;			  Set : end on other key
+;	Reg C selects window element to start with
+
+; EXIT	Reg C holds selected window element number,
+;	started with 1.
+;	Location PDMDAT holds key# and shift state
+;	Zero flag set indicates end on RETURN/ENTER else reset
+;	User Parameter Block filled with cursor
+;	and element text pointer
+
+	public	pdmcui
+
+	extrn	pdmtxa,pdmkey,pdmins,pdmvis,pdmmax
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+; Key #
+
+_PARA	equ	 4
+_PAGE	equ	12
+_RETURN	equ	18
+_ENTER	equ	78
+
+pdmcui:
+	push	de
+	pop	ix		; Fetch UPB
+	call	pdmmax		; Truncate count
+	push	de
+	bit	stxins,b	; Test cursor
+	call	z,pdmins
+	call	boolg		; Get key
+	push	af
+	bit	etxins,b
+	call	z,pdmvis	; Attache cursor
+	pop	af
+	pop	de
+	ret
+boolg:
+	ld	iy,curst1	; Load edit key numbers
+	bit	direc,(ix+mode)
+	jr	nz,bool
+	ld	iy,curst2
+bool:
+	push	iy
+	push	ix
+boolop:
+	push	bc
+	push	de
+	push	hl
+	call	pdmtxa		; Select text, indicate it
+	call	pdmkey		; Get key
+	pop	hl
+	pop	de
+	pop	bc
+	pop	ix
+	pop	iy
+	cp	_ENTER		; Test ENTER
+	ret	z
+	cp	_RETURN		; Test RETURN
+	ret	z
+	push	bc
+	cp	_PAGE		; Test DOC/PAGE
+	jr	z,dowfnd
+	cp	_PARA		; Test PARA
+	jr	z,mxrig
+	cp	(iy+0)		; Test 1st edit key
+	jr	z,edfnd
+	cp	(iy+1)		; .. 2nd, too
+	jr	z,edfnd
+	pop	bc
+	bit	retchr,b	; Test to end with other key
+	jr	z,bool
+	ret
+edfnd:
+	cp	(iy+0)		; Test UP/LEFT
+	jr	nz,dwnrgt
+	dec	c		; Fix element
+	jr	nz,okele
+	jr	mxrig
+dwnrgt:
+	inc	c		; Bump position
+	ld	a,(ix+numele)
+	cp	c		; Test against max
+	jr	nc,okele
+dowfnd:
+	ld	c,1		; Fix
+	jr	okele
+mxrig:
+	ld	c,(ix+numele)	; Set max
+okele:
+	ld	a,c		; Save count
+	pop	bc		; Get old
+	push	iy
+	push	ix
+	push	af
+	push	bc
+	ld	a,0ffh
+	xor	b		; Toggle bits
+	ld	b,a
+	push	de
+	push	hl
+	call	pdmtxa		; Deselect element
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ld	c,a
+	jr	boolop		; Select nex
+
+	dseg
+
+curst1:
+	db	14,79		; Cursor UP/DOWN
+curst2:
+	db	15,6		; Cursor LEFT/RIGHT
+
+	end
+

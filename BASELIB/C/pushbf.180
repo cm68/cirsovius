@@ -1,0 +1,62 @@
+	title	PUSHBF
+	subttl	Module from library C_4 : PUSHBF
+	maclib	SYSEQU.LIB
+
+; FILE:	PUSHBF.MAC
+; DATE: 820819:1221
+; MOD:	820820:1641	; Complete externals
+; FOR:	Write A to pushback buf for channel C
+
+; Push char back on specified channel
+; ENTRY	: Accu contains char to push back
+;	  Reg C contains channel number
+
+	entry	pushbf
+
+	ext	conbuf,fndbuf,cerror,moveu
+
+pushbf:
+	push	hl
+	push	af
+	ld	a,c		; Get channel
+	and	00001111b	; .. check console
+	jr	nz,pbf0
+	ld	hl,conbuf	; OK, console is devic
+	jr	pbf2
+pbf0:
+	call	fndbuf		; Check file mode
+	inc	a
+	jr	nz,pbf1
+	call	cerror
+	msg	<'PUSHBF: Pushback to output file'>
+pbf1:
+	ld	a,(hl)		; Get buffer
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+pbf2:
+	ld	a,(hl)
+	inc	(hl)
+	cp	90
+	jr	nc,full		; Check current count
+	push	de
+	push	bc
+	ld	c,a
+	ld	b,0
+	inc	hl
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	moveu		; .. make room
+	pop	bc
+	pop	de
+	pop	af
+	ld	(hl),a		; Insert character
+	pop	hl
+	ret
+full:
+	call	cerror
+	msg	<'PUSHBF: Pushback buffer full'>
+
+	end
+

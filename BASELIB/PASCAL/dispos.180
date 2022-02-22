@@ -1,0 +1,120 @@
+	title	Module from library HILIB_2 : DISPOS
+	name	('DISPOS')
+
+; Language : PASCAL
+
+; Free dynamic memory area
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, November 1997
+
+; ENTRY	Reg HL points to memory as created by routine NEW
+;	Reg DE holds original length of request
+
+; EXIT	Carry set on error
+
+	entry	dispos
+
+	extrn	$$HEAP,_chkmm,_inimm
+
+HeapLen	equ	4
+
+heapLOadr equ	0
+heapHIadr equ	1
+heapLOlen equ	2
+heapHIlen equ	3
+
+dispos:
+	inc	de		; Fix space
+	inc	de
+	inc	de
+	ld	a,e
+	and	-HeapLen
+	ld	e,a
+	ex	de,hl
+	ld	($$HEAP+6),hl	; Save length
+	call	_chkmm		; Load pointer to free heap
+	sbc	hl,de		; Check pointer addresses
+	jr	nc,dispos.gt
+dispos.chain:
+	ld	l,(ix+heapLOadr); Get address
+	ld	h,(ix+heapHIadr)
+	push	hl
+	or	a
+	sbc	hl,de		; Compare
+	jr	nc,dispos.ptr
+	pop	ix
+	jr	dispos.chain
+dispos.ptr:
+	pop	hl
+	push	de
+	pop	iy
+	ld	bc,($$HEAP+6)	; Get length
+	ld	(iy+heapLOlen),c;Set length
+	ld	(iy+heapHIlen),b
+	ld	(iy+heapLOadr),l; .. and address
+	ld	(iy+heapHIadr),h
+	ld	(ix+heapLOadr),e
+	ld	(ix+heapHIadr),d
+	push	ix
+	pop	hl
+	ld	c,(ix+heapLOlen);Get old length
+	ld	b,(ix+heapHIlen)
+	call	dispos.cmp	; Compare
+	jr	z,dispos.same
+	ld	e,(ix+heapLOadr); Get address
+	ld	d,(ix+heapHIadr)
+	push	de
+	pop	ix
+dispos.same:
+	push	ix
+	pop	hl
+	ld	c,(ix+heapLOlen)
+	ld	b,(ix+heapHIlen)
+	ld	e,(ix+heapLOadr)
+	ld	d,(ix+heapHIadr)
+	jr	dispos.cmp
+dispos.gt:
+	ld	hl,($$HEAP+2)	; Save pointer to free heap
+	ld	($$HEAP+2),de	; Set new
+	push	de
+	pop	ix
+	ld	(ix+heapLOadr),l; Set chain
+	ld	(ix+heapHIadr),h
+	ld	bc,($$HEAP+6)	; Get length
+	ld	(ix+heapLOlen),c
+	ld	(ix+heapHIlen),b
+	ex	de,hl
+dispos.cmp:
+	add	hl,bc		; Bump to next
+	or	a
+	sbc	hl,de		; .. test same
+	ret	nz
+	push	de
+	pop	iy		; Copy pointer
+	ld	hl,($$HEAP)
+	or	a
+	sbc	hl,de		; Test top found
+	jr	z,dispos.eq
+	ld	a,(iy+heapLOadr); Unpack address
+	ld	(ix+heapLOadr),a
+	ld	a,(iy+heapHIadr)
+	ld	(ix+heapHIadr),a
+	ld	l,(iy+heapLOlen)
+	ld	h,(iy+heapHIlen)
+	add	hl,bc
+	ld	(ix+heapLOlen),l; .. and new length
+	ld	(ix+heapHIlen),h
+	xor	a
+	ret
+dispos.eq:
+	push	ix
+	pop	hl
+	jp	_inimm		; Set new top
+
+	end
+

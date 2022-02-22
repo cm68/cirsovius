@@ -1,0 +1,75 @@
+	title	FNDBUF
+	subttl	Module from library C_2 : FNDBUF
+	maclib	SYSEQU.LIB
+
+; FILE:	FNDBUF.MAC
+; DATE: 820825:1514
+; FOR:	Find buffer for channel C
+
+; Find buffer block for channel
+; ENTRY	: Reg C contains channel no.
+; EXIT	: Reg HL points to buffer block
+;	  Accu contains read/write flag
+
+	entry	fndbuf
+
+	ext	chanls,adda
+
+fndbuf:
+	ld	a,(lstrd)	; Check if current
+	cp	c
+	jr	nz,fnd0
+	ld	hl,(ibuf)	; Buffer block addr
+	xor	a		; Input file
+	ret
+fnd0:
+	ld	a,(lstwr)
+	cp	c
+	jr	nz,fnd1
+	ld	hl,(obuf)
+	xor	a
+	dec	a		; Output file
+	ret
+fnd1:
+	ld	hl,chanls	; Find buffer block
+	ld	a,c		;  ..in channel table
+	add	a,a
+	call	adda
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	or	h		; Was channel free?
+	ret	z		; ..if so, quit
+	push	hl		; Save block addr
+	ld	a,9
+	call	adda
+	ld	a,(hl)		; Read/write flag
+	pop	hl
+	push	af
+	inc	a
+	ld	a,c		; Channel no.
+	jr	z,fnd2
+	ld	(lstrd),a	; Make it current
+	ld	(ibuf),hl	; Save block addr
+	jr	fnd3
+fnd2:
+	ld	(lstwr),a	; Current output
+	ld	(obuf),hl	; Save block addr
+fnd3:
+	pop	af		; R/W flag
+	ret
+
+	dseg
+
+lstrd:
+	db	0
+ibuf:
+	dw	0
+lstwr:
+	db	0
+obuf:
+	dw	0
+
+	end
+

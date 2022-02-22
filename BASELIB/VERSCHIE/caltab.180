@@ -1,0 +1,50 @@
+	title	Module from library BASE_2 : CALTAB
+	name	('CALTAB')
+	include	baselib.lib
+
+; Do call through table via character
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.0 November 1986
+
+; ENTRY	Accu holds character to be searched for
+;	Reg pair BC holds return address for
+;	normal return
+;	Call must follow table pointer with:
+;	Byte 0 : Number of characters in table
+;	Byte 1 : First character
+;	    ....
+;	Byte n : Last character
+;	Word 0 : Address corresponding to last character
+;	    ....
+;	Word n : Address corresponding to first character
+
+; EXIT	Call routine found in table
+;	or exit immediately after call
+
+	entry	caltab
+
+	extrn	@caljp
+
+caltab:
+	ld	(loc?),hl	; Save reg pair
+	pop	hl		; Get caller's PC
+	call	@caljp		; Get from table
+	jr	nz,cal?		; Test if found
+	push	bc		; Set return address
+cal?:
+	push	hl		; Set PC
+	ld	hl,(loc?)	; Get reg pair
+	ret			; Exit
+
+	dseg
+
+loc?:
+	ds	2
+
+	end
+

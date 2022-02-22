@@ -1,0 +1,50 @@
+	title	PDMMAN
+	subttl	Module from library PULL_DOWN_10 : PDMMAN
+
+; Module builds window on screen
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	Register pair DE points to user parameter block (UPB)
+;	as defined in file PDM.LIB
+
+; EXIT	UPB+5 and UPB+6 filled with current cursor position
+;	and/or save area pointed to by UPB7,8 filled optionally
+
+	public	pdmman
+
+	ext	pdmbld,pdmscu,pdmswd,pdminv,pdmnor
+	ext	pdmout,pdmcur
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmman:
+	push	de		; Get our PB
+	pop	ix
+	call	pdmbld		; Build the window dimensions
+	bit	savxy,(ix+mode)
+	call	nz,pdmscu	; Save cursor position
+	ld	a,scrput
+	bit	savwin,(ix+mode)
+	call	nz,pdmswd	; Save window
+	bit	color,(ix+mode)
+	jr	z,nocol
+	ld	l,(ix+wdwpbx)
+	ld	h,(ix+wdwpby)
+	call	pdmcur		; Set cursor
+	call	pdminv		; Set invers
+nocol:
+	call	pdmout		; Output window
+	bit	color,(ix+mode)
+	call	nz,pdmnor	; Set normal on invers option
+	ret
+
+	end
+

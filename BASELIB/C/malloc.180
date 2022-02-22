@@ -1,0 +1,241 @@
+	title	Module from library C_2 : MALLOC
+	name	('MALLOC')
+
+; Allocate memory
+
+; ENTRY	Reg HL holds bytes to be requested
+
+; EXIT	Reg HL holds pointer to memory.
+;	If not enough memory available, reg HL returns 0
+
+; NOTE	Routine assumes stack growing down from top of memory
+;	Location at SBRK-2 holds number of bytes to be reserved
+;	for the stack - it defaults to 1024
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1994
+
+	entry	malloc,$getmem,svenv
+
+	extrn	sbrk,allptr,free
+
+malloc:
+	ex	de,hl		;;
+	call	svenv
+	push	de
+	ld	hl,0
+	push	hl
+$getmem:
+	ld	a,(ix-2)	;; +4 (+6)
+	or	(ix-2+1)	; Test zero allocation
+	jr	z,l0d35		; .. yeap
+mem.get:
+	ld	hl,(allptr)
+l0cd8:
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	de
+	ex	de,hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+l0ce1:
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	add	hl,bc
+	sbc	hl,de
+	jr	nz,l0d0c
+	push	de
+	inc	de
+	inc	de
+	ex	de,hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	hl,4
+	add	hl,de
+	add	hl,bc
+	pop	bc
+	pop	de
+	push	de
+	ex	de,hl
+	inc	hl
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	push	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jr	l0ce1
+l0d0c:
+	ld	l,(ix-2)
+	ld	h,(ix-2+1)
+	scf
+	sbc	hl,bc
+	jr	c,l0d81
+	ld	hl,(allptr)
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	sbc	hl,de
+	jr	nz,l0d45
+	ld	l,(ix-2)
+	ld	h,(ix-2+1)
+	pop	de
+	push	hl
+	ld	de,4
+	add	hl,de
+;;	push	hl
+	call	sbrk		; Allocate memory
+	ld	a,h		; Test success
+	or	l
+l0d35:
+	jr	z,l0d7e		; .. nope
+;;	pop	de
+	inc	hl
+	inc	hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+;;	ex	(sp),hl
+	call	free		; .. free memory
+;;	pop	hl
+	jr	mem.get		; .. get next
+l0d45:
+	pop	hl
+	pop	de
+	jr	l0cd8
+l0d49:
+	ld	hl,-3
+	add	hl,bc
+	ld	c,(ix-2)
+	ld	b,(ix-2+1)
+	sbc	hl,bc
+	pop	de
+	push	de
+	inc	de
+	inc	de
+	inc	de
+	push	hl
+	ex	de,hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	add	hl,bc
+	ld	bc,7
+	add	hl,bc
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	(allptr),hl
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	de
+l0d7a:
+	ld	hl,4
+	add	hl,de
+l0d7e:
+	jp	svret
+l0d81:
+	pop	de
+	push	de
+	push	hl
+	ld	l,(ix-4)	;; -2
+	ld	h,(ix-4+1)
+	ld	a,h
+	or	l
+	jr	z,l0dad
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	push	de
+	push	hl
+	ld	l,(ix-2)
+	ld	h,(ix-2+1)
+	ld	e,(ix-6)	;; -4
+	ld	d,(ix-6+1)
+	push	hl
+	sbc	hl,de
+	pop	hl
+	jr	c,l0da7
+	ex	de,hl
+l0da7:
+	ld	b,h		; Copy length
+	ld	c,l
+	pop	hl
+	pop	de
+	ldir			; .. unpack
+l0dad:
+	pop	hl
+	ld	de,4
+	add	hl,de
+	jr	nc,l0d49
+	pop	hl
+	pop	de
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	dec	hl
+	ex	de,hl
+	ld	(allptr),hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	jr	l0d7a
+;
+; Save environment
+; EXIT	Reg IX holds copy of stack
+;
+svenv:
+	pop	hl		; Get caller
+	push	ix		; .. save regs
+	push	bc
+	ld	ix,0
+	add	ix,sp		; Copy stack
+	jp	(hl)		; .. return
+;
+; Restore environment
+; ENTRY	Reg IX holds copy of stack
+;
+svret:
+	ld	sp,ix		; Get back stack
+	pop	bc
+	pop	ix
+	ret
+
+	end
+

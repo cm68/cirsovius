@@ -1,0 +1,75 @@
+	title	LOADER
+	subttl	Module from library CPX_1 : LOADER
+	.z80
+
+; Recover the CP/M PLUS loader RSX for using the extended
+; loader functions calling thru BDOS
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1988
+
+; ENTRY	: Reg DE holds error message or zero if no error
+;	  message should be printed if the RSX is not found
+
+; EXIT	: If the loader is not found, either the error message
+;	  will be printed and program stops or carry will be
+;	  set on zeroed reg DE. Carry will be reset if loader
+;	  is found and BDOS addrress is set to new vector
+
+	public	lodrec
+
+	ext	comp2,string
+
+; ===== Constants =====
+
+warm	equ	0000h		; CP/M reboot entry
+bdos	equ	0005h		; BDOS entry point
+start	equ	0006h		; RSX entry
+name	equ	0010h		; Start of RSX name field
+page	equ	256		; RAM page
+
+lodrec:
+	push	de
+	ld	hl,(bdos+1)	; Get top
+	ld	l,0		; .. as page boundary
+.nxtsrc:
+	push	hl
+	ld	bc,name
+	add	hl,bc		; Point to name field
+	ld	de,.loader
+	ex	de,hl
+	call	comp2		; Find LOADER
+	pop	hl
+	jr	z,.lodfound
+	ld	bc,-page
+	add	hl,bc		; Next page
+	ld	a,l
+	or	h
+	jr	nz,.nxtsrc	; .. loop till page zero
+	pop	de
+	ld	a,e
+	or	d		; Test CPU flag to be set
+	scf
+	ret	z
+	call	string		; Else tell error
+	jp	warm		; ..and exit
+.lodfound:
+	ld	bc,start
+	add	hl,bc
+	ld	(bdos+1),hl	; Fix vector
+	pop	de
+	or	a
+	ret
+
+	dseg
+
+.loader:
+	db	lodlen,'LOADER  '
+lodlen	equ	$-.loader-1
+
+	end
+

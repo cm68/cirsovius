@@ -1,0 +1,60 @@
+	title	PDMDOL
+	subttl	Module from library PULL_DOWN_7 : PDMDOL
+
+; Output a line of frames
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	Cursor position set in locations PDMDOX and PDMDOY
+;	Reg B defines cursor fix
+;		Bit 0	Reset : Don't position the cursor
+;			  Set : Position the cursor
+;		Bit 1	Reset : Don't increment line position
+;			  Set : Increment line position
+;	Reg E holds left, Reg D right frame delimiter
+;	Reg C holds middle part, count as defined by user UPB
+
+; EXIT	None
+
+	public	pdmdol,pdmdox,pdmdoy
+
+	extrn	pdmcur,pdmele,pdmcon
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmdol:
+	push	iy
+	bit	posbit,b	; Test to position the cursor
+	jr	z,nopos		; No, skip procedure
+	ld	hl,(pdmdox)	; Fetch cursor
+	call	pdmcur		; Position it
+nopos:
+	bit	incbit,b	; Test to increment the cursor
+	jr	z,noinc		; No, skip procedure
+	ld	a,(pdmdoy)
+	inc	a		; Increment position
+	ld	(pdmdoy),a
+noinc:
+	ld	a,e
+	call	pdmele		; Output left element
+	ld	b,(ix+lenele)	; Get count from user
+	call	pdmcon		; Output middle part
+	ld	a,d
+	call	pdmele		; Output right element
+	pop	iy
+	ret
+
+	dseg
+
+pdmdox:	ds	1
+pdmdoy:	ds	1
+
+	end
+

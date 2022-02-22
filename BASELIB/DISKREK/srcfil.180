@@ -1,0 +1,85 @@
+	title	Module from library BASE_4
+	name	('SRCFIL')
+	include	baselib.lib
+
+; Search files, allow intermediate file access
+
+; In the normal way, CP/M doesn't allow any file action
+; between the SEARCH_FIRST (17) and SEARCH_NEXT (18) functions
+; This simple utility allows exactly this occasion
+
+; Suggested by Irv Hoff's program FIND54 (January 1986)
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, January 1991
+
+; ENTRY	Reg DE holds FCB on 1st access
+
+; EXIT	Carry set if no file found
+;	FCB filled with proper file name if no carry
+
+	entry	SrcFil
+
+	ext	SrcFrs,SrcNxt
+
+	db	0		; ZERO for 1st access
+SrcFil:
+	ld	a,(SrcFil-1)	; Test first time called
+	or	a
+	jr	nz,SrcFilNext
+	dec	a
+	ld	(SrcFil-1),a	; Set flag if so
+	ex	de,hl
+	push	hl
+	ld	(.FCB),hl
+	ld	a,(hl)
+	ld	(SrcFCB),a	; Save drive
+	ld	de,FCBmask
+	ld	bc,DIRlen
+	ldir			; Save file mask
+	pop	de
+	call	SrcFrs		; Search for 1st
+	jr	FindFCB
+SrcFilNext:
+	ld	hl,SrcFCB
+	ld	de,(.FCB)
+	push	de
+	ld	bc,DIRlen
+	ldir			; Get previous FCB
+	pop	de
+	push	de
+	call	SrcFrs		; .. set search pointer
+	ld	hl,FCBmask
+	pop	de
+	ld	bc,DIRlen
+	ldir			; Load mask
+	call	SrcNxt		
+FindFCB:
+	ret	c		; .. no more
+	push	hl
+	ld	de,SrcFCB+.drv
+	ld	bc,.nam+.ext
+	ldir			; Copy FCB found
+	pop	hl
+	ld	de,(.FCB)	; Get address of FCB
+	inc	de
+	ld	bc,.nam+.ext
+	ldir			; Get into FCB
+	or	a
+	ret
+
+	dseg
+
+FCBmask:
+	ds	DIRlen
+SrcFCB:
+	ds	DIRlen
+.FCB:
+	ds	2
+
+	end
+

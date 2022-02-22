@@ -1,0 +1,82 @@
+	title	Module from library BASE_3 : SEARCH
+	name	('SEARCH')
+	include	baselib.lib
+
+; Search for first or next directory entry
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.3 April 1987
+
+; ENTRY	Reg pair <DE> holds FCB on search for first
+;	None			on search for next
+
+;	Address below points to DMA buffer where entries
+;	will be stored. If this location holds zero (default)
+;	the currently DMA buffer will be used
+
+; EXIT	On normal return carry is reset and reg pair <HL>
+;	points to name field of entry found. DMA buffer
+;	will be changed if new one requested
+;	On error carry will be set and extended error
+;	will be processed
+
+	entry	srcfrs,srcnxt,srfbuf
+
+	extrn	@error,setdma,curdma
+
+srcnxt:
+	ld	a,.srcnxt	; Set function
+	jr	srccom
+srcfrs:
+	ld	a,.srcfrs	; Set function
+srccom:
+	push	bc
+	ld	c,a
+	push	de
+	push	bc		; Save function
+	ld	hl,(srfbuf)	; Get buffer address
+	ld	a,h		; Test zero
+	or	l
+	jr	nz,bufnew
+	call	curdma		; Get current DMA
+	ld	(dmasav),hl	; Save it
+	jr	skset
+bufnew:
+	ld	(dmasav),hl	; Save address
+	ex	de,hl
+	call	setdma		; Set address
+skset:
+	pop	bc		; Get function
+	pop	de
+	push	de		; Get FCB
+	call	BDOS		; Execute function
+	cp	OSerr		; Test error
+	scf
+	jr	z,compop
+	ld	hl,(dmasav)
+	ld	de,displ
+	inc	hl
+srclop:
+	or	a		; Test entry found
+	jr	z,compop
+	add	hl,de		; Add displacement
+	dec	a		; Fix count
+	jr	srclop
+compop:
+	pop	de
+	pop	bc
+	jp	@error		; Process error
+
+	dseg
+
+srfbuf:
+	dw	dma		; Buffer address
+dmasav:
+	ds	2		; Temporary DMA pointer
+
+	end
+

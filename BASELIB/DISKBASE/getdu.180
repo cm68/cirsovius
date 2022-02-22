@@ -1,0 +1,132 @@
+	title	Module from library BASE_2 : GETDU
+	name	('GETDU')
+	include	baselib.lib
+
+; Get drive and/or user from string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 November 1992
+
+; ENTRY	Reg pair <HL> points to string
+
+; EXIT	Reg B holds drive
+;	Reg C holds user
+;	Reg E holds definition bits:
+;	 Bit 0 set indicates drive defined
+;	 Bit 1 set indicates user  defined
+;	If bit is reset, reg B and C hold default values
+;	Carry set on error
+
+	entry	getdu
+
+	ext	usrget,curdrv,skpblk
+
+getdu:
+	ex	de,hl
+	call	skpblk		; Skip blanks
+	ex	de,hl
+	push	hl
+	ld	e,0		; .. set no drive and user
+	ld	b,4		; Set length of max DU:
+TestDU:
+	call	IsDelimiter	; Find delimiter
+	jr	z,ItIsDU	; .. yeap
+	inc	hl
+	djnz	TestDU		; Test more
+DefDU:
+	pop	hl
+	call	usrget		; .. and user
+	ld	c,a
+..D:
+	call	curdrv		; Get drive
+	inc	a
+	ld	b,a
+	or	a
+	ret
+ItIsDU:
+	cp	':'		; Verify expected one
+	jr	nz,DefDU	; .. nope
+	ld	c,0		; .. clear user
+	pop	hl		; Get back pointer
+UsrLoop:
+	call	IsDelimiter	; Test delimiter
+	inc	hl
+	jr	z,DUend		; .. yeap
+	sub	'0'		; Strip off ASCII offset
+	jr	c,ParseErr	; .. invalid range
+	cp	9+1		; Test possible drive
+	jr	nc,IsDrv?	; .. maybe
+	ld	d,a
+	ld	a,c
+	add	a,a		; .. old *10
+	add	a,a
+	add	a,c
+	add	a,a
+	add	a,d		; .. add new
+	ld	c,a
+	cp	_MaxUsr+1	; Test range
+	jr	nc,ParseErr	; .. error
+	set	1,e		; Set user
+	bit	2,e		; Verify no previous user
+	jr	z,UsrLoop
+	jr	ParseErr	; .. should *NOT* be
+IsDrv?:
+	bit	1,e		; Test user
+	jr	z,NoUsr
+	set	2,e		; .. set it
+NoUsr:
+	sub	'A'-'0'		; Test range of drive
+	jr	c,ParseErr	; .. error
+	cp	'P'-'A'+1
+	jr	nc,ParseErr
+	bit	0,e		; Verify default drive
+	jr	nz,ParseErr	; .. should be
+	inc	a
+	ld	b,a		; .. set drive
+	set	0,e
+	jr	UsrLoop		; Try user
+ParseErr:
+	scf			; Set error
+	ret
+DUend:
+	bit	0,e		; Test drive
+	call	z,..D		; .. get current
+	bit	1,e		; Test user
+	ld	a,c	
+	call	z,usrget	; .. get if not
+	ld	c,a
+	or	a
+	ret
+;
+; Test character a delimiter
+; ENTRY	Reg HL points to string
+; EXIT	Zero flag set if delimiter
+;	Accu holds character in UPPER case
+;
+IsDelimiter:
+	ld	a,(hl)
+	push	hl
+	push	bc
+	ld	hl,DelimTab	; Get table
+	ld	bc,dellen
+	cpir			; .. compare
+	pop	bc
+	pop	hl
+	ret
+
+	dseg
+;
+; Delimiter table
+;
+DelimTab:
+	db	cr,tab,' .,:;[]=<>|',null
+dellen	equ	$-DelimTab
+
+	cseg
+
+	end
+

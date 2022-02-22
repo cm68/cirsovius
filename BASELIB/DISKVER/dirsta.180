@@ -1,0 +1,55 @@
+	title	Module from library BASE_3 : DIRSTA
+	name	('DIRSTA')
+	include	baselib.lib
+
+; Get sorted directory from linked list
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 June 1993
+
+; ENTRY	Reg pair HL points to start of linked list
+;	Reg pair DE points to start of static list
+
+; EXIT	Memory filled with sorted list of filenames
+;	with a length of 12 characters each closed by zero
+;	Last element indicated by zero start
+;	Reg pair HL points to top location
+;	Reg pair DE unchanged
+
+; NOTE	For further descriptions see module DIRGET
+
+	entry	dirsta
+
+	ext	memmov
+
+dirsta:
+	push	bc
+	push	de
+.dirst:
+	ld	a,l
+	or	h		; Test end
+	jr	z,endstatic
+	ld	bc,.nam+1+.ext
+	call	memmov		; Move element
+	xor	a
+	ld	(de),a
+	inc	de
+	ld	a,(hl)		; Load link
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	jr	.dirst
+endstatic:
+	ex	de,hl
+	ld	(hl),0		; Close last
+	inc	hl
+	pop	de
+	pop	bc
+	ret
+
+	end
+

@@ -1,0 +1,50 @@
+	title	Module from library BASE_1 : PARSE
+	name	('PARSE')
+	include	baselib.lib
+
+; Parse a line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 September 1990
+
+; ENTRY	Reg pair <DE> points to a two address parse
+;	parameter block
+
+; EXIT	On normal return, carry will be reset and reg pair <HL>
+;	points either to next item or holds zero on end.
+;	Zero indicates end of string.
+;	On error return, the carry flag will be set
+;	Location PARSE-2 holds start of string address
+
+	entry	parse
+
+	ds	2		; --->> Holds start of string
+parse:
+	push	bc
+	push	de
+	push	de
+	ex	de,hl
+	ld	e,(hl)		; Get string pointer
+	inc	hl
+	ld	d,(hl)
+	ld	(parse-2),de	; .. save
+	pop	de
+	_OSCAL_	.parse		; Parse string
+	pop	de
+	pop	bc
+	inc	hl		; Fix HL (FFFF is error)
+	ld	a,l
+	or	h		; Test for error
+	dec	hl
+	scf			; Set error
+	ret	z
+	ld	a,l
+	or	h		; Test for zero
+	ret
+
+	end
+

@@ -1,0 +1,55 @@
+	title	Module from library BASE_4 : FSEEK
+	name	('FSEEK')
+	include	baselib.lib
+
+; Position file for sequential read
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 December 1996
+
+; ENTRY	Reg pair DE points to OPENED FCB
+;	Reg HL holds low and middle byte of random record
+;	Accu holds high byte
+;	Bit 0 of byte in location FSEEK-1 defines if random
+;	record should be incremented by 1 (performing
+;	sequential read). Increments if bit 0 set
+;	Defaults to *NOT* increment
+
+; EXIT	Carry set on read error
+
+	entry	fseek
+
+	extrn	rndred,dskred
+
+	db	00000000b
+fseek:
+	push	bc
+	push	de
+	ex	de,hl
+	ld	bc,_RRN
+	add	hl,bc		; Point to RRN
+	ld	(hl),e		; .. set record
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),a
+	pop	de		; Get back FCB
+	call	rndred		; .. read record
+	call	nc,read?	; Maybe read sequential
+	pop	bc
+	ret
+;
+; Do the sequential read on request
+;
+read?:
+	ld	a,(fseek-1)	; Get byte
+	and	00000001b	; .. test request
+	call	nz,dskred	; .. yeap
+	ret
+
+	end
+

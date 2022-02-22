@@ -1,0 +1,51 @@
+	title	Module from library BASE_3 : FILSIZ
+	name	('FILSIZ')
+	include	baselib.lib
+
+; Compute file size
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.2 March 1989
+
+; ENTRY	Reg pair <DE> points to FCB
+
+; EXIT	The three consecutive bytes started at FCB+33 hold
+;	at FCB+33 + 0 low    byte
+;	   FCB+33 + 1 middle byte
+;	   FCB+33 + 2 high   byte
+;	of the number of used sequential records
+;	(128 Bytes each)
+;	HL holds low and middle byte, Accu holds high byte
+
+;	On normal return carry is reset and zero set indicates
+;	high byte is zero
+;	On error carry will be set or extended error
+;	will be processed
+
+	entry	filsiz
+
+	extrn	@filcl,@error
+
+filsiz:
+	ld	a,.filsiz	; Set function
+	call	@filcl		; Do function
+	jp	c,@error	; Error, exit
+	push	de
+	ld	hl,_RRN
+	add	hl,de		; Get pointer
+	ld	e,(hl)		; Fetch low
+	inc	hl
+	ld	d,(hl)		; And middle
+	inc	hl
+	ld	a,(hl)		; And high
+	ex	de,hl
+	pop	de
+	or	a
+	ret
+
+	end
+

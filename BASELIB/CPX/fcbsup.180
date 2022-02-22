@@ -1,0 +1,53 @@
+	title	FCBSUP
+	subttl	Module from library CPX_1 : FCBSUP
+	.z80
+
+; Get file FCB from fixed length file name
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.0 June 1988
+
+; ENTRY	Reg pair HL points to fixed lenght file name
+;	Reg pair DE points to FCB
+
+;	Fixed length is defined as eight characters file name,
+;	one dot and three characters extension, all closed
+;	by zero (results in total of 13 characters)
+
+; EXIT	Carry reset on FCB proper filled, carry set on error
+;	in fixed format
+
+	extrn	skpblk,@assig
+
+	entry	fcbsup
+
+fcbsup:
+	push	hl
+	push	de
+	push	bc
+.sup:
+	ld	a,(hl)		; Check delimiter
+	inc	hl
+	cp	'.'
+	jr	z,endfcb
+	cp	' '		; .. and blank
+	jr	nz,.sup
+	ld	e,l
+	ld	d,h
+	dec	hl
+	call	skpblk		; No blanks
+	ld	bc,5		; .. value to move
+	ex	de,hl
+	ldir			; Unpack
+endfcb:
+	pop	bc
+	pop	de
+	pop	hl
+	jp	@assig		; .. go assign
+
+	end
+

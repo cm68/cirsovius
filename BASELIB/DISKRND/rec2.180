@@ -1,0 +1,201 @@
+	title	Module from library BASE_4 : REC2
+	name	('REC2')
+	include	baselib.lib
+
+; Utilities for handling with variable length records
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1989
+
+	entry	$fxnxt,$gtphs,$rnrec,$tsrec,$rclen
+	entry	$mvrec,$mlrec,$gtrec
+
+	extrn	rndred,$dmabf
+
+;
+; Fix random record counter
+;
+; ENTRY	Location $RNREC holds address of counter
+; EXIT	Counter incremented by one
+;
+$fxnxt:
+	push	hl
+	push	de
+	ld	hl,($rnrec)	; Get pointer
+	ld	e,(hl)		; Get actual count
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Increment
+	ld	(hl),d		; Bring back count
+	dec	hl
+	ld	(hl),e
+	pop	de
+	pop	hl
+	ret
+;
+; Prepare record transfer
+;
+; ENTRY	Accu and location RECLEN hold record length
+;	Reg pair BC holds record number
+; EXIT	Reg B holds record length
+;	Reg C holds offset within 128 byte record
+;
+$gtphs:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,_RRN+2
+	add	hl,de		; Get random record pointer
+	ld	(hl),0		; Clear hi end
+	dec	hl
+	dec	hl
+	ld	($rnrec),hl	; Save pointer
+	pop	hl
+	call	$mlrec		; Get logical record pointer
+	ex	de,hl
+	ld	hl,($rnrec)
+	ld	(hl),e		; Get record number
+	inc	hl
+	ld	(hl),d
+	pop	de
+	pop	hl
+	ld	c,a		; Get offset
+	ld	a,($rclen)
+	ld	b,a		; And record length
+	ret
+;
+; Read random record from file
+;
+; ENTRY	Reg pair DE holds FCB
+;	Reg C holds relative buffer pointer
+; EXIT	Carry set on error, otherwise reset
+;	On normal return reg pair DE points to
+;	start of record buffer
+;
+$gtrec:
+	call	rndred		; Get record
+	push	af
+	push	hl
+	push	bc
+	ld	b,0
+	ld	hl,($dmabf)	; Get DMA base
+	add	hl,bc
+	ex	de,hl		; Get DE as pointer
+	pop	bc
+	pop	hl
+	pop	af
+	ret
+;
+; Get logical record from variable one
+;
+; ENTRY	Accu holds variable record length
+;	Reg pair HL holds record number
+; EXIT	Reg pair HL holds logical 128 byte record #
+;	Accu holds offset within 128 byte record
+;
+$mlrec:
+	push	bc
+	push	de
+	ex	de,hl
+	dec	de		; Fix record #
+	ld	hl,0		; Clear product
+	ld	b,l
+	ld	c,8		; Set bit count
+	ld	(rec),a		; Save record length
+	xor	a
+	ld	(rec+1),a
+mullop:
+	or	a
+	ld	a,d		; Divide record by two
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	jr	nc,nofix	; Test bit shifted out
+	ld	a,(rec)
+	add	a,b		; If so, add product
+	ld	b,a
+	ld	a,(rec+1)
+	adc	a,l
+	ld	l,a
+	ld	a,h
+	adc	a,0
+	ld	h,a
+nofix:
+	push	hl
+	ld	hl,(rec)	; Double record
+	add	hl,hl
+	ld	(rec),hl
+	pop	hl
+	dec	c		; Test end
+	jr	nz,mullop
+	add	hl,hl		; Fix 16 bit
+	ld	a,b
+	rla
+	jr	nc,fix
+	inc	hl		; Fix LSB
+fix:
+	or	a
+	rra			; Make seven bit
+	pop	de
+	pop	bc
+	ret
+;
+; Move some bytes from random record buffer
+;
+; ENTRY	Reg pair DE points to source
+;	Reg pair HL points to destination
+;	Reg B holds count of variable record
+;	Reg C holds record pointer
+; EXIT	Zero set on complete move. If move incomplete
+;	zero reset and reg C cleared
+;
+$mvrec:
+	ld	a,(de)		; Get from source
+	ld	(hl),a		; Into destination
+	inc	de
+	inc	hl
+	dec	b		; Test end
+	ret	z		; Aha, done
+	inc	c		; Bump count
+	ld	a,c
+	cp	reclng		; Test record complete
+	jr	nz,$mvrec
+	ld	c,0		; Reset pointer
+	or	a		; Set non zero
+	ret
+;
+; Test legal record parameters
+;
+; ENTRY	Accu and reg pair BC hold record parameter
+; EXIT	Carry set on error, else reset
+;
+$tsrec:
+	ld	($rclen),a	; Save record length
+	or	a		; Test zero
+	scf
+	ret	z		; ... it's an error
+	ld	a,b		; Test record number
+	or	c		; Zero is error, too
+	scf
+	ret	z
+	ccf
+	ld	a,($rclen)	; Restore accu
+	ret
+
+	dseg
+
+$rclen:
+	ds	1		; Length of variable record
+$rnrec:
+	ds	2		; Random record pointer
+rec:
+	ds	2		; $RCLEN expanded to 16 bit
+
+	end
+

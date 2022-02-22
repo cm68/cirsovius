@@ -1,0 +1,203 @@
+	title	Module from library BASE_5 : CHNINI
+	name	('CHNINI')
+	include	baselib.lib
+
+; Initialize disk channel
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 April 1987
+
+; ENTRY	Register C holds channel number 0 .. max
+;	Register B holds mode word with
+
+;		0 : Open existing file for read
+;		1 : Create new file for write
+;		2 : Delete file before creating
+;		3 : Open existing file for write (append)
+;		4 : Create file if it doesn't exist for write
+
+;	MSB set indicates re-init channel if already open
+
+;	Reg pair DE points to parameter block with
+
+;		 Byte 0,1 : Record buffer
+;		 Byte  2  : Record pointer
+;		 Byte 3,4 : File control block
+;		 Byte  5  : Current user (-1 none)
+
+; EXIT	Carry set indicates error - channel out of range,
+;	file does not exist, cannot create file
+
+	entry	chnini
+
+	extrn	@chacc,@chusr,open,delete,curdma
+	extrn	setdma,create,opnapp,indexa
+
+chnini:
+	push	hl
+	push	bc
+	push	de
+	ld	(chnctb),de	; Save control block
+	call	@chacc		; Test channel open
+	push	af		; Save result
+	push	hl
+	inc	hl
+	inc	hl
+	ld	(hl),e		; Save parameter block
+	inc	hl
+	ld	(hl),d
+	ex	de,hl
+	inc	hl
+	inc	hl
+	ld	(pb),hl		; Save pointer to record pointer
+	inc	hl
+	ld	e,(hl)		; Get FCB
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	pop	af		; Test channel open
+	jr	c,chend		; Aha, out of range
+	jp	z,chopen	; Aha, channel open
+	ld	a,b		; Test re-init mode
+	and	renbit
+	scf
+	jr	nz,chend	; Should not be so
+	call	msktst		; Test range
+	jr	c,chend		; Out of range
+	push	hl
+	ld	hl,mantab
+jpix:
+	push	de
+	call	indexa		; Jump to requested mode
+	ex	de,hl
+	ld	(chjp+1),hl	; Save routine
+	ld	hl,(pb)		; Get parameter block
+	inc	hl
+	inc	hl
+	pop	de
+chjp:
+	jp	$-$
+;
+; ===== Mode 0 : Open existing file for read =====
+;
+chn0:
+	ld	bc,open
+	call	@chusr		; Open file
+	ld	a,reclng
+	ld	b,a
+chnset:
+	pop	hl		; Get channel parameter
+	jr	c,chend		; End on error
+	ld	(hl),0		; Open channel
+	inc	hl
+	ld	(hl),b		; Set mode
+	ld	hl,(pb)
+	ld	(hl),a		; Set record pointer
+	or	a		; Set success
+chend:
+	pop	de
+	pop	bc
+	pop	hl
+	ret
+;
+; ===== Mode 1 : Create a new file =====
+;
+chn1:
+	ld	bc,open
+	call	@chusr		; Find file
+	ccf
+	jr	c,chnset	; Should not be here
+chncre:
+	ld	bc,create
+	call	@chusr		; Create it
+	ld	a,0
+	ld	b,a
+	jr	chnset
+;
+; ===== Mode 2 : Delete file before creating new one =====
+;
+chn2:
+	ld	bc,delete
+	call	@chusr		; Delete file
+	jr	chncre		; Then create it
+;
+; ===== Mode 3 : Open file for write =====
+;
+chn3:
+	push	hl
+	push	de
+	call	curdma		; Get current DMA
+	ld	(dmasav),hl
+	ld	hl,(chnctb)	; Get control block
+	ld	e,(hl)		; Get channel DMA
+	inc	hl
+	ld	d,(hl)
+	call	setdma		; Set buffer
+	pop	de
+	pop	hl
+	ld	bc,opnapp
+	call	@chusr		; Get for append
+	push	af
+	ld	de,(dmasav)
+	call	setdma		; Reset buffer
+	pop	af
+	ld	b,0
+	jr	chnset
+;
+; ===== Mode 4 : Create file if not on disk =====
+;
+chn4:
+	ld	bc,open
+	call	@chusr		; Test if file on disk
+	jr	c,chncre	; No, create new one
+	jr	chn3		; Yes, append
+;
+; ===== Process opened channel =====
+;
+chopen:
+	ld	a,b
+	and	renbit		; Test re-init
+	scf
+	jr	z,chend		; Should be so
+	call	msktst		; Get index
+	jr	c,chend
+	push	hl
+	ld	hl,restab
+	jp	jpix		; Do routine
+;
+; ===== Re-init mode 1 : Create new file =====
+;
+chn1s:
+	ld	bc,open
+	call	@chusr		; Test file here
+	jr	c,chncre	; Create if not
+	jr	chnset
+;
+; Get index from mode word
+;
+msktst:
+	ld	a,b
+	and	NoMSB		; Mask
+	cp	maxmod+1	; Test max
+	ccf
+	ret
+
+	dseg
+
+mantab:
+	dw	chn0,chn1,chn2,chn3,chn4
+restab:
+	dw	chn0,chn1s,chn2,chn3,chn4
+pb:
+	ds	2
+dmasav:
+	ds	2
+chnctb:
+	ds	2
+
+	end
+

@@ -1,0 +1,47 @@
+	title	Module from library BASE_1 : GETLIN
+	name	('GETLIN')
+	include	baselib.lib
+
+; Fill a line with characters from keyboard
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.2 September 1991
+
+; ENTRY	Reg pair <DE> points to start of buffer
+;	Location <DE>+0 must hold maximal number for input
+
+; EXIT	Location <DE>+1 holds number of characters
+;	Location <DE>+2 is the character start point
+;	Carry set if buffer empty
+;	Byte behind last character is set to zero
+
+	entry	getlin
+
+getlin:
+	push	bc
+	push	hl
+	push	de
+	_OSCAL_	.rdcon		; Read line
+	pop	hl
+	push	hl
+	inc	hl		; Point to length
+	ld	c,(hl)
+	ld	b,0
+	add	hl,bc		; Point to end
+	inc	hl
+	ld	(hl),b		; Clear end
+	ld	a,c		; Get length
+	pop	de
+	pop	hl
+	pop	bc
+	or	a		; Set ok
+	ret	nz		; Test zero
+	scf
+	ret
+
+	end
+

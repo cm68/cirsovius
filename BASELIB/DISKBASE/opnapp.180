@@ -1,0 +1,63 @@
+	title	Module from library BASE_4 : OPNAPP
+	name	('OPNAPP')
+	include	baselib.lib
+
+; Open an existing file and prepare for append
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.1 November 1994
+
+; ENTRY	Reg pair <DE> points to FCB
+
+; EXIT	On normal return carry is reset and accu holds
+;	relative record pointer 0 .. 128
+;	On error carry will be set or extended error
+;	will be processed
+
+	entry	opnapp
+
+	extrn	open,filsiz,rndred,curdma,decrrn
+
+opnapp:
+	push	hl
+	call	open		; Open file
+	call	nc,filsiz	; Get last record of file
+	jr	c,opnerr	; .. not possible
+	push	ix
+	push	de
+	push	de
+	call	decrrn		; Set to real last one
+	pop	ix		; Get back FCB
+	ld	(ix+_RRN+0),l	; Store last record number
+	ld	(ix+_RRN+1),h
+	ld	(ix+_RRN+2),a
+	pop	de
+	pop	ix
+	call	rndred		; Then read last record
+	jr	c,opnerr	; .. error
+	push	bc
+	push	de
+	call	curdma		; Fetch current DMA
+	ld	b,reclng	; Set record count
+geteof:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	eof		; Test end of file
+	jr	z,eofgot
+	djnz	geteof		; Count down
+eofgot:
+	ld	a,reclng
+	sub	b		; Get relative pointer
+	pop	de
+	pop	bc
+	or	a
+opnerr:
+	pop	hl
+	ret
+
+	end
+

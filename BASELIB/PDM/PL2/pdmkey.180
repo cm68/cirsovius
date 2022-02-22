@@ -1,0 +1,48 @@
+	title	PDMKEY
+	subttl	Module from library PULLDOWN_2 : PDMKEY
+
+; Get key number from keyboard
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	None
+
+; EXIT	Accu and Reg C hold number of key
+;	Reg B holds shift state
+;	Location PDMDAT holds number and state
+
+	public	pdmkey,pdmdat
+
+	ext	pdmxbs
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmkey:
+	push	de		; Save regs
+	push	hl
+	push	ix
+keywt:
+	call	pdmxbs		; Do the XBIOS call
+	dw	kmget
+	jr	nc,keywt
+	ld	(pdmdat),bc	; Save both
+	ld	a,c		; Get key number
+	pop	ix
+	pop	hl		; Restore regs
+	pop	de
+	ret
+
+	dseg
+
+pdmdat:	ds	1	; Holds key number
+	ds	1	; Holds shift state of key
+
+	end
+

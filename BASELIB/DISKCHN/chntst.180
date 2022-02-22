@@ -1,0 +1,39 @@
+	title	Module from library BASE_2 : CHNTST
+	name	('CHNTST')
+	include	baselib.lib
+
+; Test if requested channel open
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Register C holds channel number 0 .. max
+
+; EXIT	Carry set indicates error channel out of range
+;	or not opened
+;	On carry reset zero set indicates channel opened
+;	for write operation otherwise for reading
+
+	entry	@chtst
+
+	extrn	@chacc
+
+@chtst:
+	push	hl
+	call	@chacc		; Test channel in range
+	jr	c,chnerr
+	scf
+	jr	nz,chnerr	; Should be open
+	inc	hl
+	ld	a,(hl)		; Get mode
+	or	a		; Set no error
+chnerr:
+	pop	hl
+	ret
+
+	end
+

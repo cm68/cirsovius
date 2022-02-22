@@ -1,0 +1,198 @@
+	title	OVERLAY
+	subttl	Module from library CPX_1 : OVLMNGR
+	.z80
+
+; Overlay manager for programs linked with
+; DIGITAL RESEARCH's link program
+
+; Source : SIG/M Vol. 236
+
+; Mods by	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.0 July 1988
+
+; ENTRY	: Reg BC holds filename of overlay file, length is
+;	  8 characaters. Regs DE and HL hold optional
+;	  parameters passing to overlay.
+
+; EXIT	: As defined by calling overlay
+
+maxlev	equ	5		; Max overlays
+orglen	equ	10		; Length of entry
+
+reboot	equ	0000h		; BDOS warm start
+fdr	equ	0050h		; Drive holding program
+fcb	equ	005ch		; Location of FCB
+buff	equ	0080h		; Location of buffer
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+strrec	equ	2		; Start record of overlay
+clr	equ	0ffh
+
+	ext	string,curdma,cursec,open,dskred,setdma,mulsec
+
+	public	?ovlay,?ovla0
+
+?ovla0:
+	push	hl		; Keep 2 parameters
+	push	de
+	push	bc		; Location of file name in BC
+	ld	a,(level)	; Overlay level
+	inc	a
+	cp	maxlev
+	jp	z,tmol		; Exit if level too high
+	ld	(level),a
+	dec	a		; to recover overlay level
+	add	a,a		; Multiply by 10
+	ld	h,a
+	add	a,a
+	add	a,a
+	add	a,h
+	ld	hl,filen	; File names of
+	ld	d,0		; previous overlays
+	ld	e,a
+	add	hl,de		; File name of last overlay
+	ld	d,b		; of this level
+	ld	e,c
+	ld	bc,8		; Compare names
+loop:
+	ld	a,(de)
+	cpi
+	jr	nz,diff
+	jp	po,same
+	inc	de
+	jr	loop
+diff:
+	inc	bc
+	dec	hl
+	ex	de,hl
+	ldir			; Update file name
+	ex	de,hl
+	ld	(orig),hl	; Location of origin
+	inc	hl
+	inc	hl
+	ld	(hl),clr	; Clear next overlay level
+	pop	hl		; Location of file name
+	ld	de,fcb+1	; Load file name
+	ld	bc,8
+	ldir
+	ld	hl,ftype	; Load file type
+	ld	bc,3
+	ldir
+	ld	a,(fdr)		; Load drive
+	ld	(fcb),a
+	ld	de,fcb
+	call	open		; Open file
+	jp	c,oper		; Jump on open error
+	call	curdma		; Get buffer
+	ld	(curbuf),hl
+	call	cursec		; Get sector count
+	ld	(cursct),a
+	ld	a,1
+	call	mulsec		; Set multisector
+	ld	de,buff
+	call	setdma		; Set DMA
+	ld	de,fcb
+	call	dskred		; Read record
+	jr	c,rder
+	ld	hl,(buff+1)	; Length of overlay file
+	dec	hl		; Find number of blocks
+	add	hl,hl
+	jr	c,long		; .. overflow
+	inc	h
+	jp	m,long		; .. greater 128
+	ld	a,h		; Number of blocks
+	call	mulsec
+	ld	de,(buff+7)	; File load address
+	ld	hl,(orig)	; Keep overlay origin
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	(orig),de
+	call	setdma
+	ld	a,strrec
+	ld	(fcb+32),a	; Set start record
+	ld	de,fcb
+	call	dskred		; Read
+	jr	c,rder
+	ld	a,(cursct)
+	call	mulsec		; Reset multisector count
+	ld	de,(curbuf)
+	call	setdma		; .. and DMA
+rec:
+	pop	de		; Recover parameters
+	ld	hl,exit		; To load exit
+	ex	(sp),hl		; .. onto stack
+	push	hl
+	ld	hl,(orig)	; Where to jump to
+	ex	(sp),hl
+	ret			; Jump to the overlay
+same:
+	ld	de,orig		; Find overlay origin
+	ldi
+	ldi
+	pop	hl		; Adjust stack
+	jr	rec
+exit:
+	push	af
+	push	hl		; Adjust level on exit
+	ld	hl,level
+	dec	(hl)
+	jp	m,ole
+	pop	hl
+	pop	af
+	ret
+?ovlay:
+	ld	de,ovlayx	; Not implemented yet
+	jr	errex
+tmol:
+	ld	de,tmolx
+	jr	errex
+oper:
+	ld	de,operx
+	jr	errex
+rder:
+	ld	de,rderx
+	jr	errex
+long:
+	ld	de,longx
+	jr	errex
+ole:
+	ld	de,olex
+errex:
+	call	string		; Print error string
+	jp	reboot		; Return to CP/M
+
+        dseg
+
+ftype:
+	db	'OVL'
+tmolx:
+	db	cr,lf,'TOO MANY OVLS',eot
+ovlayx:
+	db	cr,lf,'?OVLAY ACCESSED',eot
+operx:
+	db	cr,lf,'OVL FL OPN ERR',eot
+rderx:
+	db	cr,lf,'OVL FL RD ERR',eot
+longx:
+	db	cr,lf,'OVL FL TOO LONG',eot
+olex:
+	db	cr,lf,'OVL LVL ERR',eot
+
+curbuf:	ds	2		; Current DMA buffer
+cursct:	ds	1		; Current multicount sector
+orig:	ds	2		; Origin of overlay
+level:	db	0		; Overlay level
+filen:	db	clr		; Filenames & origins
+	ds	orglen-1
+	ds	orglen*(maxlev-1)
+
+        end
+

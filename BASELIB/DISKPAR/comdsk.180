@@ -1,0 +1,83 @@
+	title	Module from library BASE_2 : COMDSK
+	name	('COMDSK')
+	include	baselib.lib
+
+; Common module for special file transfer
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Reg pair <IX> points to parameter block
+;	Reg pair <HL> routine to be executed
+
+; The parameter block is defined as follows:
+
+;	(IX+0,1)  Pointer to DMA
+;	(IX+2)    Relative buffer pointer
+;	(IX+3,4)  FCB
+;	(IX+5)    User (-1 is none)
+
+; EXIT	File transfer done
+;	Carry set on error
+
+	entry	@cmdsk
+
+	ext	usrget,usrset,setdma,curdma
+
+@cmdsk:
+	ld	(doit+1),hl	; Save jump vector
+	push	bc
+	push	de
+	push	ix
+	ld	a,(ix+5)	; Test user swap
+	ld	b,a
+	inc	a
+	jr	z,skpus
+	push	ix
+	call	usrget		; Get current user
+	ld	(curus),a
+	ld	a,b
+	call	usrset		; Set new one
+	pop	ix
+skpus:
+	push	ix
+	push	bc
+	call	curdma		; Get current DMA
+	ld	(savdma),hl
+	pop	bc
+	pop	ix
+	ld	e,(ix+0)	; Get new DMA
+	ld	d,(ix+1)
+	ld	l,(ix+3)	; And FCB
+	ld	h,(ix+4)
+	call	setdma		; Set DMA
+	ex	de,hl
+	call	doit		; Execute R/W
+	push	af		; Save result
+	ld	de,(savdma)
+	call	setdma		; Set old DMA
+	ld	a,b		; Get user
+	inc	a
+	ld	a,(curus)
+	call	nz,usrset	; Set old user
+	pop	af
+	pop	ix
+	pop	de
+	pop	bc
+	ret
+doit:
+	jp	$-$		; Routine vector
+
+	dseg
+
+savdma:
+	ds	2		; Save area
+curus:
+	ds	1
+
+	end
+

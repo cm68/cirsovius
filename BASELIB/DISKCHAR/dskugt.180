@@ -1,0 +1,63 @@
+	title	Module from library BASE_5 : DSKUGT
+	name	('DSKUGT')
+	include	baselib.lib
+
+; Module unreads a byte from disk input buffer
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 September 1991
+
+; ENTRY	The locations RDBFP, RDBUF and RDFCB must be set
+;	properly and at least one byte should be read before
+
+; EXIT	On error carry will be set
+
+	entry	dskugt
+
+	ext	rdbfp,rdbuf,rdfcb,decrrn
+	ext	curdma,setdma,setrnd,rndred,dskred
+
+dskugt:
+	ld	a,(rdbfp)	; Get pointer
+	dec	a		; Bump pointer
+	ld	(rdbfp),a
+	ret	p		; .. in range
+	push	de
+	push	hl
+	ld	a,recLng-1
+	ld	(rdbfp),a	; Init pointer
+	call	curdma
+	push	hl
+	ld	de,(rdbuf)
+	call	setdma		; .. set disk buffer
+	ld	de,(rdfcb)
+	call	setrnd		; Calculate record
+	call	decrrn		; Get last one read
+	call	decrrn		; .. correct it
+	push	hl
+	ld	hl,(rdfcb)
+	ld	de,_RRN
+	add	hl,de
+	pop	de
+	ld	(hl),e		; Set record
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),a
+	ld	de,(rdfcb)
+	call	rndred		; Position record
+	call	nc,dskred	; Read record
+	pop	de
+	push	af
+	call	setdma		; Set old buffer
+	pop	af
+	pop	hl
+	pop	de
+	ret
+
+	end
+

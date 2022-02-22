@@ -1,0 +1,56 @@
+	title	Module from library BASE_1 : MULTIP
+	name	('MULTIP')
+	include	baselib.lib
+
+; Multiply unsigned numbers
+
+; Written by	G.Reichborn-Kjennerud
+;		Tandberg-Data A/S
+;		POB 9, Korsvoll, Oslo 8
+;		Norway
+;		Published in BYTE, June 1983
+
+; Modified by	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1, August 1986
+
+; ENTRY DE,HL hold multiplier
+;	One of which must be an 8 bit number
+
+; EXIT	HL holds product
+;	Carry set on overflow
+
+	entry	multip
+
+multip:
+	xor	a
+	or	h		; Find zero high byte
+	jr	z,found
+	xor	a
+	or	d		; 2nd must be zero
+	scf
+	ret	nz
+	ex	de,hl
+found:
+	ld	a,l		; Get multiplicand
+	ld	hl,0		; Clear result
+	and	a
+next:
+	rra			; Find odd or even
+	jr	nc,even
+	add	hl,de		; Add multiplier
+	ret	c		; Error
+even:
+	and	a		; Test end
+	ret	z
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jr	nc,next
+	ret
+
+	end
+

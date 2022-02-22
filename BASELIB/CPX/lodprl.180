@@ -1,0 +1,50 @@
+	title	LODPRL
+	subttl	Module from library CPX_1 : LODPRL
+	.z80
+
+; Load PRL file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1988
+
+; ENTRY	: Reg DE holds FCB of PRL file to be loaded
+;	  Reg HL holds start address of PRL file
+
+; EXIT	: Zero flag set indicates successfull load
+;	  Reg HL holds start address
+
+; NOTE	: Module requires the sytem RSX 'LOADER' in memory
+
+	public	lodprl
+
+; ==== Constants =====
+
+fcbrr	equ	33		; Random access pointer
+load.f	equ	59		; LOADER access
+BDOS	equ	0005h		; BDOS start
+
+lodprl:
+	push	bc
+	push	hl
+	push	de
+	push	hl
+	ld	hl,fcbrr
+	add	hl,de		; Point to address location
+	pop	de
+	ld	(hl),e		; Save it
+	inc	hl
+	ld	(hl),d
+	pop	de
+	ld	c,load.f
+	call	BDOS		; Perform load
+	pop	hl
+	pop	bc
+	or	a		; Test load ok
+	ret
+
+	end
+

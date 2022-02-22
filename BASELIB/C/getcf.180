@@ -1,0 +1,101 @@
+	title	GETCF
+	subttl	Module from library C_3 : GETCF
+	maclib	SYSEQU.LIB
+
+; FILE:	GETCF.MAC
+; DATE: 820819:1250
+; MOD:	820820:1629	; Complete externals
+; FOR:	Read 1 char from channel C into A
+
+; Read one char from specified channel
+; ENTRY	: Reg C contains channel no.
+;	  (Channel 0 means Console)
+; EXIT	: Accu contains char input
+
+	entry	getcf,conbuf
+
+	ext	fndbuf,cerror,setbf,fillbf,adda
+	ext	conino,condir
+
+getcf:
+	push	hl
+	push	de
+	push	bc
+	ld	a,c		; Check console
+	and	00001111b
+	jr	z,conin		; .. get it
+	call	fndbuf		; Get channel buffer
+	inc	a
+	jr	nz,gcf0		; Test writing
+	call	cerror
+	msg	<'GETCF: Reading from output file'>
+gcf0:
+	ld	e,(hl)		; Fetch buffer
+	inc	hl
+	ld	d,(hl)
+	call	pbchek		; Check it
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+	add	hl,bc
+	ld	a,(hl)
+	push	af
+	ex	de,hl
+	inc	bc
+	ld	a,b
+	or	c
+	jr	nz,gcf1
+; If we fall through here, buffer is used up
+	inc	hl
+	call	setbf
+	call	fillbf
+	jr	gcf2
+gcf1:
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+gcf2:
+	pop	af
+	jr	gcf3
+conin:
+	ld	de,conbuf
+	call	pbchek
+.conin:
+	call	conino		; Get console
+	or	a
+	jr	z,.conin
+	push	af
+	call	condir
+	pop	af
+	cp	cr		; Check CR
+	jr	nz,gcf3
+	ld	a,newlin	; .. swap against end
+gcf3:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+pbchek:
+	ld	a,(de)		; Buffer counter
+	or	a		; Empty?
+	ret	z		; If so
+	pop	hl		; Not going back, so
+	ex	de,hl		; ..discard RET addr
+	dec	(hl)		; One fewer char left
+	call	adda		; Get the char
+	ld	a,(hl)
+	pop	bc
+	pop	de
+	pop	hl
+	ret			; To fn calling GETCF
+
+	dseg
+
+conbuf:
+	db	0
+	ds	91
+
+	end
+

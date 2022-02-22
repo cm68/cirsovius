@@ -1,0 +1,82 @@
+	title	Module from library C_3 : FNAME
+	name	('FNAME')
+
+; Rename file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair DE points to name of old file DU:FN.EXT
+;	Reg pair HL points to name of new file DU:FN.EXT
+
+; EXIT	Reg HL holds zero if file was renamed successfully
+
+	maclib	c.lib
+
+	entry	fname
+
+	extrn	du$fcb,u$bdos
+
+fname:
+	ld	b,h		; .. copy 'newname'
+	ld	c,l
+	ld	hl,-FCBlen-DIRlen
+	add	hl,sp		; Let some room
+	ld	sp,hl
+	push	bc		; Save 'newname'
+	push	hl		; .. and pointer
+	call	du$fcb		; Convert to FCB
+	pop	de
+	jr	nz,p.err	; .. bad
+	push	de
+	ld	c,.open
+	call	u$bdos		; Find 'old'
+	pop	de
+	inc	a
+	jr	z,p.err		; .. should be there
+	ld	hl,_RO
+	add	hl,de
+	bit	_MSB,(hl)	; Test R/O
+	jr	nz,p.err	; .. yeap
+	ex	de,hl
+	pop	de
+	ld	bc,DIRlen
+	push	hl		; .. save 'old'
+	add	hl,bc		; Point to 2nd part
+	push	hl
+	call	du$fcb		; Convert to FCB
+	pop	de		; Get 'new'
+	pop	hl		; .. and 'old'
+	jr	nz,p..err	; .. bad parse
+	ld	a,(hl)
+	ld	(de),a		; Set drive
+	push	hl
+	ld	c,.open
+	call	u$bdos		; Find 'new' file
+	inc	a
+	pop	de
+	jr	nz,p..err	; .. should not be there
+	ld	c,.rename
+	call	u$bdos		; Rename file
+	inc	a
+	jr	z,p..err	; .. bad
+	ld	d,h		; Set result
+	ld	e,h
+	jr	p.res
+p.err:
+	pop	hl		; Clean stack
+p..err:
+	ld	de,_ERR		; Return error
+p.res:
+	ld	hl,FCBlen+DIRlen
+	add	hl,sp		; .. fix stack
+	ld	sp,hl
+	ex	de,hl
+	ret
+
+	end
+

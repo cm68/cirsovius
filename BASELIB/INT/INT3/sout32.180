@@ -1,0 +1,41 @@
+	title	Module from library INTEGER_3 : SOUT32
+	name	('SOUT32')
+	include	baselib.lib
+
+; Convert signrd 32 bit integer to ASCII decimal string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Reg pair HL points to 32 bit number
+;	Reg pair DE points to string
+;	Reg B holds end marker of string
+;	(usually zero or $)
+
+; EXIT	Decimal string closed by character in B
+;	Reg pair HL points to close location
+
+	entry	sout32
+
+	extrn	dout32,neg32
+
+sout32:
+	bit	sign,(hl)	; Check sign
+	jp	z,dout32	; Normal
+	ld	a,'-'
+	ld	(de),a		; Set sign
+	inc	de
+	push	hl
+	call	neg32		; Make >0
+	call	dout32		; Convert
+	ex	(sp),hl
+	call	neg32		; .. old sign
+	pop	hl
+	ret
+
+	end
+

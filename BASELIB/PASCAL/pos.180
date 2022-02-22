@@ -1,0 +1,80 @@
+	title	Module from library HILIB_1 : @POS
+	name	('@POS')
+	include	baselib.lib
+
+; Language : PASCAL
+
+; Find position of substring within target string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.2, June 1988
+
+; ENTRY	Reg pair HL points to target string
+;	Reg pair DE points to substring
+
+; EXIT	Reg B holds position of substring, zero indicates
+;	substring not found. Zero flag set if found
+
+	entry	@pos
+
+	extrn	@leng,comp3
+
+@pos:
+	call	@leng		; Get length of target
+	jr	z,nulpos
+	ld	c,b		; Save it
+	ex	de,hl
+	call	@leng		; Get length of substring
+	ld	(?len),a
+	ex	de,hl
+	jr	z,nulpos
+	ld	a,c
+	cp	b		; Test target < substring
+	jr	c,nulpos	; Yes, set not found
+	ld	b,1
+nxpos:
+	ld	a,(de)		; Get first of substring
+srcpos:
+	cp	(hl)		; Try to find it
+	jr	z,strpos
+	inc	hl
+	inc	b
+	dec	c
+	jr	nz,srcpos
+nulpos:
+	ld	a,1
+	or	a		; Set nonzero
+	ld	b,0
+	ret
+strpos:
+	ld	a,(?len)	; Get sub length
+	dec	a
+	cp	c		; Test remainder
+	jr	nc,nulpos	; .. none
+	inc	a
+	push	bc		; Save current
+	push	de
+	push	hl
+	ld	c,a
+	call	comp3		; Find substring
+	pop	hl
+	pop	de
+	pop	bc
+	ret	z		; Found, exit
+	inc	hl		; Fix a bit
+	inc	b
+	dec	c
+	jr	nz,nxpos
+	jr	nulpos
+
+	dseg
+
+?len:
+	ds	1
+
+	end
+

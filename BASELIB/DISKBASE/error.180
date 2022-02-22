@@ -1,0 +1,71 @@
+	title	Module from library BASE_2 : ERROR
+	name	('ERROR')
+	include	baselib.lib
+
+; Check extended file error.
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +4940-4223247
+
+;		Version 1.2 September 1991
+
+; ENTRY	@ERCOD and ERRPC set properly - default zero
+;	Carry flag set on any file error
+;	Accu holds extended error:
+;
+; 0 : No file found	4 : Invalid drive error
+; 1 : Disk I/O error	7 : File password error
+; 2 : R/O disk		8 : File already exists
+; 3 : R/O file		9 : FCB contains illegal characters
+
+; EXIT	Carry reset on normal operation
+;	If carry set :
+;	On normal error mode carry set
+;	On extended error mode:
+;	If location ERRPC holds zero (default)
+;	Accu holds extended error as normal mode
+;	Else jump to location in ERRPC with error code
+;	fixed to 0 .. 7 in reg pair BC
+
+; NOTE	Routine may be bypassed by user written routine
+
+	entry	@error
+
+	ext	@ercod,errpc
+
+@error:
+	ret	nc		; Exit on no error
+	ld	(exterr),a	; Save error code
+	ld	a,(@ercod)	; Test extended mode
+	cp	extent
+	ld	a,(exterr)
+	ret	c		; End on normal error
+	push	hl
+	ld	hl,(errpc)	; Get control address
+	ld	a,l		; Test end
+	or	h
+	ld	a,(exterr)
+	jr	z,nopc		; Exit on no transfer
+	cp	7		; Test to fix
+	jr	c,skpfix
+	sub	2		; Fix to 0 .. 7
+skpfix:
+	pop	bc
+	pop	bc		; Adjust stack level
+	ld	b,0
+	ld	c,a		; Get error into BC
+	jp	(hl)		; Leave error
+nopc:
+	pop	hl		; Set error
+	scf
+	ret
+
+	dseg
+
+exterr:
+	ds	1		; Temporary error level
+
+	end
+

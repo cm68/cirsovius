@@ -1,0 +1,81 @@
+	title	Module from library BASE_2 : DIVIDE
+	name	('DIVIDE')
+	include	baselib.lib
+
+; Divide unsigned numbers
+
+; Written by	G.Reichborn-Kjennerud
+;		Tandberg-Data A/S
+;		POB 9, Korsvoll, Oslo 8
+;		Norway
+;		Published in BYTE, June 1983
+
+; Modified by	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1, August 1986
+
+; ENTRY DE holds dividend
+;	HL holds divisor
+
+; EXIT	HL holds quotient
+;	DE holds remainder
+;	Carry set on zero divisor
+
+	entry	divide
+
+	extrn	negde
+
+divide:
+	ld	a,h		; Test zero divisor
+	or	l
+	scf
+	ret	z		; .. error if so
+	ld	b,d		; Get complement of dividend
+	ld	c,e
+	inc	bc		; Dividend + 1
+	call	negde
+	dec	de
+	xor	a		; Clear quotient buffer
+	ld	(t?),a
+	ld	(t?+1),a
+	jr	d?
+restor:
+	add	hl,bc		; Add back
+d?:
+	inc	a		; Increment counter
+	push	hl
+	add	hl,hl		; Double divisor
+	jr	c,c?
+	add	hl,de		; Compare
+	jr	nc,restor
+c?:
+	ld	b,a		; New counter
+subtrc:
+	pop	hl		; Fetch halved divisor
+	add	hl,de
+	jr	c,s?
+	ex	de,hl
+s?:
+	ccf
+	ld	a,(t?)
+	rla			; Shift quotient bits
+	ld	(t?),a
+	ld	a,(t?+1)
+	rla
+	ld	(t?+1),a
+	djnz	subtrc
+	ld	hl,(t?)		; Get quotient
+	call	negde		; Change remainder
+	dec	de
+	ret
+
+	dseg
+
+t?:
+	ds	2		; Quotient buffer
+
+	end
+

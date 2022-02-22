@@ -1,0 +1,50 @@
+	title	Module from library BASE_2 : PRDU
+	name	('PRDU')
+	include	baselib.lib
+
+; Print name of drive from FCB and current user in ZCPR DU: style
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1992
+
+; ENTRY	Reg pair <DE> points to FCB
+;	See module COMOUT for further details
+
+; EXIT	None
+
+	entry	prdu
+
+	extrn	comout,curdrv,usrget
+
+prdu:
+	ld	a,(de)		; Get drive
+	dec	a
+	call	m,curdrv	; Get name if default
+	add	a,'A'		; Add offset
+	call	comout		; Print it
+	call	usrget		; Fetch user
+	and	_MAXUSR		; .. mask it
+	push	bc
+	ld	b,-1		; Init counter
+usrfin:
+	inc	b
+	sub	10		; Count tens
+	jr	nc,usrfin	; Till found
+	push	af
+	ld	a,b		; Get tens
+	add	a,'0'		; Make ASCII
+	cp	'0'		; No leading zero
+	call	nz,comout
+	pop	af
+	add	a,'0'+10	; Fix units
+	call	comout
+	pop	bc
+	ld	a,':'
+	jp	comout		; Set delimiter
+
+	end
+

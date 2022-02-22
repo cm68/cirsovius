@@ -1,0 +1,299 @@
+	title	Module from library C_3 : FGETC
+	name	('FGETC')
+
+; Get character/byte from file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair DE points to file block
+
+; EXIT	Reg HL holds byte. -1 maps to end of file
+
+LINELEN	equ	80
+
+	maclib	c.lib
+
+	entry	fgetc,$rdrpc,$kbdpc
+
+	extrn	$stdin,$bdos,u$bdos,$flags
+
+fgetc:
+	push	de		; Save file pointer
+std..in:
+	inc	d		; Test stream device
+	dec	d
+	jr	nz,in.dev	; .. yeap
+	ld	a,e
+	dec	a		; Test standard input
+	jp	nz,in.char	; .. nope
+	ld	de,($stdin)	; Get input pointer
+	jr	std..in
+in.dev:
+	ld	hl,_Ctrl
+	add	hl,de
+	bit	_rd,(hl)	; Test read
+	jr	z,no.read	; .. nope, get end of file
+	bit	_eof.,(hl)	; .. test eof
+	jr	nz,no.read	; .. yeap
+	inc	hl
+	ld	c,(hl)		; Fetch current pointer
+	inc	hl
+	ld	b,(hl)
+	ld	a,b		; Test any
+	or	c
+	jr	nz,ld.ch	; .. yeap, get from buffer
+	ld	b,bufrec	; Get records to be read
+	push	de		; Save FCB
+	inc	hl
+	ld	e,l		; Copy pointer
+	ld	d,h
+	inc	de		; Fix for buffer
+	inc	de
+	ld	(hl),e		; .. save
+	inc	hl
+	ld	(hl),d
+frd.loop:
+	ld	c,.setdma
+	call	$bdos		; Set disk buffer
+	ld	hl,reclng
+	add	hl,de		; .. fix for next one
+	ex	(sp),hl		; Get FCB
+	ex	de,hl
+	ld	c,.rdseq
+	call	u$bdos		; .. read record
+	ex	de,hl
+	ex	(sp),hl		; .. bring back FCB
+	ex	de,hl
+	or	a		; Test end of file
+	jr	nz,f.eof	; .. yeap
+	djnz	frd.loop	; .. else loop on
+f.eof:
+	pop	de
+	ld	a,bufrec
+	sub	b		; Calculate records read
+	ld	b,a
+	ld	c,0
+	sra	b		; .. * 128
+	rr	c
+	ld	hl,_Buff
+	add	hl,de
+	ld	(hl),c		; .. save into pointer
+	inc	hl
+	ld	(hl),b
+	ld	a,b		; Test any
+	or	c
+	jr	nz,ld.ch	; .. yeap, .. get from buffer
+	dec	hl		; .. fix for control
+	dec	hl
+	set	_eof.,(hl)	; .. set eof
+no.read:
+	ld	hl,_EOF		; return end of file
+	ret
+ld.ch:
+	dec	bc		; Count down pointer
+	dec	hl
+	ld	(hl),c		; .. save
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	e,(hl)		; Get buffer address
+	inc	hl
+	ld	d,(hl)
+	ld	a,(de)		; Get character
+	inc	de		; Bump pointer
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	dec	hl
+	dec	hl
+	bit	_bin,(hl)	; Test binary
+	pop	bc
+	jr	nz,ret.ch	; .. yeap, return byte
+	cp	cr		; Test new line
+	jr	nz,is.eof?	; .. nope
+	push	bc
+	push	hl
+	ld	de,-FCBlen-1
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	call	fgetc		; Get next character
+	ld	a,l
+	pop	hl
+	pop	bc
+	cp	lf		; Test new line
+	jr	z,ret.ch	; .. yeap
+	call	bmp.in		; Bump a bit
+	ld	a,cr
+is.eof?:
+	cp	eof		; Test end of file
+	jr	nz,ret.ch	; .. nope
+	set	_eof.,(hl)	; Set eof
+	call	bmp.in		; Bump a bit
+	jr	no.read
+;
+; The character routines
+;
+in.char:
+	cp	4-1		; Test AUX:
+	jr	nz,is.CON?
+;
+; AUX: Device
+;
+	ld	e,00001000b
+	ld	hl,$rdrpc
+	ld	a,(hl)		; Get ahead character
+	ld	(hl),d		; .. clear
+	or	a
+	jr	nz,ret.ch	; .. there is one
+	inc	hl
+	or	(hl)		; Try cr+lf
+	ld	(hl),d
+	jr	nz,is.c.eof?	; .. there was a sequence
+	push	hl
+	ld	c,.auxin
+	call	$bdos		; Get character from AUX:
+	pop	hl
+	cp	cr		; Test new line
+	jr	nz,is.c.eof?	; Nope
+	ld	a,($flags)	; Get flags
+	and	e		; Test mode
+	jr	nz,ret.cr	; .. skip 2nd on binary
+	push	hl
+	ld	c,.auxin
+	call	$bdos		; Get 2nd
+	pop	hl
+	cp	lf
+	jr	z,is.c.eof?	; Test new line
+	ld	(hl),a		; .. set flag if not
+ret.cr:
+	ld	a,cr		; .. get back old one
+is.c.eof?:
+	cp	eof		; Test end of file
+	jr	nz,ret.ch	; .. nope
+	ld	a,($flags)	; Test binary
+	and	e
+	ld	a,eof
+	jr	z,no.read	; .. nope, return eof
+ret.ch:
+	ld	l,a		; Expand byte to word
+	ld	h,0
+	ret
+;
+; CON: Device
+;
+is.CON?:
+	cp	7-1		; Test CON:
+	jp	nz,no.read	; .. nope, get eof
+	ld	hl,$kbdpc
+	ld	a,(hl)		; Get ahead character
+	ld	(hl),d		; .. clear
+	or	a		; Test any
+	jr	nz,ret.ch	; .. yeap
+	inc	hl
+get..con:
+	or	(hl)		; Test any in line
+	jr	z,get.con	; .. nope
+	dec	(hl)		; Fix length
+	inc	hl
+	ld	e,(hl)		; Get index
+	inc	(hl)		; .. bump
+	ld	hl,$kbdbuf
+	add	hl,de		; Fix buffer
+	ld	a,(hl)		; .. get character
+	jr	is.c.eof?	; Look for end
+get.con:
+	ld	a,($flags)	; Get mode
+	and	00000011b	; Test line request
+	jr	nz,raw.con	; .. nope, get raw
+	ld	hl,$kbdhd
+	ld	(hl),LINELEN		; Force max
+	push	hl
+	ex	de,hl
+	ld	c,.rdcon
+	call	$bdos		; Read line
+	ld	e,lf
+	ld	c,.conout
+	call	$bdos		; .. close line
+	pop	hl
+	inc	hl
+	ld	e,(hl)		; Get length
+	inc	e
+	ld	d,b
+	add	hl,de
+	ld	(hl),lf
+	ld	hl,$kbdpc+2
+	ld	(hl),d		; .. clear value
+	dec	hl
+	ld	(hl),e		; .. set length
+	jr	get..con
+raw.con:
+	dec	a
+	bit	1,a		; Test echo
+	jr	nz,no.echo	; .. nope
+	push	af
+	ld	c,.conin
+	call	$bdos		; Get character
+	pop	af
+	or	a		; Test binary
+	ld	a,l
+	jr	nz,ret.ch	; .. yeap
+	cp	cr		; Test new line
+	jr	nz,is.lf?	; .. nope
+	ld	e,lf		; Map it
+	jr	chr.echo
+is.lf?:
+	cp	lf
+	jr	nz,is.c.eof?
+	ld	e,cr
+chr.echo:
+	ld	c,.conout
+	call	$bdos		; .. give new line
+	ld	a,lf
+	jr	is.c.eof?
+no.echo:
+	ld	e,_get
+	ld	c,.condir
+	call	$bdos		; Get character
+	or	a
+	jr	z,no.echo	; .. wait for any input
+	jp	is.c.eof?
+;
+; Bump pointer
+; ENTRY	Reg HL points to control field
+;
+bmp.in:
+	inc	hl
+	inc	(hl)		; Bump low
+	inc	hl
+	jr	nz,..bmp
+	inc	(hl)		; .. and high on carry
+..bmp:
+	inc	hl
+	ld	e,(hl)		; Get buffer address
+	inc	hl
+	ld	d,(hl)
+	dec	de		; .. fix it
+	ld	(hl),d		; .. and bring it back
+	dec	hl
+	ld	(hl),e
+	ret
+
+	dseg
+
+$rdrpc:
+	db	0,0
+$kbdpc:
+	db	0,0,0
+$kbdhd:
+	db	0,0
+$kbdbuf:
+	ds	LINELEN
+
+	end
+

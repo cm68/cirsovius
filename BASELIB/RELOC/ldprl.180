@@ -1,0 +1,232 @@
+	title	Load overlay module from overlay file
+	name	('LDPRL')
+	include	baselib.lib
+;
+; Load overlay segment
+;
+; On entry reg H holds record start position
+;          reg L holds number of records to be read
+; ^BC points to table with external addresses
+; ^DE points to parameter block
+;	1st parameter points to overlay FCB
+;	2nd parameter points to 1st free load address
+;
+; Returns C on no success
+; On success ^HL points to load address (page boundary)
+; ^DE holds 1st free address after last byte loaded
+;
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.2 April 1989
+
+	entry	LODOVL
+
+LODOVL:
+	ld	(ExTabptr),bc	; Save external table
+	ld	(OVLlen),hl	; Save file position
+	ex	de,hl
+	push	hl
+	pop	ix
+	ld	l,(ix+0)	; Get FCB
+	ld	h,(ix+1)
+	ld	(OvlFCB),hl	; Save FCB address
+	ld	l,(ix+2)	; Get FCB
+	ld	h,(ix+3)
+	call	PageBound	; Get page boundary
+	ld	(OvlLodAdr),hl	; Save start address
+	ld	a,(OvlNum)	; Get overlay number in memory
+	cp	d		; Test segment already loaded
+	jr	nz,DoLoad	; Nope
+	ld	hl,(OvlAdr)	; Get start address of overlay in memory
+	ld	de,(OvlTop)	; Get end address of overlay in memory
+	or	a		; Set success
+	ret
+DoLoad:
+	ld	de,(OvlFCB)	; Get FCB address
+	ld	hl,_EX
+	add	hl,de
+	ld	(hl),0
+	ld	hl,_CR-_EX
+	add	hl,de
+	ld	(hl),0
+	ld	c,.open
+	push	de
+	call	BDOS		; Open file
+	pop	hl
+	cp	OSerr		; Test success
+	scf
+	ret	z		; Nope
+	ld	de,_CR
+	add	hl,de		; Point to current record
+	ld	a,(OVLrec)	; Get record
+	ld	(hl),a		; Store it
+	ld	a,1
+	call	RdBuff		; Read A records from file ^DE into memory ^HL
+	dec	a		; Verify one record read
+	scf
+	ret	nz		; Missing overlay if not
+	ld	ix,(OvlLodAdr)	; Get start address
+	ld	l,(ix+0)	; Fetch length of code	
+	ld	h,(ix+1)
+	ld	(clen),hl
+	ld	de,(OvlLodAdr)	; Get start address
+	add	hl,de		; Point to end
+	ld	(OvlTop),hl	; Save end address of overlay in memory
+	ld	a,(OVLlen)	; Get record count
+	dec	a		; Adjust for record already read
+	push	af
+	call	RdBuff		; Read A records from file ^DE into memory ^HL
+	pop	bc		; Get back record count
+	cp	b		; Verify all records read
+	scf
+	ret	nz		; Missing overlay if not
+	ld	hl,(OvlLodAdr)	; Get start address
+	ld	a,(hl)
+	or	a		; Test external code
+	jr	z,NoExternal	; Nope
+;
+; Check external routines to be set up
+;
+	inc	hl		; Skip JP 0xADDR
+	inc	hl
+	inc	hl
+ExtFix:
+	ld	a,(hl)
+	or	a		; Test zero
+	jr	z,NoExternal	; Yeap
+	inc	hl		; Skip JP opcode
+	ld	c,(hl)		; Get index
+	ld	b,0
+	ex	de,hl
+	ld	hl,(ExTabptr)
+	add	hl,bc		; Point into table
+	add	hl,bc
+	ldi			; Unpack address
+	ldi
+	ex	de,hl
+	jr	ExtFix
+;
+; Relocate the code
+;
+NoExternal:
+	ld	de,(OvlLodAdr)	; Get page of overlay
+	ld	bc,(clen)	; Get length of code
+	ld	ix,(OvlTop)	; Get pointer to table
+	ld	h,d		; Get page
+RELloop:
+	ld	a,b
+	or	c
+	jr	z,OVLgo		; Test end
+	dec	bc
+	ld	a,e
+	and	00000111b	; Check bits thru
+	jr	nz,NextBit
+	ld	a,(ix)		; Get map byte
+	inc	ix
+	ld	l,a		; Save map byte
+NextBit:
+	rl	l		; Get MSB
+	jr	nc,NoRELO	; Not set
+	ld	a,(de)
+	add	a,h		; Add page offset
+	ld	(de),a
+NoRELO:
+	inc	de
+	jr	RELloop
+OVLgo:
+	ld	a,(OVLrec)	; Get overlay number
+	ld	(OvlNum),a	; Indicate overlay in memory
+	ld	hl,(OvlLodAdr)	; Get start address
+	ld	(OvlAdr),hl	; Unpack it
+	ld	de,(OvlTop)	; Get pointer to free memory
+	or	a		; Set success
+	ret
+;
+; Get page boundary:
+;
+PageBound:
+	inc	l
+	dec	l		; Test already page
+	ret	z		; Yeap
+	ld	l,0		; Make it
+	inc	h		; Fix it
+	ret
+;
+; Read A records from file ^DE into memory ^HL - C set on early end
+;
+RdBuff:
+	ld	hl,(OvlLodAdr)	; Get start address
+	ld	(CurBuf),hl	; Save start address
+	ld	(RecCnt),a	; Save record count
+	xor	a
+	ld	(CurRec),a	; Init current record count
+RdLoop:
+	ld	a,(RecCnt)	; Get record count
+	or	a
+	jr	z,EndOfRead
+	ld	de,(CurBuf)	; Get start address
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,(OvlFCB)	; Get FCB
+	ld	c,.rdseq
+	push	de
+	call	BDOS		; Read record
+	pop	de
+	cp	2		; Test error
+	scf
+	ret	z
+	cp	1		; Test end of file
+	jr	z,EndOfRead
+	ld	hl,RecCnt	; Get record count
+	dec	(hl)		; Count down
+	ld	hl,(CurBuf)	; Get start address
+	ld	de,reclng
+	add	hl,de		; Advance to next buffer address
+	ld	(CurBuf),hl
+	ld	hl,CurRec
+	inc	(hl)		; Update current record count
+	jr	RdLoop
+EndOfRead:
+	ld	a,(CurRec)	; Return current record count
+	or	a		; Set success
+	ret
+
+	dseg
+
+OvlNum:
+	db	-1		; Overlay number in memory
+;
+;				; \
+;
+OVLlen:
+	db	0		; Length of overlay module
+OVLrec:
+	db	0		; Start of overlay module
+;
+;				; /
+;
+OvlLodAdr:
+	ds	2		; Start address of overlay
+ExTabptr:
+	ds	2		; Address of table of external routines
+OvlTop:
+	ds	2		; End address of overlay
+OvlAdr:
+	ds	2		; Load address of overlay
+OvlFCB:
+	ds	2		; Address of overlay FCB
+clen:
+	ds	2		; Length of code
+CurBuf:
+	ds	2		; Current disk buffer
+RecCnt:
+	ds	1		; Current records to be read
+CurRec:
+	ds	1		; Number of records read
+
+	end
+

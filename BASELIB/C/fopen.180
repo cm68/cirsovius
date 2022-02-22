@@ -1,0 +1,280 @@
+	title	Module from library C_4 : FOPEN
+	name	('FOPEN')
+
+; Open file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair HL points to name of file DU:FN.EXT
+;	Reg pair DE points to type of file
+;	('r', 'w' or 'a', binary mode selected by prefix 'o')
+
+; EXIT	Reg HL holds resulting file pointer
+;	If HL holds zero, no file opened
+;	Character devices return always with high byte zero
+
+	maclib	c.lib
+
+	entry	fopen
+
+	extrn	calloc,du$fcb,u$bdos,$bdos
+
+;
+; Open file
+;
+fopen:
+	push	de		; Save entry
+	push	hl
+	ex	de,hl
+	ld	c,(hl)		; Get mode
+	ld	hl,_dev.tab	; Init character devices
+	ld	b,devs		; .. and length of table
+_dev.loop:
+	call	_get.dev	; Find character device
+	jr	nz,_nxt.dev	; .. nope
+	ld	h,a
+	ld	l,b		; .. set result
+	inc	l		; .. bump a bit
+	inc	l
+	pop	de		; Clean stack
+	pop	de
+	ret
+_nxt.dev:
+	djnz	_dev.loop
+	ld	hl,F.len
+	call	calloc		; Get memory for file I/O
+	ld	c,l
+	ld	b,h
+	pop	de
+	pop	hl
+	ld	a,c		; Test success
+	or	b
+	jr	z,open.err	; .. nope, no space
+	push	hl		; Save mode
+	push	bc		; .. and buffer pointer
+	push	bc
+	pop	hl		; Get block pointer
+	call	du$fcb		; .. parse FCB
+	pop	de
+	pop	hl
+	jr	nz,open.err	; .. parse error
+	push	hl
+	push	de
+	push	de
+	ld	c,.open
+	call	u$bdos		; Open file
+	pop	de
+	push	af		; Save result
+	ld	hl,_DMA
+	add	hl,de		; Point to buffer address
+	ld	c,l		; .. copy
+	ld	b,h
+	xor	a
+	dec	hl
+	ld	(hl),b		; Save address
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	ld	(hl),a		; Clear pointer
+	dec	hl
+	ld	(hl),a
+	dec	hl
+	ld	(hl),a		; .. and mode
+	pop	af
+	pop	bc		; Get back mode pointer
+	push	af
+	ld	a,(bc)
+	cp	'o'		; Test binary
+	jr	nz,mo.bin	; .. nope
+	ld	(hl),1 SHL _bin	; .. set bit
+	inc	bc		; .. skip 'o'
+	ld	a,(bc)		; .. get mode
+mo.bin:
+	pop	bc		; Get back I/O result
+	cp	'r'		; Test read
+	jr	z,r.open	; .. yeap
+	push	hl
+	ld	hl,_RO
+	add	hl,de
+	bit	7,(hl)		; Assume write, test R/O
+	pop	hl
+	jr	nz,open.err	; .. yeap
+	set	_wr,(hl)	; Set write bit
+	cp	'a'		; Test append
+	jr	z,a.open
+	cp	'w'		; Verify write
+	jr	nz,open.err
+;
+; Selected mode is '(o)w'
+;
+	inc	b		; Test file exist
+	ld	c,.delete
+	call	nz,u$bdos	; .. delete it if so
+new.file:
+	ld	c,.make
+	call	u$bdos		; .. create file
+	inc	a
+	jr	z,open.err	; .. impossible
+init.buff:
+	call	_inibuf		; Clear buffer
+	jr	open.ex		; .. and leave
+open.err:
+	ld	hl,_NUL		; Return not ok
+	ret
+;
+; Selected mode is '(o)r'
+;
+r.open:
+	inc	b		; Test result ok
+	jr	z,open.err	; .. nope
+	inc	(hl)		; Set read flag
+open.ex:
+	ld	hl,_CR
+	add	hl,de
+	ld	(hl),0		; Clear current record
+	ex	de,hl		; .. get pointer
+	ret
+;
+; Selected mode is '(o)a'
+;
+a.open:
+	inc	b		; Test file found
+	jr	z,new.file	; .. nope, build new one
+	ld	c,.filsiz
+	call	u$bdos		; Get size of file
+	ld	hl,_RRN+2
+	add	hl,de
+	ld	a,(hl)		; Test empty file
+	dec	hl
+	or	(hl)
+	dec	hl
+	or	(hl)
+	jr	z,init.buff	; .. yeap, clear buffer
+dec.rrn:
+	ld	a,(hl)		; Decrement record
+	dec	(hl)
+	inc	hl
+	or	a
+	jr	z,dec.rrn	; .. previous was zero
+	call	_inibuf		; Init entire buffer
+	push	de
+	ld	hl,_DMA
+	add	hl,de		; Build buffer address
+	ex	de,hl
+	ld	c,.setdma
+	call	$bdos		; Set disk buffer
+	pop	de
+	ld	c,.rndred
+	call	u$bdos		; Position last record
+	ld	hl,_Ctrl
+	add	hl,de
+	bit	_bin,(hl)	; Test binary
+	ld	hl,reclng+_DMA
+	add	hl,de		; Position buffer
+	ld	bc,reclng	; .. set length
+	jr	nz,bin.app	; .. got binary
+	ld	hl,_DMA-1
+	add	hl,de		; .. same for ASCII
+	ld	bc,-1
+src.eof:
+	inc	hl
+	inc	bc
+	ld	a,(hl)
+	cp	eof		; Find end of file
+	jr	nz,src.eof
+bin.app:
+	push	hl		; Save offset
+	ld	hl,_Buff
+	add	hl,de
+	ld	(hl),c		; Set pointer
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	pop	bc
+	ld	(hl),c		; .. set disk buffer
+	inc	hl
+	ld	(hl),b
+	push	de
+	ld	h,b
+	ld	l,c
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	bc,reclng
+	ld	(hl),eof
+	ldir			; .. clear one buffer
+	pop	hl		; Get back pointer
+	ret
+;
+; Initialize entire buffer
+; ENTRY	Reg DE points to memory block
+;
+_inibuf:
+	ld	hl,_DMA
+	add	hl,de		; Set pointer
+	push	de
+	ld	e,l
+	ld	d,h
+	inc	de
+	ld	bc,buflen-1
+	ld	(hl),eof
+	ldir			; .. clear it
+	pop	de
+	ret
+;
+; Find character device if type xxx:
+; ENTRY	Reg HL points to device table
+;	Reg DE points to string
+;	Reg C  holds file type ('r' or 'w')
+; EXIT	Zero set if item found
+;
+_get.dev:
+	push	de
+	push	bc
+	ld	bc,dev..*256+0	; Init loop
+_dev.get:
+	ld	a,(de)		; Get character
+	xor	(hl)		; Compare
+	or	c		; .. over all
+	ld	c,a
+	inc	de
+	inc	hl
+	djnz	_dev.get
+	ld	a,(de)
+	xor	':'		; Verify :
+	or	c
+	ld	c,a
+	inc	de
+	ld	a,(de)		; .. and verify end
+	or	c
+	pop	bc
+	ld	e,a		; .. save possible zero
+	ld	a,c		; Get mode
+	xor	(hl)		; .. check same one
+	or	e
+	inc	hl
+	pop	de
+	ret
+
+	dseg
+
+_dev.tab:
+	db	'NUL'
+dev..	equ	$-_dev.tab
+	db	'r'
+DevLen	equ	$-_dev.tab
+	db	'NUL','w'
+	db	'CON','r'
+	db	'LST','w'
+	db	'PUN','w'
+	db	'RDR','r'
+	db	'CON','w'
+devs	equ	($-_dev.tab) / DevLen
+
+	end
+

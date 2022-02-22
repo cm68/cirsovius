@@ -1,0 +1,45 @@
+	title	Module from library BASE_3 : ROUND
+	name	('ROUND')
+	include	baselib.lib
+
+; Divide unsigned numbers and round quotient
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, September 1986
+
+; ENTRY DE holds dividend
+;	HL holds divisor
+
+; EXIT	HL holds quotient incremented by one if rounded
+;	DE holds remainder
+;	Carry set on zero divisor
+
+	entry	round
+
+	extrn	divide,subhd2,shfrhl
+
+round:
+	ld	(loc?),hl	; Save divisor on entry
+	call	divide		; Then divide
+	ret	c		; Aha, zero divisor
+	push	hl		; Save quotient
+	ld	hl,(loc?)	; Get divisor
+	call	shfrhl		; Half it
+	call	subhd2		; Test against remainder
+	pop	hl		; Get quotient
+	ret	nc
+	inc	hl		; Round it
+	or	a		; Reset carry
+	ret
+
+	dseg
+
+loc?:
+	ds	2		; Temporary storage
+
+	end
+

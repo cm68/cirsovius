@@ -1,0 +1,481 @@
+	title	Combine overlay modules to overlay file
+	name	('OVLBLDPR')
+	include	base80.lib
+
+; This program combines overlay modules to an overlay file.
+
+; Call it:
+;		OVLBLDPR [-] ovr_file list_of_ovm_files
+;
+; The first file in the list is the resulting overlay file.
+; A definition file "ovr_file.TXT" will be created,
+; containing definitions of module position within overlay file.
+; Use option "-" if no definition file should be created.
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.4 April 1989
+
+	entry	$memry
+
+	ext	string,crlf,filnam
+	ext	cmdarg,parse,setdma,indexa
+	ext	open,close,delete,filsiz,creatd,dskwrt,dskred
+	ext	wrbuf,wrfcb,dskput,emplin,closef
+
+	ld	sp,(TPATOP)	; Load stack
+	call	getargv		; Sample arguments and set up memory
+	cp	2
+	jp	c,Err01		; At least two arguments
+	call	crecFO		; Create output file
+nxtFile:
+	call	parsearg	; Parse next entry
+	call	SetExt		; Set extension if none given
+	ld	de,FCB
+	call	open		; Open file
+	call	nc,GetSize	; Get file size
+	jp	c,Err05		; Cannot open it
+	ld	de,$PRCFILE
+	call	string		; Tell file working on
+	ld	de,FCB+.fdrv
+	call	filnam
+	call	crlf
+CpyLoop:
+	ld	de,FCB
+	call	dskred		; Read record
+	jr	c,EndCpy
+	call	wrRec		; Then write it
+	jr	CpyLoop
+EndCpy:
+	ld	hl,argc
+	dec	(hl)		; Count down
+	jr	nz,nxtFile
+	ld	de,OFCB
+	call	close		; Close file
+	jp	c,Err07
+	call	BuildDB		; Build file for size and record start
+	ld	de,$RDY
+	call	string		; Tell ready
+	jp	OS
+;
+; Fix record data
+;
+BuildDB:
+	ld	a,(CrecDBreq)	; Test state
+	or	a
+	ret	z		; Do not create file
+	ld	de,$DEFILE
+	call	string		; Tell creating file
+	ld	hl,(SizeSet)
+	ld	de,(SizeBase)
+	or	a
+	sbc	hl,de		; Get length
+	ld	a,h
+	or	a
+	jp	nz,Err08	; Invalid if > 255
+	ld	b,l		; Get length
+	srl	b
+	push	bc
+	push	de
+	push	de
+	pop	ix
+SampSet:
+	ld	a,(ix+0)	; Get length
+	add	a,(ix+1)	; Add to start record
+	ld	(ix+1+2),a	; Put to next as start record
+	inc	ix
+	inc	ix
+	djnz	SampSet
+	call	crecDB		; Create file
+	ld	de,$EXPLAIN
+	call	prline		; Write what it means
+	pop	hl		; Get back pointer
+	pop	bc		; Get back count
+DBloop:
+	ld	de,$PRFX
+	call	prline
+	ld	a,(hl)		; Get length of records
+	inc	hl
+	call	putnum
+	ld	a,','
+	call	fput
+	ld	a,(hl)		; Get start record
+	inc	hl
+	call	putnum
+	ld	de,$APDX
+	call	prline
+	djnz	DBloop
+	call	closef
+	ret	nc
+	jp	Err10
+;
+; Put decimal number in Accu to file
+;
+putnum:
+	push	bc
+	push	de
+	push	hl
+	ld	e,a
+	ld	d,0
+	ld	hl,$NUM
+	push	hl
+	call	Hex2ASC		; Convert to ASCII
+	inc	hl
+	ld	(hl),null
+	pop	de
+	call	SkpZero		; Skip leading zeroes
+	call	prline
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Fix ASCII pointer ^DE skipping leading zeroes
+;
+SkpZero:
+	ld	a,(de)		; Get digit
+	cp	'0'		; Test leading zero
+	ret	nz		; Nope
+	inc	de
+	ld	a,(de)		; Test next already end
+	or	a
+	jr	nz,SkpZero	; Nope
+	dec	de		; Fix it
+	ret
+;
+; Convert number 0..255 DE to ^HL
+;
+Hex2ASC:
+	ld	bc,100
+	call	DivDec		; Divide
+	ld	bc,10
+	call	DivDec
+	ld	a,e
+	add	a,'0'
+	ld	(hl),a
+	ret
+;
+; Divide DE by BC, store quotient to ^HL
+;
+DivDec:
+	ld	(hl),'0'-1	; Init quotient
+DivLoop:
+	inc	(hl)		; Bump quotient
+	xor	a
+	ld	a,e
+	sub	c		; Divide
+	ld	e,a
+	ld	a,d
+	sbc	a,b
+	ld	d,a
+	jr	nc,DivLoop	; Still >= 0
+	ex	de,hl
+	add	hl,bc		; Make >= 0
+	ex	de,hl
+	inc	hl
+	ret
+;
+; Put character to file
+;
+fput:
+	call	dskput		; Put to file
+	ret	nc
+	jp	Err11
+;
+; Put line to file
+;
+prline:
+	push	bc
+	ld	b,null
+	call	emplin		; Put to file
+	pop	bc
+	ret	nc
+	jp	Err09
+;
+; Get size of file
+;
+GetSize:
+	call	filsiz		; Get size of file
+	ret	c		; Not found
+	or	h		; Verify max 255 records
+	jp	nz,Err02
+	ld	ix,(SizeSet)
+	ld	(ix+0),l	; Change length
+	inc	ix
+	inc	ix
+	ld	(SizeSet),ix
+	ret
+;
+; Parse current argument
+;
+parsearg:
+	ld	hl,(argv)	; Get current pointer
+	ld	e,(hl)		; Get pointer to filename
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(argv),hl	; Save pointer
+	ld	(ParsePB),de	; Save it
+	ld	de,ParsePB
+	call	parse		; Parse file
+	ret	nc
+	jp	Err03		; Error
+;
+; Create DB file
+;
+crecDB:
+	ld	bc,OFCB
+	ld	(wrfcb),bc	; Set output file
+	ld	hl,$$TXT
+	jr	crec.it		; Unpack file and extension
+;
+; Create output file
+;
+crecFO:
+	call	parsearg	; Parse file
+	ld	hl,$$OVR
+	ld	bc,FCB
+crec.it:
+	ld	de,OFCB
+	push	de
+	push	hl
+	ld	l,c
+	ld	h,b
+	ld	bc,.fdrv+.fname
+	ldir			; Unpack name
+	pop	hl
+	ld	bc,.fext
+	ldir			; Unpack extension
+	pop	de
+	call	creatd		; Create file
+	ret	nc
+	jp	Err04		; Cannot do so
+;
+; Sample arguments and set up memory
+;
+getargv:
+	ld	de,CCP		; Point to command line
+	ld	hl,($memry)	; Get start of argument list
+	push	hl
+	ld	b,255
+	call	cmdarg		; Get arguments in CCP line
+	ld	(Datset),hl	; Save top pointer
+	pop	hl
+	jp	c,Err00		; Nothing in line
+	ld	b,a		; Save count
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	hl
+	ld	a,(de)		; Get first character
+	sub	'-'		; Test suppress definition file
+	jr	nz,stARGx	; No supression
+	ld	(CrecDBreq),a	; Set state
+	dec	b		; Fix count
+	inc	hl		; Fix pointer
+	inc	hl
+stARGx:
+	ld	a,b		; Get back count
+	dec	a		; Fix for main file
+	jp	m,Err01		; Nothing more in line
+	ld	(argc),a	; Save count
+	ld	(argv),hl	; Save pointer
+	push	af
+	ld	hl,(Datset)	; Get back top address
+	push	hl
+	ld	(wrbuf),hl	; Set disk buffer
+	ld	de,reclng
+	add	hl,de
+	ld	(SizeSet),hl	; Point to definition entry
+	ld	(SizeBase),hl
+	xor	a
+	ld	(hl),a		; Clear 1st pair
+	inc	hl
+	ld	(hl),a		; Clear 1st pair
+	pop	de
+	call	setdma		; Set disk buffer
+	pop	af
+	ret
+;
+; Set extension if none given
+;
+SetExt:
+	ld	de,FCB+.fdrv+.fname
+	ld	a,(de)		; Test extension given
+	cp	' '
+	ret	nz
+	ld	hl,$$OVM
+	ld	bc,.fext
+	ldir			; Unpack extension
+	ret
+;
+; Write record to file
+;
+wrRec:
+	ld	de,OFCB
+	call	dskwrt		; Write it
+	ret	nc
+	jp	Err06		; Error		
+;
+; Error routines
+;
+; -- Without deleting file --
+;
+Err00:
+	ld	a,0
+	jr	DoErr
+Err01:
+	ld	a,1
+	jr	DoErr
+;
+; -- With deleting file --
+;
+Err02:
+	ld	a,2+MSB
+	jr	DoErr
+Err03:
+	ld	a,3+MSB
+	jr	DoErr
+Err04:
+	ld	a,4+MSB
+	jr	DoErr
+Err05:
+	ld	a,5+MSB
+	jr	DoErr
+Err06:
+	ld	a,6+MSB
+	jr	DoErr
+Err07:
+	ld	a,7+MSB
+	jr	DoErr
+Err08:
+	ld	a,8+MSB
+	jr	DoErr
+Err09:
+	ld	a,9+MSB
+	jr	DoErr
+Err10:
+	ld	a,10+MSB
+	jr	DoErr
+Err11:
+	ld	a,11+MSB
+DoErr:
+	push	af
+	res	7,a
+	ld	hl,$ERTAB
+	call	indexa		; Get message from table
+	call	string		; Print it
+	pop	af
+	add	a,a		; Test file option
+	push	af
+	call	c,DelFile	; Yeap, delete file
+	pop	af
+	call	nc,PrHelp	; Else give help
+	jp	OS
+;
+; Close and delete destination file
+;
+DelFile:
+	ld	de,OFCB
+	call	close		; Close destination file
+	call	delete		; Delete file
+	ret
+;
+; Give help
+;
+PrHelp:
+	ld	de,$HELP
+	call	string		; Print help text
+	ret
+
+	dseg
+$ERTAB:
+	dw	$Err00,$Err01,$Err02,$Err03,$Err04,$Err05
+	dw	$Err06,$Err07,$Err08,$Err09,$Err10,$Err11
+$HELP:
+	db	cr,lf,lf
+	db	'This program combines overlay modules to an overlay file.'
+	db	cr,lf,lf
+	db	'Call it:'
+	db	cr,lf
+	db	tab,tab,'OVLBLDPR [-] ovr_file list_of_ovm_files'
+	db	cr,lf,lf
+	db	'The first file in the list is the resulting overlay file.'
+	db	cr,lf
+	db	'A definition file "ovr_file.TXT" will be created,'
+	db	cr,lf
+	db	'containing definitions of module position within overlay file.'
+	db	cr,lf
+	db	'Use option "-" if no definition file should be created.'
+	db	eot
+$Err00:
+	db	'Missing file name',eot
+$Err01:
+	db	'Too little arguments',eot
+$Err02:
+	db	'Exceeding 255 records',eot
+$Err03:
+	db	'Parse error',eot
+$Err04:
+	db	'Cannot create file',eot
+$Err05:
+	db	'Cannot open file',eot
+$Err06:
+	db	'Error writing record',eot
+$Err07:
+	db	'Cannot close OVR file',eot
+$Err08:
+	db	'Too many overlays',eot
+$Err09:
+	db	'Error writing line to file',eot
+$Err10:
+	db	'Cannot close TXT file',eot
+$Err11:
+	db	'Error writing character to file',eot
+$PRCFILE:
+	db	'Processing file ',eot
+$DEFILE:
+	db	'Processing definition file'
+	db	cr,lf,eot
+$RDY:
+	db	'Overlay built',eot
+$$OVM:
+	db	'OVM'
+$$OVR:
+	db	'OVR'
+$$TXT:
+	db	'TXT'
+$PRFX:
+	db	tab,'db',tab,null
+$EXPLAIN:
+	db	';',cr,lf
+	db	';',tab,'db',tab,'len,rec',cr,lf
+	db	';'
+$APDX:
+	db	cr,lf,null
+$NUM:
+	db	'255',null
+CrecDBreq:
+	db	true
+$memry:
+	ds	2
+Datset:
+	ds	2
+ParsePB:
+	dw	$-$,FCB
+OFCB:
+	ds	fcblen
+argc:
+	ds	1
+argv:
+	ds	2
+SizeSet:
+	ds	2
+SizeBase:
+	ds	2
+
+	end
+

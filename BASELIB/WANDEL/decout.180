@@ -1,0 +1,81 @@
+	title	Module from library BASE_1 : DECOUT
+	name	('DECOUT')
+	include	baselib.lib
+
+; Convert hex number to ASCII decimal string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.3, November 1987
+
+; ENTRY	HL holds hex number
+;	DE points to string
+;	B holds character to be stored at the end
+;	(Usually $ or zero)
+
+; EXIT	Decimal string closed by character in B
+;	Reg HL points to close location
+
+	entry decout
+
+decout:
+	push	ix
+	push	de
+	pop	ix		; Copy pointer
+	push	bc
+	ld	de,tentbl	; Point to table
+	push	de		; Onto stack
+	ld	c,1		; Set zero flag
+dotpos:
+	ex	(sp),hl
+	ld	e,(hl)		; Get pointer
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl
+	ld	b,-1		; Clear digit
+dotdiv:
+	inc	b		; Count digits
+	or	a
+	sbc	hl,de		; Get difference
+	jr	nc,dotdiv	; Test < 0
+	add	hl,de		; Make > 0
+	xor	a		; Clear result
+	or	b		; Test zero digit
+	jr	nz,dotstr
+	or	c		; Clear leading zero
+	jr	nz,dotbyp
+dotstr:
+	ld	c,0		; Clear zero flag
+	or	'0'		; Make ASCII
+	ld	(ix+0),a	; Save digit
+	inc	ix
+dotbyp:
+	ld	a,e		; Test end of table
+	cp	10
+	jr	nz,dotpos
+	ld	a,l		; Get LSD
+	or	'0'		; Make ASCII
+	pop	de
+	pop	bc
+	push	ix
+	pop	hl		; Get back pointer
+	ld	(hl),a		; Set last digit
+	inc	hl
+	ld	(hl),b		; Set end character
+	pop	ix
+	ret
+
+	dseg
+
+tentbl:
+	dw	10000
+	dw	1000
+	dw	100
+	dw	10
+
+	end
+

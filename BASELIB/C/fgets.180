@@ -1,0 +1,75 @@
+	title	Module from library C_4 : FGETS
+	name	('FGETS')
+
+; Get string from file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair HL points to line buffer
+;	Reg pair DE points to file control block
+;	Reg BC holds max length
+
+; EXIT	Reg HL holds resulting length of line
+;	If HL holds -1, eof was encountered
+
+	maclib	c.lib
+
+	entry	fgets
+
+	extrn	fgetc
+
+fgets:
+	exx
+	ld	bc,-1		; Init count
+	exx
+	dec	hl
+..get:
+	inc	hl
+	ld	a,b
+	or	c		; Test end of input
+	jr	z,cls.line	; .. yeap
+	dec	bc		; Count down
+	exx
+	inc	bc		; Bump count
+	push	bc
+	exx
+	push	bc
+	push	de
+	push	hl
+	call	fgetc		; Get character
+	ld	a,l		; Unpack character
+	ld	b,h
+	pop	hl
+	cp	lf
+	ld	(hl),a		; .. store it
+	pop	de
+	ld	a,b
+	pop	bc
+	exx
+	pop	bc
+	exx
+	jr	z,cls.line	; .. end on end of line
+	or	a		; Test end of file
+	jr	z,..get		; .. nope, get more
+	exx
+	ld	a,b		; Test any read
+	or	c
+	exx
+	jr	nz,cls.line	; .. yeap
+	exx
+	ld	bc,_EOF		; Return end of file
+	exx
+cls.line:
+	ld	(hl),null	; Close line
+	exx
+	ld	h,b		; .. get result
+	ld	l,c
+	ret
+
+	end
+

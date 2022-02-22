@@ -1,0 +1,70 @@
+	title	PDMCIN
+	subttl	Module from library PULL_DOWN_12 : PDMCIN
+
+; Get input from window line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.0 August 1991
+
+; ENTRY	Reg DE holds User Parameter Block
+
+; EXIT	UPBs input text pointer filled
+;	Flag set as defined by input routine
+;	On BASELIB: Zero set on empty line
+
+; NOTE:	The standard input vector must be set by caller.
+;	Store it into PDMCIN-2
+
+	public	pdmcin
+
+	ext	pdmret,pdmswd,pdmcur,pdmrcu
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+@lvc:
+	jp	$-$		; May be user defined
+pdmcin:
+	push	de
+	pop	ix		; Get UPB
+	res	delim,(ix+mode)	; .. no delimiter
+	bit	direc,(ix+mode)	; Test direction
+	jr	nz,pdmver	; .. vertical
+	ld	(ix+numele),1	; Force 1 line on horizontal
+pdmver:
+	ld	a,(ix+txcur)	; Save cursor - shared by other
+	push	af
+	call	pdmret		; Build window
+	pop	af
+	ld	(ix+txcur),a	; Set cursor back
+	ld	l,a
+	ld	h,(ix+ycor)
+	bit	direc,(ix+mode)	; Test direction
+	jr	z,pdmhor	; .. horizontal
+	ld	l,(ix+xcor)	; Get cursor
+	inc	l		; .. fix it
+	ld	a,(ix+numele)
+	add	a,h
+	ld	h,a
+pdmhor:
+	call	pdmcur		; Set it
+	ld	e,(ix+lininx)	; Load pointer
+	ld	d,(ix+lininx+1)
+	push	ix
+	call	@lvc		; Get the line
+	pop	ix
+	push	af
+	bit	reswin,(ix+mode); Test to restore
+	ld	a,scrget
+	call	nz,pdmswd	; .. do it
+	call	pdmrcu		; Restore cursor
+	pop	af
+	ret
+
+	end
+

@@ -1,0 +1,41 @@
+	title	Module from library BASE_3 : DSKSIZ
+	name	('DSKSIZ')
+	include	baselib.lib
+
+; Compute disk size
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 April 1987
+
+; ENTRY	Accu holds drive
+;	0 -> A ... 15 -> P
+
+; EXIT	The first three bytes of the current DMA buffer
+;	hold at DMA + 0 low    byte
+;		DMA + 1 middle byte
+;		DMA + 2 high   byte
+;	of disk free records (128 Bytes each)
+
+;	On normal return carry is reset
+;	On error carry will be set and extended error
+;	will be processed
+
+	entry	dsksiz
+
+	extrn	@error
+
+dsksiz:
+	_push_
+	ld	e,a
+	_OSCAL_	.getspc		; Get free space
+	rla			; Fix for error
+	ld	a,h		; Get extended error
+	_pop_
+	jp	@error		; Process error
+
+	end
+

@@ -1,0 +1,47 @@
+	title	Module from library BASE_5 : REC1
+	name	('REC1')
+	include	baselib.lib
+
+; Utilities for handling with variable length records
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1989
+
+	entry	$rndpr
+
+	extrn	$tsrec,$gtphs,$rnrec
+
+;
+; Test legal parameters
+;
+; ENTRY	Accu and reg pair BC hold record parameter
+; EXIT	Carry set on error, otherwise location $RNREC
+; 	holds record corresponding the parameters
+;
+$rndpr:
+	call	$tsrec		; Test parameter
+	ret	c		; Error
+	call	$gtphs		; Get physical values
+	push	hl
+	ld	hl,($rnrec)	; Get random record pointer
+	ld	a,(hl)		; Get record
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	hl
+	ld	a,b		; Test > 128 bytes
+	cp	reclng
+	jr	c,rec128
+	inc	hl		; Else fix
+rec128:
+	ld	($rnrec),hl	; And save it
+	pop	hl
+	or	a
+	ret
+
+	end
+

@@ -1,0 +1,87 @@
+	title	Module from library HIFLOAT_4 : CFLBIN
+	name	('CFLBIN')
+	include	baselib.lib
+
+; Floating Point to INTEGER converter
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.1 February 1997
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Reg HL holds signed integer
+
+	entry	?cflbin,?flround,?flentier
+
+	ext	?fladd,flperr
+
+ovfl:
+	ld	l,true
+	ld	h,0
+	ld	(flperr),hl	; Set overflow
+	ret
+;
+; The ROUND routine
+;
+?flround:
+	push	hl
+	push	de
+	ld	de,0ff00h
+	ld	hl,04000h
+	call	?fladd		; Add 0.5
+;
+; The ENTIER routine
+;
+?flentier:
+?cflbin:
+	ld	a,false
+	ld	(flperr),a	; Reset error
+	bit	zero,h		; Test zero number
+	ret	z		; .. end if so
+	ld	a,SIGNB		; Save sign
+	and	h
+	ld	c,a
+	res	sign,h		; Force > 0
+	ld	a,d
+	or	a
+	jp	m,tst0..1	; Test exponent
+	ld	a,exp.max
+	sub	d
+	jr	c,ovfl		; .. overflow
+	ld	b,a		; Save shift value
+	xor	a
+	cp	e		; Test last byte
+	jr	z,no.last
+	inc	a		; .. fix if not zero
+no.last:
+	dec	b
+	inc	b		; Test any to shift
+	jr	z,no.shift
+shift:	
+	srl	h		; Shift mantissa right
+	rr	l
+	adc	a,0		; Save LSB
+	djnz	shift
+no.shift:	
+	inc	c		; Test sign
+	ret	p
+	or	a		; Test any bit
+	jr	z,no.fix
+	inc	hl
+no.fix:
+	ex	de,hl
+	ld	hl,0
+	sbc	hl,de		; Negate result
+	ret
+tst0..1:
+	inc	c
+	ld	hl,0		; Return 0
+	ret	p
+	dec	hl		; .. or -1
+	ret
+
+	end
+

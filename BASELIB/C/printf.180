@@ -1,0 +1,227 @@
+	title	Module from library C_2 : PRINTF
+	name	('PRINTF')
+
+; Execute the UNIX like formatting routine like PRINTF
+;
+; ENTRY	Reg HL points to string to be formatted closed by zero
+;	Reg DE points to control array
+;	Reg BC points to string to be filled
+;	The first byte is the lenght of buffer
+; EXIT	Buffer filled by real string closed by zero
+;	Carry set on overflow
+
+; Special sequences supported:
+; Conversion:
+;	%c Convert to character
+;	%s Convert to string
+;	%d Convert to signed decimal number
+;	%u Convert to unsigned decimal number
+;	%x Convert to hex number
+;	%% Convert to singel '%'
+;	   All other sequences untouched
+; Control:
+;	\t Convert to horizontal tabulator
+;	\b Convert to backspace
+;	\f Convert to form feed
+;	\r Convert to carriage return
+;	\n Convert to carriage return and line feed
+;	\\ Convert to single '\'
+;	   All other sequences untouched
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.1, December 1996
+
+	entry	printf
+
+	ext	$contr,$StCh
+
+printf:
+	push	ix
+	ld	ix,buffer
+	ld	a,(bc)		; Get max length
+	dec	a		; .. fix for zero
+	ld	(ix),a
+	inc	bc
+	call	format		; .. do the job
+	ld	a,(ix)
+	pop	ix
+	or	a		; Test ok
+	ret	nz
+	scf
+	ret
+format:
+	ld	a,(hl)
+	cp	'%'		; Test formatter
+	jr	z,do.param
+	cp	'\'		; Test control
+	call	z,$contr
+..form:
+	call	$StCh		; Store character
+	ret	z		; .. end on zero
+	inc	hl
+	jr	format
+do.param:
+	inc	hl
+	ld	a,(hl)		; Test formatter twice
+	or	a		; Maybe end
+	ret	z		; .. yeap
+	cp	'%'
+	jr	z,..form	; .. give it
+	push	hl		; .. save a bit
+	ex	de,hl
+	ld	e,(hl)		; Get address from array
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	cp	's'		; Test string
+	jr	nz,no.str
+mov.str:
+	ld	a,(hl)		; Get string
+	or	a
+	jr	z,job.done	; .. till end
+	call	$StCh		; .. unpack
+	inc	hl
+	jr	mov.str
+no.str:
+	cp	'u'		; Test unsigned number
+	jr	nz,no.uns
+	call	dodec		; .. convert
+	jr	job.done
+no.uns:
+	cp	'd'		; Test signed number
+	jr	nz,no.sign
+	call	dosign		; .. convert
+	jr	job.done
+no.sign:
+	cp	'c'		; Test character
+	jr	nz,no.char
+	ld	a,(hl)		; Get it
+	call	$StCh
+	jr	job.done
+no.char:
+	cp	'x'		; Test hex
+	jr	nz,default
+	call	dohex		; .. convert
+	jr	job.done
+default:
+	push	af
+	ld	a,'%'
+	call	$StCh		; Put character
+	pop	af
+	call	$StCh
+job.done:
+	pop	hl		; Get back main
+	inc	hl
+	jr	format
+;
+; Convert number to decimal
+; ENTRY	Reg HL holds pointer to number
+;	Reg BC points to buffer
+;
+dodec:
+	xor	a
+	dec	a		; Set no sign
+	jr	to.dec
+;
+; Convert number to signed decimal
+; ENTRY	Reg HL holds pointer to number
+;	Reg BC points to buffer
+;
+dosign:
+	xor	a		; Set sign
+to.dec:
+	push	hl
+	push	de
+	ld	e,(hl)		; Get value
+	inc	hl
+	ld	d,(hl)
+	or	a		; Test sign request
+	jr	nz,unsig	; .. nope
+	bit	7,d		; Test MSB
+	jr	z,unsig		; .. not set
+	ld	a,d
+	cpl			; Get complement
+	ld	d,a
+	ld	a,e
+	cpl
+	ld	e,a
+	inc	de		; .. two's complement
+	ld	a,'-'
+	call	$StCh		; Set sign
+unsig:
+	ld	(to.where),bc	; Save pointer
+	ex	de,hl		; Get number
+	call	decout		; .. convert
+	ld	bc,(to.where)
+	pop	de
+	pop	hl
+	ret
+;
+; Convert number to hexadecimal
+; ENTRY	Reg HL holds pointer to number
+;	Reg BC points to buffer
+;
+dohex:
+	inc	hl		; .. LOW byte first
+	call	hexout
+	dec	hl		; .. then HI
+hexout:
+	ld	a,(hl)		; .. get byte
+	rra			; .. isolate HI
+	rra
+	rra
+	rra
+	call	outchr		; .. store
+	ld	a,(hl)		; Same for LO
+outchr:
+	and	00001111b	; .. get bits
+	add	a,090h		; .. do a trick
+	daa
+	adc	a,040h
+	daa
+	call	$StCh
+	ret
+;
+; Convert number to decimal
+; ENTRY	Reg HL holds number
+;	String address set
+;
+decout:
+	push	bc
+	push	de
+	push	hl
+	ld	bc,-10		; Set radix
+	ld	de,-1		; Set count
+dec.loop:
+	add	hl,bc		; .. subtract
+	inc	de
+	jr	c,dec.loop
+	ld	bc,10
+	add	hl,bc		; .. fix
+	ex	de,hl
+	ld	a,l
+	or	h		; Test zero
+	call	nz,decout	; .. nope
+	ld	a,e
+	add	a,'0'		; Add ASCII
+	ld	bc,(to.where)
+	call	$StCh		; .. store
+	ld	(to.where),bc
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+
+	dseg
+to.where:
+	ds	2
+buffer:
+	ds	1
+
+	end
+

@@ -1,0 +1,248 @@
+	title	Module from library BASE_4 : DIRGET
+	name	('DIRGET')
+	include	baselib.lib
+
+; Get sorted directory from selected drive
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.4 October 1995
+
+; ENTRY	Reg pair HL points to start of memory
+;	Reg pair DE holds max directory entries
+;	Reg C holds requested user  (0 .. 15)
+;	Accu determines kinda file:
+
+;	  Bit 7,Bit 6 and Bit 5 setup :
+;	  0 0 0 : Select DIR files
+;	  0 1 0 : Select SYS files
+;	  1 0 0 : Select RO  files
+;	  1 1 0 : Select SYS and RO files
+
+;	  0 1 1 : Select all SYS files
+;	  1 0 1 : Select all RO  files
+;	  x x 1 : Select all files
+
+;	If bit 4 is 0, the MSB of all file names is stripped
+;	off. If bit 4 is 1, MSB will not be attached.
+
+;	The standard CP/M FCB at location 005CH holds
+;	requested drive (0 -> current, 1 .. 16 -> A .. P)
+;	and any file name,and type with possible wildcard
+;	character '?'
+
+; EXIT	Memory filled with linked list of sorted filenames
+;	with a length of 12 characters and a two byte link
+;	pointer, last element zeroed.
+;	Reg HL holds number of files found
+;	Reg DE points to top of list
+;	Carry set on user or drive selection error
+
+; NOTE	Standard DMA buffer at address 0080H
+;	will be overwritten
+
+	entry	dirget
+
+	ext	usrset,usrget,srcfrs,srcnxt,memmov
+
+dirget:
+	push	af
+	and	strp
+	ld	(.strip),a	; Get strip bit
+	pop	af
+	and	ro+sys+wild	; Mask upper bits
+	bit	@wild,a
+	push	af
+	and	wild		; Get wild bit
+	ld	(.mods+1),a	; Save bit 5
+	pop	af
+	res	@wild,a		; No group bit
+	jr	z,st.mod
+	cp	ro+sys		; Test all bits
+	jr	nz,st.mod
+	ld	a,0		; Change to none
+st.mod:
+	ld	(.mods),a	; Save mode
+	ld	a,c		; Test user range
+	cp	_MAXUSR+1
+	ccf
+	ret	c		; .. error
+	call	usrget		; Get current user
+	ld	(.usr),a
+	ld	a,c
+	call	usrset		; Set new one
+	ld	(.max),de	; Save max
+	ld	(.ptr),hl	; .. and pointer
+	ld	(hl),0		; Close chain
+	ld	hl,0
+	ld	(.numb),hl	; Init counter
+	ld	(.base),hl	; .. and link list
+	ld	de,FCB
+	call	srcfrs		; Search first
+nxsrc:
+	jr	c,endsrc
+	push	hl
+	pop	ix
+	ld	a,(ix-1+_RO)	; Get RO bit
+	and	MSB
+	ld	b,a
+	ld	a,(ix-1+_SYS)	; Get SYS bit
+	and	MSB
+	rr	a
+	or	b
+	ld	de,(.mods)
+	bit	@wild,d		; Test bit
+	jr	z,tst.ins
+	and	e		; Mask
+tst.ins:
+	cp	e		; Test same
+	jr	nz,skip		; .. no
+insert:
+	ld	a,(.strip)
+	or	a		; Test strip possible
+	call	z,stripmsb	; .. yeap, strip it
+	ld	de,.temp
+	ld	bc,.nam
+	ldir			; Get name
+	ld	a,'.'
+	ld	(de),a		; Set delimiter
+	inc	de
+	ld	bc,.ext
+	ldir			; Get extension
+	call	chain		; Insert filename into list
+	ld	hl,(.numb)	; Get current
+	inc	hl		; Bump it
+	ld	(.numb),hl	; Save count
+	ld	hl,(.max)
+	dec	hl
+	ld	(.max),hl
+	ld	a,l		; Test done
+	or	h
+	jr	z,endsrc	; .. too many files
+skip:
+	call	srcnxt
+	jr	nxsrc
+endsrc:
+	ld	a,(.usr)
+	call	usrset		; .. and drive
+	ld	hl,(.numb)	; Get count
+	ld	de,(.ptr)	; .. and top
+	or	a
+	ret
+;
+; Build chain of file names
+;
+chain:
+	ld	hl,(.base)	; Get base
+	ld	a,l		; Test NIL
+	or	h
+	jr	nz,noNIL
+	ld	hl,(.ptr)	; Set real address
+	ld	(.base),hl
+newitem:
+	ex	de,hl
+	ld	hl,.temp
+	ld	bc,.nam+1+.ext
+	call	memmov		; Set file name
+	ex	de,hl
+	ld	(hl),0		; Clear node
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	ld	(.ptr),hl	; New top
+	ret
+noNIL:
+	ld	de,.temp
+	push	hl
+	call	comp		; Test new one less current
+	pop	hl
+	jr	nc,noswap	; .. don't swap if not
+	ld	de,(.ptr)	; Get current top
+	push	de
+	push	hl
+	ld	bc,.nam+1+.ext+2
+	call	memmov		; Unpack to new one
+	ld	(.ptr),de
+	pop	de
+	ld	hl,.temp
+	ld	bc,.nam+1+.ext
+	call	memmov		; Set new one
+	ex	de,hl
+	pop	de
+	ld	(hl),e		; Set address
+	inc	hl
+	ld	(hl),d
+	ret
+noswap:
+	ld	(.optr),hl	; Save current
+	push	hl
+	pop	ix
+	ld	l,(ix+.nam+1+.ext); Get node chain
+	ld	h,(ix+.nam+1+.ext+1)
+	ld	a,l		; Test end node
+	or	h
+	jr	nz,noNIL
+	ld	hl,(.ptr)	; Get top if not end
+	push	hl
+	call	newitem		; Install new
+	ld	ix,(.optr)
+	pop	hl
+	ld	(ix+.nam+1+.ext),l; Set chain
+	ld	(ix+.nam+1+.ext+1),h
+	ret
+;
+; Compare file names in ^DE and ^HL
+;
+comp:
+	ld	b,.nam+1+.ext	; Set loop
+cloop:
+	ld	a,(hl)
+	and	NoMSB		; No MSB
+	ld	c,a
+	ld	a,(de)
+	and	NoMSB
+	cp	c		; .. compare
+	ret	nz		; End if not equal
+	inc	hl
+	inc	de
+	djnz	cloop
+	ret
+;
+; Strip off attribute bit of FCB in ^HL
+;
+stripmsb:
+	push	hl
+	ld	b,.flen
+strdo:
+	res	@msb,(hl)	; Strip off the MSB
+	inc	hl
+	djnz	strdo
+	pop	hl
+	ret
+
+	dseg
+
+.strip:
+	ds	1
+.max:
+	ds	2
+.base:
+	ds	2
+.ptr:
+	ds	2
+.optr:
+	ds	2
+.numb:
+	ds	2
+.mods:
+	ds	2
+.usr:
+	ds	1
+.temp:
+	ds	.nam+1+.ext+1
+
+	end
+

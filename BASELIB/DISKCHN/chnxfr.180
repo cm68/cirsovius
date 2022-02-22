@@ -1,0 +1,62 @@
+	title	Module from library BASE_5 : CHNXFR
+	name	('CHNXFR')
+	include	baselib.lib
+
+; Perform multichannel character file transfer
+; Direction of transfer is determined by the channel
+; initialization routine
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Register C holds channel number 0 .. max
+;	Accu holds byte to write to file
+
+; EXIT	Accu holds byte from file read
+;	Carry set indicates end of file or error - 
+;	channel out of range, write error.
+
+	entry	chnxfr
+
+	extrn	@chacc,rdpblk,wrpblk,udskgt,udskpt
+
+chnxfr:
+	push	af
+	push	hl
+	call	@chacc		; Get channel pointer
+	jr	nc,xfer
+xferr:
+	pop	hl
+	pop	af
+	scf
+	ret			; Exit on channel error
+xfer:
+	jr	nz,xferr	; Should be open
+	inc	hl
+	ld	a,(hl)		; Get mode
+	inc	hl
+	push	de
+	ld	e,(hl)		; Fetch parameter block
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	pop	de
+	or	a		; Test mode
+	jr	z,chwr
+	jp	p,xferr		; Error on random access
+	ld	(rdpblk),hl	; Set parameter
+	pop	hl
+	pop	af
+	jp	udskgt		; Get from disk
+chwr:
+	ld	(wrpblk),hl
+	pop	hl
+	pop	af
+	jp	udskpt		; Put onto disk
+
+	end
+

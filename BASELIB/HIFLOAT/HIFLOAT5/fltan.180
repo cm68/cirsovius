@@ -1,0 +1,191 @@
+	title	Module from library HIFLOAT_5 : FLTAN
+	name	('FLTAN')
+	include	baselib.lib
+
+; Calculate the TANGENT
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Tangent in regs DE,HL
+
+	entry	?fltan
+
+	ext	?fladd,?fldiv,?flsqar,?flmul,?flfrac,?sign
+
+set.0.exp:
+	xor	a		; Clear exponent
+	jr	indx.exp
+?fltan:
+	bit	zero,h		; Test zero
+	ret	z
+	ld	a,d
+	cp	0f8h		; Test range
+	ret	m
+	ld	a,h
+	ld	(?sign),a	; Save sign
+	res	sign,h
+	ld	bc,0517ch	; Load 0.31831
+	push	bc
+	ld	bc,0fec1h
+	push	bc
+	call	?flmul
+	call	?flfrac		; Get farction
+	call	fix.frc
+	ld	a,(?sign)
+	xor	h
+	xor	SIGNB
+	and	SIGNB
+	ld	(?sign),a	; Get resulting sign
+	res	sign,h		; Make number positive
+	ld	a,d
+	add	a,3		; Test exponent
+	jr	nc,set.0.exp
+	jr	z,fix.0.exp	; Test zero
+	ld	a,h
+	cp	70h		; And range
+	jr	nc,grt.exp
+	cp	60h
+	ld	a,2
+	jr	c,indx.exp
+fix.0.exp:	
+	inc	a
+indx.exp:	
+	add	a,a		; Get as index
+	exx
+	ld	d,0
+	ld	e,a
+	ld	hl,tan.tab.1
+	add	hl,de
+	ld	c,0		; Load number
+	ld	b,(hl)
+	inc	hl
+	push	bc
+	ld	b,(hl)
+	push	bc
+	exx
+	call	?fladd
+	push	hl
+	push	de
+	ld	bc,04305h	; Load 0.523699
+	push	bc
+	ld	bc,0ff49h
+	push	bc
+	ld	bc,0d4e1h	; Load -0.663146
+	push	bc
+	ld	bc,0fff4h
+	push	bc
+	ld	bc,0c0d8h	; Load -0.253303
+	push	bc
+	ld	bc,0fe77h
+	push	bc
+	call	?flsqar		; Build value
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+	call	?flmul
+	exx
+	sla	e		; Get another index
+	sla	e
+	ld	hl,tan.tab.2
+	add	hl,de
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	push	bc		; Load number #1
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	push	bc
+	inc	hl
+	ld	c,(hl)		; .. number #2
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	bc
+	push	de
+	exx
+	call	?fladd		; Build another term
+	call	?fldiv
+	exx
+	set	sign,b
+	push	bc
+	push	de
+	exx
+	call	?fladd
+set.sign:
+	ld	a,(?sign)
+	or	h
+	ld	h,a		; Build rsulting sign
+	ret
+grt.exp:	
+	call	fix.frc		; Fix mantissa
+	res	sign,h		; Make number positive
+	push	hl
+	push	de
+	call	?flsqar
+	ld	bc,06487h	; Load 3.14159
+	push	bc
+	ld	bc,001eeh
+	push	bc
+	push	hl
+	push	de
+	ld	bc,052aeh	; Load 10.3354
+	push	bc
+	ld	bc,003f5h
+	push	bc
+	ld	bc,0519ah	; Load 40.8026
+	push	bc
+	ld	bc,005f2h
+	push	bc
+	call	?flmul		; Build fraction
+	call	?fladd
+	call	?flmul
+	call	?fladd
+	call	?flmul
+	jr	set.sign	; .. get result
+;
+; Fix mantissa subtracting 0.5
+;
+fix.frc:	
+	ld	bc,0c000h	; Load -0.5
+	push	bc
+	ld	b,0ffh
+	push	bc
+	call	?fladd		; Subtract
+	ret
+
+	dseg
+
+;
+; MSB, EXPonent, rest is zero
+;
+tan.tab.1:
+	db	0c0h,0fch		; -6.25  E-2
+	db	0e0h,0fdh		; -1.875 E-1
+	db	0d0h,0feh		; -3.125 E-1
+	db	0f0h,0feh		; -4.375 E-1
+;
+; NOTE: LO-HI
+;
+tan.tab.2:
+	db	088h,042h,03fh,000h	; 1.03957 E 0
+	db	0d7h,065h,0d8h,0fdh	; 1.98912 E-1
+	db	092h,05ch,0d9h,000h	; 1.44646 E 0
+	db	086h,055h,0e0h,0ffh	; 6.68179 E-1
+	db	0ach,067h,0adh,001h	; 3.23983 E 0
+	db	0c8h,05fh,064h,000h	; 1.49661 E 0
+	db	018h,069h,0b8h,004h	; 2.62741 E 1
+	db	06fh,050h,0fch,002h	; 5.02734 E 0
+
+	end
+

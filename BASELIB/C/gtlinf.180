@@ -1,0 +1,51 @@
+	title	GTLINF
+	subttl	Module from library C_4 : GTLINF
+	maclib	SYSEQU.LIB
+
+; FILE:	GTLINF.MAC
+; DATE: 820901:2207
+; FOR:	Get line from channel C
+;	return addr in HL, length in A
+
+; Read one line from specified channel
+; ENTRY	: Reg C contains the channel no.
+; EXIT	: Reg HL points to input buffer
+;	  Accu contains length of input
+;	  Zero flag set indicates empty line
+;
+
+	entry	gtlinf
+
+	ext	getcf,iptbuf
+
+gtlinf:
+	push	bc
+	ld	b,maxlin	; Set max
+	ld	hl,iptbuf	; Init buffer
+glf0:
+	call	getcf		; Get character
+	cp	newlin		; Check end of line
+	jr	z,endin
+	cp	eof		; Check end of file
+	jr	z,.get
+	ld	(hl),a		; Save entry
+	inc	hl
+	djnz	glf0		; Loop
+endin:
+	dec	hl
+	inc	b
+	ld	a,(hl)
+	cp	cr		; Test C.R.
+	jr	z,.get
+	inc	hl		; .. fix if so
+	dec	b
+.get:
+	ld	(hl),endstr	; Close line
+	ld	hl,iptbuf	; .. init buffer
+	ld	a,maxlin
+	sub	b		; Return str len in A
+	pop	bc
+	ret
+
+	end
+

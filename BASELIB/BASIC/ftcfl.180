@@ -1,0 +1,48 @@
+	title	Module from library HILIB_2 : @FTCFL
+	name	('@FTCFL')
+	include	baselib.lib
+
+; Language : ( BASIC )
+
+; Special assign mode
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, August 1987
+
+; ENTRY	Reg pair HL points to describing string
+;	Reg pair DE points to FCB or channel parameter block
+;	Reg C holds channel 1 to 15 or 0 for FCB
+
+; EXIT	Carry set on error and Accu holds 64
+;	Carry reset on no error
+
+	entry	@ftcfl
+
+	extrn	@assig
+
+@ftcfl:
+	push	de
+	ld	a,c		; Test mode
+	or	a
+	jr	z,skpftc
+	push	hl
+	ex	de,hl
+	ld	de,3
+	add	hl,de		; Point to FCB
+	ld	e,(hl)		; Get it
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+skpftc:
+	call	@assig		; Assign
+	pop	de
+	ret	nc		; Ok
+	ld	a,64		; Set error
+	ret
+
+	end
+

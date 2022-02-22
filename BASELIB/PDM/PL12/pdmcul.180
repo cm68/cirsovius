@@ -1,0 +1,55 @@
+	title	PDMCUL
+	subttl	Module from library PULL_DOWN_12 : PDMCUL
+
+; Get logic input from window line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 August 1991
+
+; ENTRY	Reg pair DE holds user control block (UPB)
+;	Reg pair HL points to complete window text line
+;	Reg B indicates mode as defined in module PDMCUI
+;	Additional bit 5 defines window to be built - if reset
+;	Reg C indicates mode as defined in module PDMTXO
+;	Accu selects window element to start with
+
+; EXIT	Reg C holds selected window element number,
+;	started with 1.
+;	Zero flag indicates RETURN or ENTER found
+
+	public	pdmcul
+
+	ext	pdmret,pdmcui,pdmswd,pdmrcu
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmcul:
+	push	de
+	push	af
+	push	bc
+	bit	bldfrm,b	; Test bit
+	ld	b,c
+	call	z,pdmret	; Build window on request
+	pop	bc
+	pop	af
+	ld	c,a
+	call	pdmcui		; Get key pressed
+	pop	ix
+	push	af		; Save result
+	push	bc
+	bit	reswin,(ix+mode); Test to restore
+	ld	a,scrget
+	call	nz,pdmswd	; .. do it
+	call	pdmrcu		; Restore cursor
+	pop	bc
+	pop	af
+	ret
+
+	end
+

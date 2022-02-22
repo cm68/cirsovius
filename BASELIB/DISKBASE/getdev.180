@@ -1,0 +1,123 @@
+	title	Module from library BASE_2 : GETDEV
+	name	('GETDEV')
+
+; Get character device from string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 June 1998
+
+; ENTRY	Reg pair <HL> points to string
+;	Reg pair <DE> points to optional extension devices
+;	If no extension is requested then reg pair <DE> must
+;	hold zero. Each device must be three characters long,
+;	table must be closed by zero
+
+; EXIT	Reg C holds device number:
+;	 0   for standard device NUL:
+;	 1   for standard device CON:
+;	 2   for standard device AUX:
+;	 3   for standard device LST:
+;	 4+x for extension device from list (x=0,1,..)
+;	Carry set if no device found
+
+	entry	getdev
+
+	ext	skpblk,uppcon
+
+null	equ	00h
+
+getdev:
+	push	de
+	push	hl
+	ex	de,hl
+	ld	($EXTAB),hl	; Save extension pointer
+	call	skpblk		; Skip blanks
+	ex	de,hl
+	call	..getdev	; Get device
+	pop	hl
+	pop	de
+	ret
+;
+..getdev:
+	ld	de,$DEV
+	push	de
+	ld	bc,_DEVLEN+1
+	push	bc
+	ldir			; Unpack entire device
+	pop	bc
+	pop	hl
+	ld	a,':'
+	cpir			; Find delimiter
+	scf
+	ret	nz		; .. not found
+	ret	pe		; .. not in correct position
+	ld	c,0		; Init device number
+	ld	hl,$DEVTAB	; .. and device table
+	call	FndDEV		; Find standard device
+	ret	z		; .. got it
+	ld	hl,($EXTAB)	; Get extension pointer
+	ld	a,l
+	or	h		; Test defined
+	scf
+	ret	z		; .. nope
+	call	FndDEV		; Find extended device
+	ret	z		; .. got it
+	scf			; Set no success
+	ret
+;
+; Find device in table
+; EXIT	Zero flag set if found
+;
+FndDEV:
+	call	isDEV?		; Test device found
+	ret	z		; .. got it
+	inc	c		; Next device
+	ld	a,(hl)		; Test end
+	or	a
+	jr	nz,FndDEV
+	inc	a		; Set not found
+	ret
+;
+; Test device found pointed to by reg pait <HL>
+; EXIT	Zero flag set if found
+;
+isDEV?:
+	ld	de,$DEV		; Point to search string
+	ld	b,_DEVLEN	; .. set length
+DEVloop:
+	ld	a,(de)		; Get character
+	call	uppcon		; .. as upper case
+	cp	(hl)		; Compare
+	jr	nz,skpDEV
+	inc	de
+	inc	hl
+	djnz	DEVloop
+	ret			; .. got it
+skpDEV:
+	inc	hl
+	djnz	skpDEV		; Advance pointer
+	inc	b		; .. no match
+	ret
+
+	dseg
+
+$DEVTAB:
+	db	'NUL'
+_DEVLEN	equ	$-$DEVTAB
+	db	'CON'
+	db	'AUX'
+	db	'LST'
+	db	null
+$EXTAB:
+	ds	2
+$DEV:
+	ds	_DEVLEN+1
+
+	cseg
+
+	end
+

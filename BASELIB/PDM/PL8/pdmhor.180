@@ -1,0 +1,62 @@
+	title	PDMHOR
+	subttl	Module from library PULL_DOWN_8 : PDMHOR
+
+; Output horizontal line
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	Reg IY points to four frame elements,
+;	Accu holds count
+
+; EXIT	None
+
+	public	pdmhor
+
+	extrn	pdmdol
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmhor:
+	ld	(cnt),a		; Save count
+	ld	e,(iy+frmlef)	; Get left element
+	ld	b,posval
+horlop:
+	ld	d,0		; NULL
+	ld	c,(iy+frmchr)	; Get inner character
+	bit	delim,(ix+mode)	; Test delimiter
+	jr	z,hor1
+	ld	d,(iy+frmdel)	; Load if requested
+	bit	delimm,(ix+mode); Test blank as delimiter
+	jr	z,hor1
+	ld	d,(iy+frmchr)
+hor1:
+	ld	a,(cnt)		; Test last line
+	dec	a
+	jr	nz,hor2
+	ld	d,(iy+frmrig)	; Get right end if so
+	ld	a,incval	; .. update cursor
+	or	b
+	ld	b,a
+hor2:
+	call	pdmdol		; Output elements
+	ld	e,0		; Prepare for loop
+	ld	b,0
+	ld	a,(cnt)		; Test done
+	dec	a
+	ld	(cnt),a
+	jr	nz,horlop
+	ret
+
+	dseg
+
+cnt:	ds	1
+
+	end
+

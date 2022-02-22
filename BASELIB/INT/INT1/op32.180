@@ -1,0 +1,86 @@
+	title	Module from library INTEGER_1 : OP32
+	name	('OP32')
+	include	baselib.lib
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; Prepare registers for 32 bit operation
+
+; ENTRY	See routines
+
+; EXIT	dto
+
+	entry	$op32,$lod32,$sto32
+
+; Load regs for requested operation
+;
+; ENTRY	Reg BC points to 1st number
+;	Reg DE points to 2nd number
+;	Reg HL points to requested routine
+;	On stack address of result
+;
+; EXIT	Requested operation executed
+;
+$op32:
+	push	ix		; Save a bit
+	push	iy
+	push	hl
+	pop	iy		; Get routine
+	push	de
+	ld	l,c		; Copy 1st
+	ld	h,b
+	call	$lod32
+	pop	hl		; Get 2nd
+	push	de
+	push	bc		; Put 1st onto stack
+	call	$lod32		; Load 2nd
+	ex	de,hl
+	ld	de,$ret		; Set return
+	push	de
+	jp	(iy)		; Start
+$ret:
+	ex	de,hl
+	pop	iy
+	pop	ix
+	pop	hl		; Get result
+; 
+; Save 32 bit number
+;
+; ENTRY	Regs DE,BC hold number
+;	Reg HL points to result
+;
+; EXIT	Result filled with number
+;
+$sto32:
+	ld	(hl),d		; .. simple store
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	(hl),c
+	ret
+; 
+; Load 32 bit number
+;
+; ENTRY	Reg HL points to number
+;
+; EXIT	Regs DE,BC holds number
+;
+$lod32:
+	ld	d,(hl)		; .. simple load
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	c,(hl)
+	ret
+
+	end
+

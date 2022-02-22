@@ -1,0 +1,39 @@
+	title	Module from library BASE_6 : CHNOUT
+	name	('CHNOUT')
+	include	baselib.lib
+
+; Put character to requested channel
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Register C holds channel number 0 .. max
+;	Accu holds byte to be transferred
+
+; EXIT	Carry set indicates error channel out of range
+;	or not opened - or disk full
+
+	entry	chnout
+
+	extrn	@chtst,chnxfr
+
+chnout:
+	ld	(chnbyt),a	; Save character
+	call	@chtst		; Test channel in range
+	ret	c
+	scf
+	ret	nz		; Error if read opened
+	ld	a,(chnbyt)
+	jp	chnxfr		; Go write
+
+	dseg
+
+chnbyt:
+	ds	1		; Save area
+
+	end
+

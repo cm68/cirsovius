@@ -1,0 +1,92 @@
+	title	Module from library INTEGER_3 : CFL32
+	name	('CFL32')
+	include	baselib.lib
+
+; Convert floating point number to 32 bit signed number 
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Reg DE points to location holding floating point number
+;	Reg HL points to location holding 32 bit integer
+
+; EXIT	Integer number filled
+;	Carry set on overflow
+
+; NOTE	The floating point package used here requires the
+;	HISOFT floating point format as used in PASCAL 80
+
+	entry	cfl32
+
+	ext	neg32
+
+cfl32:
+	push	ix
+	push	iy
+	push	de
+	push	hl
+	pop	ix
+	pop	iy
+	ld	a,(iy+0)
+	and	SIGNB		; Check sign
+	push	af
+	ld	d,(iy+0)	; Load mantissa
+	ld	h,(iy+1)
+	ld	l,(iy+2)
+	ld	b,(iy+3)	; .. and exponent
+	jr	z,no.sign
+	res	sign,d		; Reset sign
+no.sign:
+	bit	sign,b		; Check exponent <0
+	jr	nz,zero.n	; .. clear number if so
+	ld	a,b
+	cp	mant		; Check overflow
+	jr	nc,error
+	ld	a,mant
+	sub	b		; Get distance
+	ld	b,a
+cfl.1:
+	srl	d		; Shift right
+	rr	h
+	rr	l
+	djnz	cfl.1
+	jr	nc,skp.cy	; Check last bit
+	ld	bc,1
+	add	hl,bc		; Fix last bit
+	jr	nc,skp.cy
+	inc	d
+skp.cy:
+	ld	(ix+1),d	; Set bits
+	ld	(ix+2),h
+	ld	(ix+3),l
+	xor	a
+	ld	(ix+0),a
+	push	ix
+	pop	hl
+	pop	af
+	call	nz,neg32	; Set sign
+pop.it:
+	or	a
+pop.err:
+	pop	iy
+	pop	ix
+	ret
+error:
+	pop	af
+	scf
+	jr	pop.err
+zero.n:
+	pop	af
+	xor	a
+	ld	(ix+0),a	; Clear result
+	ld	(ix+1),a
+	ld	(ix+2),a
+	ld	(ix+3),a
+	jr	pop.it
+
+	end
+

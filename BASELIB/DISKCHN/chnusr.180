@@ -1,0 +1,57 @@
+	title	Module from library BASE_2 : CHNUSR
+	name	('CHNUSR')
+	include	baselib.lib
+
+; Perform disk I/O for different user areas
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Reg pair BC holds disk function to be performed
+;	Reg pair DE holds FCB
+;	Reg pair HL points to user location -1
+
+; EXIT	Carry set indicates disk error
+
+	entry	@chusr
+
+	extrn	usrget,usrset
+
+@chusr:
+	push	hl
+	push	bc
+	pop	hl
+	ld	(usr+1),hl	; Set vector
+	pop	hl
+	inc	hl		; Fix user location
+	ld	a,(hl)		; Get user
+	inc	a		; Test requested
+	jr	z,usr
+	call	usrget
+	ld	(curus),a	; Save current user
+	ld	a,(hl)
+	call	usrset		; Set new one
+usr:
+	call	$-$		; Put vector
+	push	af		; Save resulting code
+	ld	a,(hl)		; Test user to restore
+	inc	a
+	jr	z,nousr
+	ld	a,(curus)
+	call	usrset		; Restore
+nousr:
+	dec	hl		; Fix pointer
+	pop	af		; Get disk code
+	ret
+
+	dseg
+
+curus:
+	ds	1		; Hold current user
+
+	end
+

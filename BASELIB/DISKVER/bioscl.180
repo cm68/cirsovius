@@ -1,0 +1,42 @@
+	title	Module from library BASE_1 : BIOSCL
+	name	('BIOSCL')
+	include	baselib.lib
+
+; Perform direct BIOS call
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 August 1986
+
+; ENTRY	BIOS function in location BIOSPB
+
+; EXIT	As described in the BIOS function. Accu and pair HL
+;	hold parameter from BIOS while pair DE will be saved
+;	on parameter block - BIOSPB+4
+
+	entry	bioscl,biospb
+
+bioscl:
+	push	bc
+	push	de
+	_OSCAL_	.bioscl,biospb	; Execute BIOS
+	ld	(deret),de	; Save DE
+	pop	de
+	pop	bc
+	ret
+
+	dseg
+
+biospb:
+	db	_WBOOT		; BIOS function - Default boot
+	ds	1		; Accu
+	ds	2		; <BC> pair
+deret:
+	ds	2		; <DE> pair
+	ds	2		; <HL> pair
+
+	end
+

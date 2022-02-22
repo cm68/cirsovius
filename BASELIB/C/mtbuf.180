@@ -1,0 +1,37 @@
+	title	MTBUF
+	subttl	Module from library C_3 : MTBUF
+	maclib	SYSEQU.LIB
+
+; FILE:	MTBUF.MAC
+; DATE: 820819:1217
+; FOR:	Write C secs from <HL>, fcb = <DE>
+
+; Flush buffer to disk
+; ENTRY	: Reg HL points to buffer
+;	  Reg DE points to FCB
+;	  Reg C contains no. secs to write
+; EXIT	: Accu contains zero
+;	  Reg C contains zero
+
+	entry	mtbuf
+
+	ext	adda,cerror
+	ext	setdma,dskwrt
+
+mtbuf:
+	ex	de,hl
+	call	setdma		; Set DMA buffer
+	ex	de,hl
+	call	dskwrt		; Write a record
+	jr	c,dskful	; .. check write error
+	dec	c		; .. and end
+	ret	z
+	ld	a,reclng
+	call	adda		; Bump buffer
+	jr	mtbuf
+dskful:
+	call	cerror
+	msg	<'MTBUF: Disk full'>
+
+	end
+

@@ -1,0 +1,74 @@
+	title	CINIT
+	subttl	Module from library C_5 : CINIT
+	maclib	SYSEQU.LIB
+
+; FILE:	CINIT.MAC
+; DATE: 820819:1541
+; FOR:	Pick up command line, redirect if < >
+
+; Pick up and buffer the CP/M command line
+; reassign STDIN and STDOUT if specified in < or > parameters
+; set NARGS to the number of parameters not counting
+; redirection params.
+
+	entry	cinit
+
+	ext	nargs,argbuf,copen,stdin,stdout
+	ext	@parcn,@parst
+
+cinit:
+	call	@parcn		; Get # of parameters
+	ld	de,argbuf
+	ld	a,endstr
+	ld	(de),a		; Init buffer
+	ld	a,b
+	ld	(nargs),a	; Set count
+	or	a
+	ret	z		; .. null
+	ld	c,1		; Init parameter
+init0:
+	push	de
+	push	bc
+	ld	b,c
+	call	@parst		; Get substring
+	inc	de		; Move over end
+	pop	bc
+	pop	hl
+	ld	a,(hl)
+	cp	'<'		; Check input redirection
+	jr	nz,init1
+	ld	a,0
+	call	.stdset
+	ld	(stdin),a	; Set channel
+	jr	init2
+init1:
+	cp	'>'		; Check output redirection
+	jr	nz,init2
+	ld	a,0ffh
+	call	.stdset
+	ld	(stdout),a	; Set channel
+init2:
+	inc	c
+	djnz	init0		; Go thru the loop
+	ret
+;
+; Prepare redirection of STDIN or STDOUT
+; ENTRY	: Reg HL points to file name
+;	  Accu holds R/W flag
+; EXIT	: Accu holds channel
+;
+.stdset:
+	push	hl		; Preserve regs
+	push	bc
+	inc	hl		; .. skip direction flag
+	ld	b,a		; Get direction
+	ld	c,sectrs	; Set standard sectors (1kByte)
+	call	copen		; Open channel
+	ld	hl,nargs
+	dec	(hl)		; Fix argument count
+	pop	bc
+	pop	de
+	ret
+
+	end
+

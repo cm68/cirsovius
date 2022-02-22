@@ -1,0 +1,72 @@
+	title	Module from library BASE_3 : GETAMS
+	name	('GETAMS')
+	include	baselib.lib
+
+; Get CP/M 3 (PLUS) and AMSTRAD BIOS validation
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.1 June 1996
+
+; ENTRY	Location AMSTRA set to machine requested
+;	(Default : PCWxxx [JOYCE])
+
+; EXIT	Carry reset if CP/M 3 and requested machine found
+;	Carry set on other CP/M or machine versions
+;	or BIOS USERF vector not available
+
+	entry	getams,amstra
+
+	extrn	getver,vernum
+
+getams:
+	ld	a,(vernum)	; Save version
+	ld	b,a
+	push	bc
+	ld	a,@CPM
+	ld	(vernum),a	; Set CP/M 3
+	call	getver		; Get CP/M 3
+	pop	bc
+	ld	a,b
+	ld	(vernum),a	; Reset version
+	call	nc,isuserf	; Test USER Function does exist
+	ret	c
+	call	userf		; Get validation
+	dw	_CDVERS
+	ld	b,a
+	ld	a,(amstra)
+	cp	b		; Compare
+	ret	z
+	scf
+	ret
+;
+; Test USER Function does exist
+; EXIT	Carry set if JP 0000 found
+;
+isuserf:
+	ld	ix,(OS+1)	; Get BIOS address
+	ld	de,USRBIOS
+	add	ix,de		; Get pointer to USERF
+	ld	(userf+1),ix	; Save it
+	ld	a,(ix+0)	; Test sequence
+	sub	_JP
+	or	(ix+1)
+	or	(ix+2)
+	scf
+	ret	z		; Carry set if JP 0000
+	ccf
+	ret
+
+userf:
+	jp	$-$		; Do the jump
+
+	dseg
+
+amstra:
+	db	@PCW		; *** Default machine version
+
+	end
+

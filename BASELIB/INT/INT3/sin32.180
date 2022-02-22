@@ -1,0 +1,65 @@
+	title	Module from library INTEGER_3 : SIN32
+	name	('SIN32')
+	include	baselib.lib
+
+; Convert ASCII decimal string to 32 bit signed integer
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Reg pair DE points to string
+;	Reg pair HL points to 32 bit result
+;	Reg B holds end marker of string
+;	(usually zero or $)
+;	If B holds 255 (hex 0FFH), routine ends at first
+;	non numeric character found
+
+; EXIT	Result filled with signed value
+;	Reg pair DE points to delimiter or first
+;	non numeric character
+;	Carry set on overflow or illegal digit
+
+	entry	sin32
+
+	extrn	din32,neg32
+	extrn	skpblk
+
+sin32:
+	push	hl
+	call	skpblk		; No blanks here
+	ld	a,(de)
+	inc	de
+	cp	'-'		; Check sign
+	jr	z,din
+	cp	'+'
+	jr	z,din
+	dec	de		; .. fix pointer
+	ld	a,'+'
+din:
+	ld	(dinsin),a	; .. save sign
+	call	din32		; Get nummber
+	pop	hl
+	ret	c		; .. error
+	ld	a,(dinsin)
+	cp	'+'		; Test <0
+	ret	z		; .. no
+	ld	a,(hl)
+	rla			; Test overflow
+	call	nc,neg32	; Make >0
+	ret
+	
+	COMMON	/DATA/
+
+$$C	equ	$
+
+dinsin:
+	ds	1
+$$CL	equ	$-$$C
+	ds	COMMLEN-$$CL
+
+	end
+

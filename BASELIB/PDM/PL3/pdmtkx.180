@@ -1,0 +1,80 @@
+	title	Module from library PULL_DOWN_3 : PDMTKX
+	name	('PDMTKX')
+
+; Get key from translation table
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: 040/4223247
+
+;		Version 1.0 April 1995
+
+; ENTRY	Reg C holds key number
+;	Reg D holds translation table bit defined as:
+
+; Bit       4         3        2      1       0
+;	+-------+-----------+-----+-------+--------+
+;	| Extra | Shift+Alt | Alt | Shift | Normal |
+;	+-------+-----------+-----+-------+--------+
+
+; Note that bit 0 is the highest and bit 4 the lowest
+; priority
+
+; EXIT	Carry set on invalid key,
+;	Accu holds corresponding hex value from table
+
+; **** NOTE: Module must be initialized by calling PDMXOS
+
+	entry	pdmtkx
+
+	ext	pdmxbs,pdmtop,p@@gtk
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmtkx:
+	ld	a,c		; Test max key number
+	cp	tblen
+	ccf
+	ret	c		; Overflow, exit
+	ld	a,d		; Get bit map
+	and	11111b
+	or	a		; Test any bit 
+	scf
+	ret	z
+	ld	hl,(p@@gtk)	; Get address of table
+	ld	de,tblen	; Expand key # to 16 bit
+	or	a
+	sbc	hl,de		; .. fix
+bitshf:
+	add	hl,de		; Point to map
+	rra			; Find bit
+	jr	nc,bitshf
+	ld	b,0
+	add	hl,bc		; Point to key
+	push	hl
+	ld	de,(pdmtop)	; Get bottom
+	push	de
+	ld	hl,rout
+	ld	bc,routln
+	ldir			; Routine into Common
+	pop	bc
+	pop	hl
+	call	pdmxbs		; Execute routine
+	dw	scrrun
+	ld	a,l		; Get hex
+	or	a
+	ret
+
+; ===== Routine in Common =====
+
+rout:	; Simply fetch from table into Reg L
+
+	ld	l,(hl)		; Fetch
+	ret
+routln	equ	$-rout
+
+	end
+

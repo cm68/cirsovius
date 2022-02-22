@@ -1,0 +1,43 @@
+	title	Module from library BASE_2 : CMPCON
+	name	('CMPCON')
+	include	baselib.lib
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 July 1987
+
+; ENTRY	Reg pair HL points to constant length field
+;	Last element must be zero
+;	Reg pair DE points to element to be searched for
+;	Reg C holds constant length of elements
+
+; EXIT	Zero will be set if elements are equal
+;	Otherwise zero will be reset
+
+	entry	cmpcon
+
+	extrn	comp3
+
+cmpcon:
+	push	de
+	push	hl
+	push	bc
+	call	comp3		; Compare element
+	pop	bc
+	pop	hl
+	pop	de
+	ret	z		; Found, exit
+	ld	b,0
+	add	hl,bc		; Point to next element
+	ld	a,(hl)		; Test end
+	or	a
+	jr	nz,cmpcon
+	ld	a,1
+	or	a		; Set non zero
+	ret
+
+	end
+

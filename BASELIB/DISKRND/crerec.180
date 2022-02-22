@@ -1,0 +1,109 @@
+	title	Module from library BASE_5 : CREREC
+	name	('CREREC')
+	include	baselib.lib
+
+; Utilities for handling with variable record length
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 June 1987
+
+	entry @rndpr,@blrec,@outrc
+
+	extrn close,delete,dskwrt,setdma,curdma
+	extrn @tsrec,@gtphs,@rnrec,open
+
+;
+; Test legal parameters
+; ENTRY	Accu and reg pir BC hold record parameter
+; EXIT	Carry set on error, otherwise location @RNREC
+; 	holds record corresponding the parameters
+;
+@rndpr:
+	call	@tsrec		; Test parameter
+	ret	c		; Error
+	call	@gtphs		; Get physical values
+	push	hl
+	ld	hl,(@rnrec)	; Get random record pointer
+	ld	a,(hl)		; Get record
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	hl
+	ld	a,b		; Test > 128 bytes
+	cp	reclng
+	jr	c,rec128
+	inc	hl		; Else fix
+rec128:
+	ld	(@rnrec),hl	; And save it
+	pop	hl
+	or	a
+	ret
+;
+; Blank scratch area of 128 bytes
+; ENTRY	Reg pair HL points to scratch area
+; EXIT	Scratch area filled with blanks
+;
+@blrec:	
+	push	hl
+	ld	b,reclng
+blnrec:
+	ld	(hl),' '	; Blank buffer
+	inc	hl
+	djnz	blnrec
+	pop	hl
+	ret
+;
+; Output records n-times
+; ENTRY	Reg pair DE holds FCB, reg pair HL holds
+; 	scratch area written n-times to file
+; 	Loaction '@RNREC' set to 'n'
+; EXIT	Carry set on error, otherwise file filled
+; 	with records and opened
+;
+@outrc:
+	push	hl
+	call	curdma		; Get current buffer
+	ld	($$DMA),hl	; Save it
+	pop	hl
+	push	hl
+	call	@buff		; Set new buffer
+	call	dorec
+	push	af
+	ld	hl,($$DMA)
+	call	@buff		; Reset to old buffer
+	pop	af
+	pop	hl
+	ret
+@buff:
+	ex	de,hl
+	call	setdma		; Set buffer in HL
+	ex	de,hl
+	ret
+dorec:
+	ld	hl,(@rnrec)	; Get record count
+outrec:
+	call	dskwrt		; Write blanks
+	jr	c,creerr
+	dec	hl
+	ld	a,h
+	or	l		; Test ready
+	jr	nz,outrec
+	call	close		; Close	file
+	call	nc,open		; Re-open
+	ret
+creerr:
+	call	delete		; Delete file
+	scf
+	ret
+
+	dseg
+
+$$DMA:
+	ds	2
+
+	end
+

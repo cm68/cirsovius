@@ -1,0 +1,77 @@
+	title	Module from library BASE_2 : MEMMOV
+	name	('MEMMOV')
+	include	baselib.lib
+
+; Copy bytes to memory if enough space
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 June 1993
+
+; ENTRY	Reg pair HL points to source
+;	Reg pair DE points to destination
+;	Reg pair BC holds length
+
+; EXIT	Memory moved if enough space
+
+; NOTE	On default, no error message will be printed and a jump
+;	to address 0000H (Warmstart) will be executed.
+;
+;	These conditions my be changed as follows:
+;
+;	<MEMMOV-2> Pointer to error message printed on console
+;	           (DEFAULT: 0)
+;	<MEMMOV-4> Memory address pointing to top of memory
+;	           (DEFAULT: 0006H - System BDOS top)
+;	<MEMMOV-6> Address executing after error
+;	           (DEFAULT: 0000H - System warm start)
+
+	entry	memmov
+
+	ext	string
+
+mem.err:
+	ld	de,(mem.msg)	; Get pointer
+	ld	a,e
+	or	d
+	call	nz,string	; Print message if defined
+	db	_JP
+;
+; <MEMOV-6> : Address to be executed after error
+;
+	dw	OS		;; SYSTEM WARM START
+;
+; <MEMOV-4> : Pointer to highest memory location
+;
+mem.adr:
+	dw	TPATOP		;; SYSTEM TOP
+;
+; <MEMOV-2> : Pointer to error message
+;
+mem.msg:
+	dw	0		;; EMPTY
+memmov:
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	ex	de,hl
+	add	hl,bc		; Get requested top
+	ld	ix,(mem.adr)
+	ld	e,(ix+0)	; .. and real top
+	ld	d,(ix+1)
+	or	a
+	sbc	hl,de		; Test space
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	jr	nc,mem.err	; .. error
+	ldir			; .. move
+	ret
+
+	end
+

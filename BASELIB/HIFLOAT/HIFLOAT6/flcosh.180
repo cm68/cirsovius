@@ -1,0 +1,47 @@
+	title	Module from library HIFLOAT_6 : FLCOSH
+	name	('FLCOSH')
+	include	baselib.lib
+
+; Calculate the HYPERBOLIC COSINE and SINE
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+	entry	?flcsh,?flsnh
+
+	ext	?flexp,?fldiv,?fladd,?flmul
+
+?flsnh:
+	ld	a,10000000b	; Set flag
+	jr	comfl
+?flcsh:
+	ld	a,00000000b
+comfl:
+	push	af
+	call	?flexp		; Get EXP(X)
+	pop	af
+	push	hl
+	push	de
+	push	af
+	ld	bc,4000h	; Set 1.0
+	push	bc
+	ld	bc,0000h
+	push	bc
+	call	?fldiv		; Get 1/EXP(X)
+	pop	af
+	xor	h		; Set sign for SINH/COSH
+	ld	h,a
+	call	?fladd		; Add/Subtract
+	push	hl
+	push	de
+	ld	hl,04000h	; Set 0.5
+	ld	de,0ff00h
+	call	?flmul		; Get SINH/COSH
+	ret
+
+	end
+

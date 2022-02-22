@@ -1,0 +1,51 @@
+	title	Module from library BASE_2 : CMPITM
+	name	('CMPITM')
+	include	baselib.lib
+
+; Compare element from field elements
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 July 1987
+
+; ENTRY	Reg pair HL points to field, each element started with
+;	length, last length must be zero
+;	Reg pair DE points to element to be searched for
+;	Reg C holds length of element to be searched
+
+; EXIT	Zero will be set if elements are equal
+;	Otherwise zero will be reset
+
+	entry	cmpitm
+
+	extrn	comp2
+
+cmpitm:
+	push	de
+	push	hl
+	push	bc
+	ld	a,c		; Get length
+	cp	(hl)		; Test against expected
+	call	z,comp2		; Compare element
+	pop	bc
+	pop	hl
+	pop	de
+	ret	z		; Found, exit
+	push	bc
+	ld	b,0
+	ld	c,(hl)
+	add	hl,bc		; Point to next element
+	pop	bc
+	inc	hl
+	ld	a,(hl)		; Test end
+	or	a
+	jr	nz,cmpitm
+	ld	a,1
+	or	a		; Set non zero
+	ret
+
+	end
+

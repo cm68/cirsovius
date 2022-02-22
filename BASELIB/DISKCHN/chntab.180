@@ -1,0 +1,50 @@
+	title	Module from library BASE_1 : CHNTAB
+	name	('CHNTAB')
+	include	baselib.lib
+
+; Initialisation tables and validation for channel I/O
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Register C holds channel number 0 .. max
+
+; EXIT	Carry set indicates error - channel out of range
+;	On carry reset zero indicates channel opened if set
+;	or still inactive if reset
+;	Reg pair HL holds pointer to channel control block
+
+	entry	@chacc
+
+@chacc:
+	ld	a,c		; Test max
+	cp	max+1
+	ccf
+	ret	c
+	push	bc
+	ld	b,0
+	ld	hl,chntab	; Get pointer
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	add	hl,bc
+	pop	bc
+	ld	a,(hl)		; Get active flag
+	or	a
+	ret
+
+	dseg
+
+chntab	equ	$
+	rept	max+1
+	db	-1		; Inactive flag
+	ds	1		; Mode byte (0 write else read)
+	ds	2		; Parameter block address
+	endm
+
+	end
+

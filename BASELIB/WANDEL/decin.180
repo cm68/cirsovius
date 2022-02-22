@@ -1,0 +1,77 @@
+	title	Module from library BASE_2 : DECIN
+	name	('DECIN')
+	include	baselib.lib
+
+; Convert ASCII decimal string to hex number
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.2, December 1989
+
+; ENTRY DE points to string
+;	B holds end marker of string
+;	(usually zero or $)
+;	If B holds 255 (hex 0FFH), routine ends at first
+;	non numeric character found
+
+; EXIT	HL holds hex number
+;	DE points to delimiter or first non numeric character
+;	Carry set on overflow or illegal digit
+
+	entry	decin
+
+	extrn	skpblk,tstdig
+
+decin:
+	ld	hl,0		; Clear result
+	call	skpblk		; Skip blanks here
+dig???:
+	ld	a,(de)		; Get character
+	cp	b		; Test end
+	ret	z
+	call	tstdig
+	jr	c,tstff		; Test legal end
+	inc	de
+	push	de
+	call	mul10		; Multiply by ten
+	pop	de
+	ret	c		; Aha, overflow
+	push	bc
+	ld	c,a		; Get digit
+	ld	b,0
+	add	hl,bc		; Add digit
+	pop	bc
+	jr	nc,dig???	; Test to go on
+	ret
+;
+; Test legal end on non numeric character
+; (Reg B must hold 255 [-1])
+;
+tstff:
+	inc	b		; Result should be zero
+	ret	nz		; End with carry set
+	ccf
+	ret			; End with carry reset
+;
+; Multiply value by 10
+; ENTRY	HL holds number to be multiplied
+; EXIT	HL holds number*10
+; 	Carry set on overflow
+;
+mul10:
+	ld	d,h		; Copy old value
+	ld	e,l
+	add	hl,hl		; *  2
+	ret	c
+	add	hl,hl		; *  4
+	ret	c
+	add	hl,de		; *  5
+	ret	c
+	add	hl,hl		; * 10
+	ret
+
+	end
+

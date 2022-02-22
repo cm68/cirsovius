@@ -1,0 +1,65 @@
+	title	Module from library HILIB_2 : @PARST
+	name	('@PARST')
+	include	baselib.lib
+
+; Language : PASCAL
+
+; Select string out of command input string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.0, July 1994
+
+; ENTRY	Reg pair DE points to resulting substring
+;	Reg B holds number of string to be selected
+
+; EXIT	Substring filled or empty - closed by zero
+;	Reg HL points to next substring
+;	Reg DE points to end of selected substring
+
+; NOTE	Buffer defaults to CP/M standard buffer but may be
+;	changed to any buffer, stored at @PARCN-2
+
+	entry	@parst
+
+	extrn 	@parcn,skpblk,skpitm
+
+@parst:
+	ex	de,hl
+	ld	(hl),0		; Close result
+	ld	de,(@parcn-2)	; Fetch buffer
+	inc	de
+	call	skpblk		; No blanks this time
+	ld	a,b		; Look for zero
+	or	a
+	jr	z,strget	; Get first
+	jr	tststr		; .. fall into the job
+strnx:
+	ld	a,(de)		; Look for delimiter
+	or	a
+	ret	z		; It's the end, bye
+	call	skpitm		; Skip item
+	call	skpblk
+tststr:
+	djnz	strnx		; Found ?
+strget:
+	ld	a,(de)		; Unpack cause we got it
+	ld	(hl),a
+	or	a		; Till end
+	ret	z
+	inc	hl
+	inc	de
+	sub	tab		; .. or tab
+	jr	z,@end
+	sub	' '-tab		; .. or blank
+	jr	nz,strget
+@end:
+	dec	hl
+	ld	(hl),a		; Close result
+	ret
+
+	end
+

@@ -1,0 +1,50 @@
+	title	Module from library HILIB_3 : INEW
+	name	('INEW')
+
+; Language : PASCAL
+
+; Allocate and initialize portion of memory
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, November 1997
+
+; ENTRY	Reg DE holds amount to be allocated
+
+; EXIT	Reg HL points to allocated memory
+;	On error carry will be set and reg HL holds NIL
+;	Memory will be set to zero
+
+	entry	inew
+
+	extrn	new
+
+inew:
+	push	de		; Save length
+	call	new		; Get memory
+	pop	bc
+	ret	c		; .. error
+	ld	(hl),0		; Init 1st byte
+	dec	bc		; Count down length
+	ld	a,c
+	or	b		; Test only one byte
+	call	nz,ini0		; .. nope, clear remainder
+	or	a
+	ret
+;
+; Init memory
+;
+ini0:
+	push	hl
+	ld	e,l
+	ld	d,h
+	inc	de
+	ldir			; .. set it up
+	pop	hl
+	ret
+
+	end
+

@@ -1,0 +1,45 @@
+	title	FILLBF
+	subttl	Module from library C_2 : FILLBF
+	maclib	SYSEQU.LIB
+
+; FILE:	FILLBF.MAC
+; DATE: 820818:2055
+; FOR:	Read C secs into <HL>, fcb = <DE>
+
+; Read from disk into buffer
+; ENTRY	: Reg HL points to buffer
+;	  Reg DE points to FCB
+;	  Reg C contains no. secs to read
+; EXIT	: Accu contains zero or EOF
+;	  Reg C contains zero
+
+	entry	fillbf
+
+	ext	adda,fill
+	ext	setdma,dskred
+
+fillbf:
+	ex	de,hl
+	call	setdma		; Set DMA buffer
+	ex	de,hl
+	call	dskred		; Read from file
+	jr	c,eofl		; Check read OK
+	dec	c
+	ret	z		; Check all done
+	ld	a,reclng
+	call	adda		; Bump buffer
+	jr	fillbf		; Loop on
+eofl:
+	ld	a,c		; Nsecs left
+	or	a		; Clear C
+	rra			; Div 2
+	ld	b,a		; Mod 256
+	ld	a,0		; Get rem
+	rra			; Mul 256
+	ld	c,a		; =Bytes to fill
+	ld	a,eof
+	call	fill
+	ret
+
+	end
+

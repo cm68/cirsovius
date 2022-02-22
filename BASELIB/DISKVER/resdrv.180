@@ -1,0 +1,44 @@
+	title	Module from library BASE_1 : RESDRV
+	name	('RESDRV')
+	include	baselib.lib
+
+; Reset selected drive or entire disk system
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 August 1986
+
+; ENTRY	Accu holds drive code :	0 .. 15 -> A: .. P:
+;				  >15	-> Disk system
+
+; EXIT	None on single drive reset
+;	Default disk is set to A: and DMA address is
+;	set to 0080H on system reset
+
+	entry	resdrv
+
+resdrv:
+	_push_
+	ld	c,.resdsk	; Set reset all function
+	cp	_MAXDRV+1	; Test single drive
+	jr	nc,resit	; Ok, reset all
+	ld	de,drva		; Init drive A: bit
+	ld	c,.resdrv	; Set reset drive function
+	or	a		; Test zero entry
+	jr	z,resit
+shfbit:
+	ex	de,hl
+	add	hl,hl		; Shift bit
+	ex	de,hl
+	dec	a
+	jr	nz,shfbit
+resit:
+	call	BDOS		; Execute function
+	_pop_
+	ret
+
+	end
+

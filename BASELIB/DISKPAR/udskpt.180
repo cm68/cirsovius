@@ -1,0 +1,85 @@
+	title	Module from library BASE_4 : UDSKPT
+	name	('UDSKPT')
+	include	baselib.lib
+
+; Module writes a byte to disk output buffer and if
+; buffer full, empties it with to disk
+; This enhanced module allows multiple channel I/O
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Accu holds byte to be outputted
+;	The location WRPBLK must point to a parameter block
+;	defined as follows:
+
+;	PB+0,1	: Record buffer          - default standard
+;	PB+2	: Record pointer         - default 0
+;	PB+3,4	: File control block     - default standard
+;	PB+5	: Current user (-1 none) - default none
+
+; EXIT	On normal return the carry flag is reset
+;	On error carry will be set
+
+	entry	udskpt,@wrmpx
+
+; The following entry must be set up by the caller:
+
+	entry	wrpblk		; Parameter block
+
+	extrn	dskwrt,@cmdsk
+
+udskpt:
+	push	bc
+	push	ix
+	ld	c,a		; Save byte
+	ld	ix,(wrpblk)
+	ld	a,(ix+2)	; Get pointer
+	cp	reclng		; Buffer filled ?
+	jr	nz,put		; No, skip
+	call	@wrmpx		; Execute function
+	jr	c,popreg	
+put:
+	push	de
+	push	hl
+	ld	d,0
+	ld	e,a
+	ld	l,(ix+0)	; Get base buffer
+	ld	h,(ix+1)
+	add	hl,de		; Point to byte
+	inc	a
+	ld	(ix+2),a	; Save pointer
+	ld	(hl),c		; Put byte
+	pop	hl
+	pop	de
+	or	a		; Reset error
+popreg:
+	pop	ix
+	pop	bc
+	ret
+@wrmpx:
+	push	hl
+	push	ix
+	ld	hl,dskwrt
+	ld	ix,(wrpblk)
+	call	@cmdsk		; Do the function
+	pop	ix
+	pop	hl
+	ret
+
+	dseg
+
+wrpblk:
+	dw	ourblk
+ourblk:
+	dw	dma		; Default values
+	db	0
+	dw	fcb
+	db	none		; No user swap
+
+	end
+

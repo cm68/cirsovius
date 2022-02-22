@@ -1,0 +1,73 @@
+	title	PDMBLD
+	subttl	Module from library PULL_DOWN_2 : PDMBLD
+
+; The window parameter builder
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	Reg IX points to user parameter block
+
+; EXIT	User parameter block updated
+
+	public	pdmbld
+
+; ****** NOTE: From LIB BASELIB
+
+	ext	multip
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmbld:
+	ld	a,(ix+xcor)
+	dec	a
+	ld	(ix+wdwpbx),a
+	ld	a,(ix+ycor)	; Get coordinate
+	dec	a
+	ld	(ix+wdwpby),a
+	bit	direc,(ix+mode)	; Test direction
+	jr	z,horiz
+	ld	a,(ix+numele)
+	add	a,2		; Fix element count
+	ld	b,a
+	ld	a,(ix+lenele)
+	add	a,2		; .. and length
+	ld	c,a
+	bit	delim,(ix+mode)	; Test delimiter in window
+	jr	z,excom		; No, skip
+	ld	a,(ix+numele)
+	add	a,b		; If so, fix it
+	ld	b,a
+	dec	b
+	jr	excom
+horiz:
+	ld	b,3		; Horizontal is constant
+	ld	l,(ix+lenele)
+	ld	e,(ix+numele)
+	ld	h,0
+	ld	d,0
+	call	multip		; Get length
+	ld	c,l
+	inc	c		; .. fix
+	inc	c
+	bit	delim,(ix+mode)	; Test delimiter
+	jr	z,excom
+	ld	a,(ix+numele)
+	add	a,c		; Fix if so
+	ld	c,a
+	dec	c
+excom:
+	ld	a,b		; Save values
+	ld	(ix+wdwlin),a
+	ld	a,c
+	ld	(ix+wdwchr),a
+	ret
+	
+	end
+

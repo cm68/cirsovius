@@ -1,0 +1,71 @@
+	title	Module from library BASE_4 : FILES
+	name	('FILES')
+	include	baselib.lib
+
+; Get wildcard files
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 June 1993
+
+; ENTRY	Reg pair HL points to start of memory
+;	Reg pair DE points to wildcard FCB
+;	Reg pair BC holds  max allowed files
+
+; EXIT	Memory filled with list of filenames with a length of
+;	12 characters each
+;	Reg pair HL points to start of memory
+;	Reg pair DE points to top of memory
+;	Reg pair BC holds  number of files found
+;	Carry set on no file found
+
+; NOTE	Standard DMA buffer at address 0080H
+;	will be overwritten
+
+	entry	files
+
+	ext	srcfrs,srcnxt,memmov
+
+files:
+	push	hl
+	ld	hl,0
+	ld	(fcnt),hl	; Clear count
+	call	srcfrs		; Try to find any
+	pop	de
+	ret	c		; .. nope
+	push	de
+	call	.files
+	pop	hl		; Get back start
+	ld	bc,(fcnt)	; .. get # files found
+	or	a
+	ret
+;
+; Sample next files into memory ^DE, max is reg BC
+;
+.files:
+	ld	a,b		; Test more alloesd
+	or	c
+	ret	z		; .. nope
+	dec	bc		; .. count down
+	push	bc
+	dec	hl		; Point to start
+	ld	bc,.drv+.flen
+	call	memmov		; .. unpack
+	pop	bc
+	ld	hl,(fcnt)
+	inc	hl		; .. bump count
+	ld	(fcnt),hl
+	call	srcnxt
+	jr	nc,.files	; .. move on
+	ret
+
+	dseg
+
+fcnt:
+	dw	0
+
+	end
+

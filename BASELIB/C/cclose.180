@@ -1,0 +1,107 @@
+	title	CCLOSE
+	subttl	Module from library C_5 : CCLOSE
+	maclib	SYSEQU.LIB
+
+; FILE:	CCLOSE.MAC
+; DATE:	820825:1538
+; FOR:	Close file and free channel C
+
+; Close an i/o channel, flushing buffer if necessary.
+; ENTRY	: Reg C contains channel number
+; EXIT	: Accu contains channel number
+
+	entry	cclose
+
+	ext	putcf,fndbuf,negh,setbf,mtbuf,adda,chanls
+	ext	cerror
+	ext	close
+
+cclose:
+	push	hl
+	push	de
+	push	bc
+	ld	a,c
+	and	00001111b	; Check dummy (Console)
+	jr	z,closed
+	call	fndbuf
+	ld	(rwflg),a
+	ld	a,h
+	or	l
+	jp	z,closed
+	ld	a,(rwflg)
+	inc	a
+	jr	nz,rlease
+	ld	a,eof
+	call	putcf		; Write EOF
+	push	hl
+	inc	hl
+	inc	hl		; Bufptr
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	call	negh		; Space left
+	ex	de,hl
+	ld	a,e
+	or	a
+	rla
+	ld	a,d
+	rla			; Sectors left
+	inc	hl		; Buflen
+	push	hl		; Save for SETBF
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	sub	(hl)		; Sectors in buffer
+	pop	hl		; Buflen
+	cpl
+	inc	a		; Sectors to write
+	jr	z,ready
+	push	af
+	call	setbf
+	pop	af
+	ld	c,a
+	call	mtbuf
+ready:
+	pop	hl
+	push	hl
+	ld	a,6
+	call	adda
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)		; FCB
+	call	close
+	jr	nc,.rls
+	call	cerror
+	msg	<'CLOSE: Directory entry gone!'>
+.rls:
+	pop	hl
+rlease:
+	ld	(hl),0
+	inc	hl
+	ld	(hl),0
+	pop	bc
+	push	bc
+	ld	a,c
+	add	a,a
+	ld	hl,chanls
+	call	adda
+	ld	(hl),0
+	inc	hl
+	ld	(hl),0
+closed:
+	pop	bc
+	ld	a,c
+	or	a
+	pop	de
+	pop	hl
+	ret
+
+	dseg
+
+rwflg:
+	ds	1
+
+	end
+

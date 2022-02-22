@@ -1,0 +1,88 @@
+	title	PDMOUT
+	subttl	Module from library PULL_DOWN_9 : PDMOUT
+
+; Output window frame
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	User parameter block set up properly
+
+; EXIT	None
+
+	public	pdmout
+
+	extrn	pdmdox,pdmdol,pdmhor
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmout:
+	ld	l,(ix+wdwpbx)
+	ld	h,(ix+wdwpby)
+	ld	(pdmdox),hl	; Set start of window
+	ld	a,(ix+numele)
+	ld	(cnt),a		; Set count
+	bit	direc,(ix+mode)	; Test direction
+	jr	nz,vertic	; Do the vertical building
+	ld	iy,horiz1	; Load first line elements
+	ld	a,(cnt)
+	call	pdmhor		; Build 1st line
+	ld	iy,horiz2	; Load second line elements
+	ld	a,(cnt)
+	call	pdmhor		; Build 2nd line
+	ld	iy,horiz3	; Load third line elements
+	ld	a,(cnt)
+	call	pdmhor		; Build 3rd line
+	ret
+vertic:
+	ld	e,frlfdw	; Load top parts
+	ld	d,frrgdw
+	ld	c,frhor
+	call	comdol		; Set top line
+verlop:
+	ld	e,frver		; Load middle parts
+	ld	d,e
+	ld	c,' '
+	call	comdol		; Output line
+	bit	delim,(ix+mode)	; Test delimiter
+	jr	z,nodeli
+	ld	a,(cnt)		; Test last line
+	dec	a
+	jr	z,nodeli	; Skip delimiter
+	bit	delimm,(ix+mode); Test blank as delimiter
+	jr	nz,delix
+	ld	e,frverr	; Load delimiter elements
+	ld	d,frverl
+	ld	c,frhor
+delix:
+	call	comdol		; Set delimiter
+nodeli:
+	ld	a,(cnt)		; Test all done
+	dec	a
+	ld	(cnt),a
+	jr	nz,verlop
+;
+	ld	e,frlfup	; Load bottom parts
+	ld	d,frrgup
+	ld	c,frhor
+comdol:
+	ld	b,posinc
+	call	pdmdol		; Set bottom line
+	ret
+
+	dseg
+
+horiz1:	db	frlfdw,frhor,frhodw,frrgdw
+horiz2:	db	frver,' ',frver,frver
+horiz3:	db	frlfup,frhor,frhoup,frrgup
+
+cnt:	ds	1
+
+	end
+

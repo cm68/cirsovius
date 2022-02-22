@@ -1,0 +1,69 @@
+	title	PDMVEC
+	subttl	Module from library PULL_DOWN_1 : PDMVEC
+
+; Init BIOS vectors for window I/O and TOP of RAM
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 August 1991
+
+; ENTRY	Reg HL points to any top location in COMMON memory
+
+; EXIT	PDMBIC points to BIOS character input vector
+;	PDMXBS points to XBIOS vector
+;	PDMTOP points to highest memory location available
+;	Reg HL holds this location, too
+;	Carry set if location NOT in COMMON
+
+; NOTE: Before calling ANY window routine you MUST init the
+; 	vectors by calling PDMVEC otherwise application enters
+;	BDOS warm start calling (X)BIOS function
+
+_SCB	equ	49
+
+	public	pdmvec,pdmbic,pdmxbs,pdmtop
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmvec:
+	push	hl		; Save the TOP
+	ld	bc,(bios)	; Get BIOS base
+	ld	hl,3*(conout-1)
+	add	hl,bc		; Get BIOS character vector
+	ld	(pdmbic+1),hl
+	ld	hl,3*(userf-1)
+	add	hl,bc
+	ld	(pdmxbs+1),hl	; Get XBIOS vector
+	pop	hl
+	ld	a,h
+	sub	4		; Let room for 1kByte
+	ld	h,a
+	ld	(pdmtop),hl	; Save top
+	push	hl
+	ld	de,SCB.PB
+	ld	c,_SCB
+	call	BDOS		; Get base
+	ld	a,(pdmtop+1)
+	cp	h		; Test against COMMON
+	pop	hl
+	ret
+pdmbic:
+	jp	$-$
+pdmxbs:
+	jp	$-$
+
+	dseg
+
+pdmtop:
+	dw	0c000h
+SCB.PB:
+	db	5dh		; COMMON base
+	db	0		; .. get
+
+	end
+

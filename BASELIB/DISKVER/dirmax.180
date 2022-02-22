@@ -1,0 +1,55 @@
+	title	Module from library BASE_2 : DIRMAX
+	name	('DIRMAX')
+	include	baselib.lib
+
+; Return max directory entries
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 June 1988
+
+; ENTRY	Accu holds drive code
+;	0 -> A ... 15 -> P
+
+; EXIT	Reg pair HL holds max directory entries
+;	Carry set on illegal drive select
+
+	entry	dirmax
+
+	extrn	curdrv,seldrv
+
+dirmax:
+	push	bc
+	push	de
+	push	af
+	call	curdrv		; Get current drive
+	ld	b,a
+	pop	af
+	push	bc
+	call	seldrv		; Select drive
+	jr	c,illdrv
+	ld	c,.getdpb	; Set function
+	call	BDOS		; Execute function
+	ld	de,DSM		; Point to location
+	add	hl,de
+	ld	e,(hl)		; Get it
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	inc	hl		; Fix it
+	or	a
+illdrv:
+	pop	bc
+	push	af
+	ld	a,b
+	call	seldrv		; Reset selected drive
+	pop	af
+	pop	de
+	pop	bc
+	ret
+
+	end
+

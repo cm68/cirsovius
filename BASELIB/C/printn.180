@@ -1,0 +1,204 @@
+	title	Module from library C_2 : PRINTN
+	name	('PRINTN')
+
+; Execute the UNIX like formatting routine like PRINTF
+; for CP/M compatible FCB convertsion
+;
+; ENTRY	Reg HL points to string to be formatted closed by zero
+;	Reg DE points to control array
+;	Reg BC points to string to be filled
+;	The first byte is the lenght of buffer
+; EXIT	Buffer filled by real string closed by zero
+;	Carry set on overflow
+
+; Special sequences supported:
+; Conversion:
+;	%F Convert to file name FN.T
+;	%D Convert to drive and file name D:FN.T
+;	%U Convert to user area, drive and file name DU:FN.T
+;	%% Convert to singel '%'
+;	   All other sequences untouched
+; Control:
+;	\t Convert to horizontal tabulator
+;	\b Convert to backspace
+;	\f Convert to form feed
+;	\r Convert to carriage return
+;	\n Convert to carriage return and line feed
+;	\\ Convert to single '\'
+;	   All other sequences untouched
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, December 1996
+
+BDOS	equ	0005h
+
+.retdsk	equ	25
+.usrcod	equ	32
+
+.nam	equ	8
+.ext	equ	3
+
+	entry	printn
+
+	ext	$contr,$StCh
+
+printn:
+	push	ix
+	ld	ix,buffer
+	ld	a,(bc)		; Get max length
+	dec	a		; .. fix for zero
+	ld	(ix),a
+	inc	bc
+	call	format		; .. do the job
+	ld	a,(ix)
+	pop	ix
+	or	a		; Test ok
+	ret	nz
+	scf
+	ret
+format:
+	ld	a,(hl)
+	cp	'%'		; Test formatter
+	jr	z,do.param
+	cp	'\'		; Test control
+	call	z,$contr
+..form:
+	call	$StCh		; Store character
+	ret	z		; .. end on zero
+	inc	hl
+	jr	format
+do.param:
+	inc	hl
+	ld	a,(hl)		; Test formatter twice
+	or	a		; Maybe end
+	ret	z		; .. yeap
+	cp	'%'
+	jr	z,..form	; .. give it
+	push	hl		; .. save a bit
+	ex	de,hl
+	ld	e,(hl)		; Get address from array
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	cp	'F'		; Test FN.T only
+	jr	nz,no.FN.T
+	call	StFCB		; .. unpack
+	jr	job.done
+no.FN.T:
+	cp	'D'		; Test D:FN.T
+	jr	nz,no.D_FN.T
+	call	StD.FCB		; Unpack
+	jr	job.done
+no.D_FN.T:
+	cp	'U'		; Test DU:FN.T
+	jr	nz,default
+	call	StDU.FCB	; Unpack
+	jr	job.done
+default:
+	push	af
+	ld	a,'%'
+	call	$StCh		; Put character
+	pop	af
+	call	$StCh
+job.done:
+	pop	hl		; Get back main
+	inc	hl
+	jr	format
+;
+; Convert to file name only
+;
+StFCB:
+	ld	a,.nam
+	call	..stf		; Save name field
+	ld	a,'.'
+	call	$StCh		; Set delimiter
+	ld	a,.ext
+;
+; Store FN.T from FCB in ^HL to BC, length in Accu'
+;
+..stf:
+	ex	af,af'
+	inc	hl
+	ld	a,(hl)
+	res	7,a		; No attribute
+	cp	' '
+	call	nz,$StCh	; .. store non blank
+	ex	af,af'
+	dec	a		; Test end
+	jr	nz,..stf
+	ret			; .. yeap
+;
+; Store D:FN.T from FCB in ^HL to BC, length in Accu'
+;
+StD.FCB:
+	call	stD		; Get and store drive
+st..:
+	ld	a,':'
+	call	$StCh		; Set delimiter
+	jr	StFCB		; .. then process FN.T
+;
+; Store DU:FN.T from FCB in ^HL to BC, length in Accu'
+;
+StDU.FCB:
+	call	stD		; Get and store drive
+	call	stU		; .. get and store user area
+	jr	st..		; .. process FN.T
+;
+; Get and store drive
+;
+stD:
+	ld	a,(hl)		; Get drive
+	dec	a
+	call	m,.get.drv	; .. default, get logged one
+	add	a,'A'
+	call	$StCh		; Set drive
+	ret
+;
+; Get and store user
+;
+stU:
+	push	de
+	ld	e,-1		; .. set get
+	ld	a,.usrcod
+	call	..bdos		; .. get user
+	ld	e,'0'-1		; Init tens
+get.uas:
+	inc	e		; Bump tens
+	sub	10		; .. subtract by ten
+	jr	nc,get.uas
+	push	af		; Save units
+	ld	a,e		; Get tens
+	cp	'0'
+	call	nz,$StCh	; Set high user if one
+	pop	af
+	add	a,'0'+10	; Make ASCII units
+	call	$StCh		; .. store
+	pop	de
+	ret
+;
+; Get logged drive into Accu
+;
+.get.drv:
+	ld	a,.retdsk
+..bdos:
+	push	bc
+	push	de
+	push	hl
+	ld	c,a
+	call	BDOS		; Get what we want
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+
+	dseg
+buffer:
+	ds	1
+
+	end
+

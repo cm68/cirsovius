@@ -1,0 +1,61 @@
+	title	Module from library C_3 : UNLINK
+	name	('UNLINK')
+
+; Erase file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg pair HL points to name of file DU:FN.EXT
+
+; EXIT	If HL holds zero file was erased successfully
+
+	maclib	c.lib
+
+	entry	unlink
+
+	extrn	du$fcb,u$bdos
+
+unlink:
+	ex	de,hl
+	ld	hl,-FCBlen
+	add	hl,sp		; Let some room
+	ld	sp,hl
+	push	hl
+	call	du$fcb		; Convert to FCB
+	jr	nz,p.err	; .. bad
+	pop	de		; Get file block
+	push	de
+	ld	c,.open
+	call	u$bdos		; Open file
+	pop	de
+	inc	a
+	jr	z,_p.err	;.. not there
+	ld	hl,_RO
+	add	hl,de
+	bit	_MSB,(hl)	; Test R/O
+	jr	nz,_p.err	; .. yeap
+	ld	c,.delete
+	call	u$bdos		; Delete file
+	inc	a
+	jr	z,_p.err	; Not possible
+	ld	d,h		; .. set zero
+	ld	e,h
+	jr	p.res
+p.err:
+	pop	hl		; Clean stack
+_p.err:
+	ld	de,_ERR		; .. return error
+p.res:
+	ld	hl,FCBlen
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ex	de,hl
+	ret
+
+	end
+

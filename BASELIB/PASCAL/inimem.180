@@ -1,0 +1,95 @@
+	title	Module from library HILIB_1 : INIMEM
+	name	('INIMEM')
+
+; Language : PASCAL
+
+; Initialize dynamic memory area
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, November 1997
+
+; ENTRY	Reg HL holds first address available
+;	Reg DE holds last  address available
+
+; EXIT	None
+
+	entry	inimem,_inimm,_chkmm,$$HEAP
+
+HeapLen	equ	4
+
+TPATOP	equ	0006h
+
+;
+; Init heap
+; ENTRY	Reg HL points to 1st free location
+;	Reg DE points to lst free location
+; EXIT	Carry set indicates error
+;
+inimem:
+	ld	($$HEAP+2),hl	; Init 1st address
+	ld	($$HEAP+4),de	; .. last address
+	call	memok?		; Test memory ok
+	ret	c		; .. nope, error
+_inimm:
+	ld	($$HEAP),hl
+	ld	b,HeapLen
+IP.Loop:
+	ld	(hl),0		; .. clear 4 bytes
+	inc	hl
+	djnz	IP.Loop
+	ret
+;
+; Simple test of addresses
+;
+; **NOTE** User must be aware of min and max address
+;
+memok?:
+	ld	a,l		; Verify not zero
+	or	h
+	scf
+	ret	z		; .. error
+	push	hl
+	or	a
+	sbc	hl,de		; Test against top
+	pop	hl
+	ccf
+	ret	c		; .. error
+	push	hl
+	push	de
+	inc	de
+	ld	hl,(TPATOP)
+	sbc	hl,de		; .. again
+	pop	de
+	pop	hl
+	ret
+;
+; Verify no zero heap pointer
+; EXIT	First pointer copied to reg HL and reg IX
+;	On error carry will be set and returns
+;	to previous call level - If so, reg HL holds zero
+;
+_chkmm:
+	ld	hl,($$HEAP+2)	; Get first heap address
+	push	hl
+	pop	ix		; .. copy
+	ld	a,l
+	or	h		; Verify not NIL
+	ret	nz
+	pop	af		; Clean stack
+	scf			; .. set error
+	ret			; .. exit
+
+	dseg
+
+$$HEAP:
+	ds	2		; +0 :: HEAPPTR : Current heap
+	dw	0		; +2 :: HEAPFRE : First heap address
+	ds	2		; +4 :: HEAPTOP : Top of heap
+	ds	2		; +6 :: HEAPSCR : Scratch address
+
+	end
+

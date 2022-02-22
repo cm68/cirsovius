@@ -1,0 +1,59 @@
+	title	Module from library C_2 : UBDOS
+	name	('UBDOS')
+
+; Do file OS call with user setting
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49 040 4223247
+
+;		Version 1.0 July 1994
+
+; ENTRY	Reg C holds OS function number
+;	Reg pair DE points to file block
+
+; EXIT	Accu and reg HL hold resulting code
+
+	maclib	c.lib
+
+	entry	u$bdos
+
+	extrn	$bdos
+
+u$bdos:
+	ld	hl,_U
+	add	hl,de
+	ld	a,(hl)		; Get user
+	or	a
+	jp	z,$bdos		; .. none, so go do OS call
+	push	bc
+	push	de
+	push	af
+	ld	c,.usrcod
+	ld	e,_get
+	call	$bdos		; Get old user
+	ex	(sp),hl
+	ld	e,h
+	dec	e		; .. fix user
+	ld	c,.usrcod
+	call	$bdos		; .. set new area
+	pop	hl
+	pop	de
+	pop	bc
+	push	hl
+	call	$bdos		; Do OS call
+	ex	(sp),hl
+	push	bc
+	push	de
+	ld	e,l		; Get old user
+	ld	c,.usrcod
+	call	$bdos		; .. set it
+	pop	de
+	pop	bc
+	pop	hl
+	ld	a,l
+	ret
+
+	end
+

@@ -1,0 +1,246 @@
+	title	Module from library HIFLOAT_5 : FLSIN
+	name	('FLSIN')
+	include	baselib.lib
+
+; Calculate the COSINE and SINE
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Co-Sine in regs DE,HL
+
+	entry	?flsin,?flcos
+
+	ext	?fladd,?flsqar,?flmul,?fldiv,?flfrac
+	ext	?sign,?num1,?num2,?num3,?num4
+
+ret.1:	
+	ld	hl,4000h	; Return 1.0
+	ld	d,l
+	ld	e,l
+	ret
+?flcos:	
+	bit	zero,h		; Test zero argument
+	jr	z,ret.1
+	ld	a,d
+	cp	0f3h
+	jp	m,ret.1		; .. and range
+	call	fix.tranc
+	ld	b,0
+	jr	nz,sk.cos
+	ld	b,SIGNB
+	call	fix.mant
+sk.cos:	
+	ld	a,d
+	add	a,2		; Fix exponent
+	ex	af,af'
+	ld	a,2
+	jr	trancesnd.go
+?flsin:	
+	bit	zero,h		; Test zero argument
+	ret	z
+	ld	a,d
+	cp	0f3h
+	ret	m
+	push	hl
+	call	fix.tranc
+	jr	nz,sk.sin
+	call	fix.mant
+	xor	a
+sk.sin:	
+	ex	af,af'
+	xor	a
+	pop	bc
+trancesnd.go:	
+	ex	af,af'
+	xor	b
+	cpl
+	and	SIGNB
+	ld	(?sign),a	; Save sign
+	ld	a,d
+	cp	0feh
+	call	z,fix.mant	; Check range of exponent
+	ex	af,af'
+	add	a,a
+	ex	af,af'
+	cp	0fdh
+	jr	nz,sk.tranc
+	call	fix.mant
+sk.tranc:	
+	cp	0fch
+	ex	af,af'
+	add	a,a
+	ex	af,af'
+	jr	nz,no.sub
+	ex	af,af'
+	inc	a
+	ex	af,af'
+	ld	bc,4000h	; Load 0.125
+	push	bc
+	ld	b,0fdh
+	push	bc
+	set	sign,h
+	call	?fladd		; Subtract
+no.sub:	
+	ex	af,af'
+	exx
+	ld	l,a
+	ld	h,0
+	ld	de,sin.tab
+	add	hl,de
+	ld	a,(hl)
+	ld	(?sign+1),a	; Save resulting value
+	exx
+	ld	(?num1),de
+	ld	(?num1+2),hl
+	call	?flsqar
+	push	hl
+	push	de
+	ld	bc,07a3bh	; Load 1.90986
+	push	bc
+	ld	bc,00021h
+	push	bc
+	ld	bc,04d67h	; Load 2.41886
+	push	bc
+	ld	bc,00157h
+	push	bc
+	ld	bc,0e144h	; Load -15.1982
+	push	bc
+	ld	bc,000b2h
+	push	bc
+	call	?fladd		; Execute calculations
+	call	?fldiv
+	call	?fladd
+	ld	(?num3),de
+	ld	(?num3+2),hl
+	call	?fldiv
+	ld	c,h
+	ld	a,h
+	xor	SIGNB
+	ld	h,a		; Get sign
+	ld	(?num2),de
+	ld	(?num2+2),hl
+	ld	h,c
+	push	hl
+	push	de
+	ld	de,(?num3)
+	ld	hl,(?num3+2)
+	call	?fladd
+	ld	(?num4),de
+	ld	(?num4+2),hl
+	ld	a,(?sign+1)
+	srl	a
+	jr	c,doub.cy	; Check previous set up
+	or	a
+	jr	nz,not.0
+	ld	de,(?num1)
+	ld	hl,(?num1+2)
+	inc	d
+sin.end:	
+	call	div.old
+set.result:	
+	ld	a,(?sign)
+	or	h		; Get result sign
+	ld	h,a
+	ret
+not.0:
+	ld	de,(?num3)
+	ld	hl,(?num3+2)
+	push	hl
+	push	de
+	ld	de,(?num2)
+	ld	hl,(?num2+2)
+	call	?fladd
+	jr	sin.end
+doub.cy:	
+	ld	hl,05a82h	; Load 0.707107
+	ld	de,0ff79h
+	push	hl
+	push	de
+	inc	d
+	or	a
+	jr	nz,set.sign
+	set	sign,h
+set.sign:	
+	push	hl
+	push	de
+	ld	de,(?num2)
+	ld	hl,(?num2+2)
+	jr	nz,no.toggle
+	ld	a,h		; Toggle sign
+	xor	SIGNB
+	ld	h,a
+no.toggle:	
+	push	hl
+	push	de
+	ld	hl,(?num1+2)
+	ld	de,(?num1)
+	call	?fladd		; Calculate
+	call	?flmul
+	call	div.old
+	call	?fladd
+	jr	set.result
+;
+; Divide old number
+;
+div.old:	
+	push	hl
+	push	de
+	ld	hl,(?num4+2)
+	ld	de,(?num4)
+	call	?fldiv
+	ret
+;
+; Fix mantissa
+;
+fix.mant:	
+	ld	a,e		; Get LSByte
+mant.loop:	
+	dec	d		; Fix exponent
+	add	a,a		; Shift mantissa
+	adc	hl,hl
+	jr	z,null.mant
+	bit	zero,h		; Test zero
+	jr	z,mant.loop	; .. shift till set
+mant.end:	
+	ld	e,a
+	ex	af,af'
+	inc	a
+	ex	af,af'
+	ld	a,d		; Bring back exponent
+	ret
+null.mant:	
+	or	a		; Test zero LSByte
+	jr	nz,mant.loop
+	ld	d,a
+	jr	mant.end
+;
+; Fix argument
+;
+fix.tranc:	
+	push	af
+	res	sign,h		; Make positive
+	ld	bc,0517ch	; Load 0.159155
+	push	bc
+	ld	bc,0fdc0h
+	push	bc
+	call	?flmul		; Multiply
+	call	?flfrac		; .. get fraction
+	pop	af
+	ex	af,af'
+	ld	a,d
+	inc	a		; Return fixed exponent
+	ret
+
+	dseg
+
+sin.tab:	
+	db	0,1,3,2,2,3,1,0,2,3,1,0,0,1,3,2
+
+	end
+

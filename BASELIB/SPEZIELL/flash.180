@@ -1,0 +1,132 @@
+	title	Module from library HILIB_3 : FLASH
+	name	('FLASH')
+	include	baselib.lib
+
+; Language : None
+
+; Flash text on screen till user key detected
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, December 1987
+
+; ENTRY	Reg L holds X and reg H holds Y position of cursor
+;	Reg DE holds two messages, the flash and constant
+;	message. Both must be closed by zero
+;	Reg BC points to four element control string, all
+;	closed by zero:
+;		1 - Make cursor invisible
+;		2 - Make cursor   visible
+;		3 - Turn invers on
+;		4 - Turn invers off
+
+; EXIT	None
+
+	entry	flash
+
+	ext	@leng,strbi0,delbrk,gotoxy,conchb
+
+flash:
+	ld	(cursor),hl	; Save cursor
+	push	bc
+	pop	hl
+	ld	(invis),hl	; .. and all text pointers
+	ld	bc,-1
+	ld	a,0
+	cpir			; Get dummy search
+	ld	(visib),hl	; .. to select substrings
+	cpir
+	ld	(vidon),hl
+	cpir
+	ld	(vidoff),hl
+	ex	de,hl		; Get messages
+	ld	(strmes),hl
+	push	hl
+	cpir
+	ld	(endmes),hl
+	call	@leng		; .. and their length
+	ld	a,b
+	ld	(endlen),a
+	pop	hl
+	call	@leng
+	ld	a,b
+	ld	(strlen),a
+	ld	de,(invis)
+	call	strbi0		; Cursor invisible
+@flon:
+	ld	c,on		; Set switch
+@flop:
+	call	doflsh		; Flash
+	jr	c,@eofls
+	ld	a,c		; Test switch state
+	cp	off
+	jr	z,@flon
+	ld	c,off
+	jr	@flop
+@eofls:
+	ld	c,reset
+	call	doflsh		; Reset flash
+	ld	de,(visib)
+	call	strbi0		; Cursor visible
+setcur:
+	ld	hl,(cursor)
+	jp	gotoxy		; Set cursor
+doflsh:
+	call	setcur		; Position cursor
+	ld	a,c
+	cp	on		; Test mode
+	jr	nz,fls1
+	ld	de,(vidon)	; Set ON
+	call	strbi0
+	ld	de,(strmes)
+	call	strbi0
+	ld	de,(vidoff)
+	call	strbi0
+	jr	delcom
+fls1:
+	cp	off
+	jr	nz,resfl
+	ld	a,(strlen)
+	ld	b,a
+	call	blnk		; Set OFF
+delcom:
+	ld	de,(endmes)
+	call	strbi0
+	ld	hl,200
+	jp	delbrk		; Delay
+resfl:
+	ld	a,(strlen)
+	ld	b,a
+	ld	a,(endlen)
+	add	a,b		; Set length
+	ld	b,a
+blnk:
+	ld	e,' '
+	jp	conchb		; Output blanks
+
+	dseg
+
+cursor:
+	ds	2		; Entry cursor
+invis:
+	ds	2		; Text pointer
+visib:
+	ds	2
+vidon:
+	ds	2
+vidoff:
+	ds	2
+strmes:
+	ds	2
+endmes:
+	ds	2
+strlen:
+	ds	1
+endlen:
+	ds	1
+
+	end
+

@@ -1,0 +1,89 @@
+	title	Module from library BASE_2 : ERRIDX
+	name	('ERRIDX')
+	include	baselib.lib
+
+; Map file error to index
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 September 1991
+
+; ENTRY	IORES set properly
+;	IORES   holds error code
+;	IORES+1 holds extended error code
+
+; EXIT	Reg pair DE holds mapped index
+;	Zero flag set indicates no error
+
+; If IORES= 0 then DE returns dummy
+; If IORES=-1 then DE returns <IORES+1>*2
+;             Else DE returns fixed <IORES>*2
+
+; Index returned:
+
+; Physical error (IORES=-1)
+
+;  0 ->	 0 : No error found
+;  1	 2 : Disk I/O error
+;  2	 4 : R/O disk
+;  3	 6 : R/O file, illegal access
+;  4	 8 : Drive error
+;  7	10 : File password error
+;  8	12 : File already exists
+;  9	14 : FCB contains illegal characters (? wildcard)
+
+; Standard error
+
+;  1 ->	16 : EOF or no DIR space
+;  2	18 : No data block
+;  3	20 : Cannot close extent
+;  4	22 : Seek unwritten extent
+;  5	24 : Dir full
+;  6	26 : RRN overflow
+;  9	28 : Invalid FCB
+; 10	30 : Media changed
+;
+
+	entry	erridx
+
+	ext	iores
+
+erridx:
+	call	errget		; Get index
+	or	a		; Fix return
+	ret
+errget:
+	ld	a,(iores)	; Load error code
+	ld	hl,(iores)	; .. and extended error
+	or	a		; Test any error
+	ret	z		; .. nope
+	ld	e,h
+	sla	e
+	cp	-1		; Test error condition
+	jr	nz,error
+	push	af
+	ld	a,e
+	cp	5*2		; Test range
+	jr	c,..less
+	sub	2*2		; .. fix
+	ld	e,a
+..less:
+	pop	af
+	ret
+error:
+	push	af
+	cp	7		; Test range
+	jr	c,.less
+	sub	2		; .. fix
+.less:
+	add	a,7
+	add	a,a
+	ld	e,a
+	pop	af
+	ret
+
+	end
+

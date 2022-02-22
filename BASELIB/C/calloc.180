@@ -1,0 +1,52 @@
+	title	Module from library C_3 : CALLOC
+	name	('CALLOC')
+
+; Allocate memory and clear it
+
+; ENTRY	Reg HL holds bytes to be requested
+
+; EXIT	Reg HL holds pointer to memory.
+;	If not enough memory available, reg HL returns 0
+
+; NOTE	Routine assumes stack growing down from top of memory
+;	Location at SBRK-2 holds number of bytes to be reserved
+;	for the stack - it defaults to 1024
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1994
+
+	entry	Calloc
+
+	extrn	malloc
+
+calloc:
+	push	bc
+	call	_calloc
+	pop	bc
+	ret
+_calloc:
+	push	hl		; Save length
+	call	malloc		; Get memory
+	pop	bc
+	ld	a,l
+	or	h		; Test success
+	ret	z		; .. nope
+	dec	bc
+	ld	(hl),0		; Init zero
+	ld	a,c
+	or	b
+	ret	z		; Only one location
+	push	hl
+	ld	e,l
+	ld	d,h
+	inc	de
+	ldir			; .. clear memory
+	pop	hl
+	ret
+
+	end
+

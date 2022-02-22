@@ -1,0 +1,71 @@
+	title	Module from library PULL_DOWN_2 : PDMXOS
+	name	('PDMXOS')
+
+; Init key translation package depending on XBIOS system
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: 040/4223247
+
+;		Version 1.0 April 1995
+
+; ENTRY	-
+
+; EXIT	P@@GTK holds address key translation table
+;	P@@GTT holds sequence for token table
+;	Carry set on OS error
+
+; NOTE: Before calling ANY window routine you MUST init the
+; 	vectors by calling PDMVEC otherwise application enters
+;	BDOS warm start calling (X)BIOS function
+
+; *** Currently XBIOS version 1.4 and 1.8 are supported
+
+cdvers	equ	00e3h
+
+	entry	pdmxos,p@@gtk,p@@gtt
+
+	ext	pdmxbs
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmxos:
+	call	pdmxbs		; Get version
+	dw	cdvers
+	dec	b		; Verify major 1.x
+	jr	nz,ErrOS	; .. should be
+	ld	a,c		; Get minor
+	ld	hl,OS.1.4	; Init vector
+	cp	4		; Test 1.4
+	jr	z,ini.OS
+	ld	hl,OS.1.8
+	cp	8		; Test 1.8
+	jr	z,ini.OS
+ErrOS:
+	scf			; Indicate error
+	ret
+ini.OS:
+	ld	de,p@@gtk
+	ld	bc,p@@len
+	ldir			; .. set code
+	or	a
+	ret
+
+p@@gtk:
+	ds	2
+p@@gtt:
+	ds	3
+p@@len	equ	$-p@@gtk
+
+OS.1.4:
+	dw	1780h
+	ld	hl,(290fh)
+OS.1.8:
+	dw	4648h
+	ld	hl,570ah
+
+	end
+

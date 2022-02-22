@@ -1,0 +1,245 @@
+	title	Convert (S)PR(L) file to overlay module
+	name	('PRL2OVR')
+	include	base80.lib
+
+; This program converts an SPR file to an overlay module.
+
+; Call it:
+;		PRL2OVR prl_file [ovm_file]
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.4 April 1989
+
+	ext	open,creatd,close,delete
+	ext	dskred,dskwrt
+	ext	indexa
+	ext	string
+
+	ld	sp,(TPATOP)	; Load stack
+	call	SetupNames	; Set up file names
+	ld	de,FCB+.fdrv+.fname
+	ld	hl,$$SPR
+	call	setext		; Set default extensions
+	ld	de,FCB2+.fdrv+.fname
+	ld	hl,$$OVM
+	call	setext
+	call	DiffName	; Verify different FCBs
+	ld	hl,FCB2
+	ld	de,OFCB
+	ld	bc,dirlen
+	ldir			; Unpack 2nd file
+	ld	de,FCB
+	call	open		; Find source file
+	jp	c,Err02
+	ld	de,OFCB
+	call	creatd		; Create destination file
+	jp	c,Err03
+	call	RdHead		; Read header of PRL file
+	call	WrHead		; Write new head
+	call	CpyCode		; Now write data
+	ld	de,$RDY
+	call	string		; Tell ready
+	jp	OS
+;
+; Set up file names
+;
+SetupNames:
+	ld	hl,FCB+.fdrv
+	ld	a,(hl)
+	cp	' '		; Verify first name
+	jp	z,Err00
+	ld	de,FCB2+.fdrv
+	ld	a,(de)
+	cp	' '		; Test second name
+	ret	nz		; Ok
+	ld	bc,.fname
+	ldir			; Set default name
+	ret
+;
+; Set default extension
+;
+setext:
+	ld	a,(de)		; Get extension character
+	cp	' '		; Test defined
+	ret	nz		; Yeap
+	ld	bc,.fext
+	ldir			; Set default
+	ret
+;
+; Verify different FCBs
+;
+DiffName:
+	ld	hl,FCB
+	ld	de,FCB2
+	ld	b,.fdrv+.fname+.fext
+DNL:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	ret	nz		; Ok
+	inc	hl
+	inc	de
+	djnz	DNL
+	jp	Err01		; Should be different
+;
+; Read header of PRL file
+;
+RdHead:
+	ld	de,$RDHD
+	call	string		; Tell reading
+	ld	b,2		; Two records to be read
+	ld	de,FCB
+RdHloop:
+	call	dskred		; Read a record
+	jp	c,Err04		; Invalid header
+	ld	a,(DMA)		; First byte always 00
+	or	a
+	jp	nz,Err05
+	ld	hl,(DMA+1)	; Fetch word, maybe length
+	push	hl
+	djnz	RdHloop
+	pop	af		; Throw away value from 2nd record
+	pop	hl		; Get length of code
+	ld	(DMA),hl
+	ld	a,l
+	or	h		; Verify > 0
+	ret	nz
+	jp	Err06
+;
+; Write new head of overlay module
+;
+WrHead:
+	ld	de,$WRHEAD
+	call	string		; Tell writing
+	ld	hl,DMA+2
+	ld	de,DMA+2+1
+	ld	bc,reclng-1
+	ld	(hl),0
+	ldir			; Clear record
+WrDat:
+	ld	de,OFCB
+	call	dskwrt		; Write record
+	ret	nc		; Well done
+	jp	Err07
+;
+; Copy code to overlay module
+;
+CpyCode:
+	ld	de,$CPYCOD
+	call	string		; Tell copying
+CpyLoop:
+	ld	de,FCB
+	call	dskred		; Read a record
+	jr	c,EndOfFile
+	call	WrDat
+	jr	CpyLoop
+EndOfFile:
+	ld	de,OFCB
+	call	close		; Close file
+	ret	nc
+	jp	Err08
+;
+; Error routines
+;
+; -- Without deleting file --
+;
+Err00:
+	ld	a,0
+	jr	DoErr
+Err01:
+	ld	a,1
+	jr	DoErr
+Err02:
+	ld	a,2
+	jr	DoErr
+;
+; -- With deleting file --
+;
+Err03:
+	ld	a,3+MSB
+	jr	DoErr
+Err04:
+	ld	a,4+MSB
+	jr	DoErr
+Err05:
+	ld	a,5+MSB
+	jr	DoErr
+Err06:
+	ld	a,6+MSB
+	jr	DoErr
+Err07:
+	ld	a,7+MSB
+	jr	DoErr
+Err08:
+	ld	a,8+MSB
+	jr	DoErr
+DoErr:
+	push	af
+	res	7,a
+	ld	hl,$ERTAB
+	call	indexa		; Get message from table
+	call	string		; Print it
+	pop	af
+	add	a,a		; Test file option
+	call	c,DelFile	; Yeap, delete file
+	jp	OS
+;
+; Close and delete destination file
+;
+DelFile:
+	ld	de,OFCB
+	call	close		; Close destination file
+	call	delete		; Delete file
+	ret
+
+	dseg
+$ERTAB:
+	dw	$Err00,$Err01,$Err02,$Err03,$Err04
+	dw	$Err05,$Err06,$Err07,$Err08
+$Err00:
+	db	'Missing file name'
+	db	cr,lf,lf
+	db	'This program converts an SPR file to an overlay module.'
+	db	cr,lf,lf
+	db	'Call it:'
+	db	cr,lf
+	db	tab,tab,'PRL2OVR prl_file [ovm_file]',eot
+$Err01:
+	db	'File names must be different',eot
+$Err02:
+	db	'Cannot find source file',eot
+$Err03:
+	db	'Cannot find destination file',eot
+$Err04:
+	db	'Invalid header in source file',eot
+$Err05:
+	db	'Invalid code in source file',eot
+$Err06:
+	db	'Length of code is 0',eot
+$Err07:
+	db	'Disk write error',eot
+$Err08:
+	db	'File close error',eot
+$$SPR:
+	db	'SPR'
+$$OVM:
+	db	'OVM'
+$RDY:
+	db	'Conversion complete',eot
+$RDHD:
+	db	'Reading header...'
+	db	cr,lf,eot
+$CPYCOD:
+	db	'Copying code...'
+	db	cr,lf,eot
+$WRHEAD:
+	db	'Writing overlay header...'
+	db	cr,lf,eot
+OFCB:
+	ds	fcblen
+
+	end
+

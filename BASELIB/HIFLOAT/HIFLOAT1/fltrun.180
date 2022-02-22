@@ -1,0 +1,50 @@
+	title	Module from library HIFLOAT_1 : FLTRUN
+	name	('FLTRUN')
+	include	baselib.lib
+
+; Truncate function
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Number to be truncated in regs DE,HL
+
+; EXIT	Reg HL holds the greatest integer less than
+;	or equal to input number
+
+	entry	?fltrnc
+
+?fltrnc:
+	bit	zero,h		; Test zero number
+	ret	z		; .. end if so
+	ld	a,SIGNB		; Test < 0
+	and	h
+	ld	c,a		; Save sign
+	res	sign,h		; Make number > 0
+	ld	a,exp.max	; Test range of exponent
+	sub	d
+	jr	z,trunc.equ
+	jp	m,trunc.zero	; Out of range
+	ld	b,a
+trunc.shf:	
+	srl	h		; Shift mantissa
+	rr	l
+	djnz	trunc.shf
+trunc.equ:	
+	inc	c		; Test sign
+	ret	p
+	ex	de,hl
+	ld	hl,0
+	or	a
+	sbc	hl,de		; Negate result if < 0
+	ret
+trunc.zero:	
+	ld	hl,0		; Return zero on underflow
+	ret
+
+	end
+

@@ -1,0 +1,95 @@
+	title	Module from library HIFLOAT_4 : FLLN
+	name	('FLLN')
+	include	baselib.lib
+
+; Calculate the NATURAL LOGARITHM
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Logarithm in regs DE,HL
+
+	entry	?fllog
+
+	ext	?fladd,?flmul,?fldiv,?cbinfl,flperr,?sign
+
+SYS.ERR:
+	ld	l,true
+	ld	h,10
+	ld	(flperr),hl	; Set error
+	ret
+?fllog:
+	ld	a,false
+	ld	(flperr),a	; Reset error
+	ld	a,h
+	dec	a
+	jp	m,SYS.ERR
+	ld	a,d
+	ld	(?sign),a	; Save exponent
+	ld	d,0
+	ld	bc,04073h	; Load 4.02823
+	push	bc
+	ld	bc,002a1h
+	push	bc
+	ld	bc,0c4d2h	; Load -34.4107
+	push	bc
+	ld	bc,00545h
+	push	bc
+	push	hl
+	push	de
+	ld	bc,05309h	; Load 10.3797
+	push	bc
+	ld	bc,00390h
+	push	bc
+	ld	bc,0c103h	; Load -8.12650
+	push	bc
+	ld	bc,00314h
+	push	bc
+	push	hl
+	push	de
+	ld	bc,041a3h	; Load 2.05121
+	push	bc
+	ld	bc,00189h
+	push	bc
+	ld	bc,0c43ah	; Load -0.266520
+	push	bc
+	ld	bc,0fea0h
+	push	bc
+	ld	bc,06ccch	; Load 0.424995
+	push	bc
+	ld	bc,0fe7ch
+	push	bc
+	call	?fladd		; Calculate a lot
+	call	?fldiv
+	call	?fladd
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+	push	hl
+	push	de
+	ld	a,(?sign)
+	ld	l,a
+	ld	h,0		; Make 16 Bit exponent
+	or	a
+	jp	p,pos.exp
+	dec	h
+pos.exp:	
+	call	?cbinfl		; Convert exponent to FLP
+	ld	bc,058b9h	; Load 0.693147
+	push	bc
+	ld	bc,0ff0ch
+	push	bc
+	call	?flmul		; .. last fix
+	call	?fladd
+	ret
+
+	end
+

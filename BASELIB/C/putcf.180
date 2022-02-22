@@ -1,0 +1,163 @@
+	title	PUTCF
+	subttl	Module from library C_4 : PUTCF
+	maclib	SYSEQU.LIB
+
+; FILE:	PUTCF.MAC
+; DATE: 820819:1305
+; FOR:	Write 1 char from A into channel C
+
+; Put char on specified channel
+; ENTRY	: Accu contains char to write
+;	  Reg C contains channel no.
+;	  (0 is Console, >15 is Printer)
+
+; Offset equates
+
+$page	equ	0
+$line	equ	1
+$char	equ	2
+
+	entry	putcf,fndcnt
+
+	ext	fndbuf,cerror,setbf,mtbuf,adda
+	ext	conout,prnout
+
+putcf:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	l,a
+	ld	a,c
+	and	00011111b	; Check console
+	jr	z,.conout
+	and	00001111b	; .. or printer
+	jr	z,.lstout
+	call	fndbuf		; Get disk buffer
+	inc	a
+	jr	z,pcf0
+	call	cerror
+	msg	<'PUTCF: Writing to input file'>
+pcf0:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+	add	hl,bc
+	pop	af
+	push	af
+	ld	(hl),a		; Put character into buffer
+	ex	de,hl
+	inc	bc
+	ld	a,b
+	or	c		; Check new read
+	jr	nz,pcf1
+;
+; If we fall through here, buffer is full
+;
+	inc	hl
+	call	setbf
+	call	mtbuf
+	jr	pcf2
+pcf1:
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	jr	pcf2
+.conout:
+	ld	a,l
+	call	conout
+	jr	pcf2
+.lstout:
+	ld	a,l
+	call	prnout
+;
+; The common character checker
+;
+pcf2:
+	pop	af
+	pop	bc
+	push	bc
+	push	af
+	sub	tab
+	jr	z,tabr		; Check TAB
+	dec	a
+	jr	z,line		; .. LF
+	sub	2
+	jr	z,page		; .. FF
+	dec	a
+	jr	z,carr		; .. CR
+	ld	a,$char
+	jr	.bump		; Bump character count
+;
+; TAB found - fix character count
+;
+tabr:
+	ld	a,$char
+	call	fndcnt
+	ld	a,(hl)
+	and	11111000b	; Strip column
+	add	a,8		; Set next
+	ld	(hl),a
+	jr	pcf3
+;
+; LF found - fix line count
+;
+line:
+	ld	a,$line
+.bump:
+	call	fndcnt
+	inc	(hl)
+	jr	pcf3
+;
+; FF found - fix page count and reset line count
+;
+page:
+	ld	a,$page
+	call	fndcnt
+	inc	(hl)
+	inc	hl
+	jr	.null
+;
+; CR found - reset character count
+;
+carr:
+	ld	a,$char
+	call	fndcnt
+.null:
+	ld	(hl),0
+pcf3:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Find block of 3 bytes:
+; Page, Line and Char counters for PUTCF
+; ENTRY	: Reg C holds channel no.
+;	  Accu holds offset of 0, 1 or 2
+;
+fndcnt:
+	ld	hl,cntrs	; Point to control table
+	add	a,c
+	add	a,c
+	add	a,c		; Get channel *3
+	call	adda		; Make pointer real
+	ret
+;
+; Bytes arranged in following order: Page - Line - Char
+; (Note extra entry for list device)
+;
+	dseg
+cntrs:
+	rept	17
+	db	0,0,0
+	endm
+
+	end
+

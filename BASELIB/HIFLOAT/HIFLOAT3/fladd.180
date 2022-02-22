@@ -1,0 +1,160 @@
+	title	Module from library HIFLOAT_3 : FLADD
+	name	('FLADD')
+	include	baselib.lib
+
+; Floating point ADD and SUBTRACT
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Operand 1 on stack
+;	Operand 2 in regs DE,HL
+
+; EXIT	Result OP1+-OP2 in regs DE,HL
+
+	entry	?fladd,?flsub
+
+	ext	flperr,?ovfl
+
+op2.gt.op1:	
+	pop	de
+	jr	c,pop.op2
+pop.op1:	
+	pop	af
+ret.op1:	
+	pop	bc		; Save PC
+	pop	de		; Pop operand 1 as result
+	pop	hl
+	push	bc
+	ret
+;
+; Entry for SUB
+;
+?flsub:
+	ld	a,SIGNB		; Change sign of operand 2
+	xor	h
+	ld	h,a
+;
+; Entry for ADD
+;
+?fladd:
+	ld	a,false
+	ld	(flperr),a	; Reset error
+	bit	zero,h		; Test operand 2 = 0
+	jr	z,ret.op1
+	ld	iy,0
+	add	iy,sp
+	ld	a,h
+	ld	b,(iy+mant.hi)
+	bit	zero,b		; Test operand 1 = 0
+	jr	z,ret.op2
+	xor	b		; Get resulting sign
+	push	af
+	push	de
+	ld	a,d
+	ld	d,b
+	ld	b,e
+	ld	e,(iy+mant.mid)
+	sub	(iy+exp)	; Check difference
+	jp	pe,op2.gt.op1
+	jp	m,op1.gt.op2
+	ld	c,(iy+mant.lo)
+	jr	z,op1.eq.op2
+add.on:	
+	push	hl
+	res	sign,d		; No signs
+	res	sign,h
+shift:	
+	srl	d		; Make exponents equal
+	rr	e
+	rr	c
+	dec	a
+	jr	nz,shift
+	ld	a,b
+	bit	sign,(iy-sign.)	; Test resulting sign
+	jr	nz,neg.res
+mantissa.set:	
+	add	a,c		; Get result
+	adc	hl,de
+	pop	bc
+	pop	de
+	jp	po,skp.fix
+	srl	h
+	rr	l
+	rra
+	inc	d
+	jp	pe,?ovfl	; Test overflow
+skp.fix:	
+	ld	e,a
+	ld	a,b
+	and	msb
+	or	h
+	ld	h,a
+pop.op2:	
+	pop	af
+ret.op2:	
+	pop	bc		; Dummy pop, return OP 2
+	pop	af		; (Or result)
+	pop	af
+	push	bc
+	ret
+neg.res:	
+	sub	c
+	sbc	hl,de
+pop.2:	
+	pop	bc
+pop.1:	
+	pop	de
+normalize:	
+	bit	zero,h		; Check normalized
+	jr	nz,skp.fix
+	add	a,a		; Fix mantissa
+	adc	hl,hl
+	dec	d		; .. and exponent
+	jp	po,normalize	; .. check overflow
+	jp	?ovfl
+op1.gt.op2:	
+	ld	c,b
+	ld	b,(iy+exp)	; Save result
+	ld	(iy-res.),b
+	ld	b,(iy+mant.lo)
+	ex	de,hl
+	neg
+	jr	add.on		; Go add
+op1.eq.op2:	
+	ld	a,b
+	push	hl
+	res	sign,h		; Reset signs
+	res	sign,d
+	bit	sign,(iy-sign.)
+	jr	z,mantissa.set	; Start if > 0
+	sub	c
+	sbc	hl,de
+	jr	nz,tst.1	; Check conditions
+	or	a
+	jr	z,tst.2
+tst.1:	
+	jr	nc,pop.2
+	ld	de,0
+	ex	de,hl
+	ld	c,a
+	pop	af
+	cpl
+	ld	b,a		; Fix a bit
+	xor	a
+	sub	c
+	sbc	hl,de
+	jr	pop.1		; Go normalize
+tst.2:	
+	ld	d,h
+	ld	e,h
+	pop	af		; Fix stack
+	pop	af
+	jr	pop.op2		; Get result
+
+	end
+

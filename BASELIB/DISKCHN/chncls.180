@@ -1,0 +1,86 @@
+	title	Module from library BASE_6 : CHNCLS
+	name	('CHNCLS')
+	include	baselib.lib
+
+; Close channel
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 February 1987
+
+; ENTRY	Register C holds channel number 0 .. max
+;	If C=-1 all channels will be closed
+
+; EXIT	Carry set indicates  error - channel out of range
+
+	entry	chncls
+
+	extrn	@chacc,@chusr,wrpblk,upteof,close
+
+chncls:
+	xor	a
+	ld	(carry),a	; Reset carry
+	ld	a,c		; Test close all
+	cp	-1
+	jr	nz,sincls
+	ld	c,0		; Set start
+chlop:
+	push	hl
+	call	@chacc		; Test overflow
+	pop	hl
+	jr	nc,doclos
+	ld	a,(carry)
+	rra			; Get end
+	ret
+doclos:
+	call	sincls		; Close this channel
+	ld	a,0
+	adc	a,0		; Save carry
+	ld	(carry),a
+	inc	c
+	jr	chlop
+sincls:
+	push	hl
+	call	@chacc		; Get channel
+	jr	c,xfer		; End on overflow
+	jr	nz,xfer		; And not open
+	ld	(hl),-1		; Reset active flag
+	inc	hl
+	ld	a,(hl)
+	or	a		; Test read
+	jr	nz,xfer		; Skip it
+	inc	hl
+	push	de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl		; Get block address
+	pop	de
+	ld	(wrpblk),hl
+	call	upteof		; Fill record
+	jr	c,xfer
+	push	de
+	ld	de,3
+	add	hl,de		; Get FCB
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	bc
+	ld	bc,close	; Then close file
+	call	@chusr
+	pop	bc
+	pop	de
+xfer:
+	pop	hl
+	ret
+
+	dseg
+
+carry:
+	ds	1		; Save carry here
+
+	end
+

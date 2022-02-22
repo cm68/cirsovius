@@ -1,0 +1,54 @@
+	title	Module from library HIFLOAT_4 : FLSQRT
+	name	('FLSQRT')
+	include	baselib.lib
+
+; Calculate the SQUARE ROOT
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Square root in regs DE,HL
+
+	entry	?flsqrt
+
+	ext	?fladd,?fldiv,flperr,?num1
+
+SYS.ERR:
+	ld	l,true
+	ld	h,10
+	ld	(flperr),hl	; Set error
+	ret
+?flsqrt:
+	ld	a,false
+	ld	(flperr),a	; Reset error
+	ld	a,h		; Test negative sign
+	or	a
+	jp	m,SYS.ERR	; .. error
+	ret	z		; End on zero
+	ld	(?num1+2),de	; Save number
+	ld	(?num1),hl
+	sra	d		; Init exponent
+	ld	b,4		; .. and loop
+sqr.loop:	
+	push	bc
+	push	hl
+	push	de
+	ld	bc,(?num1)
+	push	bc
+	ld	bc,(?num1+2)
+	push	bc
+	call	?fldiv		; Build the square root
+	call	?fladd
+	dec	d		; .. count down exponent
+	pop	bc
+	djnz	sqr.loop
+	ret
+
+	end
+

@@ -1,0 +1,46 @@
+	title	Module from library BASE_2 : FILNAM
+	name	('FILNAM')
+	include	baselib.lib
+
+; Print name of file from FCB
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1986
+
+; ENTRY	Reg pair <DE> points to FCB name field
+;	See module COMOUT for further details
+
+; EXIT	None
+
+	entry	filnam
+
+	extrn	comout
+
+filnam:
+	push	bc
+	push	de
+	call	?prfil		; Do the job
+	pop	de
+	pop	bc
+	ret
+?prfil:
+	ld	b,.nam		; Set length of name
+	call	namon		; .. print
+	ld	a,'.'
+	call	comout		; Print delimiter
+	ld	b,.ext		; Set length of extension
+namon:
+	ld	a,(de)		; Get character
+	and	NoMSB		; .. less attribute
+	cp	' '
+	call	nz,comout	; Print non blank
+	inc	de
+	djnz	namon
+	ret
+
+	end
+

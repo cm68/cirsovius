@@ -1,0 +1,81 @@
+	title	Module from library INTEGER_3 : C32FL
+	name	('C32FL')
+	include	baselib.lib
+
+; Convert 32 bit signed number to floating point number
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1989
+
+; ENTRY	Reg DE points to location holding 32 bit integer
+; 	Reg HL points to location holding floating point number
+
+; EXIT	Floating point number filled
+
+; NOTE	The floating point package used here requires the
+;	HISOFT floating point format as used in PASCAL 80
+
+	entry	c32fl
+
+	ext	neg32
+
+c32fl:
+	push	ix
+	push	iy
+	push	de
+	push	hl
+	pop	iy
+	pop	ix
+	call	@zero		; Check zero number
+	jr	z,pop.reg	; .. yeap
+	ld	a,(ix+0)
+	and	SIGNB		; Test <0
+	push	af
+	call	nz,neg32	; Make >0
+	ld	h,(ix+0)	; Load 32 bits
+	ld	l,(ix+1)
+	ld	d,(ix+2)
+	ld	e,(ix+3)
+	ld	b,30
+c32.1:
+	bit	6,h		; Check bit
+	jr	nz,c32.2
+	dec	b
+	jr	z,c32.2
+	sla	e		; Shift mantissa
+	rl	d
+	rl	l
+	rl	h
+	jr	c32.1
+c32.2:
+	pop	af
+	or	h
+	ld	(iy+0),a	; Save mantissa
+	ld	(iy+1),l
+	ld	(iy+2),d
+	ld	(iy+3),b	; .. exponent
+pop.reg:
+	pop	iy
+	pop	ix
+	ret
+;
+; Test possible zero number
+;
+@zero:
+	ld	a,(ix+0)	; Check all zero
+	or	(ix+1)
+	or	(ix+2)
+	or	(ix+3)
+	ret	nz
+	ld	(iy+0),a	; Clear all
+	ld	(iy+1),a
+	ld	(iy+2),a
+	ld	(iy+3),a
+	ret
+
+	end
+

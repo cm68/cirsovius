@@ -1,0 +1,66 @@
+	title	Module from library HIFLOAT_4 : FLFRAC
+	name	('FLFRAC')
+	include	baselib.lib
+
+; Get fraction of number
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Number to be fractioned in regs DE,HL
+
+; EXIT	Regs DE,HL hold fraction of number
+
+	entry	?flfrac
+
+	ext	?fladd
+
+?flfrac:
+	ld	a,h		; Test zero number
+	or	a
+	ret	z
+	jp	p,pos.frac	; .. and negative one
+neg.frac:	
+	res	sign,h		; Reset bit
+	call	pos.frac	; Get fraction
+	bit	zero,h		; Test bit
+	ret	z
+	set	sign,h		; Set if positive result
+	push	hl		; Save number
+	push	de
+	ld	hl,4000h	; Load 1.0
+	ld	d,l
+	ld	e,l
+	call	?fladd		; Build 1.0-FRACTION
+	ret
+pos.frac:	
+	bit	sign,d		; Test exponent MSB
+	ret	nz
+	ld	b,d		; Get it
+	inc	b
+	ld	a,e
+mant.shf:	
+	add	a,a		; Shift mantissa
+	adc	hl,hl
+	djnz	mant.shf
+	ld	d,-1
+	res	sign,h		; Reset MSB
+	ld	e,a
+mant.norm:	
+	bit	zero,h		; Check normalize bit
+	ret	nz
+	dec	d		; Fix exponent
+	sla	e		; .. and mantissa
+	adc	hl,hl
+	jr	nz,mant.norm
+	inc	e
+	dec	e
+	jr	nz,mant.norm
+	ld	d,e		; Return LSB, it's the exponent
+	ret
+
+	end
+

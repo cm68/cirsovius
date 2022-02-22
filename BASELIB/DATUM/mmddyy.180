@@ -1,0 +1,47 @@
+	title	Module from library BASE_2 : MMDDYY
+	name	('MMDDYY')
+	include	baselib.lib
+
+; Convert date to format mm/dd/yy
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1992
+
+; ENTRY	Reg HL points to string to be filled
+;	Reg B  holds character to be stored at the end
+;	Reg C  holds delimiter between data
+
+; EXIT	Reg HL points to end character
+
+	entry	mmddyy
+
+	ext	getclk,cnvday,putbcd
+
+mmddyy:
+	push	ix
+	push	bc		; Save a bit
+	push	hl
+	call	getclk		; Get time and date
+	call	cnvday		; Convert date
+	pop	hl
+	pop	bc
+	ld	a,(ix+1)	; Get month
+	call	putbcd		; .. store
+	ld	(hl),c		; Set delimiter
+	inc	hl
+	ld	a,(ix+0)	; Same for days
+	call	putbcd
+	ld	(hl),c
+	inc	hl
+	ld	a,(ix+2)	; .. and year
+	call	putbcd
+	ld	(hl),b		; .. close line
+	pop	ix
+	ret
+
+	end
+

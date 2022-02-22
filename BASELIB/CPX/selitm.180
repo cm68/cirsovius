@@ -1,0 +1,294 @@
+	title	SELITM
+	subttl	Module from library CPX_1 : SELITM
+	.z80
+
+; Select item from list
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.0 June 1988
+
+; ENTRY	Reg pair HL points to start of item list
+;	(Each item must be closed by zero, each item
+;	must be of same length)
+;	Reg pair BC holds number of item in list
+;	Reg pair DE points to parameter block with
+;	byte :
+;	  1 : Number of items per line
+;	  2 : X-start coordinate of screen offset
+;	  3 : Y-start coordinate of screen offset
+;	  4 : Number of blanks between items
+;	  5 : Cursor up    character
+;	  6 : Cursor down  character
+;	  7 : Cursor left  character
+;	  8 : Cursor right character
+;	  9 : Break character
+;	 10,
+;	 11 : Optional external execution address
+
+; EXIT	Carry reset on carriage return detected, carry set on
+;	break key found
+;	Reg pair HL holds cursor coordinates of line after last
+;	directory line and row as defined by X-coordinate
+;	Reg pair DE points to selected item if carry reset
+
+; NOTE	If the external execution address is zero, no action
+;	takes place. If not, the routine will be called in the
+;	first display phase after printing the item.
+;	This allows, for example, executing a routine to
+;	perform writing the file size of a selected item.
+;	The external routine will be called with:
+;	Reg DE points to file name, reg HL holds cursor
+;	position after the name
+
+cr	equ	0dh
+choffs	equ	4
+ctrlch	equ	5
+
+	ext	divide,multip,strbi0,combrk,uppcon,indexa
+	ext	gotoxy,lowvid,norvid,@leng
+
+	public	selitm
+
+selitm:
+	push	ix
+	push	iy
+	push	de
+	pop	ix
+	ld	iy,.mypb
+	call	.selitm
+	push	af
+	ld	a,(iy+3)
+	add	a,(ix+2)
+	ld	h,a		; Get cursor
+	inc	h
+	ld	l,(ix+1)
+	pop	af
+	pop	iy
+	pop	ix
+	ret
+.selitm:
+	ld	(.field),hl	; Save parameters
+	ld	(.numb),bc
+	push	bc
+	call	@leng		; Get length of item
+	ld	(iy+5),a
+	ld	a,(ix+3)
+	add	a,b		; Adjust length
+	ld	(iy+4),a
+	pop	bc
+	xor	a
+	ld	(iy+0),a	; Clear internal values
+	ld	(iy+1),a
+	ld	h,a
+	ld	a,(de)
+	ld	l,a
+	ld	d,b
+	ld	e,c
+	dec	de
+	call	divide		; Get limits
+	ld	(iy+3),l
+	ld	(iy+2),e
+	ld	bc,(.numb)
+	ld	hl,1
+itmout:
+	push	hl
+	push	bc
+	call	cursor		; Set cursor
+	pop	bc
+	pop	hl
+	call	field		; Get address
+	call	strbi0		; Write item name
+	call	extern		; Execute external
+	inc	hl
+	dec	bc
+	ld	a,c
+	or	b
+	jr	nz,itmout
+itmlop:
+	call	lowvid		; Set video
+	call	wrtelement	; Write element
+	call	norvid		; Reset video
+wtchr:
+	call	combrk		; Get character
+	jr	nc,wtchr
+	call	uppcon		; Convert to upper case
+	cp	cr		; Test end
+	ret	z		; .. end
+	push	ix
+	pop	hl
+	ld	bc,choffs
+	add	hl,bc		; Point to cursor characters
+	ld	bc,ctrlch
+	cpir			; Find special key
+	jr	nz,wtchr
+	ld	a,c
+	or	a		; Test break
+	scf
+	ret	z		; .. break
+	dec	a
+	ld	hl,C.tab
+	call	indexa		; Find key
+	ld	hl,itmlop
+	push	hl
+	push	de
+	call	wrtelement	; Write normal
+	ret			; Execute it
+C.up:
+	ld	a,(iy+1)	; Set cursor
+	or	a
+	ret	z
+	dec	(iy+1)
+	ret
+C.dwn:
+	ld	c,(iy+3)
+	ld	a,(iy+2)
+	cp	(iy+0)		; Test right margin
+	jr	nc,C.dwn1
+	dec	c
+C.dwn1:
+	ld	a,(iy+1)
+	cp	c
+	ret	nc
+	inc	(iy+1)		; Set next line
+	ret
+C.lef:
+	ld	a,(iy+0)	; Test left margin
+	or	a
+	jr	nz,C.lef1
+	cp	(iy+1)		; Test top line
+	ret	z		; .. yes, exit
+	dec	(iy+1)		; Set new line
+	ld	a,(ix+0)	; Set right margin
+C.lef1:
+	dec	a
+	ld	(iy+0),a	; Set new
+	ret
+C.rig:
+	ld	a,(iy+3)
+	cp	(iy+1)
+	jr	nz,C.rig1	; Test in last line
+	ld	a,(iy+2)	; Check max position
+	cp	(iy+0)
+	ret	z		; .. yes, exit
+C.rig2:
+	inc	(iy+0)		; .. no bump it
+	ret
+C.rig1:
+	ld	a,(ix+0)	; Test max
+	dec	a
+	sub	(iy+0)
+	jr	nz,C.rig2
+	ld	(iy+0),a	; Begin at left margin
+	inc	(iy+1)
+	ret
+field:
+	push	hl
+	dec	hl		; .. fix index
+	ld	e,(iy+5)
+	ld	d,0
+	inc	e
+	call	multip		; Make relative
+	ld	de,(.field)
+	add	hl,de		; .. absolute
+	ex	de,hl
+	pop	hl
+	ret
+cursor:
+	dec	hl		; Fix entry
+	ex	de,hl
+	ld	l,(ix+0)	; Get x,y
+	ld	h,0
+	call	divide
+	ld	h,l
+	ld	l,e
+curset:
+	push	hl
+	ld	e,l
+	ld	a,(iy+4)
+	ld	l,a
+	xor	a
+	ld	h,a
+	ld	d,a
+	call	multip
+	ld	a,(ix+1)
+	add	a,l
+	ld	l,a
+	pop	de
+	ld	a,(ix+2)
+	add	a,d
+	ld	h,a
+	ld	(.cursor),hl	; Save cursor
+	call	gotoxy		; Set cursor
+	ret
+wrtelement:
+	ld	l,(iy+0)
+	ld	h,(iy+1)
+	call	curset		; Set cursor
+	ld	e,(ix+0)
+	ld	l,(iy+1)
+	xor	a
+	ld	d,a
+	ld	h,a
+	call	multip		; Get index
+	ld	a,(iy+0)
+	add	a,l
+	inc	a
+	ld	l,a
+	ld	h,0
+	call	field		; Get address
+	call	strbi0		; Write it
+	ret
+extern:
+	push	hl
+	push	bc
+	ld	l,(ix+9)	; Get execution address
+	ld	h,(ix+10)
+	ld	a,l
+	or	h		; Test any
+	jr	z,extend	; .. no, exit
+	push	ix
+	push	iy
+	ld	bc,adret
+	push	bc
+	push	hl
+	ld	hl,(.cursor)
+	ld	a,(iy+5)
+	add	a,l		; Fix pointer
+	ld	l,a
+	ret			; Call external
+adret:
+	pop	iy
+	pop	ix
+extend:
+	pop	bc
+	pop	hl
+	ret
+
+	dseg
+
+C.tab:
+	dw	C.rig,C.lef,C.dwn,C.up
+.cursor:
+	ds	2
+.mypb:
+	ds	6
+
+; Parameter block consists of
+;row	Current row
+;line	Current line
+;rowmx	Max row
+;linmx	Max line
+;xwidth	Width per item (Item name + blanks between)
+;len	Length of one item
+
+.field:
+	ds	2
+.numb:
+	ds	2
+
+	end
+

@@ -1,0 +1,66 @@
+	title	Module from library BASE_2 : HEXIN
+	name	('HEXIN')
+	include	baselib.lib
+
+; Input a 16 bit hex word
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1987
+
+; ENTRY	Reg pair <DE> points to ASCII buffer
+;	Reg <B> holds end of string (Usually $ or zero)
+
+; EXIT	Reg pair <HL> holds 16 bit result
+;	Carry set on illegal character or overflow
+
+	entry	hexin
+
+	extrn	uppcon,tstdig,tstlet,hexnib
+
+hexin:
+	ex	de,hl
+	ld	de,0		; Clear result
+@hxdcl:
+	ld	a,(hl)		; Test end
+	cp	b
+	jr	z,@enhxd
+	call	uppcon		; Convert to UPPER
+	ld	(hl),a
+	call	tstdig		; Test 0 .. 9
+	jr	nc,@dohx
+	ld	a,(hl)
+	call	tstlet		; Test A .. Z
+	ret	c		; Error
+	cp	'F'+1		; .. F
+	ccf
+	ret	c		; Error
+@dohx:
+	call	hexnib		; Get nibble
+	ld	c,a
+	ld	a,b
+	ld	b,0
+	ex	de,hl
+	add	hl,hl		; * 2
+	ret	c
+	add	hl,hl		; * 4
+	ret	c
+	add	hl,hl		; * 8
+	ret	c
+	add	hl,hl		; *16
+	ret	c
+	add	hl,bc		; Insert nibble
+	ex	de,hl
+	ld	b,a
+	jr	nc,@hxdcl
+	ret
+@enhxd:
+	ex	de,hl		; Get result
+	or	a		; Set no error
+	ret
+	
+	end
+

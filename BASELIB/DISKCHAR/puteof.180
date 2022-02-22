@@ -1,0 +1,43 @@
+	title	Module from library BASE_5 : PUTEOF
+	name	('PUTEOF')
+	include	baselib.lib
+
+; Module writes an end of file and outputs current record
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 2.2 December 1996
+
+; ENTRY	As described in module DSKPUT, some locations
+;	must be set up properly
+;	Location PUTEOF-1 defines mode of closure
+;	 Bit 0	Set   indicates text   file closure (Default)
+;	 Bit 0	Reset indicates binary file closure
+
+; EXIT	On normal return the carry flag is reset
+;	On error the carry will be set
+
+	entry	puteof
+
+	extrn	@wrrec,dskput,wrbfp
+
+	db	00000001b
+puteof:
+	ld	a,(puteof-1)	; Get mode bit
+	rra
+	jr	nc,.puteob
+.puteof:
+	ld	a,eof		; Output end of file
+	call	dskput
+	ret	c		; Stop on error
+.puteob:
+	ld	a,(wrbfp)
+	cp	reclng		; Test for real record write
+	jr	nz,.puteof	; Fill buffer
+	jp	@wrrec		; Output current block
+
+	end
+

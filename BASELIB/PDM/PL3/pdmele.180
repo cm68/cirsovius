@@ -1,0 +1,39 @@
+	title	PDMELE
+	subttl	Module from library PULL_DOWN_3 : PDMELE
+
+; Output printable element and fix for mode
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 1.1 October 1988
+
+; ENTRY	Accu holds element, which will interpreted as follows
+;	   0	: not printable
+;	1 .. 127: printable
+;	 >127	: printable, but fixed for single/double frame
+
+; EXIT	None
+
+	public	pdmele
+
+	extrn	pdmcha
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmele:
+	or	a		; Test printable
+	ret	z		; No, exit
+	bit	7,a		; Test frame element
+	jp	z,pdmcha	; No, output normal
+	bit	frameb,(ix+mode); Test single or double
+	jp	nz,pdmcha	; No fix
+	add	a,10h		; Fix for single
+	jp	pdmcha
+
+	end
+

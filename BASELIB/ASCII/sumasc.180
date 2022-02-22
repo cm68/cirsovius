@@ -1,0 +1,65 @@
+	title	Module from library BASE_1 : SUMASC
+	name	('SUMASC')
+	include	baselib.lib
+
+; Add two ASCII coded numbers
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 July 1992
+
+; ENTRY	Reg pair <HL> points to LSDigit of 1st string
+; ENTRY	Reg pair <DE> points to LSDigit of 2nd string
+;	Reg B holds length of number
+
+; EXIT	Sum in 2nd string
+
+	entry	sumasc
+
+sumasc:
+	ld	a,(hl)
+	cp	'0'		; Test in range
+	jr	nc,sum.Ok	; .. nope,so skip
+	ld	a,(de)
+	cp	'0'		; Test 2nd
+	jr	nc,sum.nxt
+	jr	cpy.asc		; .. go copy
+sum.Ok:
+	ld	a,(de)
+	sub	'0'		; Test 2nd
+	jr	c,cpy.asc	; .. go copy
+	add	a,(hl)		; .. add digit
+	ld	(de),a		; .. save
+	cp	'9'+1		; Test overflow
+	jr	c,sum.nxt	; .. nope
+	sub	10		; .. fix
+	ld	(de),a
+	ld	a,b
+	dec	a		; Test remainder
+	jr	z,sum.nxt	; ..nope
+	dec	de
+	ld	a,(de)		; Get previous
+	cp	'0'		; Test range
+	ld	a,'1'
+	jr	c,sum.ini	; .. not ASCII
+	ld	a,(de)
+	inc	a		; .. bump
+sum.ini:
+	ld	(de),a
+	inc	de
+sum.nxt:
+	dec	de
+	dec	hl
+	djnz	sumasc
+	ret
+cpy.asc:
+	ld	c,b
+	ld	b,0
+	lddr			; .. unpack
+	ret
+
+	end
+

@@ -1,0 +1,199 @@
+	title	Module from library HIFLOAT_5 : FLRAND
+	name	('FLRAND')
+	include	baselib.lib
+
+; Floating Point Random generator
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Seeds '@XSEED','@YSEED','@ZSEED' initialized
+
+; EXIT	Reg DE,HL hold FLP number
+
+	entry	?random,@xseed,@yseed,@zseed
+
+	ext	?fladd,?fldiv,?cbinfl,?flfrac,flperr
+
+?random:	
+	ld	iy,@zseed	; Load seed
+	ld	b,3		; Init loop
+ran.lop:	
+	push	bc
+	ld	e,(iy+0)	; Load number
+	ld	d,(iy+1)
+	ld	l,(iy+2)
+	ld	h,0
+	call	@utl2		; .. action
+	push	hl
+	ld	l,(iy+3)
+	ld	h,0
+	call	@utl1
+	ex	(sp),hl
+	ld	e,(iy+4)
+	ld	d,0
+	call	@utl1
+	pop	de
+	or	a
+	sbc	hl,de
+	jr	nc,ran.pos
+	ld	e,(iy+5)
+	ld	d,(iy+6)
+	add	hl,de
+ran.pos:	
+	ld	(iy+0),l	; Bring back the seed
+	ld	(iy+1),h
+	push	iy
+	call	?cbinfl
+	pop	iy
+	push	iy
+	push	hl
+	push	de
+	ld	l,(iy+5)
+	ld	h,(iy+6)
+	call	?cbinfl
+	call	?fldiv
+	pop	iy
+	push	hl
+	push	de
+	ld	de,seedlen	; Fix for next seed
+	add	iy,de
+	pop	bc
+	djnz	ran.lop		; Check done
+	pop	de
+	pop	hl
+	call	?fladd
+	call	?fladd
+	jp	?flfrac
+;
+; Help routines for the RANDOM Generator
+;
+@utl1:
+	ld	a,false
+	ld	(flperr),a	; Reset error
+	ld	a,d
+	xor	h
+	ld	b,a
+	call	neg.16		; Make less 0
+	ex	de,hl
+	call	neg.16
+	xor	a
+	sbc	hl,de
+	add	hl,de
+	jr	nc,no.swap
+	ex	de,hl
+no.swap:	
+	or	d
+	jr	nz,SYS.OVL	; Test overflow
+	or	e
+	ld	e,d
+	jr	nz,do.add
+	ex	de,hl
+	ret
+add.2:	
+	ex	de,hl
+	add	hl,de		; Add on
+	ex	de,hl
+add.1:	
+	add	hl,hl
+	jr	c,SYS.OVL
+do.add:	
+	rra
+	jr	nc,add.1
+	or	a
+	jr	nz,add.2
+	adc	hl,de
+	jr	c,SYS.OVL
+	jp	m,SYS.OVL
+	or	b
+	jr	tst.neg.16
+;
+; Negate 16 bit number
+; ENTRY	: Reg HL holds number
+; EXIT	: Number set to less zero
+;
+neg.16:	
+	ld	a,h
+	or	a
+tst.neg.16:
+	ret	p
+do.neg.16:	
+	xor	a
+	sub	l
+	ld	l,a
+	ld	a,0
+	sbc	a,h
+	ld	h,a
+	ret
+SYS.OVL:
+	ld	h,0
+set.err:
+	ld	l,true
+	ld	(flperr),hl	; Set overflow
+	ret
+DIV.ZER:
+	ld	h,2
+	jr	set.err
+;
+; Utility 2
+;
+@utl2:				; 0519
+	ld	a,false
+	ld	(flperr),a
+	ld	a,h
+	or	l
+	jr	z,DIV.ZER
+	ld	a,h
+	push	de
+	xor	d
+	push	af
+	xor	a
+	or	h
+	call	p,do.neg.16
+	ld	b,h
+	ld	c,l
+	ld	hl,0
+	ex	de,hl
+	call	neg.16
+	or	l
+	jr	z,null.16
+	ld	a,17		; Set loop
+doub.lop:	
+	add	hl,hl
+	dec	a
+	jr	nc,doub.lop	; Check loop
+	ex	de,hl
+do.sub:	
+	adc	hl,hl
+	add	hl,bc
+	jr	c,no.diff
+	sbc	hl,bc
+no.diff:	
+	rl	e
+	rl	d
+	dec	a		; Test end
+	jr	nz,do.sub
+null.16:	
+	pop	af
+	ex	de,hl
+	call	m,do.neg.16
+	ex	de,hl
+	pop	af
+	or	a
+	jr	tst.neg.16
+
+	dseg
+
+@zseed:
+	db	060h,053h,0b1h,002h,0abh,03dh,076h
+seedlen	equ	$-@zseed
+@yseed:
+	db	023h,030h,0b0h,023h,0ach,063h,076h
+@xseed:
+	db	01fh,01dh,0b2h,03fh,0aah,073h,076h
+
+	end
+

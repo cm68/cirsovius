@@ -1,0 +1,112 @@
+	title	Module from library HILIB_2 : NEW
+	name	('NEW')
+
+; Language : PASCAL
+
+; Allocate portion of memory
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, November 1997
+
+; ENTRY	Reg DE holds amount to be allocated
+
+; EXIT	Reg HL points to allocated memory
+;	On error carry will be set and reg HL holds NIL
+
+	entry	new
+
+	extrn	$$HEAP,_chkmm
+
+HeapLen	equ	4
+
+heapLOadr equ	0
+heapHIadr equ	1
+heapLOlen equ	2
+heapHIlen equ	3
+
+new:
+	ld	($$HEAP+6),de	; Save space
+	inc	de
+	inc	de
+	inc	de
+	ld	a,e
+	and	-HeapLen	; Get modulo 4
+	ld	e,a
+	ld	hl,$$HEAP+2
+	ld	(HEAP$$),hl	; Init pointer
+	call	_chkmm		; Get memory pointer
+new.loop:
+	ld	l,(ix+heapLOlen)
+	ld	h,(ix+heapHIlen)
+	ld	a,l		; Test assignment
+	or	h
+	jr	z,heap.free	; .. seems to be free
+	sbc	hl,de		; Test gap
+	jr	nc,new.gap
+	ld	l,(ix+heapLOadr); Get next address
+	ld	h,(ix+heapHIadr)
+	push	hl
+	ld	(HEAP$$),ix	; Save last address
+	pop	ix		; Copy chain
+	jr	new.loop
+new.gap:
+	jr	nz,new.gt.gap	; Test same gap
+	ld	e,(ix+heapLOadr); Get address if so
+	ld	d,(ix+heapHIadr)
+	push	ix
+	jr	new.save	; Save state
+new.gt.gap:
+	ld	c,l		; Copy length
+	ld	b,h
+	ld	l,(ix+heapLOadr); .. and address
+	ld	h,(ix+heapHIadr)
+new.set:
+	push	ix		; Save pointer
+	add	ix,de		; .. bump
+	ld	(ix+heapLOadr),l; Set start values
+	ld	(ix+heapHIadr),h
+	ld	(ix+heapLOlen),c
+	ld	(ix+heapHIlen),b
+	push	ix
+	pop	de		; Copy pointer
+new.save:
+	ld	hl,(HEAP$$)	; Get pointer
+	ld	(hl),e		; Set new link
+	inc	hl
+	ld	(hl),d
+	pop	hl		; Get back address
+	or	a
+	ret
+heap.free:
+	push	ix
+	pop	hl		; Copy pointer
+	add	hl,de
+	ld	($$HEAP),hl	; Set new heap
+	ld	hl,($$HEAP+6)	; Get space
+	ld	bc,HeapLen
+	add	hl,bc		; Get complete length
+	push	ix
+	pop	bc
+	add	hl,bc		; Add to pointer
+	jr	c,heap.err	; .. overflow
+	ld	bc,($$HEAP+4)	; Test against recursion
+	sbc	hl,bc
+	ld	bc,0		; Set zero
+	ld	hl,0
+	jr	c,new.set
+heap.err:
+	ld	hl,0		; Return NIL
+	scf			; .. indicate error
+	ret
+
+	dseg
+
+HEAP$$:
+	ds	2
+
+	end
+

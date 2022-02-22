@@ -1,0 +1,86 @@
+	title	Module from library BASE_6 : FILLIN
+	name	('FILLIN')
+	include	baselib.lib
+
+; Get line from disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.3 June 1989
+
+; ENTRY	Reg pair DE points to input buffer, reg B holds
+;	character which will be stored at the end of line
+;	(Usually $ or zero)
+;	Location FILMOD holds address of character fetch
+;	routine which defaults to GETEOF, the entry point
+;	of single channel transfer
+;	The first element in input buffer must hold number
+;	of characters to be inputted
+
+; EXIT	Line closed by character in reg B. Accu holds
+;	characater count (C.R. and L.F. also counted)
+;	Condition code set as follows:
+;	Carry : Set on end of file found
+;	Zero  : Set on empty line (Only C.R./L.F. or none)
+;	(For example : Carry and zero set means real end
+;	 of file found, no character found on disk)
+;	Register C holds last character read
+
+	entry	fillin,filmod
+
+	extrn	geteof
+
+fillin:
+	push	de
+	push	hl
+	push	bc
+	ld	l,false		; Reset character flag
+	ld	h,0		; Clear character count
+	ld	a,(de)		; Get max characters
+	ld	b,a
+	inc	b
+inl??:
+	inc	de
+	dec	b		; Test limit
+	jr	z,endl??
+	call	filmod-1	; Get a character
+	jr	c,end??		; Test physical end
+	ld	(de),a		; Store character
+	inc	h		; Count all characters
+	cp	cr		; Ignore C.R.
+	jr	z,inl??
+	cp	lf		; End on L.F.
+	jr	z,endlf?
+	ld	l,true		; Set character flag
+	jr	inl??
+endlf?:
+	inc	de		; L.F., too
+endl??:
+	ld	c,a		; Save character
+	ld	a,l		; Get flag
+	or	a		; Reset carry
+	jr	pop??
+end??:
+	ld	c,a
+	ld	a,l
+	or	a		; Process zero
+	scf			; Set end of file
+pop??:
+	ld	a,c		; Get character back
+	pop	bc
+	ld	c,a
+	ex	de,hl
+	ld	(hl),b		; Close line
+	ld	a,d		; Return count
+	pop	hl
+	pop	de
+	ret
+
+filmod	equ	$+1
+	jp	geteof		; Jump vector
+
+	end
+

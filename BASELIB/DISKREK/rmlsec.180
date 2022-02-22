@@ -1,0 +1,44 @@
+	title	Module from library BASE_3 : RMLSEC
+	name	('RMLSEC')
+	include	baselib.lib
+
+; Read sequential multi sectors from disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 October 1988
+
+; ENTRY	Reg pair <DE> points to FCB
+
+; EXIT	On error carry will be set or extended error
+;	will be processed
+;	On normal return carry is reset
+;	Zero set indicates all sectors read properly
+;	Zero reset indicates sectors read partially
+;	Accu holds number of sectors read, zero is none
+
+	entry	rmlsec
+
+	extrn	@BDOS,@error,iores
+
+rmlsec:
+	push	hl
+	ld	a,.rdseq	; Select function
+	call	@BDOS		; Read sector
+	pop	hl
+	or	a		; Test all done
+	ret	z
+	dec	a		; Test EOF
+	ld	a,(iores+1)
+	scf
+	jp	nz,@error	; Process error
+	inc	a		; Reset Zero
+	ccf			; .. and Carry
+	ld	a,(iores+1)
+	ret
+
+	end
+

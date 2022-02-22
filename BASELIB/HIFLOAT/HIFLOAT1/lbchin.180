@@ -1,0 +1,67 @@
+	title	Module from library HIFLOAT_1 : LBCHIN
+	name	('LBCHIN')
+	include	baselib.lib
+
+; Execute some common functions for the floating
+; point converter package
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+	entry	?fliini,?chrget,?ptrbmp
+
+; Init the input pointers
+; ENTRY	Reg BC holds ASCII buffer pointer
+;	Accu holds length of string
+;
+?fliini:
+	ld	(buffer),bc	; Save buffer
+	ld	(len),a		; .. and length
+	ret
+;
+; Get character from buffer
+; EXIT	Accu holds character
+;
+?chrget:
+	push	hl
+	ld	hl,(buffer)
+	ld	a,(hl)		; Get character
+	pop	hl
+	ret
+;
+; Update input pointer
+; EXIT	Zero set if no more in buffer
+;	Pointer updated
+;
+?ptrbmp:
+	push	hl
+	ld	l,a		; Save character
+	push	hl
+	ld	a,(len)
+	or	a		; Check empty
+	jr	z,no.dec
+	ld	hl,(buffer)
+	inc	hl		; Update pointer
+	ld	(buffer),hl
+	dec	a
+	ld	(len),a
+	inc	a		; Set NOT ZERO
+no.dec:
+	pop	hl
+	ld	a,l
+	pop	hl
+	ret
+
+	dseg
+
+buffer:
+	ds	2
+len:
+	ds	1
+
+	end
+

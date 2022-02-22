@@ -1,0 +1,219 @@
+	title	INIMOD
+	subttl	Module from library CPX_1 : INIMOD
+	.z80
+
+; Change definition of device dependent file
+
+; ENTRY	: Reg pair HL points to parameter block
+;	  Accu must hold characater 'i' or 'I'
+;	  (This must be verified by caller)
+
+; The parameter block has the form:
+
+; 	Byte 0,1 : Address of definition table
+; 	Byte 2,3 : Address of message table
+; 	Byte  4  : Length of control code
+; 	Byte  5  : Length of table
+; 	Byte 6,7 : Pointer to FCB describing file, 12 bytes
+; 	Byte 8,9 : Length of program
+
+; EXIT	: None
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1987
+
+	public	inimod
+
+	extrn	delete,create,setdma,dskwrt,close,string
+	extrn	conino,condir,crlf,uppcon,divrec,mulsec
+
+; ===== Constants =====
+
+false	equ	0
+true	equ	not false
+;
+caldrv	equ	0004h
+fcb	equ	005ch
+tpa	equ	0100h
+;
+ctrlc	equ	03h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+inimod:
+	call	uppcon
+	ld	de,notava
+	cp	'I'		; Test legal option
+	jp	nz,skpsav	; .. tell not legal
+	push	hl
+	pop	ix		; Copy pointer
+	ld	c,(ix+0)	; Fetch definition table
+	ld	b,(ix+1)
+	push	bc
+	ld	e,(ix+2)	; Fetch message table
+	ld	d,(ix+3)
+	ld	a,(ix+4)	; Get code count
+	inc	a		; .. fix
+	ld	(kylen),a
+	ld	b,(ix+5)	; Get depth
+	pop	hl
+	ld	a,false
+	ld	(iniflg),a
+@inilp:
+	ld	a,(de)		; Get message
+	ld	c,a
+	inc	de
+	ld	a,(de)
+	inc	de
+	push	de
+	ld	d,a
+	ld	e,c
+	push	bc
+	push	hl
+	push	ix
+	call	tlini		; Tell the code
+	pop	ix
+	pop	hl
+	ld	a,(kylen)
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; Get next
+	pop	bc
+	pop	de
+	djnz	@inilp
+	ld	a,(iniflg)	; Test any definition
+	cp	true
+	ld	de,nodeff
+	jr	nz,skpsav
+	ld	e,(ix+6)	; Get string to FCB
+	ld	d,(ix+7)
+	ld	c,(ix+8)	; Fetch length
+	ld	b,(ix+9)
+	push	bc		; .. save it
+	ex	de,hl
+	ld	de,fcb
+	ld	bc,12
+	ldir			; Set FCB
+	ld	a,(caldrv)
+	and	1111b		; Get drive
+	inc	a		; Fix
+	ld	de,fcb
+	ld	(de),a
+	call	delete		; Delete old
+	call	create		; And create new one
+	pop	hl		; Get length of this program
+	call	divrec		; Get records
+	ld	a,l
+	call	mulsec		; Set multi-sector
+	ld	de,tpa		; And our start
+	call	setdma		; Set new DMA
+	ld	de,fcb
+	call	dskwrt		; Write program
+	call	close		; Close file
+	ld	de,filsav
+skpsav:
+	call	string		; Tell new file created
+	ret
+	;
+tlini:	; Print currently defined control code
+	; And define new one
+	; ENTRY	: Reg pair DE points to initial string
+	; 	  Reg pair HL points to control code
+	; 	  which must start with length of code
+	;
+	call	string		; Tell kind of code
+	push	hl
+	ld	b,(hl)		; Get length
+	ld	a,b
+	or	a		; Test any
+	jr	nz,@tlop
+	ld	de,none		; Tell none
+	call	string
+	jr	reini
+@tlop:
+	inc	hl
+	ld	a,(hl)
+	call	ctrtyp		; Print as control
+	djnz	@tlop
+reini:
+	ld	de,newdef
+	call	string		; Tell we want new
+	pop	hl
+	push	hl
+	inc	hl
+	ld	b,0
+@inplp:
+	call	conino		; Get input
+	push	af
+	call	ctrtyp		; .. as control
+	pop	af
+	cp	ctrlc		; Test Control-C
+	jr	z,endctr
+	ld	(hl),a
+	inc	b
+	inc	hl
+	ld	a,(kylen)
+	dec	a
+	cp	b		; Test overflow
+	jr	nz,@inplp
+	ld	de,warn
+	call	string		; Tell overflow
+	jr	reini
+endctr:
+	pop	hl
+	ld	a,b
+	or	a
+	jr	z,empini
+	ld	(hl),a		; Store count
+	ld	a,true
+	ld	(iniflg),a
+	call	crlf
+	ret
+empini:
+	ld	de,noctl
+	call	string		; Tell nothing defined
+	ret
+	;
+ctrtyp:	; Type character as control
+	; ENTRY	: Accu holds character
+	;
+	cp	' '		; Test control
+	jp	nc,condir	; No, output it directly
+	cp	ctrlc		; Ignore Control-C
+	ret	z
+	push	af
+	ld	a,'^'		; Indicate control
+	call	condir
+	pop	af
+	add	a,'@'
+	call	condir
+	ret
+
+	dseg
+
+newdef:
+	db	cr,lf,'Input new control, Ctrl-C ends: ',eot
+warn:
+	db	cr,lf,'Too much control characters, '
+	db	're-enter',eot
+noctl:
+	db	cr,lf,'Definition skipped',cr,lf,eot
+filsav:
+	db	cr,lf,'New definitions saved',cr,lf,eot
+nodeff:
+	db	cr,lf,'No definitions saved',cr,lf,eot
+none:
+	db	'None',cr,lf,eot
+notava:
+	db	'Init must be called by "/I" switch',cr,lf,eot
+iniflg:
+	db	false
+kylen:
+	ds	1
+
+	end
+

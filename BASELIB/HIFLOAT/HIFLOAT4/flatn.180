@@ -1,0 +1,149 @@
+	title	Module from library HIFLOAT_4 : FLATN
+	name	('FLATN')
+	include	baselib.lib
+
+; Calculate the ARCTANGENT
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 January 1989
+
+; ENTRY	Operand in regs DE,HL
+
+; EXIT	Arctangent in regs DE,HL
+
+	entry	?flatn
+
+	ext	?fladd,?fldiv,?flsqar,?flmul,?sign,?num1
+
+?flatn:
+	bit	zero,h		; End on zero
+	ret	z
+	ld	a,h
+	and	SIGNB
+	ld	(?sign),a	; Save sign
+	res	sign,h		; Make number positive
+	ld	a,d
+	or	a
+	jp	m,exp.lt.0	; Test exponent < 0
+	ld	a,2
+	ld	(?num1),a	; Set index
+	exx
+	ld	hl,049e6h	; Load 0.57735
+	ld	de,0ff9dh
+	push	hl
+	push	de
+	ld	bc,0d555h	; Load -1.33331
+	push	bc
+	ld	b,0
+	jr	atan.loop
+exp.lt.0:	
+	cp	0feh		; Check range
+	jr	nc,exp.1
+	cp	0f3h
+	jp	c,ex.atan	; .. that's it
+	xor	a
+	ld	(?num1),a	; Reset index
+	jr	st.atan
+exp.1:	
+	ld	a,1		; Set index
+	ld	(?num1),a
+	exx
+	ld	hl,06ed9h
+	ld	de,000ebh	; Load 1.73205
+	push	hl
+	push	de
+	ld	bc,0c000h	; Load -4,0
+	push	bc
+	ld	b,2
+atan.loop:	
+	push	bc
+	push	hl
+	push	de
+	exx
+	call	?fladd		; Get one calculation
+	call	?fldiv
+	call	?fladd
+st.atan:	
+	push	hl
+	push	de
+	ld	bc,04000h	; Load 1.0
+	push	bc
+	ld	b,c
+	push	bc
+	call	?flsqar
+	push	hl
+	push	de
+	ld	bc,06000h	; Load 3.0
+	push	bc
+	ld	b,1
+	push	bc
+	inc	d		; Fix exponent of result
+	inc	d
+	push	hl
+	push	de
+	dec	d
+	dec	d
+	ld	b,050h		; Load 5.0
+	push	bc
+	ld	b,2
+	push	bc
+	push	hl
+	push	de
+	ld	bc,0638eh	; Load 0.777777
+	push	bc
+	ld	bc,0ff39h
+	push	bc
+	ld	bc,06b15h	; .. 0.104572
+	push	bc
+	ld	bc,0fc00h
+	push	bc
+	call	?flmul		; Calculate a lot
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+	call	?fldiv
+	call	?fladd
+	call	?fldiv
+	ld	a,(?num1)	; Test any to fix
+	or	a
+	jr	z,ex.atan
+	push	hl
+	push	de
+	add	a,a		; Get index if so
+	add	a,a
+	ld	hl,atan.tbl-4
+	ld	e,a
+	ld	d,0
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,c
+	call	?fladd		; Fix if requested
+ex.atan:	
+	ld	a,(?sign)
+	or	h
+	ld	h,a
+	ret
+
+	dseg
+
+;
+; Table started with index 1
+;
+atan.tbl:
+	db	048h,0ffh,005h,043h	; 0.523599
+	db	048h,000h,005h,043h	; 1.0472
+	db	0ech,000h,087h,064h	; 1.5708
+
+	end
+

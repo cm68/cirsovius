@@ -1,0 +1,194 @@
+	title	COPEN
+	subttl	Module from library C_4 : COPEN
+	maclib	SYSEQU.LIB
+
+; FILE:	COPEN.MAC
+; DATE: 820819:1416
+; FOR:	Open or create file named at <HL>
+
+; Open a file for reading or writing
+; (erases existing file on write)
+; ENTRY	: Reg HL points to filename string
+;	  Reg B contains FF to write, any other value to read
+;	  Reg C contains the number of sectors to buffer
+; EXIT	: Accu contains the channel no.
+;	  (0 for a failed open)
+
+	entry	copen
+
+	ext	makfcb,fillbf,bufbls,chanls,adda,negh,$memry
+	ext	open,create,delete
+
+copen:
+	call	getchn		; Find free channel
+	ret	z		; .. none
+	call	makfcb		; Create FCB from string
+	ld	a,b
+	inc	a		; Check mode
+	jr	nz,openrd
+	call	delete		; Delete and create
+	call	create
+	jr	.openrd
+openrd:
+	call	open		; .. or open
+.openrd:
+	ld	a,0
+	ret	c
+	call	setchn		; Set channel parameters
+	ld	a,b
+	inc	a
+	call	nz,fillbf	; Fill buffer if write mode
+	ld	a,(chnlno)
+	or	a
+	ret
+;
+; Get an free channel
+;
+getchn:
+	push	hl
+	push	bc
+	ld	hl,chanls+2
+	ld	b,2
+	call	getblk
+	jr	z,gtchn4
+	ld	(chanl),hl
+	ld	(chnlno),a
+	ld	hl,bufbls
+	ld	b,10
+	call	getblk
+gtchn0:
+	ld	(bufblk),hl
+	ld	a,8
+	call	adda
+	pop	bc
+	push	bc
+	ld	a,(hl)		; 0FF for unassigned
+	cp	c
+	jr	nc,gtchn1
+	ld	hl,(bufblk)
+	ld	c,b
+	ld	b,10
+	call	gtnxt
+	jr	z,gtchn4
+	jr	gtchn0
+gtchn1:
+	inc	a
+	jr	z,gtchn2
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	jr	gtchn3
+gtchn2:
+	ld	de,($memry)
+gtchn3:
+	ld	a,(chnlno)
+	or	a
+gtchn4:
+	pop	bc
+	pop	hl
+	ret			; DE -> FCB
+;
+; Get an empty channel space
+; ENTRY	: Reg HL points to first available address
+;	  Reg B holds length of item space
+; EXIT	: Reg HL points to free space
+;	  Zero flag set indicates all space reserved
+;	  Accu holds channel found
+;
+getblk:
+	ld	c,1		; Init channel
+gtcn0:
+	inc	hl
+	ld	a,(hl)
+	dec	hl
+	or	(hl)		; .. check empty
+	jr	z,gotone
+gtnxt:
+	ld	a,b
+	call	adda		; Bump to next
+	inc	c
+	ld	a,c
+	cp	16		; Check max
+	jr	c,gtcn0
+	xor	a
+	ld	c,a		; Reset all if overflow
+	ld	l,a
+	ld	h,a
+	ret
+gotone:
+	ld	a,c		; Get current channel
+	or	a
+	ret
+;
+; Fix channel parameters found
+;
+setchn:
+	push	de
+	push	hl		; Buffer start
+	ld	hl,(bufblk)
+	ld	a,9
+	call	adda
+	ld	(hl),b		; RWFLG
+	dec	hl
+	ld	(hl),c		; NSECS
+	dec	hl
+	ld	(hl),d		; FCB
+	dec	hl
+	ld	(hl),e
+	ld	a,c
+	or	a
+	rra
+	ld	d,a
+	ld	a,0
+	rra
+	ld	e,a
+	ex	de,hl
+	push	hl		; Buflen
+	call	negh
+	ex	de,hl
+	dec	hl
+	ld	(hl),d		; -Buflen
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),d		; Pointer
+	dec	hl
+	ld	(hl),e
+	pop	de		; Buflen
+	ex	(sp),hl		; Buffer start
+	push	hl
+	add	hl,de		; Bufend
+	ex	de,hl
+	pop	hl		; Buffer start
+	ex	(sp),hl		; Block pointer
+	dec	hl
+	ld	(hl),d		; Bufend
+	dec	hl		; Block start
+	ld	(hl),e
+;
+; Now reset $MEMRY and set channel entry
+;
+	ex	de,hl
+	ld	(hl),0
+	ld	a,92
+	call	adda
+	ld	($memry),hl	; Bufend + pushback
+	ld	hl,(chanl)
+	ld	(hl),e		; Buffer block addr
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	pop	de
+	ret
+
+	dseg
+
+bufblk:
+	ds	2
+chanl:
+	ds	2
+chnlno:
+	ds	1
+	end
+

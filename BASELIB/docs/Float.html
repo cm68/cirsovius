@@ -1,0 +1,161 @@
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/BASELIB/Float.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:09:26 GMT -->
+<head><title>Hinweise zu den Flie&szlig;kommazahlen</title></head>
+
+<body style="margin-left:2cm"
+      background="../perforation.gif">
+
+<table width="475"><tr><td>
+<h1 align="center">Hinweise zu den Flie&szlig;kommazahlen</h1>
+
+<div align="center">
+<table border="1" cellpadding="5">
+<tr><td bgcolor="#FBE1CA"><a href="#Darstellung">Darstellung der Zahlen</a></td><td bgcolor="#FFCC66"><a href="#Fehlerbehandlung">Fehlerbehandlung</a></td><tr>
+<tr><td bgcolor="#FFCC66"><a href="#Formathinweise">Formathinweise</a></td><td bgcolor="#FBE1CA"><a href="#Wandlungshinweise">Wandlungshinweise</a></td><tr>
+</table>
+</div>
+
+<a name="Darstellung"><h2 align="center">Darstellung der Zahlen</h2></a>
+
+Der Zahlenbereich umfa&szlig;t 3.4&nbsp;E38 bis -5.9&nbsp;E-39 mit einer Genauigkeit von sieben Ziffern
+(Bei einer Mantissa mit 23&nbsp;Bit sind das 2^-23 = 1.2&nbsp;E-7).
+<p></p>
+Die Zahlen werden kodiert als
+<p></p>
+<div style="margin-left:1cm">
+<table>
+<tr><td width="75pt">Byte 1</td><td>Normalisierte Mantisse, MSB (mit Vorzeichen)</td></tr>
+<tr><td>Byte 2</td><td>Mantisse</td></tr>
+<tr><td>Byte 3</td><td>Mantisse, LSB</td></tr>
+<tr><td>Byte 4</td><td>Exponent in binärer 2'er Komplementdarstellung</td></tr>
+</table>
+</div>
+<p></p>
+<div style="text-decoration:underline">Die Mantisse erklärt sich wie folgt:</div>
+Bei einer Länge von drei Bytes ergeben sich 3*8=24 Bits.
+Das MSB wird als Vorzeichen benutzt.
+Das nächste Bit hat eine Wertigkeit von <font size="-2"><sup>1</sup></font>/<font size="-2">2</font>, das nächste Bit <font size="-2"><sup>1</sup></font>/<font size="-2">4</font>, dann <font size="-2"><sup>1</sup></font>/<font size="-2">8</font> usw.
+Hieraus ersieht man, da&szlig; der Wert der Mantisse maximal <font size="-2"><sup>1</sup></font>/<font size="-2">2</font>+<font size="-2"><sup>1</sup></font>/<font size="-2">4</font>+<font size="-2"><sup>1</sup></font>/<font size="-2">8</font>+..., also immer &lt; 1 ist.
+Der Ausdruck "Normalisierung" bedeutet hierbei, da&szlig; immer das dem MSB folgende Bit gesetzt ist, die Mantisse also immer &gt;= 0,5 ist.
+Weil das MSB als Vorzeichen benutzt wird, mu&szlig; der ermittelte Wert noch mit zwei multipliziert werden und danach mu&szlig; nur noch der so ermittelte Wert der mit dem Exponenten multipliziert werden, um den realen Zahlenwert zu erhalten.
+<p></p>
+In der hier vorliegenden Kodierung bedeutet:
+<p></p>
+<table>
+<tr><td width="200pt">Exponent (hex)</td><td>00</td><td>2^0</td><td>= 1</td></tr>
+<tr><td>&nbsp;</td><td>01</td><td>2^1</td><td>= 2</td></tr>
+<tr><td>&nbsp;</td><td>02</td><td>2^2</td><td>= 4</td></tr>
+<tr><td colspan="2">&nbsp;</td><td colspan="2">usw.</td></tr>
+<tr><td>&nbsp;</td><td>FF</td><td>2^-1</td><td>= 1/2</td></tr>
+<tr><td>&nbsp;</td><td>FE</td><td>2^-2</td><td>= 1/4</td></tr>
+<tr><td>&nbsp;</td><td>FD</td><td>2^-3</td><td>= 1/8</td></tr>
+<tr><td colspan="2">&nbsp;</td><td colspan="2">usw.</td></tr>
+</table>
+<p></p>
+Die Zahl ist 0, wenn das dem MSB folgende Bit Null ist.
+<p></p>
+<table>
+<tr><td valign="top" width="100pt"><span style="text-decoration:underline">Beispiel 1:</span></td><td>Zahl=1. Sie ist darstellbar durch 0,5*2^1=(0,5*2)*2^0, damit ergibt sich:<br />40 80 00 00</td></tr>
+<tr><td valign="top"><span style="text-decoration:underline">Beispiel 2:</span></td><td>Zahl=-2,5. Sie ist darstellbar durch -(0,5+0,125)*2^2=-((0,5+0,125)*2)*2^1, damit ergibt sich f&uuml;r die Darstellung:<br />D0 00 00 01</td></tr>
+</table>
+<p></p>
+Mit diesen Darstellungen ergeben sich die Grenzwerte:
+<p></p>
+<table>
+<tr><td width="100pt">Kleinste Zahl</td><td width="100pt">40 00 00 81</td><td>5.87747E-39</td></tr>
+<tr><td colspan="3">&nbsp;</td></tr>
+<tr><td>Grö&szlig;te Zahl</td><td>7F FF FF 7F</td><td>3.40283E+38</td></tr>
+</table>
+
+<hr />
+
+<a name="Fehlerbehandlung"><h2 align="center">Fehlerbehandlung</h2></a>
+
+Bei Bereichs&uuml;berschreitung der Zahlen, Wurzel aus einer negativen Zahl, Division durch Null und Zahlen&uuml;ber- oder -unterlauf wird die interne Fehlerflag &#130;<b>FLPERR</b>' auf den Wert TRUE (dezimal 255, hex FF) gesetzt.
+Au&szlig;erdem wird bei einem Fehler das Carryflag der CPU gesetzt.
+Das Pr&uuml;fen dieser Flag obliegt dem Programmierer.
+Im Speicherplatz &#130;<b>FLPERR+1</b>' findet sich ein weiterer Code, der genauere Auskunft gibt:
+<p></p>
+<div style="margin-left:2cm">
+<table>
+<tr><td><span style="text-decoration:underline">Code</span></td><td><span style="text-decoration:underline">Bedeutung</span></td></tr>
+<tr><td>0</td><td>Overflow</td></tr>
+<tr><td>2</td><td>Division durch Null</td></tr>
+<tr><td>4</td><td>Exponent erwartet</td></tr>
+<tr><td>6</td><td>Ziffer erwartet</td></tr>
+<tr><td>8</td><td>Zahl zu gro&szlig;</td></tr>
+<tr><td>10</td><td>Aufruf Fehler</td></tr>
+</table>
+</div>
+
+<hr />
+
+<a name="Formathinweise"><h2 align="center">Formathinweise</h2></a>
+
+Das folgende Beispiel veranschaulicht die Ausgabe mit der Routine <b>FLFORM</b> mit unterschiedlichen Parametern (_&nbsp;entspricht einem Leerzeichen):
+<p></p>
+<table>
+<tr><td><span style="text-decoration:underline">Zahl</span></td><td><span style="text-decoration:underline">Dezimalstellen</span></td><td><span style="text-decoration:underline">Nachkommastellen</span></td><td><span style="text-decoration:underline">Darstellung</span></td></tr>
+<tr><td colspan="3">&nbsp;</td><td><span style="text-decoration:underline">123456789012</span></td></tr>
+<tr><td>100</td><td align="center">6</td><td align="center">2</td><td>100.00</td></tr>
+<tr><td>100</td><td align="center">8</td><td align="center">2</td><td>__100.00</td></tr>
+<tr><td>23.455</td><td align="center">6</td><td align="center">1</td><td>__23.5</td></tr>
+<tr><td>23.455</td><td align="center">4</td><td align="center">2</td><td>_2.34550E+01</td></tr>
+<tr><td>23.455</td><td align="center">4</td><td align="center">9</td><td>__23</td></tr>
+</table>
+<p></p>
+Bei der speziellen Formatausgabe (Akkumulator hält -1), bestimmt das Register C die Darstellungsform:
+<table>
+<tr><td width="150pt"><span style="text-decoration:underline">Register C</span></td><td><span style="text-decoration:underline">Darstellung</span></td></tr>
+<tr><td>1.. 7</td><td>Die vollen 12 Zeichen werden dargestellt</td></tr>
+<tr><td>8..12</td><td>Es werden bis f&uuml;nf Dezimalstellen dargestellt</td></tr>
+<tr><td>ab 13</td><td>Es werden entsprechende Leerzeichen vorangestellt</td></tr>
+</table>
+<p></p>
+Am Beispiel der Zahl -1.23E+10 sei dies veranschaulicht (_&nbsp;entspricht einem Leerzeichen):
+<p></p>
+<table>
+<tr><td width="150pt"><span style="text-decoration:underline">Register C</span></td><td><span style="text-decoration:underline">Darstellung</span></td></tr>
+<tr><td>&nbsp;</td><td><span style="text-decoration:underline">12345678901234567890</span></td></tr>
+<tr><td align="center">7</td><td>-1.23000E+10</td></tr>
+<tr><td align="center">8</td><td>-1.2E+10</td></tr>
+<tr><td align="center">9</td><td>-1.23E+10</td></tr>
+<tr><td align="center">10</td><td>-1.230E+10</td></tr>
+<tr><td align="center">11</td><td>-1.2300E+10</td></tr>
+<tr><td align="center">12</td><td>-1.23000E+10</td></tr>
+<tr><td align="center">13</td><td>_-1.23000E+10</td></tr>
+<tr><td align="center">14</td><td>__-1.23000E+10</td></tr>
+</table>
+
+<hr />
+
+<a name="Wandlungshinweise"><h2 align="center">Wandlungshinweise</h2></a>
+
+F&uuml;r die Wandlungen der Flie&szlig;kommazahlen in das Ganzzahlformat gibt es ja unterschiedliche Routinen.
+Es sei kurz im Bereich 12.0 bis 12.9 die  unterschiedliche Art der Wandlung dargestellt.
+(Die Wandlung in eine Ganzzahl geschieht &uuml;ber <b>ENTIER</b>)
+<p></p>
+<pre>
+<span style="text-decoration:underline">FLP</span>     <span style="text-decoration:underline">ROUND</span>   <span style="text-decoration:underline">ENTIER</span>  <span style="text-decoration:underline">TRUNC</span>   <span style="text-decoration:underline">FLP</span>     <span style="text-decoration:underline">ROUND</span>   <span style="text-decoration:underline">ENTIER</span>  <span style="text-decoration:underline">TRUNC</span>
+12.0    12      12      12      -12.0   -12     -12     -12
+12.1    12      12      12      -12.1   -12     -13     -12
+12.2    12      12      12      -12.2   -12     -13     -12
+12.3    12      12      12      -12.3   -12     -13     -12
+12.4    12      12      12      -12.4   -12     -13     -12
+12.5    13      12      12      -12.5   -12     -13     -12
+12.6    13      12      12      -12.6   -13     -13     -12
+12.7    13      12      12      -12.7   -13     -13     -12
+12.8    13      12      12      -12.8   -13     -13     -12
+12.9    13      12      12      -12.9   -13     -13     -12
+</pre>
+
+<hr />
+
+</td></tr></table>
+
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/BASELIB/Float.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:09:26 GMT -->
+</html>
+

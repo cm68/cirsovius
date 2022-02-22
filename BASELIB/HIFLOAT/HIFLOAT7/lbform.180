@@ -1,0 +1,53 @@
+	title	Module from library HIFLOAT_7 : LBFORM
+	name	('LBFORM')
+	include	baselib.lib
+
+; Convert formatted floating point number to string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Reg pair HL points to floating point number,
+;	Reg pair DE points to ASCII string buffer,
+;	Reg C holds total decimal places,
+;	Accu holds decimal places,
+;	Reg B holds character to be stored at the end of the
+;	Buffer, usually zero or $
+
+; NOTE	If Accu is -1, a special format with always scientific
+;	notation is converted. If Reg C is less 8, then the
+;	full width of 12 characters will always be set.
+;	If Reg C is greater or equal 8, then one or more
+;	decimal places will be set up to a maximum of 5 places
+;	(Reg C = 12). If Reg C is greater 12, leading spaces
+;	are inserted before the number
+
+; EXIT	Buffer well filled
+
+	entry	flform
+
+	extrn	?flform
+
+flform:
+	push	hl
+	pop	ix
+	ld	h,(ix+0)	; Get number
+	ld	l,(ix+1)
+	push	hl		; Onto stack
+	ld	l,(ix+2)
+	ld	h,(ix+3)
+	push	hl
+	ld	h,c		; Copy values
+	ld	l,a
+	ld	a,b
+	ld	c,e		; Copy buffer
+	ld	b,d
+	call	?flform		; Convert to ASCII (CALL cause
+	ret			; of values on stack)
+
+	end
+

@@ -1,0 +1,46 @@
+	title	Module from library HILIB_1 : @ASSIG
+	name	('@ASSIG')
+	include	baselib.lib
+
+; Language : PASCAL
+
+; Assigns file name
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, August 1987
+
+; ENTRY	Reg pair DE holds FCB to be assigned
+;	Reg pair HL holds string closed by 0
+
+; EXIT	Carry set on error
+;	Carry reset if no error found
+;	Reg pair DE holds FCB filled properly
+
+	entry	@assig
+
+	extrn	parse
+
+@assig:
+	ld	a,(hl)		; Test empty string
+	or	a
+	scf
+	ret	z		; Exit if so
+	push	de		; Save FCB
+	ld	($$PB),hl	; Save name addresse
+	ld	($$PB+2),de	; .. and FCB
+	ld	de,$$PB
+	call	parse		; Go parse
+	pop	de		; Return FCB
+	ret
+
+	dseg
+
+$$PB:
+	ds	2+2
+
+	end
+

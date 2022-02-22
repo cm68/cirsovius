@@ -1,0 +1,88 @@
+	title	Module from library BASE_1 : PRSCHK
+	name	('PRSCHK')
+	include	baselib.lib
+
+; Exception list implementation for extended parsing
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 September 1991
+
+; ENTRY	Reg pair <DE> points to a two address parse
+;	parameter block
+;	Reg pair <HL> points to exception list started with
+;	number of characters in the list
+
+; EXIT	As defined in routines XPARSE and XFPARS
+
+	entry	$prdelm,$prptr
+
+;
+; Check for exception in string, adjust a bit
+;
+$prdelm:
+	_push_
+	ex	de,hl
+	ld	e,(hl)		; Fetch the string pointer
+	inc	hl
+	ld	d,(hl)
+	pop	hl		; Get back the list
+	xor	a
+	ld	(DelChr),a	; Clear character
+ploop:
+	ld	a,(de)		; Test EOL
+	or	a
+	jr	z,noDel
+	cp	cr
+	jr	z,noDel
+	push	hl
+	ld	c,(hl)		; Get length
+	ld	b,0
+	inc	hl
+	cpir			; Find delimiter
+	pop	hl
+	inc	de
+	jr	nz,ploop	; .. nope
+	dec	de
+	ld	(DelPtr),de	; Save place
+	ld	(DelChr),a	; .. and character
+	xor	a
+	ld	(de),a		; Close string
+noDel:
+	pop	de
+	pop	bc
+	ret
+;
+; Restore old state
+;
+$prptr:
+	push	af
+	call	prsptr		; .. do the job
+	pop	af
+	ret
+prsptr:
+	ld	a,(DelChr)	; Test any found
+	or	a
+	ret	z		; .. nope
+	push	hl
+	ld	hl,(DelPtr)
+	ld	(hl),a		; .. restore character
+	pop	hl
+	ld	a,l
+	or	h		; Test end of parse
+	ret	nz
+	ld	hl,(DelPtr)	; .. get back if so
+	ret
+
+	dseg
+
+DelChr:
+	ds	1
+DelPtr:
+	ds	2
+
+	end
+

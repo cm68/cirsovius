@@ -1,0 +1,40 @@
+	title	Module from library HIFLOAT_2 : LBOP16
+	name	('LBOP16')
+	include	baselib.lib
+
+; Interface the stack oriented routines to address
+; referrenced calls
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; ENTRY	Reg pair BC points to number and
+;	Reg IX holds one operand routine address
+
+; EXIT	Reg HL holds signed integer
+;	Carry set on math error
+
+	entry	@opr16
+
+	ext	flperr
+
+@opr16:
+	ld	(LINK+1),ix	; Set routine
+	push	bc
+	pop	ix
+	ld	h,(ix+0)	; Load number
+	ld	l,(ix+1)
+	ld	e,(ix+2)
+	ld	d,(ix+3)
+LINK:
+	call	$-$		; Execute routine
+	ld	a,(flperr)	; Get error
+	rra
+	ret
+
+	end
+

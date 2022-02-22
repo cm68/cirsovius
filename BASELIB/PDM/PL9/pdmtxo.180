@@ -1,0 +1,52 @@
+	title	PDMTXO
+	subttl	Module from library PULL_DOWN_9 : PDMTXO
+
+; Print text in window frame
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-2000 Hamburg 20
+;		Tel.: 040/4223247
+
+;		Version 2.0 August 1991
+
+; ENTRY	Reg pair DE holds user control block (UPB)
+;	Reg pair HL points to complete window text line
+;	Reg B indicates mode
+;		Bit 0 :	Defines colour on start of text
+;			Reset : normal
+;			  Set : invers
+;		Bit 1 :	Defines colour on end of text
+;			Reset : normal
+;			  Set : invers
+
+; EXIT	None
+
+	public	pdmtxo
+
+	extrn	pdmtxa
+
+	.xlist
+	include	PDM.LIB
+	.list
+
+pdmtxo:
+	push	de
+	pop	ix
+	ld	c,1		; Get 1st line
+filop:
+	push	bc
+	push	de
+	push	hl
+	call	pdmtxa		; Select element, display it
+	pop	hl
+	pop	de
+	pop	bc
+	ld	a,c
+	inc	c		; Bump line
+	cp	(ix+numele)	; Test ready
+	jr	c,filop
+	ret
+
+	end
+

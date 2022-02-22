@@ -1,0 +1,62 @@
+	title	Module from library BASE_5 : SWPNAM
+	name	('SWPNAM')
+	include	baselib.lib
+
+; Swap name of two files
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 April 1987
+
+; ENTRY	Reg pair DE points to 1st FCB
+;	Reg pair HL points to 2nd FCB
+
+; EXIT	On carry reset 1st FCB renamed to 2nd one and
+;	vice versa. On error carry set or extended error
+;	processed
+
+	entry	swpnam
+
+	extrn	delete,renamf,rename,@mvnam
+
+swpnam:
+	push	hl
+	ld	hl,$$DUMMY
+	ex	de,hl
+	call	delete		; Delete existent dummy
+	ex	de,hl
+	call	renamf		; PASS 1 : Rename to dummy
+	pop	hl
+	ret	c
+	ex	de,hl
+	call	renamf		; PASS 2 : 1st rename
+	ret	c
+	push	hl		; PASS 3 : 2nd rename
+	push	de
+	pop	hl
+	call	@mvnam		; Unpack 1st name
+	push	bc
+	push	de
+	ld	bc,-DIRlen
+	add	hl,bc
+	ex	de,hl
+	ld	hl,$$DUMMY
+	call	@mvnam		; Unpack 2nd name
+	pop	de
+	pop	bc
+	pop	hl
+	call	rename		; Then rename
+	ex	de,hl
+	ret
+
+	dseg
+
+$$DUMMY:
+	db	0,'ZYXWVUTS$$$'
+	db	0,0,0,0
+
+	end
+

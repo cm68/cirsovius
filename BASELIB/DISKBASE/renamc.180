@@ -1,0 +1,48 @@
+	title	Module from library BASE_4 : RENAMC
+	name	('RENAMC')
+	include	baselib.lib
+
+; Rename file and check if new one on disk
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 August 1986
+
+; ENTRY	Reg pair <DE> points to FCB
+;	FCB+00		holds drive
+;	FCB+01 .. FCB+11 holds OLD file name and type
+;	FCB+17 .. FCB+27 holds NEW file name and type
+
+; EXIT	On normal return carry is reset
+;	On error carry will be set
+
+	entry	renamc
+
+	extrn	open,rename
+
+renamc:
+	_push_
+	ld	a,(de)		; Get drive
+	ld	($$FCB),a	; Into local FCB
+	ld	hl,DIRlen+1
+	add	hl,de		; Point to new name
+	ld	de,$$FCB+.drv
+	ld	bc,.flen
+	ldir			; Set name
+	ld	de,$$FCB
+	call	open		; Already here ?
+	_pop_
+	jp	c,rename	; Rename if real new
+	scf
+	ret
+
+	dseg
+
+$$FCB:
+	ds	FCBlen		; Local FCB
+
+	end
+

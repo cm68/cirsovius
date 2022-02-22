@@ -1,0 +1,112 @@
+	title	Module from library HIFLOAT_3 : FLMUL
+	name	('FLMUL')
+	include	baselib.lib
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+; Floating point MULTIPLY and SQUARE
+
+; ENTRY	Operand 1 on stack		-- NOT on FLSQAR
+;	Operand 2 in regs DE,HL
+
+; EXIT	Result OP1*OP2 in regs DE,HL
+
+	entry	?flmul,?flsqar
+
+	ext	?ovfl,?zero,flperr
+
+;
+; Entry of SQAR
+;
+?flsqar:
+	pop	bc
+	push	hl		; Double operand
+	push	de
+	push	bc
+;
+; Entry of MUL
+;
+?flmul:
+	ld	a,false
+	ld	(flperr),a	; Reset error
+	ld	iy,0
+	add	iy,sp
+	ld	a,zerbit	; Check zero operand 2
+	and	h
+	ld	b,(iy+mant.hi)	; .. as well as operand 1
+	and	b
+	jp	z,?zero		; Set zero result if either
+	ld	a,h
+	xor	b
+	and	SIGNB		; Get a bit
+	ld	b,a
+	ld	a,(iy+exp)
+	add	a,d		; Add exponents
+	ld	c,a
+	jp	pe,?ovfl	; .. overflow
+	push	bc
+	res	sign,h		; Reset sign bit
+	ld	c,e
+	xor	a
+	ex	de,hl
+	ld	l,(iy+mant.lo)	; Load last byte
+	ld	b,bitlen
+shift.lo:	
+	rr	l		; Shift byte
+	jr	nc,skip.lo
+	add	a,d
+skip.lo:	
+	rra
+	djnz	shift.lo
+	rr	l
+	ld	h,a
+	ld	a,(iy+mant.mid)
+	ld	b,bitlen
+shift.mid:	
+	rra			; Same for middle byte
+	jr	nc,skip.mid
+	add	hl,de
+skip.mid:	
+	rr	h
+	rr	l
+	djnz	shift.mid
+	rra
+	ld	b,bitlen-1
+shift.hi:	
+	rr	(iy+mant.hi)
+	jr	nc,skip.hi
+	add	a,c
+	adc	hl,de
+skip.hi:	
+	rr	h
+	rr	l
+	rra			; Same for hi byte
+	djnz	shift.hi
+	pop	bc
+	ld	e,a
+	ld	d,c
+	bit	zero,h		; Test normalized
+	jr	nz,normalize
+	rl	e
+	adc	hl,hl		; Shift bit if not
+	jr	get.op
+normalize:	
+	inc	d		; Bump exponent
+	jp	pe,?ovfl	; .. error
+get.op:	
+	ld	a,b
+	or	h
+	ld	h,a		; Set resulting bit
+	pop	bc
+	pop	af		; Fix stack
+	pop	af
+	push	bc
+	ret
+
+	end
+

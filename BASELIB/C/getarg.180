@@ -1,0 +1,50 @@
+	title	GETARG
+	subttl	Module from library C_2 : GETARG
+	maclib	SYSEQU.LIB
+
+; FILE:	GETARG.MAC
+; DATE: 820819:1533
+; FOR:	Return argument # A
+
+; Get nth argument from command line
+; ENTRY	: Accu contains no. of arg to get
+; EXIT	: Reg HL points to arg
+;	  Accu contains ENDSTR unless arg is null
+
+	entry	getarg
+
+	ext	nargs,argbuf
+
+getarg:
+	push	bc
+	or	a		; Check zero argument
+	jr	z,null		; .. skip it
+	ld	hl,nargs	; Init pointer
+	cp	(hl)		; Compare number of args
+	jr	z,.arg		; .. max
+	jr	nc,null		; .. too many
+.arg:
+	ld	c,a		; Save argument # searched for
+	ld	hl,argbuf	; Init pointer
+	xor	a		; .. and end character
+gtarg0:
+	dec	c
+	jr	z,gtarg2	; Test found
+gtarg1:
+	cp	(hl)		; Skip item if not found
+	inc	hl
+	jr	nz,gtarg1
+	jr	gtarg0		; Retry
+null:
+	ld	hl,nulbuf	; Set dummy return
+gtarg2:
+	pop	bc
+	ret
+
+	dseg
+
+nulbuf:
+	db	endstr
+
+	end
+

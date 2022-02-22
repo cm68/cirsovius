@@ -1,0 +1,229 @@
+	title	Module from library HIFLOAT_6 : FLFORM
+	name	('FLFORM')
+	include	baselib.lib
+
+; Formatted Floating Point Output
+
+; ENTRY	Number to be converted on stack
+;	Pointer to ASCII buffer in reg BC
+;	Reg H holds total decimal places
+;	Reg L holds decimal places
+;	Accu holds character to be stored at last,
+;	usually $ or 0
+
+; NOTE	If Reg L is -1, a special format with always
+;	scientific notation is converted. If Reg H is
+;	less 8, then the full width of 12 characters will
+;	always be set. If Reg H is greater or equal 8, then
+;	one or more decimal places will be set up to a
+;	maximum of 5 places (Reg H = 12). If Reg H is
+;	greater 12, leading spaces are inserted before
+;	the number
+
+; EXIT	Buffer filled with number
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 January 1989
+
+	entry	?flform
+
+	ext	?flo1,?flo2,?sign,?chrout,?floini,mantst
+	ext	?fltrnc,?fladd,?flmul,?fldiv
+	ext	?num1,?num2,?num3,?num4
+
+?flform:
+	call	?floini		; Save entry
+	ld	a,h
+	ld	(?num4),a	; Set total places
+	ld	a,l
+	ld	(?sign+1),a	; .. and decimal places
+	cp	-1		; Test special
+	jp	z,spec.form
+	or	a
+	ld	a,-1
+	jr	z,null.dig	; Test range
+	jp	m,null.dig
+	sub	l
+	dec	a
+null.dig:	
+	add	a,h		; Fix count
+	pop	hl		; Get number
+	pop	de
+	ex	(sp),hl		; Bring back caller
+	ld	(?num1),hl	; Save number
+	ld	(?num1+2),de
+	rlc	h		; Get sign
+	push	af		; .. save it
+	rrc	h
+	jp	p,pos.num
+	res	sign,h		; Make > 0
+	dec	a
+pos.num:	
+	or	a		; Check sign
+	jp	m,beg.out	; .. begin output
+	ld	(?sign),a	; Save count
+	push	hl		; .. and number
+	push	de
+	ld	hl,4000h	; Load 0.5
+	push	hl
+	ld	h,0ffh
+	push	hl
+	ld	a,(?sign+1)
+	call	mantst		; Fix mantissa
+	call	?fldiv
+	call	?fladd
+	ld	(?num2),hl	; Save so fixed value
+	ld	(?num2+2),de
+	pop	af
+	ld	a,-1
+	push	af
+	ld	a,(?sign)
+	ld	c,a
+	ld	a,(?sign+1)
+	add	a,c
+	dec	a
+	ld	(?sign+1),a	; Save resulting count
+	ld	a,c
+mant.fix:	
+	push	hl
+	push	de
+	call	mantst		; Fix mantissa
+	call	?fldiv
+	call	trunc.
+	ld	a,d
+	push	af		; Save result
+	cp	10		; Test it
+	jp	nc,beg.out.	; Start if ok
+	pop	af
+	jp	m,neg.out	; Test sign
+	or	a
+	jr	nz,mant.out	; .. start mantissa
+	ld	a,(?sign)
+	sub	b
+	jr	z,mant.out
+	ld	d,a
+	ld	a,' '
+	call	?chrout		; .. blank
+	ld	a,d
+	dec	a
+	ld	hl,(?num2)	; Get number
+	ld	de,(?num2+2)
+	jr	mant.fix
+mant.out:	
+	call	pr.sign
+mant.next:	
+	call	BCD.out.	; Ouput BCD digit
+	ld	a,(?sign)
+	cp	b		; Test fraction
+	ld	a,'.'	
+	call	z,?chrout	; Set dp
+	ld	a,d
+	ld	hl,(?num3)	; Load number
+	ld	de,(?num3+2)
+	neg			; Fix exponent
+	jr	z,exp.ok
+	push	hl
+	push	de
+	ld	l,a		; Set exponent
+	ld	h,-1
+	call	spec.fix
+	call	?fladd
+exp.ok:	
+	ld	bc,5000h	; Load 10.0
+	push	bc
+	ld	b,3
+	push	bc
+	call	?flmul
+	call	trunc.		; Truncate
+	jr	nc,mant.next
+BCD.out:	
+	pop	bc
+BCD.out.:
+	ld	a,'0'
+	add	a,d
+	call	?chrout
+	ret
+neg.out:	
+	call	pr.sign		; Check sign, output it
+	jr	BCD.out		; Give BCD output
+pr.sign:	
+	bit	0,c		; Test bit
+	ret	z
+	ld	a,'-'		; Give sign if set
+	call	?chrout
+	ret
+;
+; Truncate number
+; ENTRY	Reg DE,HL hold number to be truncated
+; EXIT	Carry indicates range against digit count
+;
+trunc.:	
+	ld	(?num3),hl
+	ld	(?num3+2),de
+	call	?fltrnc
+	ld	d,l
+	pop	hl
+	pop	bc
+	inc	b
+	push	bc
+	ld	a,(?sign+1)
+	cp	b
+	push	hl
+	ret
+;
+; Entry of special conversion
+;
+spec.form:
+	ld	a,h		; Get counter
+	pop	hl		; Get number
+	pop	de
+	ex	(sp),hl		; Bring back caller
+	jr	spec.go
+;
+; Interface to output routine
+;
+beg.out.:	
+	pop	af
+beg.out:	
+	pop	af
+	ld	a,(?num4)	; Load counter
+	ld	hl,(?num1)	; .. and number
+	ld	de,(?num1+2)
+spec.go:
+	sub	8		; Test length
+	jp	p,?flo2		; .. decide start of output
+	jp	?flo1
+;
+; Special fix of number
+;
+spec.fix:
+	ld	a,msb		; Check MSB
+	and	h
+	jr	z,spec.pos
+	ex	de,hl
+	ld	hl,0		; Negate value if set
+	sbc	hl,de
+	or	a
+spec.pos:	
+	ld	de,0
+	adc	hl,de		; Test zero
+	ret	z
+	ld	d,exp.max
+spec.norm:	
+	bit	zero,h
+	jr	nz,spec.set
+	add	hl,hl		; Normalize
+	dec	d
+	jr	spec.norm
+spec.set:	
+	ld	e,0
+	or	h
+	ld	h,a		; Fix sign
+	ret
+
+	end
+

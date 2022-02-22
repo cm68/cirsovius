@@ -1,0 +1,62 @@
+	title	Module from library C_1 : FREE
+	name	('FREE')
+
+; Free memory
+
+; ENTRY	Reg HL points to memory to be released
+
+; EXIT	Memory released
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1994
+
+	entry	free,allptr
+
+free:
+	push	bc
+	ld	bc,-4
+	add	hl,bc		; .. adjust for start
+	push	hl
+	ld	de,mem.chn	; Point to vector
+free.loop:
+	ex	de,hl
+	ld	b,h		; Copy vector
+	ld	c,l
+	ld	e,(hl)		; Get pointer
+	inc	hl
+	ld	d,(hl)
+	ld	hl,mem.chn
+	or	a
+	sbc	hl,de		; Test same pointers
+	jr	z,free.ex	; .. yeap
+	pop	hl		; Get back memory pointer
+	push	hl
+	sbc	hl,de		; .. adjust
+	jr	nc,free.loop	; .. loop on
+free.ex:
+	pop	hl		; Get back memory pointer
+	ld	a,l
+	ld	(bc),a		; .. save into vector
+	inc	bc
+	ld	a,h
+	ld	(bc),a
+	ld	(hl),e		; Save chain pointer
+	inc	hl
+	ld	(hl),d
+	pop	bc
+	ret
+
+	dseg
+
+allptr:
+	dw	mem.chn
+mem.chn:
+	dw	mem.chn
+	dw	0
+
+	end
+

@@ -1,0 +1,134 @@
+	title	Module from library INTEGER_1 : DOUT32
+	name	('DOUT32')
+	include	baselib.lib
+
+; Convert 32 bit integer to ASCII decimal string
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+;		Version 1.0 October 1989
+
+; ENTRY	Reg pair HL points to 32 bit number
+;	Reg pair DE points to string
+;	Reg B holds end marker of string
+;	(usually zero or $)
+
+; EXIT	Decimal string closed by character in B
+;	Reg pair HL points to close location
+
+	entry	dout32
+
+dout32:
+	push	ix
+	push	iy
+	push	bc		; Save entry
+	push	de
+	ld	de,$$num
+	ld	bc,4
+	ldir			; Get value
+	ld	hl,..res
+	ld	(hl),0		; Clear result
+	ld	e,l
+	ld	d,h
+	inc	de
+	ld	bc,res.len-1
+	ldir
+	ld	iy,$$dec	; Point to table
+	ld	ix,$$num
+	ld	b,res.len
+	ld	hl,..res
+out.loop:
+	call	divfix		; Divide by 10**N
+	ld	de,-4
+	add	iy,de
+	djnz	out.loop
+	ld	de,..res
+	ld	b,res.len-1
+	pop	hl		; Get string
+loop.1:
+	ld	a,(de)		; Check zero
+	or	a
+	jr	nz,loop.ex
+	inc	de
+	djnz	loop.1
+loop.ex:
+	inc	b
+loop.2:
+	ld	a,(de)		; Unpack
+	add	a,'0'
+	ld	(hl),a		; .. as ASCII
+	inc	de
+	inc	hl
+	djnz	loop.2
+	pop	bc
+	ld	(hl),b		; Close string
+	pop	iy
+	pop	ix
+	ret
+divfix:
+	call	@sub32		; Subtract
+	jr	c,div.done	; Check <0
+	inc	(hl)		; Count digits
+	jr	divfix
+div.done:
+	call	@add32		; Make >0
+	inc	hl
+	ret
+@add32:
+	ld	a,(ix+3)	; Add four bytes
+	add	a,(iy+3)
+	ld	(ix+3),a
+	ld	a,(ix+2)
+	adc	a,(iy+2)
+	ld	(ix+2),a
+	ld	a,(ix+1)
+	adc	a,(iy+1)
+	ld	(ix+1),a
+	ld	a,(ix+0)
+	adc	a,(iy+0)
+	ld	(ix+0),a
+	ret
+@sub32:
+	ld	a,(ix+3)	; Subtract four bytes
+	sub	(iy+3)
+	ld	(ix+3),a
+	ld	a,(ix+2)
+	sbc	a,(iy+2)
+	ld	(ix+2),a
+	ld	a,(ix+1)
+	sbc	a,(iy+1)
+	ld	(ix+1),a
+	ld	a,(ix+0)
+	sbc	a,(iy+0)
+	ld	(ix+0),a
+	ret
+
+	dseg
+
+	db	000h,000h,000h,001h	; 1
+	db	000h,000h,000h,00ah	; 10
+	db	000h,000h,000h,064h	; 100
+	db	000h,000h,003h,0e8h	; 1000
+	db	000h,000h,027h,010h	; 10000
+	db	000h,001h,086h,0a0h	; 100000
+	db	000h,00fh,042h,040h	; 1000000
+	db	000h,098h,096h,080h	; 10000000
+	db	005h,0f5h,0e1h,000h	; 100000000
+$$dec:
+	db	03bh,09ah,0cah,000h	; 1000000000
+
+	COMMON	/DATA/
+
+$$C	equ	$
+..res:
+	ds	10
+res.len	equ	$-..res
+$$num:
+	ds	4
+$$CL	equ	$-$$C
+	ds	COMMLEN-$$CL
+
+	end
+

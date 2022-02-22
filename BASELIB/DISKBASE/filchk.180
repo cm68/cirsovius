@@ -1,0 +1,45 @@
+	title	Module from library BASE_2 : FILCHK
+	name	('FILCHK')
+	include	baselib.lib
+
+; Test legal file parameters
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1, July 1988
+
+; ENTRY	: Standard FCB filled with file name
+;	  or reg pair DE points to file name
+;	  Reg pair HL points to a two word list
+
+; EXIT	: Carry reset if file parameters legal
+;	  Carry set if not in range and Reg pair DE holds
+;	  - first  word of list if NO file name specified
+;	  - second word of list if illegal filename found
+
+	entry	filchk,@filck
+
+	extrn	tstlet,indexa
+
+filchk:
+	ld	de,fcb		; Set standard FCB
+@filck:
+	inc	de		; Point to name
+	ld	a,(de)		; Test any name
+	sub	' '
+	jr	z,err0		; Error if none
+	ld	a,(de)
+	dec	de
+	call	tstlet		; Test legal name started with A..Z
+	ret	nc
+	ld	a,1
+err0:
+	call	indexa		; Fetch word from table
+	scf			; Indicate error
+	ret
+
+	end
+

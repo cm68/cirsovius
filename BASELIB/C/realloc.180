@@ -1,0 +1,44 @@
+	title	Module from library C_3 : REALLOC
+	name	('REALLOC')
+
+; Allocate memory with new length
+
+; ENTRY	Reg HL holds bytes to be requested
+;	Reg DE holds pointer to memory.
+
+; EXIT	Reg HL holds pointer to memory.
+;	If not enough memory available, reg HL returns 0
+
+; NOTE	Routine assumes stack growing down from top of memory
+;	Location at SBRK-2 holds number of bytes to be reserved
+;	for the stack - it defaults to 1024
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 1.0, July 1994
+
+	entry	realloc
+
+	extrn	free,svenv,$getmem
+
+realloc:
+	exx			; Save regs
+	call	svenv		; .. and environment
+	exx
+	push	hl		; Save new length requested
+	ex	de,hl
+	dec	hl
+	dec	hl
+	ld	e,(hl)		; Get current length
+	inc	hl
+	ld	d,(hl)
+	push	de		; .. save
+	inc	hl
+	call	free		; Free memory
+	jp	$getmem		; .. allocate new memory
+
+	end
+

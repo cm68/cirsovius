@@ -1,0 +1,55 @@
+	title	Module from library BASE_2 : CONCTL
+	name	('CONCTL')
+	include	baselib.lib
+
+; Define new console control word
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, March 1988
+
+; Old control word will be read and low byte masked with
+; content of reg B. Result will be ORed with content of
+; reg C
+
+; Bit definition of console control byte
+
+;  -------------------------------------------------
+;  I  x  I  x  I  x  I  x  I CTC I CTI I CTS I STC I
+;  -------------------------------------------------
+
+; STC status refers to CTRL-C if set, else to any character
+; CTS CTRL-S & CTRL-Q not filtered, else filtered
+; CTI CTRL-I not expanded, no CTRL-P, else expanded and action
+; CTC CTRL-C not interpreted, else cause warm start
+
+; NOTE that the CCP resets all the bits
+
+; ENTRY	Reg B holds AND mask of bits to be cleared
+;	Reg C holds  OR mask of bits to be set
+
+; EXIT	Reg pair HL holds old control word
+
+	entry	conctl
+
+	extrn	conset
+
+conctl:
+	push	de
+	ld	de,-1		; Set console get
+	call	conset
+	ex	de,hl		; Into HL
+	ld	a,l
+	and	b		; Reset bits
+	or	c		; Set bits
+	ld	e,a
+	ld	d,0
+	call	conset		; Set new one
+	pop	de
+	ret
+
+	end
+

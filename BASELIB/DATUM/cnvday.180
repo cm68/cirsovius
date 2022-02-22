@@ -1,0 +1,141 @@
+	title	Module from library BASE_1 : CNVDAY
+	name	('CNVDAY')
+	include	baselib.lib
+
+; Convert days since 1/1/78 to BCD month, day and year
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.1 December 1996
+;		[Fix bug stopping conversion in the year 2000]
+;		[Seems to be important in the year 1996 ;-)  ]
+
+; ENTRY	Reg HL holds days
+
+; EXIT	Reg IX points to BCD
+;	+0  days
+;	+1  month
+;	+2  year
+
+	entry	cnvday
+
+cnvday:
+	push	bc
+	push	de
+	ld	(goaldays),hl	; Save days
+	ld	ix,days		; Point to BCD field
+	ld	(ix+0),1	; Init field
+	ld	(ix+1),1
+	ld	(ix+2),_year.	; .. BCD !!
+	ld	a,_year
+	ld	(years),a
+	ld	hl,0
+	ld	(dayscnt),hl	; Init day count
+	ld	de,year		; One year of days
+yearloop:
+	ld	hl,(dayscnt)	; Get count
+	add	hl,de		; Trial add
+	call	ckleap		; Test leap year
+	jr	nz,no_leap
+	inc	hl		; .. fix count
+no_leap:
+	call	ckgoal		; Test done
+	jr	nc,yeardone	; .. yeap
+	ld	a,(ix+2)	; Get years
+	ccf
+	inc	a
+	daa
+	ld	(ix+2),a
+;;	jr	z,done		; .. exact match
+	ld	(dayscnt),hl	; Set back count
+	ld	hl,years
+	inc	(hl)		; Bump years
+	jr	yearloop
+yeardone:
+	call	ckleap		; Test leap year
+	ld	hl,feb
+	ld	(hl),28
+	jr	nz,not_leap	; .. nope
+	inc	(hl)		; Fix February
+not_leap:
+	ld	de,montbl	; Init table
+	ld	b,0
+monthloop:
+	ld	hl,(dayscnt)	; Get count
+	ld	a,(de)
+	ld	c,a		; Get from table
+	add	hl,bc		; .. add to days
+	call	ckgoal		; Test end
+	jr	nc,monthdone	; .. yeap
+	push	af
+	ccf
+	ld	a,(ix+1)	; Get month
+	inc	a
+	daa
+	ld	(ix+1),a
+	pop	af
+	jr	z,done
+	ld	(dayscnt),hl	; Set days
+	inc	de		; .. next month
+	jr	monthloop
+monthdone:
+	ld	hl,(dayscnt)	; Get days
+daysloop:
+	inc	hl		; .. bump
+	call	ckgoal		; Test done
+	jr	nc,done
+	ccf
+	ld	a,(ix+0)	; Fix days
+	inc	a
+	daa
+	ld	(ix+0),a
+	jr	daysloop
+done:
+	pop	de
+	pop	bc
+	ret
+;
+; Compare count in HL with goal
+; EXIT	Carry set if count < goal
+;	Zero  set if count = goal
+;
+ckgoal:
+	push	de
+	ld	de,(goaldays)	; Get count
+	ld	a,h
+	cp	d		; .. compare
+	jr	nz,ckend
+	ld	a,l
+	cp	e
+ckend:
+	pop	de
+	ret
+;
+; Check for leap year
+; EXIT	Zero set if leap year
+;
+ckleap:
+	ld	a,(years)	; Get count
+	and	_leap
+	ret
+
+	dseg
+
+montbl:
+	db	31
+feb:
+	db	28,31,30,31,30,31,31,30,31,30,31
+goaldays:
+	ds	2
+days:
+	ds	3
+years:
+	ds	1
+dayscnt:
+	ds	2
+
+	end
+

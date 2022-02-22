@@ -1,0 +1,40 @@
+	title	Module from library BASE_1 : GETCLK
+	name	('GETCLK')
+	include	baselib.lib
+
+; Get time and date
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0 December 1992
+
+; ENTRY	None
+
+; EXIT	Reg HL holds date since 1/1/78
+;	Reg DE points to time parameter block
+
+	entry	getclk
+
+getclk:
+	push	bc
+	_OSCAL_	.bioscl,B.PB	; Update time in SCB
+	_OSCAL_	.gettod,D.PB	; .. get date and time
+	ld	(D.PB+4),a	; .. seconds
+	ld	hl,(D.PB)	; Get date
+	ld	de,D.PB+2	; .. and pointer
+	pop	bc
+	ret
+
+	dseg
+
+B.PB:
+	db	_TIME,0
+	dw	0
+D.PB:
+	ds	5
+
+	end
+

@@ -1,0 +1,206 @@
+	title	Relocating PURE Z80 instructions
+	name	('RELOCATE')
+
+	.z80
+
+	entry	relocate
+
+; Simple methode of relocating PURE Z80 instructions
+; NOTE:	May NOT contain data
+;	Any data accessed MUST reside ABOVE instructions
+
+; ENTRY : Reg DE holds PC of area to be relocated
+;	  Reg HL holds address of source
+;	  Reg BC holds length of code to be relocated
+
+; Based upon a subroutine of PD program Z8E - the Z80 debugger
+; Modified by	W.Cirsovius
+;		Hohe Weide 44
+;		D2000-Hamburg 20
+
+;		Version 1.0, May 1988
+
+relocate:
+	ld	(top),de	;Save start address
+	ld	(orig),hl
+	ld	(len),bc
+	push	de
+	ex	de,hl
+	and	a
+	sbc	hl,de		;Get offset
+	ld	(offs),hl
+	pop	de		;Bring back PC
+.relocate:
+	call	z80clen		;Calculate Instruction length
+	ld	h,d
+	ld	l,e		;DE - Current Instruction  HL -
+	ld	b,0
+	add	hl,bc
+	ex	de,hl		;DE - Next Address to relocate
+	ld	a,c		;Test length
+	sub	3
+	jr	c,nonreloc	;One or two byters are non-Relocatable
+	ld	c,a
+	add	hl,bc		;Bump if four byter
+	ld	a,(hl)
+	ld	hl,z80r		;Table of Relocatable Instructions
+	ld	c,z80rl		;Size
+	cpir
+	jr	nz,nonreloc	;NZ - not Relocatable
+	ex	de,hl
+	dec	hl		;Point to Address Byte requiring relocation
+	push	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ld	hl,(orig)	;Get top page
+	ex	de,hl
+	and	a
+	sbc	hl,de		;Test for absolute Address < Origin
+	pop	hl
+	jr	c,absolute	;Absolute - no relocation needed
+	ld	d,(hl)		;Set address
+	dec	hl
+	ld	e,(hl)
+	push	hl
+	ld	hl,(offs)
+	add	hl,de		;Add offset
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		;Bring back fixed value
+	inc	hl
+	ld	(hl),d
+absolute:
+	inc	hl
+	ex	de,hl		;DE - Next Address tu test
+nonreloc:
+	ld	bc,(len)	;End of Relocatable portion of m
+	ld	hl,(top)	;Get start address
+	add	hl,bc		;HL - absolute End of relocated
+	and	a
+	sbc	hl,de		;Reached End?
+	jr	nc,.relocate	;Nc - more
+	ret
+;
+top:
+	ds	2
+orig:
+	ds	2
+len:
+	ds	2
+offs:
+	ds	2
+;
+;******************************************************************
+;*                                                                *
+;*	ZLEN:  Determine the Number of bytes in a Z80 Instruction *
+;*                                                                *
+;******************************************************************
+;
+z80clen:
+	ld	a,(de)		;Fetch First Byte of op Code
+	cp	0cbh		;Test for shift/bit Manipulation
+	ld	bc,2
+	ret	z		;This is a cb and length is always 2
+	cp	0edh		;Test for fast eddie
+	jr	nz,ddfd..
+	inc	de 		;Fetch Byte two of ed Instruction
+	ld	a,(de)
+	dec	de		;Restore Pointer
+	ld	hl,z80ed	;Ed four byter Table
+	ld	c,z80edl	;Length
+	cpir
+	ld	c,4		;Assume ed four byter
+	ret	z		;Correct assumption
+	ld	c,2		;Set length for return - if not
+	ret			;Two Byte ed
+ddfd..:
+	cp	0ddh		;Check for dd and fd index reg IX and IY
+	jr	z,ddfd
+	cp	0fdh
+	jr	nz,normal
+ddfd:
+	inc	de		;Fetch Byte two of Index reg Instruction
+	ld	a,(de)
+	dec	de		;Restore Pointer
+	cp	0e9h		;Check for reg indirect Jump
+	ret	z
+	ld	hl,z80fd	;Check for dd or fd two byter
+	ld	c,z80fdl
+	cpir
+	ld	c,2		;Assume two
+	ret	z
+	ld	hl,z80f4	;Not two - try four
+	ld	c,z80f4l
+	cpir
+	ld	c,4		;Assume four
+	ret	z		;Correct assumption
+	dec	c		;Must be three
+	ret
+normal:
+	and	11000111b	;Check for 8 hit immediate load
+	cp	006h
+	ld	c,2		;Assume so
+	ret	z
+	dec	c		;Assume one Byte op Code
+	ld	a,(de)
+	cp	03fh
+	jr	c,morebytes	;OpCodes 0 - 3f require further examination
+	cp	0c0h		;8 bit reg-reg loads and arithmetic
+	ret	c
+morebytes:
+	ld	hl,z803		;Check for three byter
+	ld	c,z803l
+	cpir
+	ld	c,3		;Set length
+	ret	z		;Z - three Byte inline Instruction
+	ld	hl,z802
+	ld	c,z802l		;Test for two byter
+	cpir
+	ld	c,2
+	ret	z
+	dec	c		;Length must be 1 in any case
+	ret
+;
+; 0xDD/0xFD prefixed 2 byte instructions
+;
+z80fd:
+	db	009h,019h,02bh,023h,029h,039h,0e1h,0e3h,0e5h,0e9h,0f9h
+z80fdl	equ	$-z80fd
+;
+; 0xDD/0xFD prefixed 3 byte instructions
+;
+z80f4:
+	db	021h,022h,02ah,036h,0cbh
+z80f4l	equ	$-z80f4
+;
+; 2 byte instructions
+;
+z802:
+	db	036h,0c6h,0ceh,0d3h,0d6h,0dbh,0deh,0e6h,0eeh
+	db	0f6h,0feh,018h,038h,030h,028h,020h,010h
+z802l	equ	$-z802
+;
+; ++++ Start of relocation table ++++
+;
+z80r	equ	$
+;
+; 3 byte instructions
+;
+z803:
+	db	001h,011h,021h,022h,02ah,031h,032h,03ah,0cdh
+	db	0dch,0d4h,0cch,0c4h,0ech,0e4h,0fch,0f4h,0c3h
+	db	0dah,0d2h,0cah,0c2h,0eah,0e2h,0fah,0f2h
+z803l	equ	$-z803			;number of 3 byte instructions
+;
+; 0xED prefixed 4 byte instructions - ld (nn),rp and ldrp,(nn)
+;
+z80ed:
+	db	043h,04bh,053h,05bh,073h,07bh
+z80edl	equ	$-z80ed
+;
+; ---- End of relocation table ----
+;
+z80rl	equ	$-z80r			;number of relocatable z80 instructions
+
+	end
