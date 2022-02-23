@@ -1,0 +1,2332 @@
+;
+; Command table
+;
+ComTab:
+IF	ALONE
+	dw	CMD.A
+IF	DESIGN	AND	Z80
+	dw	CMD.B
+ELSE
+	dw	ERROR
+ENDIF	; DESIGN AND Z80
+	dw	NoAlone
+	dw	CMD.D
+	dw	NoAlone
+	dw	CMD.F
+	dw	NoAlone
+	dw	CMD.H
+	dw	CMD.I
+	dw	ERROR
+	dw	ERROR
+	dw	CMD.L
+	dw	CMD.M
+	dw	ERROR
+IF	BANK
+	dw	CMD.O
+ELSE
+	dw	ERROR
+ENDIF	; BANK
+	dw	CMD.P
+IF	DESIGN
+	dw	CMD.Q
+ELSE
+	dw	ERROR
+ENDIF	; DESIGN
+	dw	NoAlone
+	dw	CMD.S
+	dw	NoAlone
+	dw	NoAlone
+	dw	CMD.V
+	dw	NoAlone
+	dw	CMD.X
+	dw	ERROR
+	dw	ERROR
+NoAlone:
+	ld	hl,$NoAlone
+	call	String		; .. tell not supported
+	jp	Main
+$NoAlone:
+	db	cr,lf
+	db	'! Not supported in the stand alone version',0
+ELSE
+	dw	CMD.A
+IF	DESIGN	AND	Z80
+	dw	CMD.B
+ELSE
+	dw	ERROR
+ENDIF	; DESIGN AND Z80
+	dw	CMD.C
+	dw	CMD.D
+	dw	CMD.E
+	dw	CMD.F
+	dw	CMD.G
+	dw	CMD.H
+	dw	CMD.I
+	dw	ERROR
+	dw	ERROR
+	dw	CMD.L
+	dw	CMD.M
+	dw	ERROR
+IF	BANK
+	dw	CMD.O
+ELSE
+	dw	ERROR
+ENDIF	; BANK
+	dw	CMD.P
+IF	DESIGN
+	dw	CMD.Q
+ELSE
+	dw	ERROR
+ENDIF	; DESIGN
+	dw	CMD.R
+	dw	CMD.S
+	dw	CMD.T
+	dw	CMD.U
+	dw	CMD.V
+	dw	CMD.W
+	dw	CMD.X
+	dw	ERROR
+IF	ZCPR
+	dw	CMD.Z
+ELSE
+	dw	ERROR
+ENDIF	; ZCPR
+ENDIF	; ALONE
+;
+; Command A : Assemble
+; Syntax	As	Assemble at @s
+;		A	Assemble at next
+;		-A	Remove assembler
+;
+CMD.A::
+	call	LA???		; Verify command active
+	jp	nc,ERROR	; Nope
+IF	BANK
+	call	TellBank	; Tell current bank
+ENDIF	; BANK
+	call	ParamGet	; Get parameter
+	or	a
+	jp	nz,CMD.A.adr
+	ld	a,(Minus)	; Test '-'
+	or	a
+	jp	z,CMD.A.cur	; .. nope
+IF	ALONE
+	jp	NoAlone
+ELSE
+	call	RemoveLA	; Remove package
+	jp	Main
+ENDIF	; ALONE
+CMD.A.adr:
+	dec	a		; Verify one parameter
+	jp	nz,ERROR	; .. should be
+	call	LoadHL		; .. get it
+	ld	(@.PC),hl	; Set PC
+CMD.A.cur:
+	call	@ASMBL
+	jp	Main
+IF	DESIGN	AND	Z80
+
+BASE	equ	00000h		; Start of RAM
+
+NoMSB	equ	01111111b
+
+len	equ	14
+;
+; Command B : Find string or byte series
+; Syntax	B"s(")	Find string s
+;		Ba,b,..	Find hex bytes/words
+;		B"s"a	Find mixed mode
+;
+CMD.B::
+IF	BANK
+	call	TellBank	; Tell current bank
+ENDIF	; BANK
+	call	CrLf		; Close line
+	call	ChkSrc		; Parse line
+	jp	c,ERROR		; .. error
+	ld	a,(CmdLine+1)	; Test remaining
+	or	a
+	jp	z,ERROR		; .. should be
+	ld	ix,count
+	ld	(ix+0),len	; Init count
+	ld	hl,BASE		; .. and start address
+	ld	bc,_LAST	; .. and address range
+SearchLoop:
+	ld	de,ParseBuff
+	call	Find		; Find string
+	jp	nz,Main		; .. no
+	push	hl
+	or	a
+	sbc	hl,de		; Test if testing pattern
+	ld	a,h
+	or	l
+	pop	hl
+	jp	z,SearchSkip	; Skip if so
+	call	Hex16		; Print address
+	call	PrSpc		; Give separator
+	dec	(ix+0)		; Count down columns
+	jp	nz,SearchSkip
+	ld	(ix+0),len	; Set new lenght
+	push	bc
+	push	de
+	call	CrLf		; Give new line if filled
+	pop	de
+	pop	bc
+SearchSkip:
+	call	Constat		; Test abort
+	jp	nz,SearchBREAK
+	inc	hl		; Fix start address
+	dec	bc		; .. bump
+	ld	a,b
+	or	c
+	jp	nz,SearchLoop
+	jp	Main		; Fill line from keyboard
+SearchBREAK:
+	ld	a,(ix+0)
+	cp	len
+	call	nz,CrLf		; .. close line
+	jp	Main		; .. exit
+count:
+	db	0
+;
+; #################
+; ## Subroutines ##
+; #################
+;
+; Parse command line
+; EXIT	Carry set on error
+;	Reg IY points to remaing length
+;
+ChkSrc:
+	ld	de,ParseBuff	; Init buffers
+	ld	hl,CmdLine+3
+	ld	iy,CmdLine+1	; .. pointer to count
+	ld	ix,ParseFlag
+	ld	(ix+0),0	; .. flag
+	ld	bc,0		; .. counter and byte
+	inc	(iy+0)		; .. fix count
+ChkSrcNext:
+	dec	(iy+0)
+	jr	nz,ChkSrcMore	; Test more
+	bit	1,(ix+0)	; Test pending nibble
+	jr	z,ChkSrcExit	; .. no
+	inc	(iy+0)		; Force one more
+	jr	ChkSrcDelim	; Shift nibble in
+ChkSrcMore:
+	ld	a,(hl)		; Get character
+	inc	hl
+	and	NoMSB
+	cp	'"'		; Check string
+	jr	z,ChkSrcString	; .. do it
+	bit	0,(ix+0)	; Test string processing
+	jr	z,ChkSrcChkHex	; .. no
+ChkSrcSave:
+	ld	(de),a		; Save what we got
+	inc	de		; Bump pointer
+	inc	b		; .. and counter
+	jr	ChkSrcNext	; Get next
+ChkSrcChkHex:
+	cp	','		; Test delimiter
+	jr	z,ChkSrcDelim
+	call	tstdigit	; Test hex byte
+	ret	c		; .. should be
+	bit	1,(ix+0)	; Test HI mode
+	jr	nz,ChkSrcLo	; .. set LO
+	set	1,(ix+0)	; Indicate 2nd
+	add	a,a		; .. shift into HI position
+	add	a,a
+	add	a,a
+	add	a,a
+	ld	c,a		; Save
+	jr	ChkSrcNext
+ChkSrcLo:
+	res	1,(ix+0)	; Indicate 1st
+	add	a,c		; Get byte
+	jr	ChkSrcSave	; .. store
+ChkSrcDelim:
+	bit	1,(ix+0)	; Test pending nibble
+	jr	z,ChkSrcNext	; .. no, get next
+	res	1,(ix+0)	; Set HI
+	ld	a,c		; Get old byte
+	or	a
+	rra			; .. shift into LO position
+	rra
+	rra
+	rra
+	jr	ChkSrcSave	; Save result
+ChkSrcString:
+	bit	0,(ix+0)
+	set	0,(ix+0)	; Toggle mode
+	jr	z,ChkSrcDelim
+	res	0,(ix+0)
+	jr	ChkSrcDelim
+ChkSrcExit:
+	ld	a,b
+	ld	(CmdLine+1),a	; Save length
+	or	a		; Set success
+	ret
+;
+; ENTRY	Reg DE points to parsed buffer
+;	Reg BC holds count
+;	Reg HL holds current memory address
+;	Reg IY points to remaining length
+; EXIT	Zero flag set indicates pattern found
+;
+Find:
+	ld	a,(iy+0)
+	ld	(RemLen),a	; Save entry count
+	push	de		; Save buffer
+FindTry:
+IF	BANK
+	call	CmpBank		; Compare byte
+ELSE
+	ld	a,(de)
+	cp	(hl)		; Compare byte
+ENDIF	; BANK
+	jp	z,Found1st	; Test found first
+FindRestart:
+	inc	hl		; Fix address
+	dec	bc
+	ld	a,b
+	or	c		; Test more
+	jp	z,FoundNothing	; .. no
+	call	ConStat		; Test break
+	jp	nz,Main
+	jp	FindTry
+Found1st:
+	push	bc		; Save a bit
+	push	hl
+FindNext:
+	dec	(iy+0)		; Count down
+	jp	z,FoundString	; .. done
+	inc	hl
+	inc	de
+IF	BANK
+	call	CmpBank		; Compare next
+ELSE
+	ld	a,(de)
+	cp	(hl)		; Compare next
+ENDIF	; BANK
+	jp	nz,NoMatch	; Not the same
+	dec	bc
+	ld	a,b		; Test all scanned
+	or	c
+	jp	z,FoundDone	; .. that's all
+	jp	FindNext	; .. get next
+NoMatch:
+	pop	hl		; Get back regs
+	pop	bc
+	pop	de
+	push	de
+	ld	a,(RemLen)
+	ld	(iy+0),a	; .. and count
+	jp	FindRestart
+FoundDone:
+	pop	hl		; Get back regs
+	pop	bc
+FoundNothing:
+	pop	de
+	dec	a		; Set more to be searched for
+	jp	FindExit
+FoundString:
+	pop	hl		; Get back regs
+	pop	bc
+	pop	de
+	xor	a		; Indicate pattern found
+FindExit:
+	ld	a,(RemLen)
+	ld	(iy+0),a	; Restore length
+	ret
+RemLen:
+	db	0
+IF	BANK
+CmpBank:
+	call	CurBnk		; Select current bank
+	ld	a,(de)
+	cp	(hl)		; Compare byte
+	push	af		; Save result
+	jp	SelTPA		; Reset bank
+ENDIF	; BANK
+;
+; Test hex digit
+; ENTRY	Accu holds character
+; EXIT	Accu holds nibble
+;	Carry set on error
+;
+tstdigit:
+	call	UPPcon		; Get UPPER case
+	sub	'0'		; Strip off ASCII
+	ret	c
+	cp	9+1		; Test decimal
+	jr	c,legaldig
+	sub	'A'-'0'-10	; Fix hex
+	ret	c
+	cp	15+1		; Test max F
+	jr	c,legaldig
+	scf			; Set error
+	ret
+legaldig:
+	or	a		; Clear error
+	ret
+;
+lineptr:
+	dw	0
+;
+; Bit 0 String requested state
+; Bit 1 Hex nibble state
+;
+ParseFlag:
+	db	0
+ParseBuff:
+	ds	80
+ENDIF	; DESIGN AND Z80
+
+IF	NOT	ALONE
+;
+; Command C : Call
+; Syntax	Cs	Call @s, clear BC and DE
+;		Cs,b	Call @s, set BC, clear DE
+;		Cs,b,d	Call @s, set BC and DE
+;
+CMD.C::
+	call	ParamGet	; Get parameter
+	jp	c,ERROR		; .. error
+	jp	z,ERROR		; .. min is one
+	call	LoadHL		; .. get 1st
+	push	hl
+	ld	bc,0
+	dec	a		; Test 2nd
+	jp	nz,CMD.C.LdBC
+	push	bc		; Clear both
+	push	bc
+	jp	CMD.C.call
+CMD.C.LdBC:
+	call	LoadHL		; Get 2nd
+	push	hl
+	dec	a		; Test 3rd
+	jp	nz,CMD.C.LdDE
+	push	bc		; Clear BC
+	jp	CMD.C.call
+CMD.C.LdDE:
+	call	LoadHL		; Get 3rd
+	push	hl
+CMD.C.call:
+	pop	de		; Get DE
+	pop	bc		; .. and BC
+	ld	hl,Main
+	ex	(sp),hl		; Change return address
+	jp	(hl)		; .. start
+ENDIF	; NOT ALONE
+;
+; Command D : Dump
+; Syntax	Ds	Dump from @s
+;		Ds,f	Dump from @s to @f
+;		D	Dump from current
+;		D,f	Dump from current to @f
+;		-D..	Same as above bit no ASCII
+;		DW..	Same as above as words
+;
+CMD.D::
+IF	BANK
+	call	TellBank	; Tell current bank
+ENDIF	; BANK
+	call	Param.W.Get	; Get parameters
+	jp	z,CMD.D.def	; .. dump from current
+	call	LoadHL		; Get value
+	jp	c,DMP.D.NoStrt	; .. check only end
+	ld	(CurDump),hl	; .. set start
+DMP.D.NoStrt:
+	and	NoMSB
+	dec	a
+	jp	z,CMD.D.def
+	call	LoadHL		; Get end
+	dec	a
+	jp	nz,ERROR	; .. verify done
+	jp	CMD.D.go
+CMD.D.def:
+	ld	hl,(CurDump)	; Get current
+	ld	de,_Dump-1
+	add	hl,de		; Check address wrap
+	jp	nc,CMD.D.go
+	ld	hl,_LAST	; Set max 16 bit address
+CMD.D.go:
+	ld	(DmpEnd),hl	; Set end address
+CMD.D.Loop:
+	call	ConStat		; Test break
+	jp	nz,Main		; .. yep
+	ld	hl,(DmpEnd)
+	ex	de,hl
+	ld	hl,(CurDump)
+	ld	(DmpSav),hl	; .. save start
+	ex	de,hl
+	call	Cmp.HL.DE	; Test remainder
+	jp	c,Main		; .. end
+	call	CrLf
+	ld	hl,(CurDump)	; Get current
+	call	Hex16		; .. print as address
+	ld	a,':'
+	call	Conout
+	ld	a,(WordFlag)	; Check WORD
+	or	a
+	jp	z,CMD.D.bytes
+	ld	c,_DByte / 2	; Set word count
+CMD.D.WrdLoop:
+	call	PrSpc
+IF	BANK
+	call	LdBank16	; Get word from bank
+ELSE
+	ld	e,(hl)		; Get 16 bit
+	inc	hl
+	ld	d,(hl)
+ENDIF	; BANK
+	inc	hl
+	ex	de,hl
+	call	Hex16		; .. print it
+	call	PrSpc
+	ex	de,hl
+	dec	c
+	push	af
+	call	TstDmpEnd	; Test ready
+	jp	c,CMD.D.WrdEx
+	pop	af
+	jp	nz,CMD.D.WrdLoop
+	jp	CMD.D.ASCII
+CMD.D.WrdEx:
+	pop	af		; Clean stack
+CMD.D.WrdFill:
+	ld	a,c
+	or	c
+	jp	z,CMD.D.ASCII
+	call	PrSpc		; .. fill blanks
+	call	PrSpc
+	call	PrSpc
+	call	PrSpc
+	call	PrSpc
+	call	PrSpc
+	dec	c
+	jp	nz,CMD.D.WrdFill
+	jp	CMD.D.ASCII	; .. fall in ASCII
+CMD.D.bytes:
+	ld	c,_DByte
+CMD.D.ByteLoop:
+	call	PrSpc
+IF	BANK
+	call	LdBank
+ELSE
+	ld	a,(hl)
+ENDIF	; BANK
+	call	HexByte		; Print byte
+	dec	c
+	push	af
+	inc	hl
+	ex	de,hl
+	ld	hl,(DmpEnd)
+	call	Cmp.HL.DE	; Test end reched
+	ex	de,hl
+	jp	c,CMD.D.ByteEx
+	pop	af
+	jp	nz,CMD.D.ByteLoop
+	jp	CMD.D.ASCII
+CMD.D.ByteEx:
+	pop	af
+CMD.D.ByteFill:
+	ld	a,c
+	or	c
+	jp	z,CMD.D.ASCII
+	call	PrSpc		; .. fill bytes
+	call	PrSpc
+	call	PrSpc
+	dec	c
+	jp	nz,CMD.D.ByteFill
+CMD.D.ASCII:
+	ld	(CurDump),hl
+	ld	a,(Minus)	; Test '-'
+	or	a
+	jp	nz,CMD.D.Loop	; .. yep
+	ld	hl,(DmpSav)	; Get back start
+	ex	de,hl
+	call	PrSpc
+	ld	c,_DByte
+CMD.D.ASCII.Loop:
+IF	BANK
+	ex	de,hl
+	call	LdBank		; Get ASCII
+	ex	de,hl
+ELSE
+	ld	a,(de)
+ENDIF	; BANK
+	call	IsItASCII	; Print pure ASCII
+	inc	de
+	ld	hl,(DmpEnd)
+	call	Cmp.HL.DE	; Test end
+	jp	z,CMD.D.ASCex
+	jp	c,CMD.D.Loop
+	dec	c
+	jp	nz,CMD.D.ASCII.Loop
+	jp	CMD.D.Loop
+CMD.D.ASCex:
+	ld	a,(de)
+	call	IsItASCII
+	ld	a,(DmpFlg)	; Check flag
+	cp	-1
+	jp	nz,CMD.D.Loop
+	ld	a,0
+	ld	(DmpFlg),a
+	jp	Main
+IF	NOT	ALONE
+;
+; Command E : Load file(s)
+; Syntax	Ep	Load program file (.HEX or .COM)
+;		Ep,s	Load program and symbol file (.SYM)
+;		E*,s	Load symbol file
+;
+CMD.E::
+	ld	a,(CmdLine+1)
+	or	a		; Test any input
+	jp	z,ERROR		; .. should be
+	call	Parse		; Parse input
+	ld	a,(FCB+.ext)
+	cp	' '
+	jp	nz,CMD.E.COM
+	call	Set.COM		; .. set .COM
+CMD.E.COM:
+	ld	a,(FCB+.fcb2+.ext)
+	cp	' '
+	jp	nz,CMD.E.SYM
+	call	Set.SYM		; .. set .SYM
+CMD.E.SYM:
+	ld	hl,0
+	jp	LoadFile	; Load file(s)
+ENDIF	; NOT ALONE
+;
+; Command F : Fill memory
+; Syntax	F,s,f,d	Fill from @s to @f with d
+;
+CMD.F::
+	call	ThreePar	; Get what we need
+	ld	a,h		; Verify byte filler
+	or	a
+	jp	nz,ERROR
+CMD.F.Loop:
+	call	Cmp.BC.Top	; Test overflow
+	jp	c,Main		; .. end
+	call	Cmp.BC.DE	; Test end reached
+	jp	c,Main		; .. yeap
+	ld	a,l
+IF	BANK
+	call	StBank.		; Store into bank
+ELSE
+	ld	(bc),a		; Store byte
+ENDIF	; BANK
+	inc	bc
+	jp	CMD.F.Loop
+IF	NOT	ALONE
+;
+; Command G : Go
+; Syntax	G	Go (from current PC)
+;		Gp	Start at @p
+;		G,a	Go, breakpoint at @a
+;		Gp,a	Start at @p, breakpoint at @a
+;		G,a,b	Go, breakpoints at @a and @b
+;		Gp,a,b	Start at @p, breakpoints at @a and @b
+;		-G..	Same as above without symbolic trace
+;
+CMD.G::
+	xor	a
+	ld	(BrkFlag),a	; Clear break flag
+	call	CrLf
+	call	ParamGet	; Get paramter
+	ld	(GoParam),a	; .. save count
+	call	LoadHL		; Get 1st parameter
+	push	hl
+	call	LoadHL
+	ld	(BP.1),hl	; .. save breakpoint
+	push	hl
+	call	LoadHL
+	ld	(BP.2),hl	; .. 2nd, too
+	ld	b,h		; Copy it
+	ld	c,l
+	pop	de		; Get back break point
+	pop	hl		; .. and address
+	jp	CMD.G.go
+;
+; #############################
+; # Re-enter after breakpoint #
+; #############################
+;
+CMD.G.EXTRN:
+	push	hl
+	ld	hl,BrkFlag
+	ld	(hl),-1		; Set flag
+	pop	hl
+CMD.G.go:
+	di			; .. no interrupts now
+	jp	z,CMD.G.def	; .. no input
+	jp	c,CMD.G.noPC	; .. no PC
+	ld	(SavPC),hl	; .. else set
+CMD.G.noPC:
+	and	NoMSB		; Strip off bit
+	dec	a
+	jp	z,CMD.G.def	; .. done
+	call	BP.Set		; .. save breakpoint
+	dec	a
+	jp	z,CMD.G.def
+	ld	e,c		; Copy 2nd one
+	ld	d,b
+	call	BP.Set		; .. save it
+CMD.G.def:
+	ld	hl,PassArr
+	ld	c,_Pass
+CMD.G.PassLoop:
+	push	hl
+	ld	a,(hl)		; Test entry
+	or	a
+	jp	z,CMD.G.Passive	; .. no count
+	inc	hl
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	a,(BrkFlag)	; Test break
+	or	a
+	jp	z,CMD.G.SetBP	; .. nope
+	ld	hl,(SavPC)	; Get PC
+	ld	a,e
+	cp	l		; Test pass point reached
+	jp	nz,CMD.G.SetBP
+	ld	a,d
+	cp	h
+	jp	nz,CMD.G.SetBP
+	pop	hl		; Clean stack
+	pop	hl		; .. get array pointer
+	ld	(CurPass),hl	; Save it
+	push	hl
+	ld	a,(hl)		; Get count
+	ld	(hl),0		; .. clear
+	ld	(PasOPC),a	; .. save ole one
+	jp	CMD.G.Passive
+CMD.G.SetBP:
+	pop	hl		; Get array pointer
+	inc	hl
+	ld	a,(de)		; Get old code
+	ld	(hl),a		; .. save
+	ex	de,hl
+	ld	(hl),RST.cod	; Set RST
+CMD.G.Passive:
+	pop	hl
+	ld	de,_PasLen
+	add	hl,de		; .. point to next
+	dec	c		; Test more
+	jp	nz,CMD.G.PassLoop
+IF	Z80
+	ld	sp,Z80regs	; Point to Z80 reg save area
+	pop	iy		; Get index reg IY
+	pop	ix		; .. IX
+	exx
+	pop	hl		; Get HL'
+	pop	de		; ..  DE'
+	pop	bc		; ..  BC'
+	exx
+	ex	af,af'
+	pop	af		; ..  AF'
+	ex	af,af'
+ENDIF	; Z80
+	ld	sp,SavDE	; Point to reg save area
+	pop	de		; Get callers DE
+	pop	bc		; .. BC
+	pop	af		; .. Accu+PSW
+	pop	hl
+	ld	sp,hl		; .. SP
+	ld	hl,(SavPC)	; Get PC for execution
+	push	hl
+	ld	hl,(SavHL)	; Get callers HL
+	ei
+	ret			; .. run
+;
+; Set breakpoint
+; ENTRY	Reg DE holds address of breakpoint
+;
+BP.Set:
+	push	af
+	push	bc
+	ld	hl,BP.Save	; Point to 1st location
+	ld	a,(hl)		; .. get entry
+	inc	(hl)		; .. bump
+	or	a		; .. test empty
+	jp	z,..SaveIt	; .. yep
+	inc	hl
+	ld	a,(hl)		; Get address of current BP
+	inc	hl		; .. set pointer to 2nd BP
+	ld	b,(hl)
+	inc	hl
+	cp	e
+	jp	nz,..SaveIt
+	ld	a,b
+	cp	d
+	jp	nz,..SaveIt
+	ld	a,(hl)		; Restore code if same
+	ld	(de),a
+..SaveIt:
+	inc	hl
+	ld	(hl),e		; Save address
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	a,(de)		; Get code
+	ld	(hl),a		; .. save
+	ld	a,RST.cod
+	ld	(de),a		; Set RST
+	pop	bc
+	pop	af
+	ret
+ENDIF	; NOT ALONE
+;
+; Command H : Hex commands
+; Syntax	Ha,b	Build a+b and a-b
+;		Ha	Give number and character conversion
+;		H	Print symbol table
+;
+CMD.H::
+	call	ParamGet	; Get parameter
+	jp	z,CMD.H.Sym	; .. print symbols
+	call	LoadHL		; Get value
+	dec	a		; .. test conversion
+	jp	z,CMD.H.Conv
+	dec	a		; Verify legal end
+	jp	nz,ERROR
+	push	hl
+	call	LoadHL		; Get 2nd parameter
+	pop	de
+	push	hl
+	call	CrLf
+	add	hl,de		; .. add
+	call	Hex16		; .. give sum
+	call	PrSpc
+	pop	hl
+	xor	a
+	sub	l		; .. negate 2nd
+	ld	l,a
+	ld	a,0
+	sbc	a,h
+	ld	h,a
+	add	hl,de
+	call	Hex16		; Print difference
+	jp	Main
+;
+; Print value after command Ha
+;
+CMD.H.Conv:
+	ex	de,hl
+	call	CrLf
+	push	de
+	push	de
+	call	SymbVal		; Print symbol
+	call	PrSpc
+	ld	a,'#'
+	call	Conout		; Give decimal prefix
+	ld	b,MSB+DecLen	; Set length, set no char
+	ld	hl,DecimalTab	; Point to table
+CMD.H.DecLoop:
+	ld	e,(hl)		; Get value from table
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl		; Get original value
+	ld	c,'0'		; Init digit count
+CMD.H.Sub:
+	ld	a,l		; Subtract
+	sub	e
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ld	h,a
+	jp	c,CMD.H.Neg	; .. till < 0
+	inc	c		; Bump digit
+	jp	CMD.H.Sub
+CMD.H.Neg:
+	add	hl,de		; Make > 0
+	ld	a,b
+	or	a		; Test digit out
+	jp	p,CMD.H.PrDig	; .. yep
+	push	af
+	ld	a,c
+	cp	'0'		; Test zero
+	jp	z,CMD.H.supp	; .. suppress
+	call	Conout
+	pop	af
+	and	NoMSB		; Indicate stream
+	ld	b,a
+	jp	CMD.H.DecNxt
+CMD.H.PrDig:
+	ld	a,c
+	call	Conout		; .. print digit
+	jp	CMD.H.DecNxt
+CMD.H.supp:
+	pop	af
+	and	NoMSB
+	cp	1		; Test last digit
+	jp	nz,CMD.H.DecNxt
+	ld	b,a		; .. print always
+	jp	CMD.H.PrDig
+CMD.H.DecNxt:
+	ex	(sp),hl		; Set back new value
+	dec	b		; .. test done
+	jp	nz,CMD.H.DecLoop
+	pop	de
+	pop	de		; Get back ole value
+	ld	a,d
+	or	a		; Test byte
+	jp	nz,Main
+	ld	a,e
+	and	NoMSB		; .. force 7 bit
+	cp	' '		; Test valid ASCII range
+	jp	c,Main
+	inc	a
+	jp	z,Main
+	call	PrSpc
+	ld	a,''''		; Give string prefix
+	call	Conout
+	ld	a,e
+	and	NoMSB
+	call	Conout		; .. print
+	ld	a,''''
+	call	Conout
+	jp	Main
+;
+; Print symbol table after command H
+;
+CMD.H.Sym:
+	ld	hl,(BaseSym)	; Get base symbol address
+	inc	hl		; Fix pointer
+	inc	hl
+CMD.H.SymLoop:
+	ld	d,(hl)		; Fetch address
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	ld	c,(hl)		; Get length
+	dec	hl
+	ld	a,c
+	cp	_SymLen		; Test max
+	jp	nc,Main
+	call	CrLf
+	ex	de,hl
+	call	Hex16		; Print address
+	ex	de,hl
+	call	PrSpc
+	inc	c
+CMD.H.SymbPr:
+	dec	c
+	jp	z,CMD.H.SymEx	; Test ready
+	ld	a,(hl)
+	dec	hl
+	call	Conout		; .. print symbol
+	jp	CMD.H.SymbPr
+CMD.H.SymEx:
+	call	ConStat		; Test break
+	jp	nz,Main		; .. yep
+	jp	CMD.H.SymLoop
+;
+; Command I : Input command line
+; Syntax	I any_character_line
+;
+; Sets up string into command buffer @0080H and
+; builds FCBs at @005CH and @006CH
+;
+CMD.I::
+	ld	a,(Minus)	; Test '-'
+	or	a
+	jp	nz,ERROR	; .. should not be
+	call	Parse		; .. parse input
+	jp	Main
+;
+; Command L : List code
+; Syntax	Ls	List from @s
+;		Ls,f	List from @s to @f
+;		L	List from current
+;		-L..	Same as above without symbol table
+;
+CMD.L::
+	call	LA???		; Verify command active
+	jp	nc,ERROR	; .. nope
+IF	BANK
+	call	TellBank	; Tell current bank
+ENDIF	; BANK
+	call	ParamGet	; Get parameter
+	jp	z,CMD.L.def	; .. list from current
+	call	LoadHL		; Get address
+	ld	(@.PC),hl	; Set as PC
+	dec	a		; .. test only start
+	jp	z,CMD.L.def
+	call	LoadHL		; .. get end address
+	ld	(@.END),hl
+	dec	a		; .. verify legal end
+	jp	nz,ERROR
+	xor	a		; Clear lines
+	jp	CMD.L.go
+CMD.L.def:
+	ld	a,_Lines	; .. get default
+CMD.L.go:
+	ld	(LISTcnt),a	; .. save
+	call	@LIST		; .. go list
+	jp	Main
+;
+; Comand M : Move memory
+; Syntax	Ms,h,d	Move from @s to @h into new start @d
+;
+CMD.M::
+	call	ThreePar	; Get three parameters
+CMD.M.Loop:
+	call	Cmp.BC.DE	; Test end reached
+	jp	c,Main		; .. yep
+	push	bc
+	push	de
+	push	hl
+	ld	hl,_LAST	; Compare against max
+	ld	a,h
+	cp	b
+	jp	nz,CMD.M.Move
+	ld	a,l
+	cp	c
+	jp	nz,CMD.M.Move
+	jp	Main		; .. end if top reached
+CMD.M.Move:
+	pop	hl
+	pop	de
+	pop	bc
+IF	BANK
+	call	LdBank.		; Get from current bank
+ELSE
+	ld	a,(bc)		; .. unpack
+ENDIF	; BANK
+	inc	bc
+	ld	(hl),a
+	inc	hl
+	jp	CMD.M.Loop
+IF	BANK
+;
+; Command O : Other bank select
+; Syntax	Ob	Select bank b
+;		O	Display current bank
+;		-O	Select TPA bank
+;
+CMD.O::
+	call	ParamGet	; Get parameter
+	jp	z,NoBankSet	; .. none
+	dec	a
+	jp	nz,ERROR	; .. should be bank only
+	call	LoadHL		; Get bank
+	inc	h
+	dec	h
+	jp	nz,ERROR
+	ld	a,l
+	cp	_MaxBnk+1	; Valid bank is 0..15
+	jp	nc,ERROR
+..SetTPA:
+	ld	(SelBank),a	; .. save bank
+	jp	Main
+NoBankSet:
+	ld	a,(Minus)	; Test minus flag
+	or	a
+	ld	a,_TPA
+	jp	nz,..SetTPA	; .. yeap, so set TPA
+	call	..TellBnk	; .. nope, display
+	jp	Main
+;
+; Fetch word from bank:HL
+; ENTRY	Reg HL holds address
+; EXIT	Reg DE holds word
+;
+LdBank16:
+	push	af
+	call	LdBank
+	ld	e,a		; Get LO
+	inc	hl
+	call	LdBank
+	ld	d,a		; .. and HI
+	pop	af
+	ret
+;
+; Fetch byte from bank:BC
+; ENTRY	Reg BC holds address
+; EXIT	Accu holds byte
+;
+LdBank.:
+	push	hl
+	ld	l,c		; Copy adress
+	ld	h,b
+	call	LdBank		; .. get byte
+	pop	hl
+	ret
+;
+; Fetch byte from bank:HL
+; ENTRY	Reg HL holds address
+; EXIT	Accu holds byte
+;
+LdBank:
+	call	CurBnk		; Select current bank
+	ld	a,(hl)		; Get byte
+	push	af
+	jp	SelTPA		; Reset TPA bank
+;
+; Store byte into bank:BC
+; ENTRY	Reg BC holds address
+;	Accu holds byte
+;
+StBank.:
+	push	hl
+	ld	l,c		; Copy adress
+	ld	h,b
+	call	StBank		; .. store byte
+	pop	hl
+	ret
+;
+; Store byte into bank:HL
+; ENTRY	Reg HL holds address
+;	Accu holds byte
+;
+StBank:
+	push	af
+	call	CurBnk		; Select current bank
+	pop	af
+	push	af
+	ld	(hl),a		; Store byte
+SelTPA:
+	ld	a,_TPA
+	call	SelBnk		; Reset TPA bank
+	pop	af
+	ret
+;
+; Select current memory bank
+;
+CurBnk:
+	ld	a,(SelBank)	; Get bank
+;
+; Select memory bank
+; ENTRY	Accu holds bank
+;
+SelBnk:
+	push	bc
+	push	de
+	push	hl
+	cp	_TPA		; Test TPA
+	jr	nz,SetNoTPA	; .. nope, set it
+	ld	c,a
+	ld	a,(CurBank)	; Test bank already set
+	cp	c
+	ld	a,c
+	jr	z,SetBankSkp	; .. yeap, skip
+SetNoTPA:
+	ld	(CurBank),a	; .. store as new one
+	ld	c,a		; Save bank
+	ld	a,(COMMflg)	; Get COMMON
+	or	a
+	ld	a,c
+@SelBank:
+	call	nz,$-$		; .. go if banked
+SetBankSkp:
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+SelBank:
+	db	_TPA
+CurBank:
+	db	_TPA
+COMMflg:
+	ds	1
+;
+; Tell current bank selected
+;
+TellBank:
+	ld	a,(SelBank)
+	cp	_TPA
+	ret	z		; Skip TPA bank
+..TellBnk:
+	push	bc
+	push	de
+	push	hl
+	ld	hl,$BANK
+	call	String		; Tell bank
+	ld	a,(SelBank)
+	call	HexByte
+	ld	a,']'
+	call	Conout		; .. close message
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+$BANK:
+	cr,lf,'[Selected bank : ',nul
+ENDIF	; BANK
+;
+; Command P : Pass counter
+; Syntax	Pp	Set pass point at @p with count 1
+;		Pp,c	Set pass point at @p with count c
+;		P	Display pass points
+;		-Pp	Clear pass point at @p
+;		-P	Clear all pass points
+;
+CMD.P::
+	call	ParamGet	; Get parameter
+	jp	c,ERROR		; .. error
+	jp	z,CMD.P.disp	; .. display
+	call	LoadHL		; Get pass point
+	push	hl
+	ld	hl,1		; .. set default
+	dec	a
+	ld	a,(Minus)	; Test '-'
+	jp	z,CMD.P.def	; .. nope
+	or	a
+	jp	nz,ERROR
+	call	LoadHL		; Get count
+	jp	CMD.P.go
+CMD.P.def:
+	ld	hl,0		; Clear count if '-'
+	or	a
+	jp	nz,CMD.P.go
+	ld	hl,1		;.. set default if no '-'
+CMD.P.go:
+	ld	a,h		; Verify byte count
+	or	a
+	jp	nz,ERROR
+	ld	(LoadVal),hl	; .. save it
+	ld	hl,PassArr
+	ld	c,_Pass
+CMD.P.Src:
+	push	hl
+	ld	a,(hl)
+	or	a		; Test entry active
+	jp	z,CMD.P.empty	; .. nope
+	inc	hl
+	ld	a,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ex	(sp),hl
+	cp	l		; Test against requested one
+	jp	nz,CMD.P.forget
+	ld	a,d
+	cp	h
+	jp	nz,CMD.P.forget
+	ld	a,(LoadVal)
+	pop	hl
+	ld	(hl),a		; .. set new count if in list
+	or	a
+	jp	Main
+CMD.P.forget:
+	ex	(sp),hl
+	push	hl
+CMD.P.empty:
+	pop	hl
+	ld	de,_PasLen
+	add	hl,de		; Bump to next
+	dec	c		; .. check done
+	jp	nz,CMD.P.Src
+	ld	a,(LoadVal)	; Verify not zero on new one
+	or	a
+	jp	z,ERROR
+	ld	hl,PassArr
+	ld	c,_Pass
+CMD.P.FndNew:
+	push	hl
+	ld	a,(hl)
+	or	a		; Find passive entry
+	jp	nz,CMD.P.NextNew
+	ld	a,(LoadVal)
+	pop	hl
+	ld	(hl),a		; Set value
+	pop	de
+	inc	hl
+	ld	(hl),e		; .. and address
+	inc	hl
+	ld	(hl),d
+	jp	Main
+CMD.P.NextNew:
+	pop	hl
+	ld	de,_PasLen
+	add	hl,de		; Bump to next
+	dec	c
+	jp	nz,CMD.P.FndNew
+	jp	ERROR		; .. should be at least one
+;
+; Display pass point table or delete any
+;
+CMD.P.disp:
+	ld	hl,PassArr
+	ld	c,_Pass
+CMD.P.DspLoop:
+	push	hl
+	ld	a,(hl)
+	or	a
+	jp	z,CMD.P.DspNxt	; Skip empty
+	ld	a,(Minus)	; Test '-'
+	or	a
+	jp	z,CMD.P.Dsp..	; .. nope
+	ld	(hl),0		; .. clear entry
+	jp	CMD.P.DspNxt
+CMD.P.Dsp..:
+	push	bc
+	call	CrLf
+	ld	a,(hl)
+	call	HexByte		; Display current count
+	call	PrSpc
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	call	SymbVal		; Print symbol
+	pop	bc
+CMD.P.DspNxt:
+	pop	hl
+	ld	de,_PasLen
+	add	hl,de		; Get next
+	dec	c
+	jp	nz,CMD.P.DspLoop
+	jp	Main
+IF	DESIGN
+;
+; Command Q : Quit debugger
+; Syntax	Q
+;
+CMD.Q::
+IF	ZCPR
+	call	IsZCPR?		; Test ZCPR
+	jp	nz,WarmExit
+	ld	hl,(ZRET)	; Get ZCPR return
+	jp	(hl)		; .. and leave debugger
+WarmExit:
+ENDIF	; ZCPR
+	ld	hl,(WarmVec)
+	jp	(hl)		; Leave debugger via warm start
+WarmVec:
+	dw	OS
+ENDIF	; DESIGN
+IF	NOT	ALONE
+;
+; Command R : Read file
+; Syntax	Rfile	Read file
+;		Rfile,d	Read file with offset d
+;
+CMD.R::
+	ld	a,(CmdLine+1)
+	or	a		; Test any input
+	jp	z,ERROR		; .. should be
+	ld	hl,FCB
+	call	ParseFCB	; Parse file
+	ld	(hl),0		; Set default drive
+	inc	hl
+	ld	a,' '
+	ld	c,FN
+CMD.R.ClrFN:
+	ld	(hl),a		; Clear name
+	inc	hl
+	dec	c
+	jp	nz,CMD.R.ClrFN
+	ld	a,0
+	ld	c,4
+CMD.R.ClrByte:
+	ld	(hl),a		; Clear next bytes
+	inc	hl
+	dec	c
+	jp	nz,CMD.R.ClrByte
+	ld	(hl),0
+	call	ParamGet	; Get parameter
+	ld	hl,0
+	jp	z,LoadFile	; .. load
+	dec	a
+	jp	nz,ERROR
+	ld	hl,(Param1)
+;
+; Load file(s)
+; ENTRY	Reg HL holds entry address
+;
+LoadFile:
+	ld	(LoadVal),hl	; Save entry
+IF	DESIGN
+	ld	de,DMA
+	call	SetDMA		; Set default DMA
+ENDIF	; DESIGN
+	ld	hl,FCB+.fcb2
+	ld	de,$$$FCB
+	ld	c,FCBcpy
+Sav2ndFCB:
+	ld	a,(hl)
+	ld	(de),a		; Save 2nd file name
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,Sav2ndFCB
+	ld	a,(FCB+.nam)	; Test wild card
+	cp	'?'
+	jp	z,LoadSYM	; .. only symbol table
+	call	Open		; Find .COM file
+	cp	OSErr
+	jp	z,ERROR
+	ld	hl,TPA
+	ld	(NEXT),hl	; Init address
+IF	NOT	NOHEX
+	ld	a,'H'
+	ld	bc,'E'*256+'X'
+	call	Compare		; Check .HEX
+	ld	hl,(LoadVal)
+	push	hl
+	jp	z,LoadHEX	; .. found
+;
+; Load .COM or .UTL file
+;
+	pop	hl
+ELSE
+	ld	hl,(LoadVal)
+ENDIF	; NOT NOHEX
+	ld	de,TPA
+	add	hl,de
+LoadCOMloop:
+	push	hl
+	ld	de,FCB
+	ld	c,.RdSeq
+	call	goBDOS		; Get record
+	pop	hl
+	or	a		; .. test more
+IF	RSX
+	jp	nz,TryRSX
+ELSE
+	jp	nz,LoadSYM
+ENDIF	; RSX
+	ld	de,DMA
+	ld	c,RecLng
+UnpkCode:
+	ld	a,(de)
+	inc	de
+	ld	(hl),a		; .. unpack code
+	inc	hl
+	dec	c
+	jp	nz,UnpkCode
+	call	SetMSZE		; Set addresses
+	call	SetNEXT
+	ex	de,hl
+	ld	hl,(BDOS+1)
+	call	Cmp.HL.DE	; Test still room
+	ex	de,hl
+	jp	nc,LoadCOMloop
+	ld	hl,TPA
+	ld	(NEXT),hl	; Clear addresses
+	ld	(MSZE),hl
+	jp	ERROR		; .. and tell error
+
+IF	NOT	NOHEX
+;
+; Load .HEX file
+;
+; Format of HEX file
+;
+; :03010000210500D6 -- Load item
+; || |   | |     .. -- Checksum
+; || |   | ........ -- Code starts
+; || |............. -- Start address
+; ||............... -- Code length
+; |................ -- Start of item
+;
+; :0000000000 ..... -- Last item
+;
+LoadHEX:
+	call	Get		; Get character
+	cp	eof
+	jp	z,ERROR		; .. should not be EOF now
+	sbc	a,':'
+	jp	nz,LoadHEX	; Wait for start
+	ld	d,a		; .. clear checksum
+	pop	hl
+	push	hl
+	call	RdF.ChksByte	; Read code length
+	ld	e,a
+	call	RdF.ChksByte	; Read HI byte
+	push	af
+	call	RdF.ChksByte	; .. the LO
+	pop	bc
+	ld	c,a		; Build 16 bit
+	add	hl,bc		; Build address
+	ld	a,e
+	or	a		; Test last item
+	jp	nz,LdHEX.code
+	ld	a,b		; Test transfer address
+	or	c
+	ld	hl,TPA		; Get default
+	jp	z,LdHEX.Xfer
+	ld	l,c		; .. get xfer
+	ld	h,b
+LdHEX.Xfer:
+	ld	(SavPC),hl	; .. set PC
+	jp	LoadSYM		; .. try load symbols
+LdHEX.code:
+	call	RdF.ChksByte	; Skip filler
+LdHEX.loop:
+	call	RdF.ChksByte
+	ld	(hl),a		; .. load file
+	inc	hl
+	dec	e
+	jp	nz,LdHEX.loop
+	call	RdF.ChksByte	; Get last sum
+	push	af		; .. must result in zero
+	call	SetMSZE		; Set addresses
+	call	SetNEXT
+	pop	af
+	jp	nz,ERROR	; .. checksum error
+	jp	LoadHEX
+ENDIF	; NOT NOHEX
+;
+; Load byte from ASCII file
+; EXIT	Accu holds byte
+;
+RdF.Byte:
+	call	Get		; Get a character
+.RdF.Byte:
+	call	IsItHex		; .. get hex
+	rlca			; .. into upper bits
+	rlca
+	rlca
+	rlca
+	and	HiMask
+	push	af
+	call	Get		; Get next character
+	call	IsItHex		; .. into lower bits
+	pop	bc
+	or	b
+	ret
+IF	NOT	NOHEX
+;
+; Load byte from ASCII file with checksum fix
+; ENTRY	Reg D holds checksum
+; EXIT	Accu holds byte
+;
+RdF.ChksByte:
+	push	bc
+	push	hl
+	push	de
+	call	RdF.Byte	; Build a byte
+	ld	b,a		; .. save it
+	pop	de
+	add	a,d		; Add to checksum
+	ld	d,a
+	ld	a,b		; .. get back byte
+	pop	hl
+	pop	bc
+	ret
+ENDIF	; NOT NOHEX
+;
+; Load .SYM
+; Loading .SYM moves down BDOS entry so symbol table
+; will be protected
+;
+LoadSYM:
+IF	ZCPR
+;
+; Test loaded program requires ZCPR environment
+;
+	call	IsZCPR?		; Test ZCPR
+	jp	nz,NoZCPR
+	ld	hl,(ZCPRptr)
+	ld	(TPA+9),hl	; .. store into field
+	ld	hl,(Z.HL)
+	ld	(SavHL),hl	; .. transfer regs
+	ld	hl,(Z.SP)
+	ld	(SavSP),hl	; .. transfer regs
+noZCPR:
+ENDIF	; ZCPR
+	ld	hl,ENTRY
+	call	ChkAddr		; Test address below SID
+	jp	c,LdSYM.room	; .. ok
+	ld	a,(LAflag)	; Test L and A
+	or	a
+	call	z,RemoveLA	; .. yep, remove
+LdSYM.room:
+	ld	a,'U'
+	ld	bc,'T'*256+'L'
+	call	Compare		; Remember first file .UTL
+	push	af		; .. save flag
+	ld	hl,$$$FCB
+	ld	de,FCB
+	ld	c,FCBcpy
+Cpy2ndFCB:
+	ld	a,(hl)		; Get 2nd FCB
+	ld	(de),a		; .. into main
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,Cpy2ndFCB
+	xor	a
+	ld	(FCB+.cr),a	; Clear current record
+	ld	a,(FCB+.nam)
+	cp	' '		; .. test name
+	jp	z,LdSYM.ex	; .. nope
+IF	DESIGN
+	cp	'?'		; Test wild card
+	jp	nz,BegSYMLoad
+	ld	a,($$$FCB+.nam)	; Test first file ok
+	cp	' '
+	jp	z,LdSYM.ex
+	cp	'?'
+	jp	z,LdSYM.ex
+	ld	hl,$$$FCB
+	ld	de,FCB
+	ld	c,.nam+@nam
+CpyBkFCB:
+	ld	a,(de)		; Get 1st FCB
+	ld	(hl),a		; .. back again
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,CpyBkFCB
+BegSYMLoad:
+ENDIF	; DESIGN
+	ld	hl,$SYMB
+	call	String		; Tell loading symbols
+	call	Open
+	inc	a		; .. test file there
+	jp	z,ERROR
+WtValSYM:
+	call	Get		; Get character
+.WtValSYM:
+	cp	eof		; Test eof
+	jp	z,LdSYM.ex
+	cp	' '+1		; Wait for valid one
+	jp	c,WtValSYM
+	call	.RdF.Byte	; Convert to byte
+	push	af
+	call	RdF.Byte	; Get byte
+	pop	de
+	ld	e,a		; Build address
+	ld	hl,(LoadVal)
+	add	hl,de		; .. for offsetting
+	push	hl
+	call	Get
+	cp	' '
+	jp	z,GetSYMbol	; .. check start
+	pop	hl
+WtSYMblnk:
+	call	Get
+	cp	' '
+	jp	c,.WtValSYM
+	jp	WtSYMblnk	; Skip blanks
+GetSYMbol:
+	ld	hl,(BDOS+1)	; Get top address
+	ld	e,0		; Clear symbol length
+LdSYMbol:
+	dec	hl
+	call	Get		; Get character
+	cp	tab		; Check end of symbol
+	jp	z,LdSYMend
+	cp	cr
+	jp	z,LdSYMend
+	cp	' '+1
+	jp	c,ERROR		; Should be valid
+	ld	(hl),a		; .. save
+	inc	e
+	ld	a,e
+	cp	_SymLen
+	jp	nc,ERROR	; .. should not be too long
+	jp	LdSYMbol
+LdSYMend:
+	push	de
+	push	hl
+	ex	de,hl
+	ld	hl,(BDOS+1)	; Get top
+	inc	hl
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ld	(hl),d		; .. unpack old entry
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),_JP	; Set JUMP
+	call	ChkAddr		; Test address
+	jp	nc,ERROR	; .. overlap
+	ex	de,hl
+	ld	hl,(BDOS+1)
+	ex	de,hl
+	ld	(BDOS+1),hl	; Set new entry
+	ex	de,hl
+	pop	de
+	ld	(hl),e		; Set length
+	inc	hl
+	pop	de
+	ld	(hl),e		; Set value of symbol
+	inc	hl
+	ld	(hl),d
+	jp	WtValSYM
+LdSYM.ex:
+IF	DESIGN
+	ld	hl,0
+	ld	(TPA-2),hl	; Clear stack return
+	ld	a,l
+	ld	(DMA),a		; Clear CCP input
+ENDIF	; DESIGN
+	pop	af		; Get .UTL flag
+	jp	nz,..CMD.V	; .. no
+	ld	hl,UTL.RET	; Set return
+	push	hl
+	ld	hl,(SavPC)	; Get PC
+	jp	(hl)		; .. GO
+;
+; Exit from .UTL, Reg DE holds offset to .UTL symbol table
+;
+UTL.RET:
+	ld	hl,(BDOS+1)
+	add	hl,de		; Add offset to .UTL symbols
+	ld	(BaseSym),hl	; .. as base
+	jp	Main
+IF	RSX
+
+BytMask	equ	00000111b
+SCBget	equ	49
+HdLen	equ	16
+SCBini	equ	0003h
+RSXhd	equ	0100h
+MinPag	equ	15
+_RET	equ	0c9h
+_COMM	equ	05dh
+_LOAD	equ	018h
+_PREV	equ	00dh
+_PR.LO	equ	00bh
+
+;
+; .COM file loaded, try RSX
+;
+TryRSX:
+	ld	de,SCBadr
+	ld	c,SCBget
+	call	BDOS		; Get COMMON base
+	ld	(SavSCB),hl
+	ld	hl,(NEXT)	; Get load top
+	ld	a,l
+	and	MSB		; Test page boundary
+	jp	z,RSXpage	; .. yeap
+	inc	h		; .. fix top
+	ld	l,0
+RSXpage:
+	ld	(TopOvl),hl	; .. set top
+	ld	hl,TPA
+	ld	a,(hl)		; Test RSX
+	cp	_RET
+	jp	nz,LoadSYM	; .. nope
+;
+; The RSX load task
+; Reg HL points to current RSX slot
+;
+LoadGENCOM:
+	ld	de,HdLen
+	add	hl,de		; Point to RSX address
+	push	hl
+	ld	e,(hl)		; .. get it
+	inc	hl
+	ld	d,(hl)
+	ld	a,e
+	or	d		; Test end
+	jp	nz,LoadRSX
+	call	TPA+SCBini	; Init SCB
+	ld	hl,(TPA+1)
+	ld	b,h		; Get length
+	ld	c,l
+	ld	de,TPA
+	ld	hl,TPA+RSXhd
+	ld	a,(hl)		; Test code
+	cp	_RET
+	jp	z,LoadSYM
+	ld	a,b
+	or	c		; .. or any length
+	call	nz,ldir		; .. unpack
+	jp	LoadSYM
+LoadRSX:
+	inc	hl
+	ld	c,(hl)		; Fetch length
+	inc	hl
+	ld	b,(hl)
+	ld	a,(SavSCB)	; Test COMMON
+	or	a
+	jp	z,ldRSX1	; .. unbanked
+	inc	hl
+	inc	(hl)		; Test banked
+	jp	z,ldRSX2
+ldRSX1:
+	push	de		; Save load address
+	call	TopLess		; Set up addresses
+	pop	hl
+	call	PageReloc	; Relocate
+	call	InitRSX		; Fix RSX environment
+ldRSX2:
+	pop	hl
+	jp	LoadGENCOM	; .. get next RSX
+;
+; Check RSX load address in range
+; ENTRY	Reg BC holds length of code
+; EXIT	Reg DE holds load address
+;
+TopLess:
+	ld	a,(BDOS+2)	; Get page
+	dec	a
+	dec	bc
+	sub	b		; Test room
+	inc	bc
+	cp	MinPag
+	jp	c,ERROR		; .. nope
+	ld	hl,(TopOvl)
+	cp	h
+	jp	c,ERROR
+	ld	d,a		; .. set start
+	ld	e,0
+	ret
+;
+; Page relocation
+; ENTRY	Reg BC holds length of program
+;	Reg DE holds load address
+;	Reg HL points to PRL type header
+;
+PageReloc:
+	inc	h		; Fix page
+	push	bc
+	push	de
+	call	ldir		; .. unpack program code
+	pop	de
+	pop	bc
+	push	de		; Save load address
+	ld	e,d		; Get page
+	dec	e		; .. fix
+	push	hl		; Save start of bit map
+	ld	h,e		; Get relocation page
+	ld	e,0		; Clear bit count
+PRLbit:
+	ld	a,b		; Test ready
+	or	c
+	jp	z,donePRL
+	dec	bc
+	ld	a,e
+	and	BytMask		; Test byte boundary
+	jp	nz,PRLbit1	; .. nope
+	ex	(sp),hl
+	ld	a,(hl)		; Get map byte
+	inc	hl
+	ex	(sp),hl
+	ld	l,a
+PRLbit1:
+	ld	a,l
+	rla			; Test bit
+	ld	l,a
+	jp	nc,PRLbit2	; .. nope
+	ld	a,(de)
+	add	a,h		; Relocate
+	ld	(de),a
+PRLbit2:
+	inc	de
+	jp	PRLbit
+donePRL:
+	pop	de		; .. clean stack
+	pop	de
+	ret
+;
+; Init RSX header
+; ENTRY	Reg DE holds RSX start address
+;
+InitRSX:
+	ld	hl,(BDOS+1)	; Get current address
+	ld	l,0		; .. boundary
+	ld	bc,6
+	call	ldir		; Copy copyright
+	ld	e,_LOAD
+	xor	a
+	ld	(de),a		; Clear LOADER
+	ld	e,_PREV
+	ld	(de),a		; Set previous to 0007h
+	dec	de
+	ld	a,BDOS+2
+	ld	(de),a
+	ld	l,e		; .. copy current
+	ld	e,_PR.LO
+	ld	(hl),e		; Set NEXT
+	inc	hl
+	ld	(hl),d
+	ex	de,hl
+	ld	(hl),d		; Set offset next HI
+	dec	hl
+	ld	(hl),BDOS+1
+	ld	l,BDOS+1
+	ld	(BDOS+1),hl	; .. new vector
+	ret
+ldir:
+	ld	a,b
+	or	c
+	ret	z
+	dec	bc
+	ld	a,(hl)
+	ld	(de),a
+	inc	hl
+	inc	de
+	jp	ldir
+SCBadr:
+	db	_COMM,0
+SavSCB:
+	dw	0
+TopOvl:
+	dw	0
+ENDIF	; RSX
+
+ENDIF	; NOT ALONE
+
+;
+; Execute Command V : Give load statistic
+;
+..CMD.V:
+	ld	hl,$LOAD
+	call	String		; Tell load statistic
+	ld	hl,(NEXT)
+	call	Hex16		; NEXT ..
+	call	PrSpc
+	ld	hl,(MSZE)
+	call	Hex16		; MSZE ..
+	call	PrSpc
+	ld	hl,(SavPC)
+	call	Hex16		; PC ..
+	call	PrSpc
+	ld	hl,(BDOS+1)
+	dec	hl
+	call	Hex16
+	jp	Main
+;
+; Command S : Set memory
+; Syntax	Ss	Set into memory started at @s
+;		SWs	Set words into memory started at @s
+;
+CMD.S::
+	call	Param.W.Get	; Get memory address
+	dec	a
+	jp	nz,ERROR	; .. should be there
+	call	LoadHL		; .. load
+CMD.S.next:
+	call	CrLf
+	push	hl
+	call	Hex16		; Give current address
+	call	PrSpc
+	pop	hl
+	push	hl
+	ld	a,(WordFlag)	; Test words to be set
+	or	a
+	jp	z,CMD.S.byte
+IF	BANK
+	call	LdBank16	; Fetch word from bank
+ELSE
+	ld	e,(hl)		; Fetch word
+	inc	hl
+	ld	d,(hl)
+ENDIF	; BANK
+	ex	de,hl
+	call	Hex16		; .. and print it
+	jp	CMD.S.wrd
+CMD.S.byte:
+IF	BANK
+	call	LdBank
+ELSE
+	ld	a,(hl)
+ENDIF	; BANK
+	call	HexByte		; Give current byte
+CMD.S.wrd:
+	call	PrSpc
+	call	ReadLine	; Get line
+	call	GetUPPER	; .. fetch character
+	pop	hl
+	cp	cr		; Test end of line
+	jp	z,CMD.S.eol
+	cp	'.'		; Test end delimiter
+	jp	nz,CMD.S.go
+	ld	a,(CmdLine+1)
+	or	a		; Test any input
+	jp	z,Main		; .. nope, exit command S
+	ld	a,'.'
+CMD.S.go:
+	cp	'"'		; Test string constant follows
+	push	hl
+	jp	nz,CMD.S.byteIn
+CMD.S.$Loop:
+	call	GetChar		; Get characters
+	pop	hl
+	cp	cr		; .. till end
+	jp	z,CMD.S.next
+IF	BANK
+	call	StBank
+ELSE
+	ld	(hl),a		; Store into memory
+ENDIF	; BANK
+	inc	hl		; .. bump address
+	push	hl
+	jp	CMD.S.$Loop
+CMD.S.byteIn:
+	call	ByteSet		; Get byte
+	dec	a
+	jp	nz,ERROR	; .. ONE
+	call	LoadHL
+	ld	a,(WordFlag)
+	or	a		; Test word
+	jp	z,CMD.S.savByte
+	ex	de,hl
+	pop	hl
+IF	BANK
+	push	af
+	ld	a,e
+	call	StBank		; .. store word
+	inc	hl
+	ld	a,d
+	call	StBank
+	pop	af
+ELSE
+	ld	(hl),e		; .. store word
+	inc	hl
+	ld	(hl),d
+ENDIF	; BANK
+	inc	hl
+	jp	CMD.S.next
+CMD.S.savByte:
+	or	a
+	jp	nz,ERROR
+	ld	a,l
+	pop	hl
+IF	BANK
+	call	StBank
+ELSE
+	ld	(hl),a		; .. store byte
+ENDIF	; BANK
+CMD.S.eol:
+	inc	hl
+	ld	a,(WordFlag)	; Test flag
+	or	a
+	jp	z,CMD.S.next
+	inc	hl		; .. bump on word
+	jp	CMD.S.next
+IF	NOT	ALONE
+;
+; Command U : Untrace
+; Syntax	Un	Untrace from current PC n-times
+;		U	Untrace from current PC 1-times
+;		Un,c	Untrace with automatic call
+;		U,c	dto.
+;		-U..	Same as above without symbols
+;		UW..	Same as above without call
+;		-UW..	Same as above without call and symbols
+;
+CMD.U::
+	ld	a,_Untrc	; Set mode
+	jp	EnterTrc
+;
+; Command T : Trace
+; Syntax	Tn	Trace from current PC n-times
+;		T	Trace from current PC 1-times
+;		Tn,c	Trace with automatic call
+;		T,c	dto.
+;		-T..	Same as above without symbols
+;		TW..	Same as above without call
+;		-TW..	Same as above without call and symbols
+;
+CMD.T::
+	ld	a,_Trace
+EnterTrc:
+	ld	(TraceMode),a	; Save mode
+	call	Param.W.Get	; Get parameters
+	ld	hl,0
+	ld	(TraceVal),hl	; Init value
+	inc	hl		; .. set default 1
+	jp	z,CMD.T.curr	; .. from current
+	jp	c,CMD.T.Ccurr	; .. from current with call
+	call	LoadHL		; Get address
+	push	af
+	ld	a,l
+	or	h		; .. verify .GT. 0
+	jp	z,ERROR
+	pop	af
+CMD.T.Ccurr:
+	push	hl		; Save count
+	dec	a
+	jp	z,CMD.T.go	; Test more
+	dec	a
+	jp	nz,ERROR
+	call	LoadHL		; Fetch address
+	ld	(TraceVal),hl
+CMD.T.go:
+	pop	hl		; Get back count
+CMD.T.curr:
+	ld	(TraceCnt),hl	; .. save
+	xor	a
+	ld	(GoParam),a
+	call	PrRegs		; Print registers
+	jp	CMD.G.EXTRN	; Enter command G
+ENDIF	; NOT ALONE
+;
+; Command V : Display values
+; Syntax	V
+;
+CMD.V::
+	jp	..CMD.V		; .. jump to executor
+IF	NOT	ALONE
+;
+; Command W : Write to file
+; Syntax	Wfile,s,f	Writefrom @s to @f to file
+;
+CMD.W::
+	ld	a,(CmdLine+1)
+	or	a		; Test any input
+	jp	z,ERROR		; .. should be
+	ld	hl,FCB
+	call	ParseFCB	; Parse file
+	ld	a,0
+	ld	(FCB+.cr),a	; Clear extent
+	ld	hl,TPA
+	ld	(W.Strt),hl	; Set default start
+	ld	hl,(NEXT)
+	ld	(W.end),hl	; .. and end
+	call	ParamGet	; Get parameter
+	ld	a,(ParamCnt)
+	or	a
+	jp	z,CMD.W.WrDef	; Test default
+	cp	2		; Verify two parameters
+	jp	nz,ERROR
+	ld	hl,(Param1)
+	ld	(W.Strt),hl	; .. get values
+	ld	hl,(Param2)
+	ld	(W.end),hl
+CMD.W.WrDef:
+	ld	hl,(W.Strt)
+	call	Cmp.To.End	; Test END>START
+	jp	c,ERROR		; .. nope
+	ld	hl,0
+	ld	(RecCnt),hl	; Clear record count
+	ld	de,FCB
+	call	Delete		; Delete old file
+	call	Make		; .. and create new one
+	inc	a
+	jp	z,ERROR		; .. oops, disk full
+IF	DESIGN
+	ld	de,DMA
+	call	SetDMA		; Set default DMA
+ENDIF	; DESIGN
+	ld	hl,(W.Strt)	; Get start address
+CMD.W.Loop:
+	call	ChkW.EOF	; Fix for EOF
+	ld	de,DMA
+	ld	c,RecLng
+CMD.W.cpy:
+IF	BANK
+	call	LdBank		; Get from selected bank
+ELSE
+	ld	a,(hl)
+ENDIF	; BANK
+	inc	hl
+	ld	(de),a		; .. copy data into buffer
+	inc	de
+	dec	c
+	jp	nz,CMD.W.cpy
+	ld	de,FCB
+	call	WrSeq		; Write to file
+	or	a
+	jp	nz,ERROR	; .. error
+	push	hl
+	ld	hl,(RecCnt)
+	inc	hl		; Bump record count
+	ld	(RecCnt),hl
+	pop	hl
+	call	Cmp.To.End	; Set new length
+	ld	a,(W.EOF)
+	cp	-1		; Test EOF
+	jp	nz,CMD.W.Loop
+	ld	de,FCB
+	call	Close		; Close file
+	ld	hl,$CRLF
+	call	String		; Close line
+	ld	hl,(RecCnt)	; Tell records written
+	call	Hex16
+	ld	hl,$WRT
+	call	String
+	jp	Main
+;
+; Compare pointer to end address
+; ENTRY	Reg HL holds pointer
+; EXIT	Carry flag set if HL > END
+;
+Cmp.To.End:
+	ld	a,(W.end)	; Get end
+	sub	l		; .. subtract
+	ld	(W.Len),a	; .. to length
+	ld	a,(W.end+1)
+	sbc	a,h
+	ld	(W.Len+1),a
+	ret
+;
+; Determine all data written
+;
+ChkW.EOF:
+	ld	a,0
+	ld	(W.EOF),a	; Clear flag
+	ld	a,(W.Len+1)
+	cp	0		; Test HI zero
+	ret	nz
+	ld	a,(W.Len)
+	cp	RecLng		; Test more records
+	jp	c,..Set.W.EOF
+	jp	z,..Set.W.EOF
+	ret
+..Set.W.EOF:
+	ld	a,-1
+	ld	(W.EOF),a	; Set end marker
+	ret
+;
+W.EOF:
+	db	0
+W.Len:
+	dw	0
+ENDIF	; NOT ALONE
+;
+; Command X : Examine CPU state
+; Syntax	X	Display CPU regs
+;		Xf	Change flags
+;		Xr	Change reg
+;
+CMD.X::
+	call	GetUPPER
+	cp	cr		; Test all display
+	jp	nz,CMD.X.Dspl
+	call	PrRegs		; Print registers
+	jp	Main
+IF	Z80
+CMD.X.Dspl:
+	ld	b,a		; Save character
+	call	GetUPPER	; .. get next
+	cp	cr		; Test end
+	jp	nz,CX.alt.reg	; .. must be 2nd set
+	ld	a,b
+	jp	CX.change
+CX.alt.reg:
+	cp	''''		; Test character
+	jp	nz,ERROR	; .. must indicate 2nd set
+	call	GetUPPER
+	cp	cr		; Check end
+	jp	nz,ERROR	; .. must be
+	ld	a,b
+	cpl			; Complement flag
+CX.change:
+	ld	hl,$X.REG
+	ld	de,RP.Tab
+	call	FndReg		; Find 1st set
+	jp	z,CMD.X.RegFnd	; .. got it
+	ld	hl,$X.REG.
+	ld	de,RP.Tab.
+	call	FndReg		; .. try alternative set
+	jp	nz,ERROR	; .. nope
+ELSE
+CMD.X.Dspl:
+	ld	bc,XREG.l	; Init count
+	ld	hl,$X.REG	; .. and table
+CMD.X.FndLoop:
+	cp	(hl)		; Find register attached
+	jp	z,CMD.X.RegFnd
+	inc	hl
+	inc	b
+	dec	c
+	jp	nz,CMD.X.FndLoop
+	jp	ERROR		; .. should be known
+ENDIF	; Z80
+CMD.X.RegFnd:
+	call	GetUPPER
+	cp	cr
+	jp	nz,ERROR	; Verify end of line
+IF	Z80
+	push	hl
+	push	bc
+	push	de
+ELSE
+	push	bc
+ENDIF	; Z80
+	call	CrLf
+	call	PrCPUval	; Print flags
+	call	PrSpc
+	call	ReadLine	; Get line
+	call	ParamGet	; .. and parameter
+	or	a
+	jp	z,Main		; .. none
+	dec	a
+	jp	nz,ERROR	; Verify one
+	call	LoadHL		; .. get it
+IF	Z80
+	pop	de
+ENDIF	; Z80
+	pop	bc
+	ld	a,b
+	cp	PSWlen		; Test flag
+	jp	nc,CMD.X.reg
+	ld	a,h
+	or	a
+	jp	nz,ERROR	; Verify bit input
+	ld	a,l
+	cp	1+1
+	jp	nc,ERROR	; .. 0 or 1
+IF	Z80
+	ex	(sp),hl
+	call	GetPSW		; Get PSW
+	pop	hl
+ELSE
+	call	GetPSW		; Get PSW
+ENDIF	; Z80
+	ld	h,a		; .. save it
+	ld	b,c		; Set bit position
+	ld	a,PSWmask	; .. and mask
+	call	ShfPSW		; .. get proper position
+	and	h		; Mask bit
+	ld	b,c		; Get back position
+	ld	h,a		; Set masked value
+	ld	a,l
+	call	ShfPSW		; Shift position again
+	or	h		; Insert bit
+	ld	(de),a		; .. save
+	jp	Main
+ShfPSW:
+	dec	b		; .. count down
+	ret	z
+	rlca			; Shift mask
+	jp	ShfPSW
+CMD.X.reg:
+	jp	nz,CMD.X.notACC	; .. test Accu
+	ld	a,h
+	or	a		; Verify byte
+	jp	nz,ERROR
+IF	Z80
+	ld	b,l
+	pop	hl
+	ld	a,(hl)
+	or	a
+	ld	hl,ACCU.2
+	jp	m,Set.ACC.
+	ld	hl,SavACCU
+Set.ACC.:	
+	ld	(hl),b
+ELSE
+	ld	a,l
+	ld	hl,SavACCU
+	ld	(hl),a		; .. save accu
+ENDIF	; Z80
+	jp	Main
+CMD.X.notACC:
+	push	hl		; Save value
+	call	GetReg		; Get address of register
+	pop	de
+	ld	(hl),e		; Save new value
+	inc	hl
+	ld	(hl),d
+	jp	Main
+IF	ZCPR
+;
+; Command Z : Restore ZCPR environment
+; Syntax	Z	ZCPR restore
+;
+CMD.Z::
+	call	IsZCPR?		; Test ZCPR
+	jp	nz,ERROR	; .. nope
+	call	ResZCPR		; .. restore
+	jp	Main
+ENDIF	; ZCPR
+

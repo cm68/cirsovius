@@ -1,0 +1,732 @@
+	title	SID - Debugger
+	name	('SIDLOAD')
+	.z80
+
+; DASMed version of CP/M+ (Z)SID loader part
+; By W. Cirsovius
+
+; This modified loader requires two additional records
+
+; The 1st one is reserved for user messages in case of running
+; this skeleton without the kernel of the debugger
+
+; The 2nd one holds loader information at relative address 0001
+
+; NOTE that both records MUST start with a zero (NOP) at the
+; first location
+
+; The loder requires the 'real' working part, which must be
+; appended here by the LDBLD utility
+
+; Modified by	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Voice +49/40/4223247
+
+;		Last mod.:
+
+_Date	macro
+	db	'28-Mar-94'
+	endm
+
+	maclib	xsid.lib
+
+TPA	equ	0100h
+
+	aseg
+	org	TPA
+
+OS	equ	0000h
+BDOS	equ	0005h
+FCB.1	equ	005ch
+FCB.2	equ	FCB.1+16
+CCPbuff	equ	0080h
+
+CPMplus	equ	031h
+
+nam	equ	1
+ext	equ	9
+namlen	equ	8
+
+.conin	equ	  1
+.conout	equ	  2
+.string	equ	  9
+.consta	equ	 11
+.vers	equ	 12
+.scb	equ	 49
+.conset	equ	109
+
+PagLen	equ	24		; Default page length
+@Paglen	equ	01ch
+
+LoMask	equ	00000111b
+
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+CtrlC	equ	'C'-'@'
+nl	equ	-1
+
+IF	NOT	ALONE
+;
+; #######################################
+; ## First record simply holds warning ##
+; #######################################
+;
+REC.1::
+	nop			; <<-- NULL MUST BE
+	ld	de,$WARN
+	ld	c,.string
+	call	BDOS		; Give warning
+	jp	OS		; .. leave
+$WARN:
+	db	'This is only the (Z)SID loader which '
+	db	'cannot run stand-alone',cr,lf
+	db	'Use LDBLD for building your '
+	db	'version of (Z)SID',cr,lf,eot
+
+	_DS
+
+IF2
+IF	$ GT 0180H
+	.printx	/	+++++++++++++++++++++	/
+	.printx	/	First record too long	/
+	.printx	/	+++++++++++++++++++++	/
+ENDIF	; $ GT 180H
+ENDIF	; IF2
+;
+; #######################################
+; ## Second record holds fix addresses ##
+; #######################################
+;
+REC.2::
+	db	0		; <<-- NULL MUST BE
+	dw	XSID+1-TPA	; Where the length of code goes
+
+	_DS
+
+IF2
+IF	$ GT 0200H
+	.printx	/	++++++++++++++++++++++	/
+	.printx	/	Second record too long	/
+	.printx	/	++++++++++++++++++++++	/
+ENDIF	; $ GT 0200H
+ENDIF	; IF2
+ENDIF	; NOT ALONE
+;
+; ####################################
+; ## Third record starts the loader ##
+; ####################################
+;
+REC.3::
+	.phase	TPA
+IF	ZCPR
+	jp	SkpZCPR		; Skip ZCPR header
+	db	'Z3ENV'
+	db	1		; Type 1 program
+ZCPRptr:
+	dw	0fe00h
+Z.HL:
+	dw	0
+Z.SP:
+	dw	0
+SkpZCPR:
+	ld	(Z.HL),hl	; Save HL -> Environment
+	ld	hl,0
+	add	hl,sp
+	ld	(Z.SP),hl	; Save ZCPR stack
+ENDIF	; ZCPR
+XSID:				; <<< Ref for length
+	ld	bc,$-$
+	jp	SIDgo
+$HEAD:
+	db	'CP/M '
+IF	CPM3
+	db	'3.x '
+ELSE
+	db	'2.x '
+ENDIF	; CPM3
+;;IF	Z80
+;;	db	'Z'
+;;ENDIF	; Z80
+;;	db	'SID - Version '
+	db	'DEBUG - Version '
+	db	'3.0'
+	db	tab
+	_Date
+	db	cr,lf
+IF	Z80
+	db	'[Supports Z80 mnemonics      ]',cr,lf
+ENDIF	; Z80
+IF	NOHEX
+	db	'[Ignores INTEL HEX format    ]',cr,lf
+ENDIF	; NOHEX
+IF	RSX
+	db	'[Supports RSX relocating     ]',cr,lf
+ENDIF	; RSX
+IF	BANK
+	db	'[Supports CP/M bank switching]',cr,lf
+ENDIF	; BANK
+IF	ZCPR
+	db	'[Supports ZCPR header        ]',cr,lf
+ENDIF	; ZCPR
+	db	eot
+SIDgo:
+IF	Z80
+	sub	a		; Check proper CPU
+	jp	po,Z80.ok
+	ld	de,$ill.CPU
+	ld	c,.string	; .. give error
+	call	BDOS
+	jp	OS		; .. break
+$ill.CPU:
+	db	'ZSID requires Z80 CPU',eot
+Z80.ok:
+ENDIF	; Z80
+	ld	sp,SID.Cod	; Get stack
+	push	bc
+	push	bc
+	call	GetParams	; Sample parameters
+	call	TestHelp	; Maybe help request
+	ld	hl,(Param1)
+	ld	a,(ParamLen1)
+	ld	bc,COM
+	ld	de,FCB.1+ext
+	call	Check.EXT	; Set default .COM
+	ld	de,FCB.2+nam
+	ld	a,(de)		; Test 2nd name
+	cp	'?'		;.. as wildcard
+	jp	nz,..go
+	dec	de		; .. fix for drive
+	ld	hl,FCB.1
+	ld	b,1+namlen
+	call	.ldir		; Set same name and drive
+..go:
+	ld	hl,(Param2)
+	ld	a,(ParamLen2)
+	ld	bc,SYM
+	ld	de,FCB.2+ext
+	call	Check.EXT	; Set default .SYM
+IF	CPM3
+	ld	c,.vers
+	call	BDOS		; Test version
+	ld	a,l
+	cp	CPMplus
+	jp	nc,CPM.OK
+	ld	de,$ill.OS
+	ld	c,.string	; .. give error
+	call	BDOS
+	jp	OS		; .. break
+$ill.OS:
+IF	Z80
+	db	'Z'
+ENDIF	; Z80
+	db	'SID requires CP/M Plus',eot
+CPM.OK:
+ENDIF	; CPM3
+	ld	de,$HEAD
+	ld	c,.string
+	call	BDOS		; Give header
+IF	CPM3
+	ld	de,001000b	; No CTRL-C break
+	ld	c,.conset
+	call	BDOS
+ENDIF	; CPM3
+IF	BANK
+	ld	de,COM.PB
+	ld	c,.scb
+	call	BDOS		; Get COMMON memory
+	ld	a,l
+	or	h
+	ld	(COMMflg),a	; .. zero is non banked
+ENDIF	; BANK
+	pop	bc
+	ld	hl,BDOS+2
+	ld	a,(hl)		; Get high TPA page
+	dec	a
+	sub	b		; Calculate gap
+	ld	d,a
+	ld	e,0
+	push	de
+	ld	hl,SID.Cod	; Load address
+MoveCode:
+	ld	a,b
+	or	c
+	jp	z,CodMoved	; Test end
+	dec	bc
+	ld	a,(hl)
+	ld	(de),a		; .. unpack code
+	inc	de
+	inc	hl
+	jp	MoveCode
+CodMoved:
+	pop	de		; Get page
+	pop	bc		; .. and length
+	push	hl		; Save bit map table
+	ld	h,d		; Get page
+RELloop:
+	ld	a,b
+	or	c
+	jp	z,SIDstart	; Test end
+	dec	bc
+	ld	a,e
+	and	LoMask		; Check bits thru
+	jp	nz,NextBit
+	ex	(sp),hl		; .. get address
+	ld	a,(hl)
+	inc	hl
+	ex	(sp),hl
+	ld	l,a		; .. save map byte
+NextBit:
+	ld	a,l
+	rla			; Get MSB
+	ld	l,a
+	jp	nc,NoRELO	; .. not set
+	ld	a,(de)
+	add	a,h		; .. add page offset
+	ld	(de),a
+NoRELO:
+	inc	de
+	jp	RELloop
+SIDstart:
+	pop	de		; .. Clean stack
+IF	ZCPR
+	ex	de,hl
+	ld	hl,(Z.HL)	; Get register HL
+	ld	b,h
+	ld	c,l
+	ld	hl,(Z.SP)	; .. get stack
+	ld	sp,hl
+	ld	hl,(ZCPRptr)	; Get environment pointer
+	ex	de,hl
+ENDIF	; ZCPR
+	ld	l,0		; .. set page boundary
+IF	BANK
+	ld	a,(COMMflg)	; Get bank flag
+ENDIF	; BANK
+	jp	(hl)		; .. start debugging
+;
+; Sample parameters from CCP line
+;
+GetParams:
+	ld	hl,CCPbuff
+	ld	a,(hl)		; Test any in line
+	or	a
+	ret	z		; .. no
+	ld	b,a
+	call	ParamStr	; Get 1st
+	ret	z
+	ld	(Param1),hl	; Save
+	call	ParamLen	; Get length
+	ld	a,c
+	ld	(ParamLen1),a
+	call	ParamStr	; Get 2nd
+	ret	z
+	ld	(Param2),hl	; Save
+	call	ParamLen	; Get length
+	ld	a,c
+	ld	(ParamLen2),a
+	ret
+;
+; Get length of parameter
+; ENTRY	Reg HL points to string length searched for
+;	Reg B  holds remaining length
+; EXIT	Reg C  holds length of substring
+;
+ParamLen:
+	ld	c,0		; Clear count
+	ld	a,b		; Test any remainder
+	or	a
+	ret	z
+..Len:
+	call	ParamDelim	; Find delimiter
+	ret	z
+	inc	c		; .. bump
+	inc	hl
+	dec	b
+	jp	nz,..Len
+	ret
+;
+; Get pointer to substring
+; ENTRY	Reg HL points to string
+;	Reg B  holds remaining length
+; EXIT	Reg HL points to start of string
+;	Zero flag set if end of parameter
+;
+ParamStr:
+	inc	b
+..Str:
+	dec	b		; Test end
+	ret	z
+	inc	hl		; Bump pointer
+	call	ParamDelim	; Skip any delimiter
+	jp	z,..Str
+	ret
+;
+; Skip delimiter
+; ENTRY	Reg HL holds pointer
+; EXIT	Zero flag set on delimiter
+;
+ParamDelim:
+	ld	a,(hl)		; Get character
+	cp	tab		; Test TAB
+	ret	z
+	cp	' '		; .. or BLANK
+	ret	z
+	or	a		; .. or end
+	ret
+;
+; Check extension, set default if none
+; ENTRY	Reg HL points to substring defining file
+;	Reg DE points to extension field of FCB
+;	Reg BC points to default extension
+;	Accu holds length of substring defining file
+;
+Check.EXT:
+	or	a		; Test any file name
+	ret	z		; .. no, skip
+	push	bc
+	ld	c,a
+	ld	a,(de)		; Test extension defined
+	cp	' '
+	jp	nz,no.ext
+	ld	a,'.'		; Test extension suppressed
+	call	.cpir
+	pop	hl
+	ret	z
+	ld	b,ext.len
+	call	.ldir		; Set extension
+	ret
+no.ext:
+	pop	bc
+	ret
+;
+; Block move <DE>:=<HL> B-times
+;
+.ldir:
+	ld	a,(hl)
+	ld	(de),a
+	inc	de
+	inc	hl
+	dec	b
+	jp	nz,.ldir
+	ret
+;
+; Block search Accu:<HL> C-times
+;
+.cpir:
+	cp	(hl)
+	ret	z
+	inc	hl
+	dec	c
+	jp	nz,.cpir
+	push	bc
+	dec	c
+	pop	bc
+	ret
+;
+; Test help requested and print text if so
+; First parameter must be '?'
+;
+TestHelp:
+	ld	a,(ParamLen1)	; Get parameter count
+	dec	a		; Should be length of 1
+	ret	nz		; .. nope
+	ld	hl,(Param1)	; Get parameter
+	ld	a,(hl)
+	cp	'?'		; Test help
+	ret	nz		; .. nope
+	call	GetPageLen	; Get screen page length
+	ld	(MaxLin),a	; .. save
+	ld	hl,$HELP	; Init text
+HlpIni:
+	ld	a,(MaxLin)
+	dec	a		; Fix line count
+	ld	(Lines),a
+HlpLoop:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	eot		; Test end of text
+	jp	z,OS
+	cp	nl		; Test special new line
+	jp	z,.NL
+	call	Conout		; .. print
+	jp	HlpLoop
+.NL:
+	call	CrLf		; Give new line
+	ld	a,(Lines)
+	dec	a		; Decrement line count
+	ld	(Lines),a
+	jp	nz,HlpLoop	; .. any remaining
+	ld	de,$MORE
+	call	String		; Tell MORE
+wt.help:
+	call	Constat		; Wait for key
+	jp	nc,wt.help
+	call	Conin
+	cp	CtrlC		; Test break
+	jp	z,OS		; .. yeap
+	call	..CR		; .. close
+	jp	HlpIni		; .. get next part
+;
+; Get state of keyboard
+; EXIT	Carry set if character available
+;
+Constat:
+	push	hl
+	ld	c,.consta
+	call	BDOS		; .. get it
+	pop	hl
+	rra			; Get state
+	ret
+;
+; Get character from keyboard
+; EXIT	Accu holds character
+;
+Conin:
+	push	hl
+	ld	c,.conin
+	call	BDOS		; Get character
+	pop	hl
+	ret
+;
+; Give new line to console
+;
+CrLf:
+	ld	a,lf
+	call	Conout		; .. Line Feed
+..CR:
+	ld	a,cr		; .. Carriage Return
+;
+; Print character on console
+; ENTRY	Accu holds character
+;
+Conout:
+	push	hl
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; .. print
+	pop	hl
+	ret
+;
+; Print string on console
+; ENTRY	Reg DE points to string
+;
+String:
+	push	hl
+	ld	c,.string
+	call	BDOS		; Print
+	pop	hl
+	ret
+;
+; Get screen page length
+; EXIT	Accu holds length of screen
+;
+GetPageLen:
+IF	CPM3
+	ld	de,@LinMax
+	ld	c,.scb
+	call	BDOS		; Get from system control block
+	ret
+@LinMax:
+	db	@PagLen,0
+ELSE
+	ld	a,PagLen	; Get default length
+	ret
+ENDIF	; CPM3
+;
+MaxLin:
+	ds	1
+Lines:
+	ds	1
+$MORE:
+	db	'<<<MORE>>>',eot
+$HELP:
+	db	'The ZSID symbolic debugger allows you to '
+	db	'monitor and test programs developed',nl
+	db	'for the Z80 microprocessor. ZSID supports '
+	db	'real-time breakpoints, fully',nl
+	db	'monitored execution, symbolic disassembly, '
+	db	'assembly, and memory display and fill',nl
+	db	'functions.',nl,nl
+	db	'Call it:',nl,nl
+	db	tab,'ZSID {pgm-filespec} {,sym-filespec}',nl
+	db	tab,'ZSID {pgm-filespec} {*}',nl
+	db	tab,'ZSID ?',nl,nl
+	db	'Default extensions are .COM for pgm-file '
+	db	'and .SYM for sym-file.',nl,nl
+	db	'Typing ''*'' instead of sym-filespec enables '
+	db	'same name for sym-file as for pgm-',nl
+	db	'file.',nl,nl
+	db	'Typing ''?'' as argument simply prints '
+	db	'a help text.',nl,nl
+	db	'COMMANDS AVAILABLE:',nl,nl
+IF	DESIGN
+	db	'?',tab,tab,'Print commands available and '
+	db	'system addresses such as BIOS',nl
+	db	tab,tab,'and BDOS entry',nl,nl
+ENDIF	; DESIGN
+	db	'A{s}',tab,tab,'Enter assembly language '
+	db	'statements.',nl
+	db	tab,tab,'s is the start address',nl,nl
+	db	'-A',tab,tab,'Disable further L and A command'
+	db	nl,nl
+IF	DESIGN AND Z80
+	db	'Bs or B"s"',tab,'Search for hex or string '
+	db	'from address 0000 up to highest',nl
+	db	tab,tab,'address. Hex and string may be mixed'
+	db	' in either way',nl,nl
+ENDIF	; DESIGN AND Z80
+	db	'Cs{b{,d}}',tab,'Call to memory location '
+	db	'from ZSID',nl
+	db	tab,tab,'s is the called address',nl
+	db	tab,tab,'b is the value of the BC register',nl
+	db	tab,tab,'pair d is the value of the DE '
+	db	'register pair',nl,nl
+	db	'D{W}{s}{,f}',tab,'Display memory in hex '
+	db	'and ASCII',nl
+	db	tab,tab,'W is a 16-bit word format',nl
+	db	tab,tab,'s is the start address',nl
+	db	tab,tab,'f is the finish address',nl,nl
+	db	'-D',tab,tab,'Disable ASCII display',nl,nl
+	db	'Epgm-filespec',tab,'Load program and '
+	db	'symbol table for execution',nl
+	db	' {,sym-filespec}',nl,nl
+	db	'E*sym-filespec',tab,'Load a symbol table file'
+	db	nl,nl
+	db	'Fs,f,d',tab,tab,'Fill memory with '
+	db	'constant value',nl
+	db	tab,tab,'s is the start address',nl
+	db	tab,tab,'f is the finish address',nl
+	db	tab,tab,'d is an eight-bit data item',nl,nl
+	db	'G{p}{,a{,b}}',tab,'Begin Execution',nl
+	db	tab,tab,'p is a start address',nl
+	db	tab,tab,'a is a temporary breakpoint',nl,nl
+	db	'-G',tab,tab,'Don''t display pass points',nl,nl
+	db	'H',tab,tab,'Displays all symbols with '
+	db	'addresses in Hex',nl
+	db	'H.a',tab,tab,'Displays hex, decimal, and '
+	db	'ASCII values of a',nl
+	db	tab,tab,'where a is a symbolic expression'
+	db	nl,nl
+	db	'Ha,b',tab,tab,'Computes hex sum and '
+	db	'difference of a and b',nl
+	db	tab,tab,'where a and b are symbolic '
+	db	'expressions',nl,nl
+	db	'Icommand tail',tab,'Input CCP command line'
+	db	nl,nl
+	db	'L{s}{,f}',tab,'List Z80 mnemonic '
+	db	'instructions',nl
+	db	tab,tab,'s is the start address',nl
+	db	tab,tab,'f is the finish address',nl,nl
+	db	'-L',tab,tab,'List without symbolic feature'
+	db	nl,nl
+	db	'Ms,h,d',tab,tab,'Move Memory Block',nl
+	db	tab,tab,'s is the start address',nl
+	db	tab,tab,'h is the high address of the block',nl
+	db	tab,tab,'d is the destination start address'
+	db	nl,nl
+IF	BANK
+	db	'O{b}',tab,tab,'Select memory bank',nl,nl
+	db	'-O',tab,tab,'Select TPA bank',nl,nl
+	db	'P{p{,c}}',tab,'Pass point set, reset, '
+	db	'and display',nl
+	db	tab,tab,'p is a permanent breakpoint '
+	db	'address',nl
+	db	tab,tab,'c is initial value of pass counter'
+	db	nl,nl
+	db	'-P{p}',tab,tab,'Clear pass point',nl,nl
+ENDIF	; BANK
+IF	DESIGN
+	db	'Q',tab,tab,'Quit the debugger',nl,nl
+ENDIF	; DESIGN
+	db	'Rfilespec{,d}',tab,'Read Code/Symbols',nl
+	db	tab,tab,'d is an offset to each address',nl,nl
+	db	'S{W}s',tab,tab,'Set Memory Values',nl
+	db	tab,tab,'s is address where value is sent',nl
+	db	tab,tab,'W is 16 bit word',nl,nl
+	db	'T{n{,c}}',tab,'Trace Program Execution',nl
+	db	tab,tab,'n is the number of program steps',nl
+	db	tab,tab,'c is the utility entry address.',nl,nl
+	db	'T{W}{n{,c}}',tab,'Trace Without Call',nl
+	db	tab,tab,'W instructs ZSID not to trace '
+	db	'subroutines',nl
+	db	tab,tab,'n is the number of program steps',nl
+	db	tab,tab,'c is the utility entry address',nl
+	db	'-T{W}{n{,c}}',tab,'Trace without symbolic '
+	db	'feature',nl,nl
+	db	'U{W}{n{,c}}',tab,'Monitor Execution '
+	db	'without Trace',nl
+	db	tab,tab,'n is the number of program steps',nl
+	db	tab,tab,'c is the utility entry address',nl
+	db	tab,tab,'W instructs ZSID not to trace '
+	db	'subroutines',nl,nl
+	db	'-U{W}{n{,c}}',tab,'Disable pass point display'
+	db	nl,nl
+	db	'V',tab,tab,'Display the value of the next '
+	db	'available location in memory',nl
+	db	tab,tab,'(NEXT), the next location after the '
+	db	'largest file read in',nl
+	db	tab,tab,'(MSZE), the current value of the '
+	db	'Program counter (PC), and',nl
+	db	tab,tab,'the address of the end of available '
+	db	'memory (END)',nl,nl
+	db	'Wfilespec,s,f',tab,'Write the contents of a '
+	db	'contiguous block of memory to filespec',nl
+	db	tab,tab,'f is finish address',nl,nl
+	db	'X{f}{r}',tab,tab,'Examine/alter CPU state.',nl
+	db	tab,tab,'f is flag bit C,Z,M,E or I.',nl
+	db	tab,tab,'r is register A,B,D,H,S,P,X,Y or '
+	db	'one of the alternate',nl
+	db	tab,tab,'register A'',B'',D'' or H''.',nl,nl
+IF	ZCPR
+	db	'Z',tab,tab,'Reset ZCPR environment.',nl,nl
+ENDIF	; ZCPR
+	db	'UTILITIES',nl,nl
+	db	'ZSID utilities, HIST.UTL and TRACE.UTL are '
+	db	'special programs that operate with',nl
+	db	'ZSID to provide additional debugging '
+	db	'facilities.',nl,nl
+	db	'The HIST utility creates a histogram (bar '
+	db	'graph) showing the relative',nl
+	db	'frequency of execution of code within '
+	db	'selected program segments of the test',nl
+	db	'program. The HIST utility allows you to '
+	db	'monitor those sections of code',nl
+	db	'that execute most frequently.',nl,nl
+	db	'The TRACE utility obtains a backtrace of the '
+	db	'instructions that led to',nl
+	db	'a particular breakpoint address in a program '
+	db	'under test. You can collect the',nl
+	db	'addresses of up to 256 instructions between '
+	db	'pass points in U or T modes.',nl
+	db	eot
+;
+IF	BANK
+COM.PB:
+	db	5dh,0		; Get COMMON memory
+COMMflg:
+	ds	1		; COMMON memory flag
+ENDIF	; BANK
+Param1:
+	ds	2		; First parameter pointer
+ParamLen1:
+	ds	1
+Param2:
+	ds	2		; Second parameter pointer
+ParamLen2:
+	ds	1
+COM:
+	db	'COM'
+ext.len	equ	$-COM
+SYM:
+	db	'SYM'
+
+	ds	2*8		; Minimum stack
+	_DS
+
+SID.Cod::
+
+	end
+

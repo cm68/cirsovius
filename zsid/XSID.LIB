@@ -1,0 +1,146 @@
+;
+; The definition file for building versions of (Z)SID
+;
+; NOTE: For original compiling SID, set all definitions to NO
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+;
+NO	equ	0
+YES	equ	NOT NO
+;
+; Define type of debugger
+;
+;Z80	equ	NO		; Select SID	8080
+Z80	equ	YES		; Select ZSID	Z80
+;
+; Z180 support?
+;
+Z180	equ	YES
+;Z180	equ	NO
+;
+; Define OS version
+;
+CPM3	equ	NO		; Normal OS	CPM 2.2
+;CPM3	equ	YES		; Newer  OS	CPM 3.1
+;
+; Define support of INTEL .HEX format
+;
+;NOHEX	equ	NO		;    INTEL .HEX support
+NOHEX	equ	YES		; No INTEL .HEX support
+;
+; Define RSX support
+;
+_RSX	equ	NO		; No RSX support
+;_RSX	equ	YES		;    RSX support
+;
+; Define bank support
+;
+_BANK	equ	NO		; No bank support
+;_BANK	equ	YES		;    Bank support
+;
+; Define extended I/O support
+;
+_XIO	equ	NO		; No extended I/O support
+;_XIO	equ	YES		;    Extended I/O support
+;
+; Define environment
+;
+ZCPR	equ	NO		; No ZCPR support
+;ZCPR	equ	YES		;    ZCPR support
+;
+; Define own design
+;
+;DESIGN	equ	NO		; No change
+DESIGN	equ	YES		; Change
+;
+; Define stand alone version
+;
+ALONE	equ	NO		; Normal system
+;ALONE	equ	YES		; Stand alone system
+;
+; Build CP/M Plus related definitions
+;
+RSX	equ	_RSX  AND CPM3 AND NOT ALONE
+BANK	equ	_BANK AND CPM3 AND NOT ALONE
+XIO	equ	_XIO  AND CPM3
+
+IF1
+	.printx | +++++++++++++++++++++++++++++++++++++	|
+	.printx | Definitions selected:			|
+	.printx | +++++++++++++++++++++++++++++++++++++	|
+IF Z80
+	.printx	| Support Z80 mnemonics			|
+ELSE
+	.printx	| Support 8080 mnemonics		|
+ENDIF	; Z80
+IF Z180
+	.printx	| Support Z180 mnemonics		|
+ELSE
+	.printx	| Ignore Z180 mnemonics			|
+ENDIF	; Z80
+
+IF CPM3
+	.printx	| Support CP/M PLUS (CP/M 3.1)		|
+ELSE
+	.printx	| Support CP/M 2.2			|
+ENDIF	; CPM3
+
+IF NOHEX
+	.printx	| Don't support INTEL .HEX format	|
+ELSE
+	.printx	| Support INTEL .HEX format		|
+ENDIF	; NOHEX
+
+IF CPM3
+IF _RSX
+	.printx	| Support RSX in .COM file		|
+ELSE
+	.printx	| Don't support RSX in .COM file	|
+ENDIF	; _RSX
+
+IF _BANK
+	.printx	| Support CP/M 3.1 bank switching	|
+ELSE
+	.printx	| Don't support CP/M 3.1 bank switching	|
+ENDIF	; _BANK
+
+IF _XIO
+	.printx	| Support CP/M 3.1 extended errors	|
+ELSE
+	.printx	| Don't support CP/M 3.1 ext. errors	|
+ENDIF	; _XIO
+ENDIF	; CPM3
+
+IF ZCPR
+	.printx	| Support ZCPR system			|
+ELSE
+	.printx	| Don't support ZCPR system		|
+ENDIF	; ZCPR
+
+IF ALONE
+	.printx	| Building stand alone system		|
+ELSE
+	.printx	| Building ready to run system		|
+ENDIF
+
+	.printx | +++++++++++++++++++++++++++++++++++++	|
+ENDIF	; PASS 1
+
+_DS	MACRO
+;
+; $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+; $$ Generate record or page boundary $$
+; $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+;
+PC	aset	$ and 00ffh
+
+IF	PC GT 07fh
+.ds	aset	256
+ELSE
+.ds	aset	128
+ENDIF
+
+IF	PC GT 0
+	ds	.ds-PC,0
+ENDIF
+	ENDM
+

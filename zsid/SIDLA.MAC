@@ -1,0 +1,1137 @@
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !! Entry point of SID after running SIDs loader !!
+; !!               (Page boundary)                !!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+HiOPC	equ	11000000b
+MovBit	equ	01000000b
+ALUBit	equ	10000000b
+RegBits	equ	11000111b
+_Inr	equ	00000100b
+_RetC	equ	00000111b
+_JmpC	equ	00000010b
+_CallC	equ	00000100b
+__Rst	equ	00000111b
+_MVI	equ	00000110b
+_INX	equ	00000011b
+_DAD	equ	00001001b
+__POP	equ	11000001b
+__PUSH	equ	11000101b
+???	equ	00001000b
+_Pop	equ	00000111b
+LD.RP	equ	11100111b
+_DE.BC	equ	00000010b
+_DE	equ	00010000b
+LXImask	equ	11001111b
+RpMask	equ	00110000b
+RegMask	equ	00000111b
+_reg	equ	RegMask SHL 3
+NibMask	equ	00001111b
+
+.E	equ	4
+.L	equ	5
+.PSW	equ	6
+.M	equ	6
+..SP	equ	3
+..PSW	equ	4
+
+_RSTmax	equ	7
+
+ENTRY:
+	jp	@RunENTRY
+	ds	3
+@LIST:
+	jp	LIST
+@ASMBL:
+	jp	ASMBL
+@.PC:
+	dw	0
+@.END:
+	dw	0
+LISTcnt:
+	db	0
+TmpPC:
+	dw	0
+..StkSav:
+	dw	0
+;
+; Print character on console saving Accu
+; ENTRY	Reg C holds character
+;
+..Conout:
+	push	af		; Save accu
+	ld	a,c
+	call	@Conout		; .. print
+	pop	af
+	ret
+;
+; Check delimiter
+; ENTRY	Accu holds character
+; EXIT	Zero flag set on BLANK, TAB, COMMA or RETURN
+;	Line restart on DEL
+;
+ChkDel:
+	cp	' '
+	ret	z		; .. test it
+	cp	tab
+	ret	z
+	cp	','
+	ret	z
+	cp	cr
+	ret	z
+	cp	del
+	jp	z,ASMBL		; .. restart
+	ret
+;
+; Give new line on console
+;
+..CrLf:
+	ld	c,cr
+	call	..Conout	; .. CR
+	ld	c,lf
+	call	..Conout	; .. LF
+	ret
+;
+; Fill operand buffer
+; EXIT	Zero flag set if buffer starts with blank
+;
+Get$OPC:
+	call	@GetUPPER	; Get character
+.Get$OPC:
+	cp	cr
+	jp	z,A.ERR		; Verify OK
+	call	ChkDel		; Check delimiter
+	jp	z,Get$OPC	; .. skip
+	ld	c,ASMbfL
+	ld	hl,MnemoBf
+MnBfClr:
+	ld	(hl),' '	; Clear buffer
+	inc	hl
+	dec	c
+	jp	nz,MnBfClr
+	ld	c,ASMbfL+1
+	ld	hl,MnemoBf
+MnBfFill:
+	ld	(hl),a		; Sample code
+	call	@GetUPPER
+	call	ChkDel		; Check delimiter
+	jp	z,MnBfFull
+	inc	hl
+	dec	c		; Test not too long
+	jp	z,A.ERR
+	jp	MnBfFill
+MnBfFull:
+	ld	a,(MnemoBf)	; Get back 1st char
+	cp	' '
+	ret
+IF	NOT	DESIGN
+;
+; NEVER CALLED ?????
+;
+;;l0170:
+	sub	'0'
+	cp	10
+	ret	c
+	add	a,'9'-'A'+1
+	cp	16
+	ret	c
+	jp	A.ERR
+ENDIF
+;
+; Read word from keyboard
+; EXIT	Reg BC holds word
+;	Accu holds LO byte
+;	Zero flag set if HI byte is zero
+;
+RdConWrd:
+	call	@ParamGet	; Get parameter
+	dec	a		; .. verify ONE
+	jp	nz,A.ERR
+	ex	de,hl
+	ld	c,(hl)		; .. fetch value
+	inc	hl
+	ld	b,(hl)
+	ld	a,c		; .. get LO
+	dec	b
+	inc	b		; .. check HI
+	ret
+;
+; Read byte from keyboard
+; EXIT	Accu holds byte
+;
+RdConByte:
+	call	RdConWrd	; Get word
+	jp	nz,A.ERR	; .. error if HI defined
+	ret
+;
+; Set register to proper position in opcode
+; ENTRY	Accu holds reg code - right justified
+; EXIT	Accu holds reg code shifted three bits left
+;
+SetRg:
+	rla			; .. shift
+	rla
+	rla
+	and	_reg		; .. mask only these bits
+	ret
+;
+; Set register pair to proper position in opcode
+; ENTRY	Accu holds reg pair code - right justified
+; EXIT	Accu holds reg pair code shifted four bits left
+;
+SetRgP:
+	rla			; .. shift
+	rla
+	rla
+	rla
+	and	RpMask		; .. mask only these bits
+	ret
+;
+; Search for two characters
+; ENTRY	Reg HL points to end of mnemonic list
+;	Reg C  holds length of list
+; EXIT	Zero flag set indicates code found
+;	(Reg C is index then)
+;
+Fnd2OPC:
+	ex	de,hl
+	ld	hl,(MnemoBf)	; Get 1st two characters
+	ex	de,hl
+Fnd2..Loop:
+	ld	a,e
+	cp	(hl)		; .. compare LO
+	jp	nz,Fnd2..Nxt
+	inc	hl
+	ld	a,d
+	cp	(hl)		; .. then HI
+	ret	z		; .. ok
+	dec	hl
+Fnd2..Nxt:
+	dec	hl		; Fix table
+	dec	hl
+	dec	c		; .. test thru
+	jp	nz,Fnd2..Loop
+	dec	c		; .. force non zero
+	ret
+;
+; Search for opcode
+; ENTRY	Reg HL points to end of mnemonic list
+;	Reg DE points to opcode list
+;	Reg C  holds length of list
+; EXIT	Zero flag set indicates code found
+;	(Reg C is index then)
+;
+FndOPC:
+	ld	b,ASMbfL	; Set length
+	push	de
+	ld	de,MnemoBf	; Set buffer
+FndOPC.Loop:
+	ld	a,(de)
+	cp	(hl)		; .. compare
+	jp	nz,FndOPC.Next
+	inc	hl
+	inc	de
+	dec	b		; Test item found
+	jp	nz,FndOPC.Loop
+	pop	de		; .. got it
+	ret
+FndOPC.Next:
+	inc	hl
+	dec	b		; Fix list pointer
+	jp	nz,FndOPC.Next
+	ld	de,-2*ASMbfL	; -8 = 0fff8h
+	add	hl,de		; .. set to prior element
+	pop	de
+	inc	de		; .. bump list
+	dec	c		; Test more
+	jp	nz,FndOPC
+	dec	c		; .. force non zero
+	ret
+;
+; Find reg
+; EXIT	Accu holds reg code
+;
+FndRg:
+	push	bc
+	call	Get$OPC		; Fill buffer
+	jp	z,A.ERR		; .. empty
+	ld	c,$$Rel
+	ld	hl,$$RTOP
+	call	Fnd2OPC		; Find reg code
+	jp	nz,A.ERR	; .. error
+	dec	c
+	ld	a,c		; .. adjust index
+	pop	bc
+	ret
+;
+; Find reg pair
+; EXIT	Accu holds reg pair code
+;
+FndRgP:
+	push	bc
+	call	Get$OPC		; Fill buffer
+	jp	z,A.ERR		; .. empty
+	ld	c,$$RPel
+	ld	hl,$$RPTOP	; $REG.PAIR+($$RPel-1)*$$RPlen
+	call	FndOPC		; Find code
+	jp	nz,A.ERR	; .. should be here
+	dec	c		; Fix code
+	ld	a,c		; .. get it
+	pop	bc
+	ret
+;
+; Get reg pair code, doen't allow PSW
+; EXIT	Accu holds reg pair code
+;
+Fnd.NoPSW:
+	call	FndRgP		; Find reg pair
+	cp	..PSW		; Doen't allow PSW
+	jp	z,A.ERR
+	ret
+;
+; Get reg pair code, doen't allow SP
+; EXIT	Accu holds reg pair code
+;
+Fnd.NoSP:
+	call	FndRgP		; Find reg pair
+	cp	..SP		; Doen't allow SP
+	jp	z,A.ERR
+	cp	..PSW		; Check PSW
+	ret	nz
+	dec	a		; .. map it
+	ret
+;
+; Find conditional
+; EXIT	Accu condition code
+;
+CondCode:
+	ld	hl,MnemoBf
+	ld	de,MnemoBf+1
+	ld	c,$$CClen
+CC.cpy:
+	ld	a,(de)		; Overwrite J, C or R
+	ld	(hl),a
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,CC.cpy
+	ld	a,(de)		; Check proper input
+	cp	' '
+	jp	nz,A.ERR
+	ld	(hl),a
+	ld	hl,$$CCTOP
+	ld	c,$$CCel
+	call	Fnd2OPC		; Find condition code
+	jp	nz,A.ERR	; .. should be here
+	dec	c		; .. fix
+	ld	a,c
+	call	SetRg		; Shift condition in
+	ret
+;
+; Find conditional and address on Jxx, Cxx
+; EXIT	Accu holds opcode
+;	Reg BC holds address
+;
+CC.Adr:
+	call	CondCode	; Get condition
+	push	af
+	call	RdConWrd	; Get address
+	pop	af
+	or	HiOPC		; .. build opcode
+	ret
+;
+; Store byte into memory
+; ENTRY	Reg DE points to opcode
+;
+StB:
+	ld	a,(de)		; .. get code
+;
+; Store byte into memory
+; ENTRY	Accu holds opcode
+;
+..StB:
+	ld	hl,(TmpPC)	; Get current pointer
+IF	BANK
+	call	@StBank		; .. store into bank
+ELSE
+	ld	(hl),a		; .. store
+ENDIF	; BANK
+	inc	hl
+	ld	(TmpPC),hl	; .. increment pointer
+	ret
+;
+; The main assembler loop
+;
+DoASM:
+	call	@GetUPPER	; Get character
+	cp	cr
+	jp	z,ASMBL.ex	; .. end on CR
+	cp	'.'
+	jp	z,ASMBL.ex	; .. or dot
+	call	.Get$OPC	; Fill buffer
+	jp	z,A.ERR		; .. empty buffer
+	ld	c,$$OPC1l
+	ld	hl,$OP1TOP
+	ld	de,@OPC.1
+	call	FndOPC		; Find code 1
+	jp	nz,DoASM.Imm
+	jp	StB		; .. store constant
+DoASM.Imm:
+	ld	c,$$OPC2l
+	ld	hl,$OP2TOP
+	call	FndOPC		; Find code 2
+	jp	nz,DoASM.Adr
+	call	StB		; Store opcode
+	call	RdConByte	; .. get byte
+	jp	..StB		; .. store it
+DoASM.Adr:
+	ld	c,$$OPC3l
+	ld	hl,$OP3TOP
+	call	FndOPC		; Find code 3
+	jp	nz,DoASM.MOV
+	call	StB		; Store opcode
+StWrd:
+	call	RdConWrd	; Get address
+	call	..StB		; .. store LO
+	ld	a,b
+	jp	..StB		; .. and HI
+DoASM.MOV:
+	ld	c,1
+	ld	hl,$MOV
+	call	FndOPC		; Find MOV
+	jp	nz,DoASM.ALU
+	call	FndRg		; Get 1st register
+	call	SetRg		; .. shift
+	ld	b,a		; .. save
+	ld	c,MovBit	; Get bit
+DoASM.Bld:
+	call	FndRg		; Get register
+	or	c		; .. build opcode
+	or	b
+	jp	..StB		; Store resulting code
+DoASM.ALU:
+	ld	c,$$ALUel
+	ld	hl,$ALUTOP
+	call	FndOPC		; Find ALU code
+	jp	nz,DoASM.DCR
+	dec	c
+	ld	a,c		; .. fix code
+	call	SetRg		; .. shift in
+	ld	b,a
+	ld	c,ALUbit	; Set bit
+	jp	DoASM.Bld	; Build code
+DoASM.DCR:
+	ld	c,$$INRel
+	ld	hl,$INRTOP
+	call	FndOPC		; Find INR, DCR
+	jp	nz,DoASM.MVI
+	inc	c		; Fix code
+	inc	c
+	inc	c
+	call	FndRg		; Get register
+	call	SetRg		; .. shift in
+	or	c		; .. build code
+	jp	..StB		; Store result
+DoASM.MVI:
+	ld	c,1
+	ld	hl,$MVI
+	call	FndOPC		; Find MVI
+	jp	nz,DoASM.RPX
+	call	FndRg		; Get register
+	call	SetRg
+	or	_MVI		; .. build opcode
+	call	..StB		; Store
+	call	RdConByte	; Get byte
+	jp	..StB
+DoASM.RPX:
+	ld	c,$$RPXel
+	ld	hl,$RPXTOP
+	call	FndOPC		; Find 16 bit reg code
+	jp	nz,DoASM.RST
+	ld	a,c		; Check result
+	cp	_INX+1
+	jp	c,LXI..INX
+	add	a,_DAD-_INX-1	; Map code
+LXI..INX:
+	ld	b,a
+	call	Fnd.NoPSW	; Get reg pair - no PSW
+	call	SetRgP		; Set bits
+	or	b
+	call	..StB		; Store code
+	and	LXImask
+	cp	1		; Test LXI
+	ret	nz
+	jp	StWrd		; .. get word
+DoASM.RST:
+	ld	c,1
+	ld	hl,$RST
+	call	FndOPC		; Find RST
+	jp	nz,DoASM.POP
+	call	RdConByte	; Get byte
+	cp	_RSTmax+1	; Verify in range
+	jp	nc,A.ERR
+	call	SetRg
+	or	_RST		; Build opcode
+	jp	..StB		; Store RST
+DoASM.POP:
+	ld	c,$$POPel
+	ld	hl,$POPTOP
+	call	FndOPC		; Find PUSH, POP
+	jp	nz,DoASM.Jxxx
+	dec	c		; Test POP
+	jp	nz,DoASM.PUSH
+	ld	c,__POP		; Set code
+	jp	PUSH..POP
+DoASM.PUSH:
+	ld	c,__PUSH
+PUSH..POP:
+	call	Fnd.NoSP	; Get reg pair - no SP
+	call	SetRgP		; Set bits
+	or	c		; .. build code
+	jp	..StB
+DoASM.Jxxx:
+	ld	a,(MnemoBf)
+	cp	'J'		; Test conditional JP
+	jp	nz,DoASM.Cxxx
+	call	CC.Adr		; Get code
+	or	_JmpC		; .. complete
+	jp	St.3bytes
+DoASM.Cxxx:
+	cp	'C'		; Test conditional CALL
+	jp	nz,DoASM.Rxx
+	call	CC.Adr		; Get code
+	or	_CallC		; .. complete
+St.3bytes:
+	call	..StB		; .. store opcode
+	ld	a,c
+	call	..StB		; .. and address
+	ld	a,b
+	jp	..StB
+DoASM.Rxx:
+	cp	'R'		; Test conditional RET
+	jp	nz,A.ERR	; .. should be
+	call	CondCode	; Get condition
+	or	HiOPC		; Complete code
+	jp	..StB		; .. store
+;
+; Get next byte from PC
+; EXIT	Accu holds byte
+;
+GetOPC:
+	ld	hl,(@.END)	; Get end address
+	push	de
+	ex	de,hl
+	ld	hl,(@.PC)	; Get PC
+	ld	a,e		; .. test done
+	sub	l
+	ld	a,d
+	sbc	a,h
+	jp	nc,..GetOPC	; .. any left
+	ld	hl,(..StkSav)
+	ld	sp,hl		; Get back stack
+	ret			; .. end
+..GetOPC:
+	pop	de
+IF	BANK
+	call	@LdBank		; Get code
+ELSE
+	ld	a,(hl)		; .. get code
+ENDIF	; BANK
+	inc	hl		; .. bump PC
+	ld	(@.PC),hl
+	ret
+;
+; Print register
+; ENTRY	Accu holds reg bits
+;
+PrReg:
+	inc	a		; Map 0..7 -> 1..8
+	and	RegMask		; .. mask
+	cp	.L+1		; Test memory M
+	jp	c,..NorReg
+	add	a,3		; .. add offset
+..NorReg:
+	cp	.E+1		; Test H, L or M
+	jp	c,..NoFixReg
+	add	a,2		; Add offset
+..NoFixReg:
+	add	a,'A'		; Make ASCII
+	ld	c,a
+	jp	..Conout	; .. print
+;
+; Print hex byte in ACCU
+;
+PrHexByt:
+	ld	b,a		; Save byte
+	and	HiMask		; .. get HI
+	rrca			; Into LO
+	rrca
+	rrca
+	rrca
+	add	a,HexOffs	; Add offset
+	daa			; .. adjust
+	adc	a,HexASC	; .. fix
+	daa			; .. make real
+	ld	c,a
+	call	..Conout	; Print
+	ld	a,b
+	and	LoMask		; Same for LO
+	add	a,HexOffs
+	daa
+	adc	a,HexASC
+	daa
+	ld	c,a
+	jp	..Conout	; Print
+;
+; Print mnemonic string - fixed for 4 characters
+; ENTRY	Reg HL points to string
+;
+PrMnemo:
+	ld	b,$$OPCl	; .. set count
+..PrMnemo:
+	ld	c,(hl)
+	call	..Conout	; .. print
+	inc	hl
+	dec	b
+	jp	nz,..PrMnemo
+	ld	c,' '		; Give delimiter
+	jp	..Conout
+;
+; Isolate reg bits from opcode
+; ENTRY	Reg D holds code
+; EXIT	Accu holds right justified bits
+;
+Get.reg:
+	ld	a,d
+	and	_reg		; .. mask
+	rrca			; .. set right
+	rrca
+	rrca
+	ret
+;
+; Print condition
+;
+PrCond:
+	call	Get.reg		; Get reg bits
+	add	a,a
+	ld	c,a
+	ld	hl,$CC		; Get table
+	add	hl,bc
+	ld	c,(hl)		; Get 1st code
+	call	..Conout
+	inc	hl
+	ld	c,(hl)		; .. then second
+	call	..Conout
+	ld	c,' '
+	call	..Conout
+	jp	..Conout
+;
+; Print register pair from opcode
+; ENTRY	Reg D holds code
+;
+PrReg..SP:
+	call	Get.reg		; Get reg bits
+	and	..SP*2
+	cp	..SP*2
+	jp	nz,PrReg	; Print regular reg
+	ld	c,'S'
+	call	..Conout	; .. print SP
+	ld	c,'P'
+	jp	..Conout
+;
+; Give new line and print hex word from HL
+;
+PrHexNL:
+	call	..CrLf		; .. new line
+;
+; Print hex word from HL
+;
+PrHexWrd:
+	ld	hl,(@.PC)	; Get PC
+	ld	a,h
+	call	PrHexByt	; Print it
+	ld	a,l
+	call	PrHexByt
+	ld	c,' '
+	call	..Conout	; .. give delimiter
+	call	..Conout
+	ret
+;
+; ########################
+; ## Entry of command L ##
+; ########################
+;
+LIST:
+	ld	hl,0
+	add	hl,sp
+	ld	(..StkSav),hl	; Save entry stack
+	ld	a,(LISTcnt)	; Test any count
+	or	a
+	jp	z,LI.def
+	ld	hl,_LAST
+	ld	(@.END),hl	; .. set indifinite end
+	inc	a
+	jp	nz,LI.def	; Test -1
+	inc	a
+	ld	(LISTcnt),a	; .. set count
+	ld	hl,(@.PC)	; Get PC
+	jp	LI.beg
+LI.def:
+	call	@ConStat	; Test break
+	jp	nz,ASMBL.ex	; .. yep
+	ld	hl,LISTcnt	; Get count
+	ld	a,(hl)		; .. test any
+	or	a
+	jp	z,LI.more
+	dec	(hl)		; .. fix count
+	jp	z,ASMBL.ex	; .. end
+LI.more:
+	ld	hl,(@.PC)	; Get PC
+	call	@Decode		; .. print symbol there
+	call	..CrLf
+	ld	c,' '
+	call	..Conout	; Give delimiter
+	call	..Conout
+	call	PrHexWrd	; Print hex
+LI.beg:
+	call	GetOPC		; Get opcode
+	ld	d,a		; .. save
+	ld	hl,@OPC.1
+	ld	bc,_OPC.1
+SrcOP.1:
+	cp	(hl)		; .. find instruction
+	jp	z,OPC.1		; .. done
+	inc	hl
+	dec	c
+	jp	nz,SrcOP.1
+	ld	c,_OPC.2
+SrcOP.2:
+	cp	(hl)		; Find next type
+	jp	z,OPC.2
+	inc	hl
+	dec	c
+	jp	nz,SrcOP.2
+	ld	c,_OPC.3
+SrcOP.3:
+	cp	(hl)		; Find next type
+	jp	z,OPC.3
+	inc	hl
+	dec	c
+	jp	nz,SrcOP.3
+	and	HiOPC		; Get MSBits
+	cp	MovBit
+	jp	z,FndMOV	; Test MOV
+	cp	ALUBit
+	jp	z,FndALU	; Test ALU operations
+	ld	a,d
+	and	RegBits		; Mask for register oprations
+	sub	_Inr
+	jp	z,FndINR	; .. test INR
+	dec	a
+	jp	z,FndDCR	; .. test DCR
+	dec	a
+	jp	z,FndMVI	; .. test MVI
+	ld	a,d
+	and	HiOPC		; Get back MSBits
+	jp	z,FndRegOp	; .. reg ops
+	ld	a,d
+	and	_RetC
+	jp	z,FndRETC	; Test conditional RET
+	sub	_JmpC
+	jp	z,FndJC		; Test conditional JUMP
+	sub	_CallC-_JmpC
+	jp	z,FndCC		; Test conditional CALL
+	sub	__Rst-_CallC
+	jp	z,FndRST	; Test RST
+	ld	a,d
+	and	???
+	jp	nz,FndUnk	; Test 8080 code
+	ld	a,d
+	and	_Pop		; Isolate POP and PUSH
+	ld	c,a
+	dec	a
+	ld	hl,$POP-1
+	add	hl,bc
+	call	PrMnemo		; Print mnemonic
+	call	Get.reg		; Get reg bits
+	cp	.PSW		; .. test PSW
+	jp	nz,POPreg
+	ld	hl,$PSW
+	call	PrMnemo		; Print mnemonic
+	jp	LI.def
+;
+; Found RST instruction
+;
+FndRST:
+	ld	hl,$RST
+	call	PrMnemo		; Prinr mnemonic
+	call	Get.reg		; Get RST bits
+	call	PrHexByt	; .. print them
+	jp	LI.def
+;
+; Found conditional call instruction
+;
+FndCC:
+	ld	c,'C'
+	call	..Conout	; Give prefix
+	call	PrCond		; .. condition
+	jp	PrAddr		; .. and address
+;
+; Found conditional jump instruction
+;
+FndJC:
+	ld	c,'J'
+	call	..Conout	; Give prefix
+	call	PrCond		; .. condition
+	jp	PrAddr		; .. and address
+;
+; Found conditional return instruction
+;
+FndRETC:
+	ld	c,'R'
+	call	..Conout	; Give prefix
+	call	PrCond		; .. condition
+	jp	LI.def
+;
+; Found reg operations 00..3F
+;
+FndRegOp:
+	ld	hl,$RPX
+	ld	a,d
+	and	RegMask		; Get mask
+	jp	z,FndUnk	; .. unknown code
+	ld	a,d
+	and	NibMask		; Get lower bits
+	dec	a		; Test xxxx0001
+	jp	z,FndRO.LXI	; .. print LXI
+	cp	_INX		; Test code
+	jp	c,FndRO.noFix
+	sub	_DAD-_INX-1	; .. fix code
+FndRO.noFix:
+	add	a,a		; Fix index
+	add	a,a
+	ld	c,a
+	add	hl,bc
+	call	PrMnemo		; Print code
+	call	PrReg..SP	; Print reg pair
+	jp	LI.def
+FndRO.LXI:
+	call	PrMnemo		; Print LXI
+	call	PrReg..SP	; Print reg pair
+	ld	c,','
+	call	..Conout
+	jp	PrAddr		; Print address
+;
+; Found instruction MVI r,dd
+;
+FndMVI:
+	ld	hl,$MVI
+	call	PrMnemo
+	call	Get.reg		; Get reg bits
+	call	PrReg		; .. and print
+	ld	c,','
+	call	..Conout
+	jp	Prd8		; Print byte
+;
+; Found instruction DCR r
+;
+FndDCR:
+	ld	hl,$DCR		; Get code
+	jp	FndDCR..INR
+;
+; Found instruction INR r
+;
+FndINR:
+	ld	hl,$INR
+FndDCR..INR:
+	call	PrMnemo		; Print mnemonic
+	call	Get.reg		; Get reg bits
+;
+; Print reg for PUSH and POP
+;
+POPreg:
+	call	PrReg		; Print reg
+	jp	LI.def
+;
+; Found ALU instructions CODE r
+;
+FndALU:
+	ld	a,d
+	and	_reg		; Get code part
+	rrca			; .. for index
+	ld	c,a
+	ld	hl,$ALU
+	add	hl,bc
+	call	PrMnemo		; .. print mnemonics
+	jp	PrReg2		; .. and reg
+;
+; Found instruction MOV r1,r2
+;
+FndMOV:
+	ld	hl,$MOV
+	call	PrMnemo		; Print mnemonics
+	call	Get.reg		; Get TO reg bits
+	call	PrReg		; .. print
+	ld	c,','
+	call	..Conout
+PrReg2:
+	ld	a,d
+	and	RegMask		; Get FROM reg bits
+	call	PrReg		; .. print
+	jp	LI.def
+;
+; Found one byte op code with address operand
+;
+OPC.3:
+	ld	a,c		; Get index
+	add	a,a
+	add	a,a
+	ld	c,a
+	ld	hl,$OPC.3-$$OPCl
+	add	hl,bc
+	call	PrMnemo		; Print mnemonics
+;
+; Print operands address, remember LO.HI -->> HI.LO
+;
+PrAddr:
+	call	GetOPC		; Get LO
+	push	af
+	call	GetOPC		; .. and HI
+	ld	d,a
+	pop	af
+	ld	e,a
+	call	@SymbVal	; Print symbol
+	jp	LI.def
+;
+; Found one byte op code with immediate operand
+;
+OPC.2:
+	ld	a,c		; Get index
+	add	a,a
+	add	a,a
+	ld	c,a
+	ld	hl,$OPC.2-$$OPCl
+	add	hl,bc
+	call	PrMnemo
+Prd8:
+	call	GetOPC		; Get code
+	call	@HexByte	; .. type
+	jp	LI.def
+;
+; Found one byte op code
+;
+OPC.1:
+	ld	a,c		; Get index
+	add	a,a
+	add	a,a
+	ld	c,a
+	ld	hl,$OPC.1-$$OPCl
+	add	hl,bc
+	call	PrMnemo		; Print mnemonics
+	jp	LI.def
+;
+; Found non 8080 instruction
+;
+FndUnk:
+	ld	hl,$???
+	call	PrMnemo		; .. tell unknown
+	ld	a,d
+	call	@HexByte	; .. and byte
+	jp	LI.def
+;
+; Assemble error
+;
+A.ERR:
+	call	..CrLf		; .. give new line
+	ld	c,'?'
+	call	..Conout	; .. indicate error
+	ld	hl,(..StkSav)
+	ld	sp,hl		;.. get back stack
+;
+; #######################
+; ## Entry of comand A ##
+; #######################
+;
+ASMBL:
+	ld	hl,0
+	add	hl,sp
+	ld	(..StkSav),hl	; Save stack
+ASMBL.loop:
+	call	PrHexNL		; Print current address
+	ld	(TmpPC),hl	; .. save
+	call	@ReadLine	; Read instruction line
+	call	DoASM		; .. decode it
+	ld	hl,(TmpPC)
+	ld	(@.PC),hl	; .. set new PC
+	jp	ASMBL.loop
+ASMBL.ex:
+	ld	hl,(..StkSav)	; .. get back stack
+	ld	sp,hl
+	ret
+;
+; Opcode tables
+;
+; One byte instructions
+;
+@OPC.1:
+	db	000h,007h,00fh,017h,01fh,027h,02fh,037h,03fh
+	db	076h,0c9h,0e3h,0e9h,0ebh,0f3h,0f9h,0fbh
+_OPC.1	equ	$-@OPC.1
+;
+; Immediate instructions
+;
+@OPC.2:
+	db	0c6h,0ceh,0d3h,0d6h,0dbh
+	db	0deh,0e6h,0eeh,0f6h,0feh
+_OPC.2	equ	$-@OPC.2
+;
+; Address instructions
+;
+@OPC.3:
+	db	022h,02ah,032h,03ah,0c3h,0cdh
+_OPC.3	equ	$-@OPC.3
+;
+; Mnemonic tables
+;
+$OPC.1:
+	db	'EI  '
+$$OPCl	equ	$-$OPC.1
+	db	'SPHL'
+	db	'DI  '
+	db	'XCHG'
+	db	'PCHL'
+	db	'XTHL'
+	db	'RET '
+	db	'HLT '
+	db	'CMC '
+	db	'STC '
+	db	'CMA '
+	db	'DAA '
+	db	'RAR '
+	db	'RAL '
+	db	'RRC '
+	db	'RLC '
+	db	'NOP '
+$$OPC1l	equ	($-$OPC.1) / $$OPCl
+$OP1TOP	equ	$OPC.1+($$OPC1l-1)*$$OPCl
+;
+$OPC.2:
+	db	'CPI '
+	db	'ORI '
+	db	'XRI '
+	db	'ANI '
+	db	'SBI '
+	db	'IN  '
+	db	'SUI '
+	db	'OUT '
+	db	'ACI '
+	db	'ADI '
+$$OPC2l	equ	($-$OPC.2) / $$OPCl
+$OP2TOP	equ	$OPC.2+($$OPC2l-1)*$$OPCl
+;
+$OPC.3:
+	db	'CALL'
+	db	'JMP '
+	db	'LDA '
+	db	'STA '
+	db	'LHLD'
+	db	'SHLD'
+$$OPC3l	equ	($-$OPC.3) / $$OPCl
+$OP3TOP	equ	$OPC.3+($$OPC3l-1)*$$OPCl
+;
+$MOV:
+	db	'MOV '
+;
+$ALU:
+	db	'ADD '
+$ALUlen	equ	$-$ALU
+	db	'ADC '
+	db	'SUB '
+	db	'SBB '
+	db	'ANA '
+	db	'XRA '
+	db	'ORA '
+	db	'CMP '
+$$ALUel	equ	($-$ALU) / $ALUlen
+$ALUTOP	equ	$ALU+($$ALUel-1)*$ALUlen
+;
+$INR:
+	db	'INR '
+$$Ilen	equ	$-$INR
+$DCR:
+	db	'DCR '
+$$INRel	equ	($-$INR) / $$Ilen
+$INRTOP	equ	$INR+($$INRel-1)*$$Ilen
+;
+$MVI:
+	db	'MVI '
+;
+$RPX:
+	db	'LXI '
+$$RPXl	equ	$-$RPX
+	db	'STAX'
+	db	'INX '
+	db	'DAD '
+	db	'LDAX'
+	db	'DCX '
+$$RPXel	equ	($-$RPX) / $$RPXl
+$RPXTOP	equ	$RPX+($$RPXel-1)*$$RPXl
+;
+$RST:
+	db	'RST '
+$PSW:
+	db	'PSW '
+;
+$POP:
+	db	'POP '
+$POPlen	equ	$-$POP
+	db	'PUSH'
+$$POPel	equ	($-$POP) / $POPlen
+$POPTOP	equ	$POP+($$POPel-1)*$POPlen
+;
+$CC:
+	db	'NZ'
+$$CClen	equ	$-$CC
+	db	'Z '
+	db	'NC'
+	db	'C '
+	db	'PO'
+	db	'PE'
+	db	'P '
+	db	'M '
+$$CCel	equ	($-$CC) / $$CClen
+$$CCTOP	equ	$CC+($$CCel-1)*$$CClen
+;
+$REG:
+	db	'B '
+$$Rlen	equ	$-$REG
+	db	'C '
+	db	'D '
+	db	'E '
+	db	'H '
+	db	'L '
+	db	'M '
+	db	'A '
+$$Rel	equ	($-$REG) / $$Rlen
+$$RTOP	equ	$REG+($$Rel-1)*$$Rlen
+;
+$REG.PAIR:
+	db	'B   '
+$$RPlen	equ	$-$REG.PAIR
+	db	'D   '
+	db	'H   '
+	db	'SP  '
+	db	'PSW '
+$$RPel	equ	($-$REG.PAIR) / $$RPlen
+$$RPTOP	equ	$REG.PAIR+($$RPel-1)*$$RPlen
+;
+$???:
+	db	'??= '
+;
+MnemoBf:
+	db	'    '
+ASMbfL	equ	$-MnemoBf
+;
+	_DS
+

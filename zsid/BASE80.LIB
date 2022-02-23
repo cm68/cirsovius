@@ -1,0 +1,330 @@
+	.xlist
+; Subject : Main constant library (Z80 based)
+
+	.z80
+
+; File    : BASE80.LIB
+
+; Module  : Main definition file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.:040/4223247
+
+;		Version 5.2, February 1994
+
+	.request baselib	; Request standard LIB
+
+; Define boolean constants
+
+false	equ	0
+true	equ	not false
+
+; Some CP/M constants
+
+warm	equ	0000h		; Warm start entry
+os	equ	0000h		;	dto.
+;
+; *** NOTE
+; ++++++++
+;	Callers drive at 0004H holds User and Drive
+;	Drive is 0 relative (Drive A is 0)
+;
+;	Programs drive at 0050H holds only Drive
+;	Drive is 1 relative (Drive A is 1)
+;
+caldrv	equ	0004h		; Callers user and drive
+bdos	equ	0005h		; BDOS entry
+tpatop	equ	bdos+1		; Top of TPA
+prgdrv	equ	0050h		; Program drive
+
+fcblen	equ	36		; Length of FCB
+dirlen	equ	16		; Length of directory entry
+
+.fdrv	equ	1		; Relative FCB pointer
+.fname	equ	8		;	dto.
+.fext	equ	3		;	dto.
+.frrn	equ	33		;	dto.
+_RO	equ	9		;	dto.
+_SYS	equ	10		;	dto.
+_ARC	equ	11		;	dto.
+_EX	equ	12		;	dto.
+_RC	equ	15		;	dto.
+_CR	equ	32		;	dto.
+_RRN	equ	33		;	dto.
+
+fcb	equ	005ch		; Standard FCB
+fcb1	equ	fcb		; 	dto.
+fcbnam	equ	fcb+.fdrv	; Name field
+fcbext	equ	fcb+.fdrv+.fname; Extension field
+fcbrnd	equ	fcb+.frrn	; Random record position
+fcb2	equ	fcb+dirlen	; Standard 2nd FCB
+fcbnm2	equ	fcb2+.fdrv	; Name field
+fcbex2	equ	fcb2+.fdrv+.fname; Extension field
+
+dma	equ	0080h		; Standard file buffer
+
+ccpbuf	equ	dma		; Standard CCP command
+ccplen	equ	0080h		; Length of command
+ccp	equ	0081h		; Standard CCP command line
+
+reclng	equ	128		; Standard record length
+
+tpa	equ	0100h		; Transient program area
+
+; BDOS calls
+
+; Function Name			Function
+; =============			========
+
+.conin	equ	  1		; Read Console
+.conout	equ	  2		; Write Console
+.auxin	equ	  3		; Auxiliary input
+.auxout	equ	  4		; Auxiliary output
+.lstout	equ	  5		; Write List
+.condir	equ	  6		; Direct Con I/O
+.auxist	equ	  7		; Get AUXIN: status
+.auxost	equ	  8		; Get AUXOUT: status
+.string	equ	  9		; Print String
+.rdcon	equ	 10		; Read Buffer
+.consta	equ	 11		; Console Stat
+.vers	equ	 12		; Get CP/M version
+.resdsk	equ	 13		; Init BDOS
+.seldsk	equ	 14		; LOG-In disk
+.open	equ	 15		; Open File
+.close	equ	 16		; Close File
+.srcfrs	equ	 17		; Search File
+.srcnxt	equ	 18		; Search next
+.delete	equ	 19		; Delete File
+.rdseq	equ	 20		; Read Record
+.wrseq	equ	 21		; Write Record
+.make	equ	 22		; Create File
+.rename	equ	 23		; Rename File
+.retlog	equ	 24		; Ret. Log Code
+.retdds	equ	 25		; Read Drive #
+.setdma	equ	 26		; Set DMA Addr.
+.getalv	equ	 27		; Get All.Vect.
+.wrprot	equ	 28		; Write prot dsk
+.getrov	equ	 29		; Get R/O Vect.
+.attr	equ	 30		; Set File Attr.
+.getdpb	equ	 31		; Get DSK par.
+.usrcod	equ	 32		; Get/Set Usr.Cd
+.rdrnd	equ	 33		; Read  Random
+.wrrnd	equ	 34		; Write Random
+.filsiz	equ	 35		; Comp File Sz.
+.setrrn	equ	 36		; Set Rand. Rec.
+.resdrv	equ	 37		; Initialize disk
+.errmod	equ	 45		; Set BDOS error code
+.getspc	equ	 46		; Get Drive Free Space
+.scbfun	equ	 49		; Gt/Put SCB
+.bioscl	equ	 50		; Direct BIOS call
+.conmod	equ	109		; Set/Get Console Mode
+.parse	equ	152		; Parse string
+
+; Non printable characters or special ones
+
+; (NOTE: Cursor related control is PCW specific)
+
+;nul	equ	00h		; No character	NOT ACCEPTED BY SLR
+null	equ	00h		; No character
+_etx	equ	00h		;	dto.
+curlef	equ	01h		; Cursor left
+ctrlc	equ	03h		; Control C (=>STOP)
+currig	equ	06h		; Cursor right
+bell	equ	07h		; Ring the bell
+bel	equ	07h		;	dto.
+delr	equ	bell		; Delete right character
+bs	equ	08h		; Do a backspace
+can	equ	bs		; Cancel from keyboard
+tab	equ	09h		; Do a tab
+lf	equ	0ah		; Do a line feed
+ff	equ	0ch		; Do a form feed
+cr	equ	0dh		; Carriage return
+eof	equ	1ah		; End of file
+esc	equ	1bh		; Do an escape
+exit	equ	esc		; Exit from keyboard
+curdwn	equ	1eh		; Cursor down
+curup	equ	1fh		; Cursor up
+eot	equ	'$'		; End of text (in string)
+dell	equ	07fh		; Delete left character
+rubout	equ	dell		; Rubout
+
+; Some useful patterns
+
+MSB	equ	10000000b
+NoMSB	equ	01111111b
+
+LoMask	equ	00001111b
+HiMask	equ	11110000b
+
+;;
+;; ########################## MACROS ##########################
+;;
+;; Build RSX header
+;;
+RSXhead	macro	name,start,remove
+local	i
+i	aset	0
+	ds	6,0		;; Serial line
+	ifnb	<start>
+	jp	start		;; Start RSX
+	else
+	jp	?start
+	endif
+.BDOS:
+	jp	0		;; Filled by loader
+RSXprv:
+	dw	0		;; Previous in chain
+RSXremove:
+	ifnb	<remove>
+	db	remove
+	else
+	db	0ffh		;; Default to remove
+	endif
+	db	0		;; Set banked system
+	db	'&name'		;; Set name
+	irpc	c,name		;; Get length of RSX name
+i	aset	i+1
+	endm
+	rept	8-i
+	db	' '		;; Fill with blanks
+	endm
+	db	0		;; Not loader RSX
+	dw	0		;; Reserve
+	ifb	<start>
+?start:
+	endif
+	endm
+;;
+;; ###########################################################
+;;
+;; Activate library function
+;; Simple insert EXT into .REL stream
+;; Mark as defined external
+;;
+activ	macro	name
+	if not 	@&name		;; Check flag
+	ext	name		;; Force EXT if new
+@&name	aset	true		;; Force FLAG set
+	endif
+	endm
+;;
+;; ###########################################################
+;;
+;; Print string pointed to by reg DE or HL
+;; Note UPPER case for selecting reg DE and HL
+;;
+@string aset	false
+.string	macro	txt$adr
+	activ	string		;; Create label
+	ifnb	<txt$adr>	;; Check address
+	ifidn	<txt$adr>,<HL>
+	exchg
+	else
+	ifdif	<txt$adr>,<DE>	;; Check call by reg
+	ld	de,txt$adr	;; Get address
+	endif
+	endif
+	endif
+	call	string		;; Call LIB function
+	endm
+;;
+;; ############################################################
+;;
+;; Open FCB pointed to by reg DE
+;; Note UPPER case for selecting reg DE
+;; Without any argument the CP/M default FCB will be selected
+;;
+@open	aset	false
+.open	macro	fcb$adr
+	activ	open		;; Create LIB call
+	ifnb	<fcb$adr>	;; Check address
+	ifdif	<fcb$adr>,<DE>	;; Check reg
+	ld	de,fcb$adr
+	endif
+	else
+	ld	de,fcb		;; Get default
+	endif
+	call	open		;; Call LIB function
+	endm
+;;
+;; ############################################################
+;;
+;; Fill line by keyboard
+;; Note UPPER case for selecting reg DE
+;; Without address argument the CP/M default buffer
+;; will be selected
+;; Optinal size may be set
+;;
+@getlin	aset	false
+.getlin	macro	lin$adr,size
+	activ	getlin		;; Create LIB call
+	ifnb	<lin$adr>	;; Check address
+	ifdif	<lin$adr>,<DE>	;; Check reg
+	ld	de,lin$adr
+	endif
+	else
+	ld	de,dma		;; Get default
+	endif
+	ifnb	<size>		;; Check size
+	ld	a,size
+	ld	(de),a		;; Set size
+	endif
+	call	getlin		;; Call LIB function
+	endm
+;;
+;; ############################################################
+;;
+;; Fill line by file
+;; Note UPPER case for selecting reg DE
+;; Default end of line set to 0
+;; Optinal transfer to ERR$ if carry set
+;;
+@fillin	aset	false
+.fillin	macro	txt$adr,etx,err$
+	activ	fillin		;; Create LIB call
+	ifnb	<txt$adr>	;; Check address
+	ifdif	<txt$adr>,<DE>	;; Check reg
+	ld	de,txt$adr
+	endif
+	endif
+	ifnb	<etx>		;; Check end
+	ld	b,etx
+	else
+	ld	b,0		;; Set default
+	endif
+	call	fillin		;; Call LIB function
+	ifnb	<err$>
+	jp	c,err$
+	endif
+	endm
+;;
+;; ############################################################
+;;
+;; Put line to file
+;; Note UPPER case for selecting reg DE
+;; Default end of line set to 0
+;; Optinal transfer to ERR$ if carry set
+;;
+@emplin	aset	false
+.emplin	macro	txt$adr,etx,err$
+	activ	emplin		;; Create LIB call
+	ifnb	<txt$adr>	;; Check address
+	ifdif	<txt$adr>,<DE>	;; Check reg
+	ld	de,txt$adr
+	endif
+	endif
+	ifnb	<etx>		;; Check end
+	ld	b,etx
+	else
+	ld	b,0		;; Set default
+	endif
+	call	emplin		;; Call LIB function
+	ifnb	<err$>
+	jp	c,err$
+	endif
+	endm
+
+	.list
+

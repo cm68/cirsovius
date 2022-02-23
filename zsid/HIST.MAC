@@ -1,0 +1,515 @@
+	title	Debugger History Utility
+	name	('HIST')
+
+; DASMed version of HIST.UTL
+; By W. Cirsovius
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+
+RSTsel	equ	6		; RST number
+RSTadr	equ	RSTsel SHL 3	; RST address vector
+
+_RDL	equ	 3		; Read line from keyboard
+_GCC	equ	 6		; Get command character
+_CO	equ	 9		; Put to console
+_DSB	equ	12		; Display byte
+_GPC	equ	18		; Get parameter count
+_GP	equ	21		; Get parameter
+_DSS	equ	27		; Display symbol
+
+null	equ	00h
+lf	equ	0ah
+cr	equ	0dh
+
+SEGS	equ	64
+
+	.z80
+	aseg
+	org	0100h
+
+	ld	bc,l0534-l0200	; Set length of code
+	push	bc
+	ld	hl,TPATOP+1
+	ld	a,c
+	or	a		; Test length boundary
+	ld	a,(hl)		; Get top page
+	jp	z,l010e
+	dec	a		; Fix if not
+l010e:
+	sub	b		; Calculate start address of code
+	ld	d,a
+	ld	e,0
+	push	de
+	ld	hl,l0200	; Point to code
+l0116:
+	ld	a,b		; Test end
+	or	c
+	jp	z,l0123		; Code moved
+	dec	bc
+	ld	a,(hl)
+	ld	(de),a		; Move code
+	inc	de
+	inc	hl
+	jp	l0116
+l0123:
+	pop	de
+	pop	bc
+	push	hl
+	ld	h,d		; Get page
+l0127:
+	ld	a,b		; Test done
+	or	c
+	jp	z,l0145		; Code relocated
+	dec	bc
+	ld	a,e		; Get code pointer
+	and	00000111b	; Test byte boundary
+	jp	nz,l0138
+	ex	(sp),hl
+	ld	a,(hl)		; Get new bit map
+	inc	hl
+	ex	(sp),hl
+	ld	l,a
+l0138:
+	ld	a,l
+	rla			; Shift bit map
+	ld	l,a
+	jp	nc,l0141	; Nothing to do
+	ld	a,(de)
+	add	a,h		; Add page
+	ld	(de),a
+l0141:
+	inc	de
+	jp	l0127
+l0145:
+	pop	de
+	ld	l,0		; Set page boundary
+	jp	(hl)		; Enter HIST
+;
+; Filler to page boundary
+;
+	ds	183
+;
+; PAGE BOUNDARY REQUIRED
+;
+l0200:
+	ds	820
+l0534:
+;
+; Bit map
+;
+ll0534:
+	db	00100000b,00001000b,00000010b,00000000b
+	db	10010010b,01000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000100b,00010000b
+	db	01000001b,00001000b,01000001b,00000000b
+	db	00000000b,00000000b,00000000b,10000100b
+	db	00000010b,00100000b,10010000b,01001001b
+	db	00100100b,10010010b,00010010b,01000100b
+	db	01000010b,01000100b,10010000b,00001001b
+	db	00100100b,10010010b,01001001b,00100100b
+	db	10000000b,10001000b,10010010b,01000010b
+	db	01001000b,10000100b,00000000b,00001000b
+	db	00000100b,00000000b,00001000b,01000001b
+	db	00001000b,10010010b,00100010b,01000100b
+	db	01001000b,10000000b,10010000b,10000001b
+	db	00100001b,00000010b,00000010b,00100010b
+	db	00000000b,10000100b,10000000b,00100010b
+	db	01000000b,10001000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b
+;
+; End of bit map
+;
+l059b:
+	ds	101
+;
+; PAGE BOUNDARY REQUIRED
+;
+; Relocated part of HIST - Base address ist 0600H, original is 0000H
+;
+l0600:
+	jp	l06ab		; Enter HIST
+;
+; Internal symbols - Reversed order
+;
+$$1:
+	db	'YALPSID'	; DISPLAY
+$$1L	equ	$-$$1
+	db	$$1L
+	dw	l0627
+;
+$$2:
+	db	'TCELLOC'	; COLLECT
+$$2L	equ	$-$$2
+	db	$$2L
+	dw	l0624
+;
+$$3:
+	db	'LAITINI'	; INITIAL
+$$3L	equ	$-$$3
+l061e:
+	db	$$3L
+	dw	l0621
+;
+l0621:
+	jp	l06c0		; INITIAL
+l0624:
+	jp	l0725		; COLLECT
+l0627:
+	jp	l0763		; DISPLAY
+;
+	db	'COPYRIGHT (C) 1977 DIGITAL RESEARCH   '
+;
+; Read line from keyboard
+;
+l0650:
+	ld	bc,_RDL		; Set index
+	jp	l067b
+;
+; Get command character
+;
+l0656:
+	ld	bc,_GCC		; Set index
+	jp	l067b
+;
+; Put character in Accu to console
+;
+l065c:
+	ld	bc,_CO		; Set index
+	jp	l067b
+;
+; Display byte in Accu
+;
+l0662:
+	ld	bc,_DSB		; Set index
+	jp	l067b
+;
+; Display word in reg DE
+;
+l0668:
+	push	de
+	ld	a,d
+	call	l0662		; Display hi byte
+	pop	de
+	ld	a,e		; Then lo byte
+	jp	l0662
+;
+; Get parameter count
+;
+l0672:
+	ld	bc,_GPC		; Set index
+	jp	l067b
+;
+; Get parameter
+;
+l0678:
+	ld	bc,_GP		; Set index
+;
+; Execute breakpoint related instruction
+; Reg BC holds index
+;
+l067b:
+	ld	hl,(RSTadr+1)	; Fetch base of vector
+	add	hl,bc
+	jp	(hl)
+;
+; DE:=DE-HL
+;
+l0680:
+	ld	a,e
+	sub	l		; Subtract
+	ld	e,a
+	ld	a,d
+	sbc	a,h
+	ld	d,a
+	ret
+;
+; Divide reg HL by 64
+;
+l0687:
+	ld	a,l		; Save low
+	ld	l,h		; DIV 256
+	ld	h,0
+	add	hl,hl		; MUL 2
+	add	hl,hl		; MUL 4
+	rlca
+	rlca
+	and	00000011b	; Mask lo
+	or	l		; Insert
+	ld	l,a
+	ret
+;
+; Give new line on console
+;
+l0694:
+	ld	a,cr
+	call	l065c		; Put to console
+	ld	a,lf
+	call	l065c
+	ret
+;
+; Put zero closed string ^DE to console
+;
+l069f:
+	ld	a,(de)		; Get character
+	or	a		; Test end
+	ret	z		; Yeap
+	inc	de
+	push	de
+	call	l065c		; Put to console
+	pop	de
+	jp	l069f
+;
+; %%%%%%%%%%%%%%%%%%%%%
+; %%% START OF HIST %%%
+; %%%%%%%%%%%%%%%%%%%%%
+;
+l06ab:
+	ld	hl,(BDOS+1)	; Get old OS address
+	ld	(l0600+1),hl	; Into HIST entry
+	ld	hl,l0600	; Get HIST entry
+	ld	(BDOS+1),hl	; For new os address
+	jp	l06c0
+l06ba:
+	ld	de,l080d
+	call	l069f		; Tell error
+;
+; INITIAL entry point
+;
+l06c0:
+	ld	de,l0823
+	call	l069f		; Tell bounds required
+	call	l0650		; Read line from keyboard
+	call	l0672		; Get parameter count
+	jp	c,l06ba		; Error
+	cp	2		; Verify count
+	jp	nz,l06ba	; Should be two
+	call	l0678		; Get 1st parameter
+	ld	(l08ab),hl	; Save
+	push	hl
+	call	l0678		; Get 2nd parameter
+	inc	hl
+	ld	(l08ad),hl	; Save
+	pop	de
+	ex	de,hl
+	call	l0680		; DE:=DE-HL
+	jp	c,l06ba		; 2nd should be GT 1st
+	ex	de,hl
+	call	l0687		; Divide by 64
+	ld	(l0931),hl	; Save
+	ld	hl,l08af	; Point to data array
+	ld	c,2*SEGS
+l06f6:
+	ld	(hl),0		; Clear array
+	inc	hl
+	dec	c
+	jp	nz,l06f6
+	ld	de,l0879
+	call	l069f		; Display internal symbol table
+	ld	de,l0621
+	call	l0668
+	ld	de,l0887
+	call	l069f
+	ld	de,l0624
+	call	l0668
+	ld	de,l0895
+	call	l069f
+	ld	de,l0627
+	call	l0668
+	ld	de,l061e-l0600	; Return symbol pointer
+	ret
+;
+; COLLECT entry point
+;
+l0725:
+	push	de
+	ld	hl,(l08ad)	; Get bound Y
+	ex	de,hl
+	call	l0680		; DE:=DE-HL
+	pop	de
+	jp	c,l0760
+	ld	hl,(l08ab)	; Get bound X
+	call	l0680		; DE:=DE-HL
+	jp	c,l0760
+	ld	c,0
+	ld	hl,(l0931)
+l073f:
+	call	l0680		; DE:=DE-HL
+	jp	c,l0749
+	inc	c
+	jp	l073f
+l0749:
+	ld	b,0
+	ld	hl,l08af
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	inc	de
+	ld	a,d
+	or	e
+	jp	nz,l0760
+	ld	a,1
+	ret
+l0760:
+	ld	a,0
+	ret
+;
+; DISPLAY entry point
+;
+l0763:
+	ld	hl,l08af
+	ld	c,SEGS
+	ld	de,0
+l076b:
+	push	de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl
+	push	de
+	call	l0680		; DE:=DE-HL
+	pop	de
+	ex	de,hl
+	jp	c,l077b
+	ex	de,hl
+l077b:
+	dec	c
+	pop	hl
+	jp	nz,l076b
+	ex	de,hl
+	push	hl
+	call	l0687		; Divide by 64
+	inc	hl
+	ld	(l092f),hl
+	ld	de,l083c
+	call	l069f		; Tell histogram
+	pop	de
+	call	l0668		; Display word
+	xor	a
+	ld	(l08aa),a	; Init state
+	ld	hl,(l08ab)	; Get bound X
+	ex	de,hl
+	ld	bc,l08af
+l079e:
+	push	de
+	ld	hl,(l08ad)	; Get bound Y
+	call	l0680		; DE:=DE-HL
+	pop	de
+	jp	nc,l07ee
+	ld	h,b
+	ld	l,c
+	ld	a,(hl)
+	inc	hl
+	or	(hl)		; Test zero
+	ld	hl,l08aa
+	jp	nz,l07cf	; Nope
+	ld	a,(hl)		; Test state
+	or	a
+	jp	nz,l07c5	; Was set
+	ld	(hl),TRUE	; Set it
+	push	bc
+	push	de
+	ld	de,l08a3
+	call	l069f		; Indicate it
+	pop	de
+	pop	bc
+l07c5:
+	ld	hl,(l0931)
+	add	hl,de
+	ex	de,hl
+	inc	bc
+	inc	bc
+	jp	l079e
+l07cf:
+	ld	(hl),0
+	push	bc
+	push	de
+	push	de
+	call	l0694		; Give new line
+	pop	de
+	call	l0668		; Display word
+	pop	de
+	ld	hl,(l0931)
+	add	hl,de
+	ex	(sp),hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	call	l07f2		; Display diagram
+	pop	bc
+	pop	de
+	jp	l079e
+l07ee:
+	call	l0694		; Give new line
+	ret
+;
+; Display diagram
+;
+l07f2:
+	ld	a,e
+	or	d		; Test zero
+	ret	z		; Ignore if so
+	push	de
+	ld	a,' '
+	call	l065c		; Put to console
+	pop	de
+l07fc:
+	ld	hl,(l092f)
+	call	l0680		; DE:=DE-HL
+	ret	c
+	push	de
+	ld	a,'*'
+	call	l065c		; Put to console
+	pop	de
+	jp	l07fc
+;
+l080d:
+	db	cr,lf,'ERROR - FORM IS X,Y',null
+l0823:
+	db	cr,lf,'TYPE HISTOGRAM BOUNDS ',null
+l083c:
+	db	cr,lf,'HISTOGRAM:',cr,lf
+	db	'ADDR      RELATIVE FREQUENCY, LARGEST VALUE = ',null
+l0879:
+	db	cr,lf,'.INITIAL = ',null
+l0887:
+	db	cr,lf,'.COLLECT = ',null
+l0895:
+	db	cr,lf,'.DISPLAY = ',null
+l08a3:
+	db	cr,lf,'....',null
+l08aa:
+	ds	1
+l08ab:				; Bound X
+	ds	2
+l08ad:				; Bound Y
+	ds	2
+l08af:
+	ds	2*SEGS
+l092f:
+	ds	2
+l0931:
+	ds	2
+
+	end
+

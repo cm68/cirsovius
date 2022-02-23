@@ -1,0 +1,495 @@
+	.xlist
+
+; Subject : Main definition file for BASELIB library
+
+	.z80
+
+; File    : BASELIB.LIB
+
+; Modull  : Main definition file
+
+; Copyright (C)	Werner Cirsovius, partially based upon PD SIG/M 117
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49-40-4223247
+
+;		Version 1.0, September 1997
+;		(Before that date all definitions were made on the
+;		 assembler modules itself)
+
+;
+; Max length of COMMON /DATA/
+;
+COMMLEN	equ	32
+;
+; Macros
+;
+_push_	macro
+	push	bc
+	push	de
+	push	hl
+	endm
+;
+_pop_	macro
+	pop	hl
+	pop	de
+	pop	bc
+	endm
+;
+_OSCAL_	macro	fn,ARG2
+	ld	c,fn
+	if	NOT NUL ARG2
+	ld	de,ARG2
+	endif
+	call	BDOS
+	endm
+;
+; Booleans
+;
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+;
+; CP/M page zero locations
+;
+OS	equ	0000h		; Warm start JP entry
+BIOS	equ	OS+1		; BIOS table entry
+;
+; *** NOTE:
+; +++++++++
+;	Callers drive at 0004H holds user and drive
+;	Drive is 0 relative (Drive A is 0)
+;
+;	Programs drive at 0050H holds only drive
+;	Drive is 1 relative (Drive A is 1)
+;
+CALDRV	equ	0004h		; Callers drive
+BDOS	equ	0005h		; OS entry
+TPATOP	equ	BDOS+1		; Top of available memory
+PRGDRV	equ	0050h		; Progrms drive
+FCB	equ	005ch		; Standard File Control Block
+DMA	equ	0080h		; Standard Disk Memory Address
+TPA	equ	0100h		; Transient Program Area
+;
+; BDOS functions
+;
+.conin	equ	  1		; Console inpit
+.conout	equ	  2		; Console output
+.auxin	equ	  3		; Auxiliary input
+.auxout	equ	  4		; Auxiliary output
+.lstout	equ	  5		; List output
+.condir	equ	  6		; Direct console I/O
+.auxist	equ	  7		; Auxiliary input status
+.auxost	equ	  8		; Auxiliary ouput status
+.string	equ	  9		; String to console function
+.rdcon	equ	 10		; String from console function
+.consta	equ	 11		; Console state
+.vers	equ	 12		; OS version
+.resdsk	equ	 13		; Reset entire disk system
+.seldsk	equ	 14		; Log in disk
+.open	equ	 15		; Open existing file
+.close	equ	 16		; Close file
+.srcfrs	equ	 17		; Search file the first time
+.srcnxt	equ	 18		; Search file the next time
+.delete	equ	 19		; Delete file
+.rdseq	equ	 20		; Read sequential record
+.wrseq	equ	 21		; Write sequential record
+.make	equ	 22		; Create file
+.rename	equ	 23		; Rename file
+.retdsk	equ	 25		; Return current disk
+.setdma	equ	 26		; Set DMA address
+.attr	equ	 30		; Set file attribute(s)
+.getdpb	equ	 31		; Get Disk Parameter Block
+.usrcod	equ	 32		; Get or set user area
+.rdrnd	equ	 33		; Read Random record
+.wrrnd	equ	 34		; Write random record
+.filsiz	equ	 35		; Return file size
+.setrrn	equ	 36		; Setrandom record
+.resdrv	equ	 37		; Reset drive(s)
+.mulsec	equ	 44		; Set multi sector count
+.errmod	equ	 45		; Set error mode
+.getspc	equ	 46		; Get free disk space
+.chain	equ	 47		; Chain to .COM file
+.scbfun	equ	 49		; Set or get System Control Block
+.bioscl	equ	 50		; Call BIOS function
+.ldovl	equ	 59		; Load overlay
+.trncat	equ	 99		; Truncate file
+.gettod	equ	105		; Get time and date
+.conmod	equ	109		; Set or get console mode
+.parse	equ	152		; Parse filre
+;
+; BIOS functions
+;
+_WBOOT	equ	 1		; Warm boot
+_CONOUT	equ	 4		; Console output
+_TIME	equ	26		; Update time
+_USERF	equ	30		; User function
+
+USRBIOS	equ	3*(_USERF-1)
+
+_CI	equ	0ffh		; Get function for console
+
+RSXSTRT	equ	0006h		; Start of RSX
+
+.drv	equ	 1		; Drive length of FCB
+.nam	equ	 8		; Name length of FCB
+.ext	equ	 3		; Extension length of FCB
+.flen	equ	.nam+.ext	; Name and extension length
+
+_RO	equ	 9		; R/O position in FCB
+_SYS	equ	10		; System position in FCB
+_EX	equ	12		; Extent position in FCB
+_CR	equ	32		; Current record position
+_RRN	equ	33		; Random record number position
+
+DIRlen	equ	16		; Length of directory entry (less blocks)
+FCBlen	equ	36		; Length of entire FCB
+;
+; Definitions for the C alike library
+;
+_U	equ	FCBlen		; Position of user area
+_Ctrl	equ	_U+1		; Position of control byte
+_Buff	equ	_Ctrl+1		; Position of current buffer
+_DMA	equ	_buff+4		; Position of current DMA
+_FIBlen	equ	_DMA+buflen	; Entire length of File Information Block
+
+OSerr	equ	255		; Standard OS error
+
+_MAXUSR	equ	15		; Max user area
+_MAXDRV	equ	'P'-'A'		; Max drive code
+
+reclng	equ	128		; Standard length of disk buffer
+
+_get	equ	000h		; SCB get code
+_set	equ	0ffh		; SCB set code
+;
+; Offsets within SCB
+;
+@DMAADR	equ	3ch		; Current DMA address
+@MULSEC	equ	4ah		; Current multi sector count
+@ERR	equ	4bh		; Disk error mode
+
+EXTENT	equ	0feh		; Extended error setting
+PHYERR	equ	0ffh		; Physical error setting
+
+DSM	equ	7		; Directory length in DPB
+
+@CPM	equ	031h		; OS version required
+@PCW	equ	1		; Machine supported
+;
+; PCW XBIOS calls
+;
+_TEASK	equ	00bfh		; Get terminal settings
+_KMGET	equ	00dah		; Read key token and mode
+_CDVERS	equ	00e3h		; Get machine and BIOS type
+_SCRRUN	equ	00e9h		; Run routine in screen environment
+;
+; ASCII character definitions
+;
+null	equ	00h
+ctrlc	equ	03h
+bell	equ	07h
+bs	equ	08h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+newlin	equ	lf
+vt	equ	0bh
+ff	equ	0ch
+cr	equ	0dh
+ceol	equ	0eh
+ceos	equ	0fh
+can	equ	18h
+eof	equ	1ah
+esc	equ	1bh
+eot	equ	'$'
+del	equ	7fh
+;
+; PCW special keys on ASCII level
+;
+curlef	equ	01h
+currig	equ	06h
+delrig	equ	07h
+;
+; PCW key numbers
+;
+_PARA	equ	 4
+_PAGE	equ	12
+_RETURN	equ	18
+_ENTER	equ	78
+;
+; Some special definitions
+;
+LINELEN	equ	80		; Length of line
+;
+$page	equ	0
+$line	equ	1
+$char	equ	2
+;
+; Some date definitions
+;
+year	equ	365
+_year	equ	78		; Counter starts at year 1978
+_year.	equ	16*(_year / 10) + _year MOD 10
+_leap	equ	00000011b
+;
+; Bit definitions
+;
+@msb	equ	7		; MSB
+
+@ro	equ	7		; Definitions for attribute bits
+@sys	equ	6
+@wild	equ	5
+@strp	equ	4
+
+ro	equ	1 SHL @ro
+sys	equ	1 SHL @sys
+wild	equ	1 SHL @wild
+strp	equ	1 SHL @strp
+;
+; Masks
+;
+LoMask	equ	00001111b		; Lower bits of byte
+HiMask	equ	11110000b		; Higher bits of byte
+NoMSB	equ	01111111b		; All except MSB
+MSB	equ	10000000b		; MSB only
+SIGNB	equ	10000000b		; Sign bit
+LOWER	equ	00100000b		; Convert to lower mask
+UPPER	equ	NOT LOWER		; Convert to upper mask
+;
+; Some special
+;
+renbit	equ	10000000b
+;
+upbit	equ	00000001b
+curbit	equ	00000010b
+invbit	equ	00000100b
+;
+; Drive A vector
+;
+drva	equ	0000000000000001b
+;
+; Definitions for common character I/O
+;
+conbit	equ	00000001b	; Console bit
+lstbit	equ	00000010b	; List bit
+auxbit	equ	00000100b	; Auxiliary bit
+rambit	equ	00001000b	; Storage bit
+;
+; Flash definitons
+;
+on	equ	00000000b
+off	equ	00000001b
+reset	equ	00000010b
+;
+_JP	equ	0c3h		; Jump opcode
+
+$WILD	equ	'?'		; Single wild card character
+maxmod	equ	 4		; Max mode byte for channle I/O
+max	equ	15		; Max number of channels
+displ	equ	32
+none	equ	-1
+
+addoff	equ	0f0h
+addoff.	equ	090h
+addasc	equ	'0'+16
+hexrng	equ	'A'-'9'-1
+asc	equ	'0'
+num	equ	10
+;
+; Definitions for overlay and loader
+;
+name	equ	0010h
+page	equ	256
+maxlev	equ	5		; Max overlay levels supported
+orglen	equ	10
+strrec	equ	2
+clr	equ	0ffh
+choffs	equ	4
+ctrlch	equ	5
+
+clock	equ	4		; CPU clock
+;
+; Definitions for C alike library
+;
+bufrec	equ	4		; Buffers for C I/O
+buflen	equ	reclng*bufrec
+;
+_NUL	equ	 0
+_EOF	equ	-1
+_ERR	equ	-1
+;
+?rd	equ	0
+?wr	equ	1
+?eof.	equ	2
+?bin	equ	7
+?CONOUT	equ	3
+?CONIN	equ	7
+?MSB	equ	7
+;
+; The main definitions for the HIFLOAT math LIBrary
+;
+;		LIBrary initiated January 1989
+;
+; Numbers arranged as :			Reg	Stack
+;					=============
+;		Mantissa MSB (Sign)	H	+5
+;		Mantissa (middle)	L	+4
+;		Mantissa LSB		E	+2
+;		Exponent		D	+3
+;
+zero		equ	 6
+zerbit		equ	 1 SHL zero
+sign		equ	 7
+exp		equ	 3
+mant.lo		equ	 2
+mant.mid	equ	 4
+mant.hi		equ	 5
+sign.		equ	 1
+res.		equ	 3
+lo.		equ	 4
+exp.max		equ	14
+bitlen		equ	 8
+digits		equ	 7
+out.digits	equ	 4
+numcount	equ	22
+mant		equ	22
+expcount	equ	32
+;
+; The Pull Down Menue definitions
+;
+; Definition of User Parameter Block:
+;
+;	UPB+0		: X-start coordinate of text
+;	UPB+1		: Y-start coordinate of text
+;	UPB+2		: Length of window element
+;	UPB+3		: Number of window elements
+;	UPB+4		: Mode byte - see below
+;	UPB+5		: Optional current X-position
+;	UPB+6		: Optional current Y-position
+;	UPB+7,8		: Optional save pointer
+;	UPB+9,10	: Optional line input buffer
+;			  started with number of max characters
+;	UPB+11		: Characters per line, including frame elements
+;	UPB+12		: Lines in window, including frame elements
+;	UPB+13		: X-start coordinate of window
+;	UPB+14		: Y-start coordinate of window
+;	UPB+15		: X-Start of text cursor for input
+;	UPB+16		: Y-Start of text cursor for input
+;	UPB+17,18	: Input text pointer
+;
+; The mode byte at UPB+4 is defined as follows
+;
+;	BIT0	: Defines one of two frames
+;		  Reset : single line frame
+;		    Set : double line frame
+;	BIT1	: Defines delimiter required between elements
+;		  Reset : No delimiter
+;		    Set : delimiter requested
+;	BIT2	: Defines direction of window to build
+;		  Reset : horizontal direction
+;		    Set : vertical direction
+;	BIT3	: Defines colour of window
+;		  Reset : normal colour
+;		    Set : invers colour
+;	BIT4	: Defines to save current cursor position
+;		  Reset : don't save position
+;		    Set : save cursor position in UPB+5,UPB+6
+;	BIT5	: Defines to save window area
+;		  Reset : don't save area
+;		    Set : save into area pointed to by UPB+7,8
+;	BIT6	: Defines blank as delimiter
+;		  Reset : don't use blank
+;		    Set : use blank as delimiter
+;	BIT7	: Defines to restore window area after input
+;		  Reset : don't save area
+;		    Set : restore from area pointed to by UPB+7,8
+;
+xcor	equ	 0
+ycor	equ	 1
+lenele	equ	 2
+numele	equ	 3
+mode	equ	 4
+xsav	equ	 5
+ysav	equ	 6
+savpon	equ	 7
+lininx	equ	 9
+wdwchr	equ	11
+wdwlin	equ	12
+wdwpbx	equ	13
+wdwpby	equ	14
+txcur	equ	15
+tycur	equ	16
+txfld	equ	17
+frameb	equ	 0
+delim	equ	 1
+direc	equ	 2
+color	equ	 3
+savxy	equ	 4
+savwin	equ	 5
+delimm	equ	 6
+reswin	equ	 7
+stxinv	equ	 0
+etxinv	equ	 1
+stxins	equ	 2
+etxins	equ	 3
+retchr	equ	 4
+bldfrm	equ	 5
+posbit	equ	 0
+incbit	equ	 1
+posval	equ	 1 SHL posbit
+incval	equ	 1 SHL incbit
+posinc	equ	 posval+incval
+frmlef	equ	 0
+frmchr	equ	 1
+frmdel	equ	 2
+frmrig	equ	 3
+;
+; Special macine and OS dependend addresses
+;
+tblstr	equ	01780h
+cnvstr	equ	0290fh
+roller	equ	0b600h
+;
+tblen	equ	81
+frmlng	equ	maxcol*8
+
+maxcol	equ	90
+maxlin	equ	32
+scrput	equ	 0
+scrget	equ	 1
+;
+; Window elements
+;
+frlfup	equ	083h
+frlfdw	equ	086h
+frrgup	equ	089h
+frrgdw	equ	08ch
+frhor	equ	08ah
+frver	equ	085h
+frverr	equ	087h
+frverl	equ	08dh
+frhodw	equ	08eh
+frhoup	equ	08bh
+;
+; C like LIBrary definitions - based upon PD SIG/M 117
+;
+blank	equ	' '
+squote	equ	''''
+plus	equ	'+'
+minus	equ	'-'
+period	equ	'.'
+
+MAXLINE	equ	120
+SECTRS	equ	8
+;
+; Some heap definitions
+;
+HeapLen	equ	4
+
+heapLOadr equ	0
+heapHIadr equ	1
+heapLOlen equ	2
+heapHIlen equ	3
+
+	.list
+
