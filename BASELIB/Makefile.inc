@@ -1,8 +1,8 @@
 ROOT = $(shell pwd | sed 's/BASELIB.*$$/BASELIB/')
 
-ZX = $(HOME)/src/RomWBW/Tools/Linux/zx 
-SLR180 = $(ROOT)/../SLR/SLR180.COM
-LIB = /usr/local/lib/cpm/bin80/LIB.COM
+ZX = zxcc
+SLR180 = SLR180.COM
+LIB = LIB.COM
 
 ifndef DIRS
 LINKS = $(notdir $(shell echo $(ROOT)/INCLUDE/*.lib)) 
@@ -47,18 +47,23 @@ $(LIBRARY): $(OBJS)
 	for i in $(basename $(OBJS)) ; do \
 		if [ $$(dirname $$i) = '.' ] ; then \
 			fi=$$i ; \
+			lo=$$(echo $$fi | tr 'A-Z' 'a-z') ; \
+			if [ ! -f $$lo.rel ] && [ -f $$fi.rel ] ; then \
+				cp $$fi.rel $$lo.rel ; \
+			fi ; \
 		else \
 			fi=$$(basename $$i) ; \
-			cp $$i.rel $$fi.rel ; \
+			lo=$$(echo $$fi | tr 'A-Z' 'a-z') ; \
+			cp $$i.rel $$lo.rel ; \
 		fi ; \
 		if [ -f $(LOWLIB) ] ; then \
 			echo $(ZX) $(LIB) $(LIBROOT)=$(LIBROOT),$$fi ; \
-			$(ZX) $(LIB) $(LIBROOT)=$(LIBROOT),$$fi > /dev/null ; \
+			$(ZX) $(LIB) -$(LIBROOT)=$(LIBROOT),$$fi > /dev/null ; \
 		else \
 			echo $(ZX) $(LIB) $(LIBROOT)=$$fi ; \
-			$(ZX) $(LIB) $(LIBROOT)=$$fi > /dev/null ; \
+			$(ZX) $(LIB) -$(LIBROOT)=$$fi > /dev/null ; \
 		fi ; \
-		if [ $$(dirname $$i) != '.' ] ; then rm $$fi.rel ; fi ; \
+		if [ $$(dirname $$i) != '.' ] ; then rm $$lo.rel ; fi ; \
 	done;
 	mv $(LOWLIB) $(LIBRARY)
 
