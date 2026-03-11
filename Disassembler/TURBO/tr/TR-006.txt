@@ -1,0 +1,1340 @@
+;
+; Close untyped file
+; ENTRY	Reg HL holds FIB
+;
+; Procedure CLOSE(un_typed_file)
+;
+CloseUntyp:
+	ld	(IOdev),hl	; Save devic
+	ld	a,(hl)
+	and	..in+..out	; Test mode
+	ret	z
+	jp	CloseFIB	; Go close if any IO
+;
+; Write block to untyped file
+; Procedure BLOCKWRITE(file,buffer,count)
+; ENTRY	Reg HL holds number of records to be written
+;	On stack FIB and buffer
+;
+BlkWr:
+	ld	a,.WrRnd	; Set function code
+	jr	BlockFile
+;
+; Read block from untyped file
+; Procedure BLOCKREAD(file,buffer,count)
+; ENTRY	Reg HL holds number of records to be read
+;	On stack FIB and buffer
+;
+BlkRd:
+	ld	a,.RdRnd	; Set function code
+BlockFile:
+	ld	b,h		; Copy count
+	ld	c,l
+	ld	hl,Scratch
+	ld	(OvlRecord),hl	; Init record
+	pop	ix
+	pop	de		; Get buffer
+	pop	hl		; .. and FIB
+	push	ix
+	push	bc		; Save count
+	call	Block.IO	; Execute block IO
+	pop	bc
+	ld	a,(IOResult)	; Test error
+	or	a
+	ret	nz
+	ld	hl,(Scratch)	; Test all records done
+	sbc	hl,bc
+	ret	z
+	ld	a,(BlockMode)	; Get file function
+	cp	.RdRnd
+	ld	a,_IllEOF
+	jr	z,BF.Err
+	ld	a,_WrErr
+BF.Err:
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Write block to untyped file
+; Procedure BLOCKWRITE(file,buffer,count,result)
+; ENTRY	Reg HL points to result
+;	On stack FIB, buffer and number of records
+;
+BlkWrR:
+	ld	a,.WrRnd	; Set function
+	jr	BlockFileRes
+;
+; Rad block from untyped file
+; Procedure BLOCKREAD(file,buffer,count,result)
+; ENTRY	Reg HL points to result
+;	On stack FIB, buffer and number of records
+;
+BlkRdR:
+	ld	a,.RdRnd	; Set function
+BlockFileRes:
+	ld	(OvlRecord),hl	; Save result pointer
+	pop	ix
+	pop	bc		; Get count
+	pop	de		; .. and buffer
+	pop	hl		; .. and FIB
+	push	ix
+;
+; Perform block IO
+; ENTRY	Accu holds file function
+;	Reg HL holds FIB
+;	Reg DE holds buffer
+;
+Block.IO:
+	ld	(BlockMode),a	; Save function
+	ld	(IOdev),hl	; .. and FIB
+	ld	a,(hl)		; Get FIB type
+	and	..in+..out	; Test IO allowed
+	jp	z,Block.Err	; .. error
+	ld	hl,(OvlRecord)
+	xor	a
+	ld	(hl),a		; Clear record
+	inc	hl
+	ld	(hl),a
+BlIO.loop:
+	ld	a,b		; Test all done
+	or	c
+	jr	z,BlIO.exit
+	push	bc
+	push	de
+	call	SetDMA		; Set disk buffer
+	ld	a,(BlockMode)	; Get file function
+	ld	c,a
+	call	FIB.BDOS	; .. execute it
+	pop	de
+	pop	bc
+	jr	nz,BlIO.exit	; Test result
+	push	de
+	ld	hl,(IOdev)
+	ld	de,FIB.FCB+_rrn
+	add	hl,de
+	inc	(hl)		; Bump random record
+	jr	nz,BlIO.rec
+	inc	hl
+	inc	(hl)		; .. bump HI, too
+BlIO.rec:
+	pop	de
+	ld	hl,RecLng
+	add	hl,de		; Point to next record buffer
+	ex	de,hl
+	ld	hl,(OvlRecord)
+	inc	(hl)		; Bump number of records
+	jr	nz,BlIO.cnt
+	inc	hl
+	inc	(hl)		; .. bump HI, too
+BlIO.cnt:
+	dec	bc		; Count down
+	jr	BlIO.loop
+BlIO.exit:
+	ld	hl,(IOdev)	; Get FIB
+	ld	de,FIB.FCB+_rrn
+	add	hl,de
+	ld	c,(hl)		; Get last random record
+	inc	hl
+	ld	b,(hl)
+	ld	de,FIB.cur-FIB.FCB-_rrn-1
+	add	hl,de		; Point to FIB record
+	ld	(hl),c		; .. save it
+	inc	hl
+	ld	(hl),b
+	ld	de,-FIB.rec
+	add	hl,de
+	ld	d,(hl)		; Get record count
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	or	a
+	sbc	hl,bc		; Test against last record
+	ret	nc
+	ex	de,hl
+	ld	(hl),c		; .. save new max
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Procedure SEEK(file,record)
+; ENTRY	Reg HL holds record seeked for
+;	FIB pushed onto stack
+;
+Seek:
+	pop	bc
+	pop	de		; Get FIB
+	ld	(IOdev),de	; .. save
+	push	bc
+	push	hl		; Save record
+	call	FIBdata		; Get record data
+	pop	de
+	or	a
+	sbc	hl,de
+	jp	c,Seek.Err	; .. behind last record
+	ld	hl,(IOdev)
+	ld	bc,FIB.cur	; Point to current record
+	add	hl,bc
+	ld	(hl),e		; Save new position
+	inc	hl
+	ld	(hl),d
+	ld	bc,FIB.FCB+_rrn-FIB.cur-1
+	add	hl,bc
+	ld	(hl),e		; .. in FCB, too
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Delete file
+; Procedure ERASE(file)
+; ENTRY	Reg HL holds FIB
+;
+Erase:
+	call	ChkLegIO	; Check legal FIB
+	ret	nz
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	U.BDOS
+	ld	c,.delete
+	call	BDOS		; Delete file
+	inc	a
+	ret	nz
+	jr	NoFile		; Set error if unknown
+;
+; Rename file
+; Procedure RENAME(file,newname)
+; ENTRY	FIB and name on stack
+;
+Rename:
+	pop	iy
+	ld	hl,(TopRam)	; Load buffer
+	ld	b,16		; Set max
+	call	AsStr		; Get string
+	xor	a
+	ld	(de),a
+	pop	hl		; Load FIB
+	push	iy
+	call	ChkLegIO	; Check legal channel
+	ret	nz
+	push	hl
+	call	assignFCB	; Assign string to FCB
+	pop	hl
+	push	hl
+	ld	de,FIB.FCB+16
+	add	hl,de		; Point to 2nd FCB
+	ex	de,hl
+	ld	hl,FCB
+	ld	bc,1+Fname+Fext
+	ldir			; Move new name
+	pop	hl
+	ld	de,FIB.FCB
+	add	hl,de		; Get FCB
+	push	hl
+	ex	de,hl
+	U.BDOS
+	ld	c,.rename
+	call	BDOS		; .. rename
+	pop	de
+	inc	a		; Test success
+	jr	z,NoFile
+	ld	hl,FCB
+	ld	bc,FCBlen
+	ldir			; Unpack new file name
+	ret
+NoFile:
+	ld	a,_NoFile	; Set error
+;
+DirectErr:
+	ld	(IOResult),a
+	ret
+;
+; Perform executing new programs
+; Procedure EXECUTE(File)
+; ENTRY	Reg HL points to FIB
+;
+Execute:
+	db	SKIP
+;
+; Procedure CHAIN(File)
+;
+Chain:
+	xor	a
+	ld	(FilIniMode),a	; Set mode (0=CHAIN)
+	call	ChkLegIO	; Test device ok
+	ret	nz		; .. no
+	ld	a,(RunMode)	; Test run mode
+	or	a
+	ld	a,_DirErr
+	jr	z,DirectErr	; .. must NOT be direct mode
+	ld	hl,(IOdev)	; Get FIB
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ld	de,FCB
+	ld	bc,FCBlen
+	ldir			; Move to standard FCB
+	ld	c,.open		; Open file
+	call	FBDOS
+	inc	a
+	jr	z,NoFile	; .. not here
+	ld	hl,Loader
+	ld	de,LoadTemp
+	ld	bc,Ld.Len
+	ldir			; Move to temporary
+	ld	de,TPA		; Get loader start
+	ld	a,(FilIniMode)	; .. depends on mode
+	or	a
+	jr	nz,DoExec
+	ld	de,(TPA+1)	; Get for CHAIN
+DoExec:
+	ld	sp,Stack	; Set local stack
+	jp	LoadTemp	; .. go load
+;
+; ############### Start of loader ###############
+;
+; Loader will be moved into 00B0H temporary loaction
+;
+Loader:
+	.phase	LoadTemp
+.Loader:
+	push	de
+	call	SetDMA		; Set buffer to address
+	ld	c,.rdseq
+	call	FBDOS		; Read a record
+	pop	de
+	ld	hl,RecLng
+	add	hl,de		; .. bump address
+	ex	de,hl
+	or	a		; Test more
+	jr	z,.Loader
+	jr	TPA		; .. start if ready
+Ld.Len	equ 	$-.Loader
+	.dephase
+;
+; ################ End of loader ################
+;
+;
+; Check legal device for file operation
+; ENTRY	Reg HL points to FIB
+; EXIT	Zero flag set if legal device
+;	If illegal, IOerror 20H will be set
+;
+ChkLegIO:
+	ld	(IOdev),hl	; Save FIB
+	ld	a,(hl)		; Get flag
+	and	FIBtype		; .. mask
+	ret	z		; 0 is file
+	ld	a,_IllIO
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Load overlay file
+; ENTRY	Reg HL holds record procedure starts with
+;	Reg DE holds number of records to be read
+;
+; Overlay call follows:
+;	    2 Bytes hold last sector read
+;	   11 Bytes NAME.EXT of file
+;	n*128 Bytes record(s)
+;
+Overlay:
+	ld	(OvlRecord),hl	; Save record
+	ld	(FilIniMode),de	; .. and count
+	ex	de,hl
+	pop	hl
+	ld	(IOdev),hl	; Save caller
+	ld	c,(hl)		; Get last sector
+	ld	(hl),e		; .. set new one
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),d
+	ex	de,hl
+	or	a
+	sbc	hl,bc		; Compare new:old
+	jr	z,OVL.loaded	; .. ok, already in memory
+	ex	de,hl
+	inc	hl
+	ld	de,FCB
+	ld	a,(OvrDrv)	; .. get overlay drive instead
+	ld	(de),a
+	inc	de
+	ld	bc,Fname+Fext
+	ldir			; Move to standard FCB
+	ld	b,FCBlen-_ex
+	xor	a
+IniOVL.FCB:
+	ld	(de),a		; Clear rest of FCB
+	inc	de
+	djnz	IniOVL.FCB
+	push	hl		; Save buffer address
+	ld	c,.open
+	call	FBDOS		; Open overlay file
+	pop	de		; Get buffer address
+	inc	a
+	jr	z,OVL.Err	; .. not here
+	ld	hl,(OvlRecord)	; Get start record
+	ld	(FCB+_rrn),hl	; .. set it
+	ld	bc,(FilIniMode)	; Load total length
+OVL.load:
+	push	bc
+	push	de
+	call	SetDMA		; Set load address
+	ld	c,.RdRnd
+	call	FBDOS		; Read from file
+	pop	de
+	pop	bc
+	or	a		; .. test error
+	jr	nz,OVL.Err
+	ld	hl,(FCB+_rrn)
+	inc	hl		; Bump record
+	ld	(FCB+_rrn),hl
+	ld	hl,RecLng
+	add	hl,de		; .. and address
+	ex	de,hl
+	dec	bc		; Test all records read
+	ld	a,b
+	or	c
+	jr	nz,OVL.load
+	ld	c,.close
+	call	FBDOS		; .. close file
+OVL.loaded:
+	ld	hl,(IOdev)	; Load caller
+	ld	de,2+Fname+Fext
+	add	hl,de		; Skip header
+	jp	(hl)		; .. start at buffer
+OVL.Err:
+	ld	ix,(IOdev)	; Fetch callers PC
+	ld	a,_OVLerr
+	jp	SetRT.Err	; .. abort
+;
+; Procedure OVRDRIVE(drive)
+; ENTRY	Reg HL holds drive (1=A, 2=B, etc)
+;
+OvrDrive:
+	call	VALget		; Get low part
+	cp	'P'-'@'+1	; Test max
+	ret	nc		; .. exit on range error
+	ld	(OvrDrv),a	; Set overlay drive
+	ret
+;
+; Procedure NEW(pointer)
+; Procedure GETMEM(pointer,space)
+; ENTRY	Reg HL holds space required
+;	Variable pointer on stack
+;
+New:
+	ld	(Scratch),hl	; Save space
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	ld	(HeapVar),hl	; Save address of variable
+	inc	de
+	inc	de
+	inc	de
+	ld	a,e
+	and	-HeapLen	; Get modulo 4
+	ld	e,a
+	ld	hl,HeapFre
+	ld	(HeapSav),hl	; Init pointer
+	ld	ix,(HeapFre)	; Get pointer to 1st free
+New.Loop:
+	ld	l,(ix+heapLOlen)
+	ld	h,(ix+heapHIlen)
+	ld	a,l		; Test assignment
+	or	h
+	jr	z,Heap.Free	; .. seems to be free
+	sbc	hl,de		; Test gap
+	jr	nc,New.Gap
+	ld	l,(ix+heapLOadr); Get next address
+	ld	h,(ix+heapHIadr)
+	push	hl
+	ld	(HeapSav),ix	; Save last address
+	pop	ix		; Copy chain
+	jr	New.Loop
+New.Gap:
+	jr	nz,New.GT.Gap	; Test same gap
+	ld	e,(ix+heapLOadr); Get address if so
+	ld	d,(ix+heapHIadr)
+	push	ix
+	jr	New.Save	; Save state
+New.GT.Gap:
+	ld	c,l		; Copy length
+	ld	b,h
+	ld	l,(ix+heapLOadr); .. and address
+	ld	h,(ix+heapHIadr)
+New.Set:
+	push	ix		; Save pointer
+	add	ix,de		; .. bump
+	ld	(ix+heapLOadr),l; Set start values
+	ld	(ix+heapHIadr),h
+	ld	(ix+heapLOlen),c
+	ld	(ix+heapHIlen),b
+	push	ix
+	pop	de		; Copy pointer
+New.Save:
+	ld	hl,(HeapSav)	; Get pointer
+	ld	(hl),e		; Set new link
+	inc	hl
+	ld	(hl),d
+	pop	de
+	ld	hl,(HeapVar)
+	ld	(hl),e		; Set into variable
+	inc	hl
+	ld	(hl),d
+	ret
+Heap.Free:
+	push	ix
+	pop	hl		; Copy pointer
+	add	hl,de
+	ld	(HeapPtr),hl	; Set new heap
+	ld	hl,(Scratch)	; Get space
+	ld	bc,HeapLen
+	add	hl,bc		; Get complete length
+	push	ix
+	pop	bc
+	add	hl,bc		; Add to pointer
+	jp	c,HeapError	; .. overflow
+	ld	bc,(RecurPtr)	; Test against recursion
+	sbc	hl,bc
+	ld	bc,0		; Set zero
+	ld	hl,0
+	jp	c,New.Set
+HeapError:
+	ld	a,_HeapErr
+	jp	SetRTerror	; Set error
+;
+; Procedure DISPOSE(pointer)
+; Procedure FREEMEM(pointer,space)
+; ENTRY	Reg HL holds space
+;	Variable pointer on stack
+;
+Dispose:
+	ex	de,hl		; Save space
+	pop	hl
+	ex	(sp),hl		; Get variable pointer
+	ld	a,(hl)		; Load dynamic pointer
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	de		; Fix space
+	inc	de
+	inc	de
+	ld	a,e
+	and	-HeapLen
+	ld	e,a
+	ex	de,hl
+	ld	(Scratch),hl	; Save length
+	ld	hl,(HeapFre)	; Load pointer to free heap
+	push	hl
+	pop	ix
+	or	a
+	sbc	hl,de		; Check pointer addresses
+	jr	nc,Dispose.GT
+Dispose.chain:
+	ld	l,(ix+heapLOadr); Get address
+	ld	h,(ix+heapHIadr)
+	push	hl
+	or	a
+	sbc	hl,de		; Compare
+	jr	nc,Dispose.ptr
+	pop	ix
+	jr	Dispose.chain
+Dispose.ptr:
+	pop	hl
+	push	de
+	pop	iy
+	ld	bc,(Scratch)	; Get length
+	ld	(iy+heapLOlen),c;Set length
+	ld	(iy+heapHIlen),b
+	ld	(iy+heapLOadr),l; .. and address
+	ld	(iy+heapHIadr),h
+	ld	(ix+heapLOadr),e
+	ld	(ix+heapHIadr),d
+	push	ix
+	pop	hl
+	ld	c,(ix+heapLOlen);Get old length
+	ld	b,(ix+heapHIlen)
+	call	Dispose.cmp	; Compare
+	jr	z,Dispose.same
+	ld	e,(ix+heapLOadr); Get address
+	ld	d,(ix+heapHIadr)
+	push	de
+	pop	ix
+Dispose.same:
+	push	ix
+	pop	hl
+	ld	c,(ix+heapLOlen)
+	ld	b,(ix+heapHIlen)
+	ld	e,(ix+heapLOadr)
+	ld	d,(ix+heapHIadr)
+	jr	Dispose.cmp
+Dispose.GT:
+	ld	hl,(HeapFre)	; Save pointer to free heap
+	ld	(HeapFre),de	; Set new
+	push	de
+	pop	ix
+	ld	(ix+heapLOadr),l; Set chain
+	ld	(ix+heapHIadr),h
+	ld	bc,(Scratch)	; Get length
+	ld	(ix+heapLOlen),c
+	ld	(ix+heapHIlen),b
+	ex	de,hl
+Dispose.cmp:
+	add	hl,bc		; Bump to next
+	or	a
+	sbc	hl,de		; .. test same
+	ret	nz
+	push	de
+	pop	iy		; Copy pointer
+	ld	hl,(HeapPtr)
+	or	a
+	sbc	hl,de		; Test top found
+	jr	z,Dispose.EQ
+	ld	a,(iy+heapLOadr); Unpack address
+	ld	(ix+heapLOadr),a
+	ld	a,(iy+heapHIadr)
+	ld	(ix+heapHIadr),a
+	ld	l,(iy+heapLOlen)
+	ld	h,(iy+heapHIlen)
+	add	hl,bc
+	ld	(ix+heapLOlen),l; .. and new length
+	ld	(ix+heapHIlen),h
+	xor	a
+	ret
+Dispose.EQ:
+	push	ix
+	pop	hl
+	ld	(HeapPtr),hl	; Set new top
+	ld	b,HeapLen
+Dispose.clr:
+	ld	(hl),0		; Clear top
+	inc	hl
+	djnz	Dispose.clr
+	ret
+;
+; Get free memory
+; Function MEMAVAIL:integer
+; EXIT	Reg HL holds free memory in bytes
+;
+MemAvail:
+	call	GetMemory	; Get memory
+	ld	hl,(AvailMem)	; Load available
+	ret
+;
+; Get max free memory
+; Function MAXAVAIL:integer
+; EXIT	Reg HL holds free memory in bytes
+;
+MaxAvail:
+	call	GetMemory	; Get memory
+	ld	hl,(AvailMax)	; Load max
+	ret
+;
+; Get free memory
+;
+GetMemory:
+	ld	hl,0
+	ld	(AvailMem),hl	; Init to zero
+	ld	(AvailMax),hl
+	ld	ix,(HeapFre)	; Get pointer to free
+GM.Loop:
+	ld	c,(ix+heapLOlen)
+	ld	b,(ix+heapHIlen)
+	ld	a,c
+	or	b		; Test end of chain
+	jr	z,GM.got
+	ld	hl,(AvailMem)	; Get old
+	add	hl,bc		; Add length
+	ld	(AvailMem),hl
+	ld	hl,(AvailMax)	; Get max
+	or	a
+	sbc	hl,bc		; Check
+	jr	nc,GM.NoAvail
+	ld	(AvailMax),bc	; Set new
+GM.NoAvail:
+	ld	l,(ix+heapLOadr); Get chain
+	ld	h,(ix+heapHIadr)
+	push	hl
+	pop	ix
+	jr	GM.Loop		; .. loop
+GM.got:
+	ld	hl,(RecurPtr)	; Get recursion pointer
+	ld	bc,-5
+	add	hl,bc		; Get free
+	ld	de,(HeapPtr)
+	or	a
+	sbc	hl,de		; Test any free
+	ret	c
+	ex	de,hl
+	ld	hl,(AvailMem)	; Get available
+	add	hl,de		; .. add gap
+	ld	(AvailMem),hl
+	ld	hl,(AvailMax)	; Get max
+	or	a
+	sbc	hl,de		; Subtract
+	ret	nc
+	ld	(AvailMax),de	; Set new
+	ret
+;
+; Mark heap
+; Procedure MARK(pointer)
+; ENTRY	Reg HL holds pointer
+;
+Mark:
+	ld	de,(HeapPtr)	; Get heap pointer
+	ld	(hl),e		; .. save into variable
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Release heap
+; Procedure RELEASE(pointer)
+; ENTRY	Reg HL holds pointer
+;
+Release:
+	ld	e,(hl)		; Get heap
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl		; .. init heap
+;
+; Init heap
+; ENTRY	Reg HL points to 1st free location
+;
+IniPntr:
+	ld	(HeapPtr),hl	; Init pointers
+	ld	(HeapFre),hl
+	ld	b,HeapLen
+IP.Loop:
+	ld	(hl),0		; .. clear 4 bytes
+	inc	hl
+	djnz	IP.Loop
+	ret
+;
+; Convert number to string
+; Procedure STR(real,string)
+; ENTRY	Real pushed onto stack with formatting data
+;	Reg HL points to string
+;	Reg B holds length of string
+;
+STRreal:
+	db	SKIP
+;
+; Procedure STR(integer,string)
+; ENTRY	Integer pushed onto stack with digit count
+;	Reg HL points to string
+;	Reg B holds length of string
+;
+STRinteger:
+	xor	a
+	ld	c,a		; Save mode
+	ld	(FilIniMode),hl	; Save string
+	xor	a
+	ld	(hl),a		; .. init to empty string
+	ld	(IOResult),a	; .. clear error
+	ld	a,b
+	ld	(STR.VAL.par),a	; Save max length
+	ld	hl,(IOdev)
+	ld	(IOdev.sav),hl	; Save current FIB
+	ld	hl,RAM.FIB
+	ld	(IOdev),hl	; Set RAM device
+	pop	hl		; Get caller
+	ld	(IOPc),hl
+	pop	hl		; Get digit count/comma places
+	inc	c		; Test mode
+	dec	c
+	jr	nz,SIR.real
+	call	WrInt		; Get integer string
+	jr	SIR.exit
+SIR.real:
+	call	WrReal		; Get real string
+SIR.exit:
+	ld	hl,(IOdev.sav)
+	ld	(IOdev),hl	; Restore FIB
+	ld	hl,(IOPc)	; Get caller
+	jp	(hl)
+;
+; Convert string to number
+; Procedure VAL(string,real,result)
+; ENTRY	String and address of real pushed onto stack
+;	Reg HL points to result
+;
+VALreal:
+	db	SKIP
+;
+; Procedure VAL(string,real,result)
+; ENTRY	String and address of integer pushed onto stack
+;	Reg HL points to result
+;
+VALinteger:
+	xor	a
+	ld	(VALtype),a	; Save mode
+	ld	(FilIniMode),hl	; Save result
+	ld	hl,(IOdev)
+	ld	(IOdev.sav),hl	; Save current FIB
+	ld	hl,RAM.FIB
+	ld	(IOdev),hl	; Set RAM FIB
+	pop	hl
+	ld	(IOPc),hl	; Save caller
+	pop	hl
+	ld	(STR.VAL.par),hl; Save integer/real address
+	ld	hl,FCB
+	ld	b,30
+	call	AsStr		; Get string
+	xor	a
+	ld	(de),a
+	ld	hl,(STR.VAL.par); Get back variable pointer
+	ld	a,(VALtype)	; Test mode
+	or	a
+	jr	nz,VIR.real
+	call	RdInt		; Convert to integer
+	jr	VIR.exit
+VIR.real:
+	call	RdReal		; Convert to real
+VIR.exit:
+	ld	hl,IOResult
+	ld	a,(hl)		; Get IOResult
+	ld	(hl),0		; .. clear
+	or	a
+	ld	h,a
+	ld	l,a
+	jr	z,VIR.ok	; Test error
+	push	ix
+	pop	hl		; Get last address
+	ld	de,FCB
+	sbc	hl,de		; Get relative string error
+VIR.ok:
+	ex	de,hl
+	ld	hl,(FilIniMode)	; Point to result
+	ld	(hl),e		; .. save error or success
+	inc	hl
+	ld	(hl),d
+	jr	SIR.exit	; .. exit
+;
+; FIB for RAM storage
+;
+RAM.FIB:
+	db	..in+..out+RAMdevice
+	db	0
+;
+; Procedure RANDOMIZE
+;
+RndMiz:
+	ld	a,r		; Get refresh counter
+	ld	(RandomVal+3),a	; .. setting random
+	ret
+;
+; Fill variable with constant value
+; Procedure FILLCHAR(var,num,val)
+; ENTRY	Reg HL holds value
+;	Count and variable address pushed onto stack
+;
+FillChar:
+	ex	de,hl
+	pop	ix
+	pop	bc		; Get count
+	pop	hl		; Get address
+	ld	a,b		; Test count zero
+	or	c
+	jr	z,FC.ex		; .. exit if so
+	ld	(hl),e		; Store value
+	dec	bc
+	ld	a,b
+	or	c
+	jr	z,FC.ex		; Test count one
+	ld	d,h		; Unpack
+	ld	e,l
+	inc	de
+FC.do:
+	ldir			; Move 1st value for fill
+FC.ex:
+	jp	(ix)
+;
+; Move variable to another
+; Procedure MOVE(var1,var2,len)
+; ENTRY	Reg HL holds count
+;	Variables pushed onto stack
+;
+Move:
+	ld	b,h		; Copy count
+	ld	c,l
+	pop	ix
+	pop	de		; Get 2nd var
+	pop	hl		; .. and 1st one
+	ld	a,b
+	or	c
+	jr	z,FC.ex		; Test zero length
+	sbc	hl,de
+	add	hl,de
+	jr	nc,FC.do	; Test overlapping
+	dec	bc
+	add	hl,bc		; Point to top
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	inc	bc
+	lddr			; .. move down
+	jp	(ix)
+;
+; Get string from OS command line
+; Function PARAMSTR(num):any_string
+; ENTRY	Reg HL holds number of substring
+; EXIT	Selected string on stack
+;
+ParamStr:
+	ld	d,l		; Get number
+	inc	d
+	dec	d
+	call	nz,ParamIndex	; Get if so
+	pop	ix		; Get caller
+	ld	c,a		; Get length of substring
+	ld	b,0
+	cpl			; Get compliment
+	ld	l,a
+	ld	h,-1
+	add	hl,sp		; Move down satck
+	ld	sp,hl
+	ld	(hl),c		; Set length
+	inc	hl
+	ex	de,hl
+	inc	c		; .. test any selected
+	dec	c
+	jr	z,PS.skp
+	ldir			; .. move to stack
+PS.skp:
+	jp	(ix)
+;
+; Init command line
+; ENTRY	Accu   holds length of line
+;	Reg HL holds buffer address
+;
+ParamInit:
+	ld	(@PIB),hl	; Set buffer
+	ld	(@PIC),a	; .. and length
+	ret
+;
+; Get number of parameters in OS command line
+; Function PARAMCOUNT:integer;
+;
+ParamCount:
+	ld	d,0		; Set dummy selection
+;
+; Get parameters of OS command line
+; ENTRY	Reg D holds number of substring selected
+; EXIT	Reg DE points to selected substring
+;	Accu   holds length of substring
+;	Reg HL holds index of substring
+;
+ParamIndex:
+	ld	hl,CCPbuf	; Init pointer
+@PIB	equ	$-2
+	ld	a,MaxParams	; Test parameter
+@PIC	equ	$-1
+	ld	b,(hl)
+	cp	b
+	jr	nc,PI.trnc
+	ld	b,a		; Truncate to max
+PI.trnc:
+	inc	hl
+	ld	c,0		; Init count
+PI.skp:
+	inc	b
+	dec	b		; Test end
+	jr	z,PI.noblnk
+	ld	a,(hl)
+	cp	' '		; Skip blanks
+	jr	z,PI.blnk
+	cp	tab		; .. and tabs
+	jr	nz,PI.noblnk
+PI.blnk:
+	inc	hl
+	dec	b
+	jr	PI.skp
+PI.noblnk:
+	ld	e,l		; Save pointer
+PI.delsrc:
+	inc	b		; Test done
+	dec	b
+	jr	z,PI.delim
+	ld	a,(hl)
+	cp	' '		; Find delimiter
+	jr	z,PI.delim
+	cp	tab
+	jr	z,PI.delim
+	inc	hl		; .. bump pointer
+	dec	b
+	jr	PI.delsrc
+PI.delim:
+	ld	a,l		; Test same position
+	sub	e
+	jr	z,PI.exit
+	inc	c		; Count up index
+	dec	d		; Test found
+	jr	nz,PI.skp
+PI.exit:
+	ld	l,c		; Get selected or last index
+	ld	d,h		; Make pointer relative
+	ld	h,0
+	ret
+;
+; Procedure GOTOXY(x_val,y_val)
+; ENTRY	Reg HL holds y_val
+;	x_val on stack
+;
+GotoXY:
+	pop	de
+	pop	bc		; Get X
+	push	de
+	dec	l		; Fix Y for 0
+	ld	h,c
+	dec	h		; Fix X for 0
+	jp	ExecXY		; Go set
+;
+; Procedure SETENV(@D,@U)
+; ENTRY	Reg HL points to @U
+;	@D on stack
+;
+SetEnv:
+	ld	a,(hl)		; Fetch user
+	cp	MaxUsr+1	; Test in range
+	jr	nc,IllDU	; .. nope
+	call	LogUsr		; .. set it
+	pop	de
+	pop	hl		; Get @D
+	push	de
+	ld	a,(hl)		; Fetch it
+	cp	'P'-'A'+1
+	jr	nc,IllD
+	call	LogDsk		; .. log it
+	inc	a		; Test success
+	ret	nz
+	jr	IllD
+IllDU:
+	pop	de
+	pop	hl		; .. fix stack
+	push	de
+IllD:
+	ld	a,_BadDU
+	ld	(IOResult),a	; Set error
+	ret
+IF	@@DU
+;
+; Procedure SETENV(@D,@U,@F)
+; ENTRY	Reg HL points to @F
+;	@D, @U on stack
+;
+FSetEnv:
+	pop	ix
+	push	hl
+	pop	iy		; Copy FIB
+	pop	hl		; Get @U
+	ld	a,(hl)		; Fetch user
+	cp	MaxUsr+1	; Test in range
+	jr	nc,IllDU	; .. nope
+	ld	(iy+FIB.DU),a	; Set user
+	pop	hl		; Get @D
+	ld	a,(hl)		; Fetch it
+	cp	'P'-'A'+1
+	jr	nc,IllD
+	inc	a		; .. fix
+	ld	(iy+FIB.FCB),a	; Set drive
+	jp	(ix)
+ENDIF	;@@DU
+;
+; Set or get user
+; ENTRY	Accu holds user to be set
+;
+LogUsr:
+	ld	c,.UsrCod
+	jr	..BDOS		; .. go
+;
+; Return current disk
+; EXIT	Accu holds disk
+;
+RetDsk:
+	ld	c,.RetDsk
+	jr	.BDOS		; .. get it
+;
+; Select disk
+; ENTRY	Accu holds disk to be set
+;
+LogDsk:
+	ld	c,.SelDsk
+..BDOS:
+	ld	e,a		; .. set it
+;
+; Execute BDOS function
+; ENTRY	Reg (D)E holds parameter
+;	Reg   C  holds BDOS function
+; EXII	Accu holds result
+;
+.BDOS:
+	push	ix		; Save regs
+	push	iy
+	call	BDOS		; Execute BDOS
+	pop	iy
+	pop	ix
+	ret
+;
+; Perform file related BDOS call on standard FCB
+; ENTRY	Reg C holds function to be performed
+; EXIT	Accu holds error code
+;
+FBDOS:
+	ld	de,FCB		; Get standard FCB
+	U.BDOS
+	jr	.BDOS		; .. go
+;
+; Procedure GETENV(@D,@U)
+; ENTRY	Reg HL points to @U
+;	@D on stack
+;
+GetEnv:
+	push	hl
+	ld	a,_Get
+	call	LogUsr		; Get user
+	pop	hl
+	ld	(hl),a		; .. save
+	call	RetDsk		; Fetch logged drive
+	pop	de
+	pop	hl
+	ld	(hl),a		; .. save
+	push	de
+	ret
+IF	@@DU
+;
+; Procedure GETENV(@D,@U,@F)
+; ENTRY	Reg HL points to @F
+;	@D,@U on stack
+;
+FGetEnv:
+	pop	ix
+	push	hl
+	pop	iy		; Copy FIB
+	pop	hl
+	ld	a,(iy+FIB.DU)
+	ld	(hl),a		; .. save user
+	pop	hl		; Get @D
+	ld	a,(iy+FIB.FCB)
+	dec	a
+	ld	(hl),a		; .. save drive
+	jp	(ix)
+ENDIF	;@@DU
+;
+; Function UPCASE(char):char
+; ENTRY	Reg HL holds character
+; EXIT	Reg HL holds UPPER case character
+;
+UPCASE:
+	ld	a,l		; Get into accu
+	call	DoUPCASE	; .. get UPPER
+	ld	l,a		; .. bring back
+	ret
+;
+; Execute BIOS function
+; Procedures	BIOS(func)
+;		BIOS(func,param)
+; Functions	BIOS(func):integer
+;		BIOS(func,param):integer
+;		BIOSHL(func,param):integer
+; ENTRY	Reg DE holds BIOS function
+;	Reg BC holds optional parameter
+; EXIT	Accu and reg HL hold result
+;
+BIOS:
+	ld	hl,(OS+1)	; Get base address
+	add	hl,de		; .. make executable
+	add	hl,de
+	add	hl,de
+	jp	(hl)		; .. Execute
+;
+; Get IO result
+; Function IORESULT:integer
+; EXIT	Reg HL holds result
+;
+IORget:
+	ld	hl,IOResult	; Point to result
+	ld	a,(hl)		; Get it
+	ld	(hl),0		; .. clear after request
+	ld	l,a
+	ld	h,0
+	ret
+;
+; Control C entry - entered via RST after each statement
+;
+Ctrl.C:
+	call	KeyPressed	; Test key pressed
+	ld	a,h
+	or	l
+	ret	z		; .. no
+	ld	a,(CBreak)	; Save old break state
+	push	af
+	xor	a
+	ld	(CBreak),a	; Force NO break
+	call	readkbd		; Read KBD
+	pop	af
+	ld	(CBreak),a	; Reset break state
+	ld	a,l
+	cp	CtrlC		; Test control C
+	ret	nz		; .. no, exit
+	pop	ix		; Get PC
+UsrErr:
+	ld	de,_CBRK	; Set CtrlC error
+	jr	ErrChk		; Enter error routine
+;
+; Check IOResult after IO operation
+; (May be turned off by {$I-})
+;
+IOerrChk:
+	ld	a,(IOResult)	; Test any result
+	or	a
+	ret	z		; .. no
+RunTimErrChk:
+	pop	ix		; Get caller
+	ld	e,a		; Save code
+	ld	d,_IO		; Set mode
+	jr	ErrChk
+SetRTerror:
+	pop	ix		; Get caller
+SetRT.Err:
+	ld	e,a		; Save code
+	ld	d,_RT		; Set mode
+;
+; Common error handler
+; ENTRY	Reg D holds error mode
+;	Reg E holds error code
+;	Reg IX holds callers address
+;
+ErrChk:
+	push	de
+	call	noRST		; Reset some things
+	pop	de
+	xor	a
+	ld	(CBreak),a	; Disable break
+	ld	hl,(Curr.PC)	; Get previous PC
+	ld	a,h
+	or	l		; Check zero
+	push	ix
+	pop	hl
+	ld	bc,(Base.PC)	; Get start PC
+	sbc	hl,bc		; Subtract for base
+	ld	bc,TPhead	; .. fix for 0100h start
+	add	hl,bc
+	ld	(Curr.PC),hl	; Set as current
+	or	a		; Look for previous zero
+	jr	nz,SkpFixRST
+	push	de
+	push	de
+	push	hl
+	call	RestVect	; Reset vector
+	pop	de
+SkpFixRST:
+	ld	a,d
+	or	a		; Test user break
+	jr	nz,noBRKerr
+	call	String		; Tell Control C
+	db	'^C',cr,lf
+IF	@@GERMAN
+	db	'Abbruch'
+ELSE
+	db	'User break'
+ENDIF	;@@GERMAN
+	db	eot
+	jr	TellErrPC
+noBRKerr:
+	dec	a		; Test IO error
+	jr	nz,TellRunTim
+	call	String		; Tell IO error
+	db	cr,lf,'I/O',eot
+	jr	TellError
+TellRunTim:
+	call	String		; Tell run time error
+	db	cr,lf
+IF	@@GERMAN
+	db	'Laufzeit'
+ELSE
+	db	'Run-time'
+ENDIF	;@@ERROR
+	db	eot
+TellError:
+	call	String
+IF	@@GERMAN
+	db	' Fehler '
+ELSE
+	db	' error '
+ENDIF	;@@GERMAN
+	db	eot
+TellNum:
+	ld	a,e
+	call	GetHXbyt	; Tell error number
+TellErrPC:
+	call	String		; Tell PC
+	db	', PC=',eot
+	ld	hl,(Curr.PC)	; Fetch PC
+	call	GetHXwrd	; .. get hex
+	jr	Abort		; .. exit
+;
+; Not enough memory, tell error and break
+;
+NoRAM:
+	call	String		; Give memory full message
+IF	@@GERMAN
+	db	'Nicht genug Speicher'
+ELSE
+	db	'Not enough memory'
+ENDIF	;@@GERMAN
+	db	eot
+;
+; Error detected, tell abort and break
+;
+Abort:
+	call	String		; Give message
+	db	cr,lf
+IF	@@GERMAN
+	db	'Programm abgebrochen'
+ELSE
+	db	'Program aborted'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+;
+; Halt program
+;
+Halt:
+	ld	a,(RunMode)	; Test mode
+	or	a
+	jp	z,TPmenue	; Enter TURBO PASCAL
+	jp	OS		; Enter CP/M
+;
+; Restart program
+;
+Restart:
+	pop	hl		; .. get PC
+	pop	de		; .. clean stack
+	pop	de
+	jp	(hl)		; .. restart
+;
+; **********************************************************
+;
+; Start of empty program (Eg: BEGIN END.)
+; NOTE : Values are sample of empty program
+;
+strtprg:
+;;
+;; ################### INIT CCP ###################
+;;
+;;	ld	sp,Stack	; Load stack
+;;	ld	hl,CCPbuf	; Set CCP buffer
+;;	ld	a,CCPlen	; Set length
+;;	call	ParamInit	; Init CCP
+;;
+;; ################### INIT I/O ###################
+;;
+;;	ld	hl,0f2c2h	; Set top ram
+;;	ld	bc,0ff00h	; Set break mode
+;;	call	IniPrg		; Init program
+;;
+;; ################## INIT MEMORY #################
+;;
+;;	ld	hl,20ffh	; Set 1st free address
+;;	ld	de,0f2bah	; Set last free address
+;;	ld	bc,0f342h	; Set top of ram
+;;	ld	a,.run		; Set run mode
+;;	call	RangChk		; Check enough space
+

@@ -1,0 +1,1422 @@
+	title	ARCHIVE Selfextractor
+	name	('PMSFX')
+
+; DASMed version of PMSFX.COM
+; By W. Cirsovius
+
+; This module is also for use with PMARC. It is used to make
+; selfextracting (SFX) archives, like this:
+;
+;	PMARC <archive>.COM=PMSFX2.COM <filenames> [options]
+;
+; The archive-name must be .COM, not .PMA.
+;
+; Call it:
+;	SFX {d:} {/A} {/L | /C | /Q}
+;
+; d: Denotes destination drive
+;
+; /A Extract with Attributes
+; /L List members
+; /C Check archive only
+; /Q Query stepping
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.wrseq	equ	21
+.make	equ	22
+.setdma	equ	26
+.setatt	equ	30
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+DIRlen	equ	16
+FCBlen	equ	36
+
+reclng	equ	128
+
+bell	equ	07h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+MSB	equ	10000000b
+NOMSB	equ	01111111b
+ALL	equ	11111111b
+
+la001	equ	0a001h		; 1010000000000001b
+
+DskPag	equ	32
+l2000	equ	DskPag*256
+
+l0005	equ	0005h
+
+l00ee	equ	00eeh
+l00f0	equ	l00ee+2		; Length of file
+l00f4	equ	l00f0+4		; Calculated CRC
+l00f6	equ	l00f4+2
+l00f8	equ	l00f6+2		; Disk buffer index
+
+l1000	equ	1000h
+
+l0120	equ	l0100+32
+l0128	equ	l0120+8
+
+l0100:
+	jr	l017b
+
+	db	'-pms-S',8,0,0,0d7h
+l010c:
+	db	cr,lf,'PMsfx Version 2.00 for CP/M'
+	db	cr,lf
+	db	'Copyright(C) 1990 by '
+l0140:
+	db	'Yoshihiko Mino.',cr,lf
+	db	cr,lf,eot
+l0154:
+	db	bell,'Header is broken.'
+	db	cr,lf,eot
+l0169:
+	db	bell,'Out of memory.'
+	db	cr,lf,eot
+;
+; Start module
+;
+l017b:
+	ld	de,l010c
+	call	l01c0		; Give initila message
+	ld	hl,FCB
+	call	l05da		; Scan for options
+	ld	hl,FCB+DIRlen
+	call	l05da
+l018d:
+	call	l061d		; Load header
+	ret	c		; Invalid
+	jr	z,l0198		; Got last module
+	call	l05cf		; Bump to next module
+	jr	l018d
+l0198:
+	ld	hl,(l06e0)	; Get pointer
+	ld	a,l
+	or	a		; Test page boundary
+	jr	z,l01a0		; Yeap
+	inc	h		; Fix page
+l01a0:
+	ld	a,h		; Get page
+	ld	(l075a),a	; Store it
+	add	a,2		; Advance
+	ld	(l02cc),a	; Store pages
+	inc	a
+	ld	(l02d0),a
+	inc	a
+	ld	(l0804+1),a	; Set disk buffer
+	add	a,DskPag	; Add disk buffer space
+	ld	(l044e),a
+	ld	h,a
+	ld	a,(TPATOP+1)	; Get top memory page
+	cp	h		; Verify enough free space
+	jr	nc,l01c5	; Yeap
+	ld	de,l0169	; Not enough memory
+;
+; Print string on console
+; ENTRY	Reg DE points to string
+;
+l01c0:
+	ld	c,.string
+	jp	BDOS		; Print it
+;
+;
+;
+l01c5:
+	ld	hl,l096d
+	ld	(l06e0),hl	; Get start of module
+	ld	a,(l075a)
+	ld	h,a
+	ld	l,0
+l01d1:
+	ld	b,8
+	ld	d,0
+	ld	e,l
+l01d6:
+	or	a
+	ld	a,d
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	jr	nc,l01e7
+	ld	a,LOW la001
+	xor	e
+	ld	e,a
+	ld	a,HIGH la001
+	xor	d
+	ld	d,a
+l01e7:
+	djnz	l01d6
+	ld	(hl),d
+	inc	h
+	ld	(hl),e
+	dec	h
+	inc	l
+	jr	nz,l01d1
+	ld	sp,l00ee	; Get local stack
+l01f3:
+	call	l061d		; Load header
+	jr	nz,l01f9	; Still more
+	rst	0
+l01f9:
+	ld	hl,FCB+.drv
+l01fd	equ	$+1
+	ld	b,0		; May be 'L' if option selected
+l01ff	equ	$+1
+	ld	a,0		; May be 'C' if option selected
+	or	b
+	jr	nz,l0223	; Skip 'L' or 'C'
+	ld	(l0766),a	; Set check flag
+	ld	a,(hl)		; Get character
+	cp	'!'
+	jr	nz,l0223
+	inc	hl
+	ld	a,(hl)
+	dec	hl
+	cp	' '
+	jr	nz,l0223
+	ld	a,(FCB+.drv+.nam)
+	cp	' '		; Test extension given
+	jr	nz,l0223	; Yeap
+	ld	(l0766),a	; Reset check flag
+	ld	a,(l0241)	; Get module type
+	inc	a		; Test standard
+	jp	nz,l02b6	; Yeap
+l0223:
+	ld	b,.nam
+	call	l08c1		; Print name
+	ld	e,'.'
+	ld	c,.conout
+	call	BDOS		; Give delimiter
+	ld	hl,FCB+.drv+.nam
+	ld	b,.ext
+	call	l08c1		; Print type
+	ld	a,(l01fd)	; Get 'L' option
+	or	a		; Test set
+	ld	de,l096a
+	jr	nz,l028b	; Yeap, get next one
+l0241	equ	$+1
+	ld	a,0		; Get module type
+	inc	a		; Test supported
+	jr	nz,l024d	; Yeap
+	ld	de,l0906
+	call	l01c0		; Tell unsupported
+	jr	l0288
+l024d:
+	ld	a,(l01ff)	; Get 'C' option
+	or	a		; Test selected
+	ld	de,l0929
+	jr	nz,l02b3	; Yeap, tell checking
+l0257	equ	$+1
+	ld	a,0		; Get 'Q' option
+	or	a		; Test set
+	jr	z,l0275		; Nope
+	ld	de,l08cf
+	call	l0609		; Ask for extraction
+	jr	z,l0275		; Yeap
+	cp	'V'		; Test vedose
+	jr	z,l026b		; Yeap
+	cp	'v'
+	jr	nz,l0288
+l026b:
+	ld	a,' '
+	ld	(l0766),a	; Reset check flag
+	ld	de,l091b
+	jr	l02b3		; Tell displaying
+l0275:
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Test on disk
+	jr	z,l029c		; Nope
+	ld	de,l08e0
+	call	l0609		; Ask for overwrite
+	jr	z,l0294		; Yeap
+l0288:
+	ld	de,l08f3	; Tell skipping this file
+l028b:
+	call	l01c0		; Give message
+	call	l05cf		; Find next module
+	jp	l01f3
+l0294:
+	ld	de,FCB
+	ld	c,.delete
+	call	BDOS		; Delete file
+l029c:
+	ld	hl,FCB+_EX
+	ld	b,FCBlen-_EX
+	call	l0617		; Clear parts of FCB
+	ld	de,FCB
+	ld	c,.make
+	call	BDOS		; Create new file
+	inc	a		; Verify success
+	jp	z,l07a4		; Nope, tell disk fll and exit
+	ld	de,l0934	; Tell extracting
+l02b3:
+	call	l01c0		; Give message
+l02b6:
+	ld	hl,0
+	ld	(l00f4),hl	; Clear CRC
+	ld	(l00f6),hl
+	ld	(l00f8),hl	; Clear buffer index
+	ld	(l06ed),hl
+	ld	hl,(l0804)	; Get disk buffer
+	ld	(l0783),hl	; Init pointer
+l02cc	equ	$+1
+	ld	h,0		; Load page
+	ld	l,0ffh		; Init p1FF
+l02d0	equ	$+1
+	ld	d,0		; Load page
+	ld	e,1		; Init p201
+	xor	a
+l02d4:
+	ld	(hl),a		; Store p1FF:=00, p100:=01..p1FE:=FF
+	inc	l
+	ld	(de),a		; Store p201:=00, p202:=01..p2FF:=FF
+	inc	e
+	inc	a
+	jr	nz,l02d4
+;
+	ld	l,07fh
+	ld	(hl),a		; p17F:=00
+	dec	a
+	ld	e,020h
+	ld	(de),a		; p220:=FF
+	ld	a,020h
+	ld	(l072d),a
+	ld	l,0ffh
+	ld	(hl),a		; p1FF:=20
+	dec	a
+	ld	e,0a0h
+	ld	(de),a		; p2A0:=1F
+	ld	a,080h
+	ld	l,0dfh
+	ld	(hl),a		; p1DF:=80
+	dec	a
+	ld	e,000h
+	ld	(de),a		; p200:=7F
+	ld	a,0a0h
+	ld	l,01fh
+	ld	(hl),a		; p11F:=A0
+	dec	a
+	ld	e,0e0h
+	ld	(de),a		; p2E0:=9F
+	ld	a,0e0h
+	ld	l,09fh
+	ld	(hl),a		; p19F:=E0
+	dec	a
+	ld	e,080h
+	ld	(de),a		; p280:=DF
+;
+	ld	a,(l0241)	; Get module type
+	cp	'2'		; Test .PMA
+	jr	nc,l0318	; Yeap
+l0310:
+	call	l06de		; Get byte from module
+	call	l0751
+	jr	l0310
+l0318:
+	ld	a,00000001b
+	ld	(l08aa),a	; Init bit state
+	call	l087e		; Read bit
+	call	l0459
+	ld	b,5
+	call	l04ae
+l0328:
+	ld	hl,l0140
+	call	l059c
+	cp	8
+	jr	nc,l038f
+	cp	1
+	jr	c,l0354
+	jr	z,l0359
+	cp	3
+	jr	c,l0360
+	ld	d,020h
+	jr	z,l0367
+	cp	5
+	ld	d,040h
+	jr	c,l0367
+	ld	d,060h
+	jr	z,l0367
+	cp	7
+	ld	e,080h
+	jr	c,l0376
+	ld	e,040h
+	jr	l0376
+l0354:
+	call	l0884
+	jr	l036b
+l0359:
+	call	l0884
+	add	a,8
+	jr	l036b
+l0360:
+	call	l0887
+	add	a,10h
+	jr	l036b
+l0367:
+	call	l088a
+	add	a,d
+l036b:
+	ld	d,a
+	ld	a,(l02cc)
+	ld	h,a
+	ld	a,(l072d)
+	inc	d
+	jr	l0386
+l0376:
+	call	l088d
+	ld	d,a
+	ld	a,e
+	sub	d
+	ld	d,a
+	ld	a,(l02d0)
+	ld	h,a
+	ld	a,(l072d)
+l0384:
+	ld	l,a
+	ld	a,(hl)
+l0386:
+	dec	d
+	jr	nz,l0384
+	call	l06e9
+	jp	l0328
+l038f:
+	jr	nz,l039b
+	call	l088d
+	ld	d,0
+	ld	b,2
+	jp	l0431
+l039b:
+	cp	17h
+	jr	c,l03d7
+	jr	z,l03d0
+	cp	19h
+	jr	c,l03c9
+	jr	z,l03bb
+	cp	1bh
+	jr	c,l03c2
+	jr	z,l03b4
+	ld	b,0
+	ld	de,0
+	jr	l0432
+l03b4:
+	call	l0890
+	add	a,81h
+	jr	l03d9
+l03bb:
+	call	l088a
+	add	a,21h
+	jr	l03d9
+l03c2:
+	call	l088d
+	add	a,41h
+	jr	l03d9
+l03c9:
+	call	l0884
+	add	a,19h
+	jr	l03d9
+l03d0:
+	call	l0884
+	add	a,11h
+	jr	l03d9
+l03d7:
+	sub	6
+l03d9:
+	ld	b,a
+	ld	hl,l0128
+	call	l059c
+	cp	1
+	jr	c,l03fd
+	jr	z,l0404
+	cp	3
+	jr	c,l040d
+	jr	z,l0416
+	cp	5
+	jr	c,l041a
+	jr	z,l0421
+	cp	7
+	jr	c,l0428
+	call	l0887
+	add	a,10h
+	jr	l042d
+l03fd:
+	call	l088d
+	ld	d,0
+	jr	l0431
+l0404:
+	call	l088d
+	add	a,40h
+	ld	d,0
+	jr	l0431
+l040d:
+	call	l0890
+	add	a,80h
+	ld	d,0
+	jr	l0431
+l0416:
+	ld	d,1
+	jr	l042e
+l041a:
+	call	l087e		; Read bit
+	add	a,2		; Add offset
+	jr	l042d
+l0421:
+	call	l0881
+	add	a,4
+	jr	l042d
+l0428:
+	call	l0884
+	add	a,8
+l042d:
+	ld	d,a
+l042e:
+	call	l0893
+l0431:
+	ld	e,a
+l0432:
+	ld	hl,(l00f8)	; Get buffer index
+	inc	de
+	ld	a,l
+	sub	e
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ld	h,a
+	jr	nc,l0442
+	ld	de,l2000
+	add	hl,de
+l0442:
+	ex	de,hl
+	ld	hl,(l0804)	; Get disk buffer
+	add	hl,de		; Position in buffer
+l0447:
+	ld	a,(hl)
+	call	l06e9
+	inc	hl
+	ld	a,h
+l044e	equ	$+1
+	cp	0
+	jr	nz,l0454
+	ld	hl,(l0804)	; Get disk buffer
+l0454:
+	djnz	l0447
+	jp	l0328
+l0459:
+	call	l088a
+	ld	(l04af),a
+	ld	hl,l0100
+	ld	b,l0120-l0100
+	call	l0617		; Clear memory
+	call	l0884
+	ld	(l04b8),a
+	or	a
+	jr	nz,l0478
+	ld	a,(l04af)
+	dec	a
+	ld	(l0140),a
+	ret
+l0478:
+	call	l0884
+	dec	a
+	add	a,a
+	ld	d,0
+	ld	e,a
+	ld	hl,l05c5
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l0497),hl
+	ld	de,l0100
+	ld	a,(l04af)
+	ld	b,a
+	ld	a,(l04b8)
+	ld	c,a
+l0496:
+l0497	equ	$+1
+	call	l0887
+	or	a
+	jr	z,l049e
+	dec	a
+	add	a,c
+l049e:
+	ld	(de),a
+	inc	de
+	djnz	l0496
+	ld	hl,l0140
+	ld	de,l0100
+	ld	a,(l04af)
+	jp	l04fb
+l04ae:
+l04af	equ	$+1
+	ld	a,0
+	cp	0ah
+	ret	c
+	cp	1dh
+	jr	nz,l04bb
+l04b8	equ	$+1
+	ld	a,0
+	or	a
+	ret	z
+l04bb:
+	push	bc
+	ld	hl,l0120
+	ld	b,l0128-l0120
+	call	l0617		; Clear memory
+	pop	bc
+	ld	de,l0120
+l04c8:
+	call	l0884
+	ld	(de),a
+	inc	de
+	djnz	l04c8
+	ld	hl,l0120
+	ld	de,0
+	ld	c,0
+	ld	b,l0128-l0120
+l04d9:
+	ld	a,(hl)
+	or	a
+	jr	z,l04df
+	inc	d
+	ld	e,c
+l04df:
+	inc	hl
+	inc	c
+	djnz	l04d9
+	ld	a,d
+	cp	1
+	ret	c
+	jr	nz,l04ee
+	ld	a,e
+	ld	(l0128),a
+	ret
+l04ee:
+	ld	a,1
+	ld	(l04b8),a
+	ld	hl,l0128
+	ld	de,l0120
+	ld	a,8
+l04fb:
+	ld	(l05b4),hl
+	ex	de,hl
+	ld	(l0529),hl
+	ld	(l057b),a
+	ld	b,a
+	xor	a
+	push	de
+l0508:
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	djnz	l0508
+	pop	hl
+	ld	a,(l04b8)
+	ld	(l0532),a
+	ld	bc,1
+	ld	(hl),-1
+l051c:
+	dec	a
+	jr	z,l0528
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	inc	hl
+	ld	(hl),b
+	inc	c
+	inc	b
+	jr	l051c
+l0528:
+l0529	equ	$+1
+	ld	de,$-$
+	xor	a
+l052c:
+	ld	(l0578),a
+	ld	a,(de)
+	inc	de
+l0532	equ	$+1
+	cp	0
+	jr	nz,l0577
+	inc	hl
+	ld	a,(hl)
+	or	a
+	ld	a,(l0578)
+	jr	nz,l0543
+	or	MSB
+	ld	(hl),a
+	dec	hl
+	jr	l0577
+l0543:
+	inc	hl
+	or	MSB
+	ld	(hl),a
+	push	de
+	ld	b,0
+l054a:
+	inc	b
+	dec	hl
+	dec	hl
+	ld	a,(hl)
+	cp	-1
+	jr	nz,l0554
+	pop	de
+	ret
+l0554:
+	ld	d,0
+	ld	e,a
+	ld	hl,(l05b4)
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	nz,l054a
+l0563:
+	ld	(hl),c
+	ld	a,e
+	ld	d,0
+	ld	e,c
+	inc	c
+	ld	hl,(l05b4)
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ld	(hl),a
+	inc	hl
+	dec	b
+	jr	nz,l0563
+	dec	hl
+	ld	b,e
+	pop	de
+l0577:
+l0578	equ	$+1
+	ld	a,0
+	inc	a
+l057b	equ	$+1
+	cp	0
+	jp	nz,l052c
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	z,l0585
+	inc	hl
+l0585:
+	ld	(hl),c
+	ld	d,0
+	ld	e,c
+	inc	c
+	ld	hl,(l05b4)
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ld	(hl),b
+	ld	b,e
+	ld	a,(l0532)
+	inc	a
+	ld	(l0532),a
+	jp	l0528
+l059c:
+	ld	a,(hl)
+	cp	-1
+	ret	nz
+	ld	(l05b4),hl
+	push	de
+	ex	de,hl
+	inc	de
+l05a6:
+	call	l087e		; Read bit
+	or	a		; Test it
+	jr	z,l05ad		; Not set
+	inc	de
+l05ad:
+	ld	a,(de)
+	cp	80h
+	jp	nc,l05c1
+l05b4	equ	$+1
+	ld	hl,$-$
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ex	de,hl
+	inc	de
+	jp	l05a6
+l05c1:
+	and	7fh
+	pop	de
+	ret
+l05c5:
+	dw	l087e		; Read bit
+	dw	l0881
+	dw	l0884
+	dw	l0887
+	dw	l088a
+;
+; Bump pointer to next module
+;
+l05cf:
+	ld	hl,(l06e0)	; Get current module pointer
+l05d3	equ	$+1
+	ld	de,$-$		; Get length of module
+	add	hl,de		; Advance to next module
+	ld	(l06e0),hl
+	ret
+;
+; Scan for options
+; ENTRY	Reg HL points to FCB
+;
+l05da:
+	inc	hl
+	ld	a,(hl)		; Get character
+	cp	'/'		; Skip option delimiter
+	jr	z,l05da
+	cp	'a'-1		; Test range
+	jr	c,l05e6
+	sub	'a'-'A'		; Convrt zo upper case
+l05e6:
+	cp	'A'		; Test valid option
+	jr	z,l05fa
+	cp	'L'
+	jr	z,l05ff
+	cp	'C'
+	jr	z,l0604
+	cp	'Q'
+	ret	nz
+	ld	(l0257),a	; Set 'Q' option
+	jr	l05da
+l05fa:
+	ld	(l0822),a	; Set 'A' option
+	jr	l05da
+l05ff:
+	ld	(l01fd),a	; Set 'L' option
+	jr	l05da
+l0604:
+	ld	(l01ff),a	; Set 'C' option
+	jr	l05da
+;
+; Ask for mode, get answer
+; EXIT	Accu holds answer
+;	Zero set if YES selected
+;
+l0609:
+	call	l01c0		; Give message
+	ld	c,.conin
+	call	BDOS		; Get answer
+	cp	'y'		; Test YES
+	ret	z
+	cp	'Y'
+	ret
+;
+; Clear memory
+; ENTRY	Reg HL points to memory
+;	Reg B  holds length to be cleared
+;
+l0617:
+	xor	a		; Init zero
+;
+; Set up memory
+; ENTRY	Reg HL points to memory
+;	Reg B  holds length
+;	Accu   holds character to be stored
+;
+l0618:
+	ld	(hl),a
+	inc	hl
+	djnz	l0618
+	ret
+;
+; Load header from current module
+; EXIT	Zero set if end of module
+;	Carry set on erroneous header
+;
+l061d:
+	call	l06de		; Get byte from module
+	or	a		; Test header defined
+	ret	z		; Nop, that's all
+	ld	b,a		; Set as length
+	call	l06de		; Get byte from module
+	ld	c,a		; Set as checksum
+	ld	hl,(l06e0)	; Get module pointer
+	xor	a		; Init checksum
+l062b:
+	ld	d,a		; Save checksum
+	call	l06de		; Get byte from module haeder
+	add	a,d		; Update checksum
+	djnz	l062b
+	cp	c		; Verify match
+	jr	z,l063d
+	ld	de,l0154
+	call	l01c0		; Invalid header
+	scf
+	ret
+l063d:
+	ld	a,'-'		; Verify correct method
+	xor	(hl)
+	inc	hl
+	ld	c,a
+	ld	a,'p'
+	xor	(hl)
+	inc	hl
+	or	c
+	ld	c,a
+	ld	a,'m'
+	xor	(hl)
+	inc	hl
+	or	c
+	ld	c,a
+	ld	b,(hl)
+	inc	hl
+	ld	a,'-'
+	xor	(hl)
+	inc	hl
+	or	c		; Test standard method
+	jr	nz,l0660	; Nope
+	ld	a,b
+	cp	'0'		; Verify supported one
+	jr	z,l0662
+	cp	'2'
+	jr	z,l0662
+l0660:
+	ld	a,-1		; Indicate not standard
+l0662:
+	ld	(l0241),a	; Set module type
+	ld	e,(hl)		; Fetch compressed length
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	ld	(l05d3),hl	; Set length of module
+	ex	de,hl
+	inc	hl
+	inc	hl
+	ld	e,(hl)		; Fetch original length
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	ld	(l00f0),hl	; Save it
+	ex	de,hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l00f0+2),hl
+	ld	hl,l0005
+	add	hl,de		; Point to attribute
+	ld	a,(hl)
+	ld	(l082a),a	; Store it
+	inc	hl
+	inc	hl
+	ld	b,0
+	ld	c,(hl)		; Get length of file name
+	inc	hl
+	push	hl		; Save address of file name
+	add	hl,bc		; Position to CRC
+	ld	a,(hl)		; Get it
+	ld	(l084a),a	; Store CRC
+	inc	hl
+	ld	a,(hl)
+	ld	(l084a+1),a
+	ld	hl,FCB+.drv
+	ld	b,.nam+.ext
+	ld	a,' '
+	call	l0618		; Blank name and type
+	pop	hl		; Get back pointer to file name
+	ld	de,FCB+.drv
+	ld	b,.nam
+l06a9:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'.'		; Test type delimiter
+	jr	z,l06c1
+	ld	(de),a		; Unpack name of file
+	inc	de
+	dec	c
+	jr	z,l06d1
+	djnz	l06a9
+l06b6:
+	ld	a,(hl)
+	inc	hl
+	cp	'.'		; Wait for delimiter
+	jr	z,l06c1
+	dec	c
+	jr	nz,l06b6
+	jr	l06d1
+l06c1:
+	ld	de,FCB+.drv+.nam
+	ld	b,.ext
+l06c6:
+	dec	c
+	jr	z,l06d1
+	ld	a,(hl)		; Get character
+	inc	hl
+	and	NOMSB		; Strip off attribute
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l06c6
+l06d1:
+	ld	hl,0
+	ld	(FCB+_EX),hl	; Prepare file values
+	ld	(FCB+_EX+2),hl
+	ld	a,ALL
+	or	a		; Set success
+	ret
+;
+; Get byte from module
+;
+l06de:
+	push	hl
+l06e0	equ	$+1
+	ld	hl,l096d	; Get current module pointer
+	ld	a,(hl)		; Fetch byte
+	inc	hl
+	ld	(l06e0),hl	; Update pointer
+	pop	hl
+	ret
+;
+;
+;
+l06e9:
+	push	hl
+	push	bc
+	push	af
+l06ed	equ	$+1
+	ld	hl,$-$
+	inc	hl
+	ld	(l06ed),hl
+	ld	a,l
+	or	a
+	jr	nz,l072a
+	ld	a,h
+	cp	20h
+	jr	z,l0716
+	cp	10h
+	jr	z,l070d
+	ld	b,7
+	cp	8
+	jr	z,l0727
+	dec	b
+	cp	4
+	jr	z,l0727
+	jr	l072a
+l070d:
+	call	l087e		; Read bit
+	or	a		; Test set
+	call	nz,l0459	; Yeap
+	jr	l0725
+l0716:
+	ld	hl,l1000
+	ld	(l06ed),hl
+	call	l087e		; Read bit
+	or	a		; Test set
+	jr	z,l072a		; Nope
+	call	l0459
+l0725:
+	ld	b,8
+l0727:
+	call	l04ae
+l072a:
+	pop	af
+	ld	c,a
+l072d	equ	$+1
+	ld	a,0
+	cp	c
+	jr	z,l0754
+	ld	l,a
+	ld	a,(l02d0)
+	ld	h,a
+	ld	a,(hl)
+	ld	(hl),c
+	ld	l,c
+	ld	d,(hl)
+	ld	(hl),a
+	ld	l,a
+	dec	h
+	ld	(hl),c
+	ld	l,c
+	ld	a,(hl)
+	ld	l,d
+	ld	(hl),a
+	ld	l,a
+	inc	h
+	ld	(hl),d
+	dec	h
+	ld	l,c
+	ld	a,(l072d)
+	ld	(hl),a
+	ld	a,c
+	ld	(l072d),a
+	jr	l0754
+l0751:
+	push	hl
+	push	bc
+	ld	c,a
+l0754:
+	ld	hl,(l00f4)	; Get CRC
+	ex	de,hl
+	xor	e		; Build new one
+l075a	equ	$+1
+	ld	h,0
+	ld	l,a
+	ld	a,d
+	ld	d,(hl)
+	inc	h
+	xor	(hl)
+	ld	e,a
+	ex	de,hl
+	ld	(l00f4),hl	; Update CRC
+l0766	equ	$+1
+	ld	a,0		; Get check flag
+	ld	b,a
+	cp	' '
+	jr	nz,l077e
+	ld	a,c
+	cp	eof		; Test end of file
+	jr	nz,l0776
+	ld	(l0766),a	; Reset check flag
+	jr	l077e
+l0776:
+	push	bc
+	ld	e,c
+	ld	c,.conout
+	call	BDOS		; Echo character
+	pop	bc
+l077e:
+	ld	hl,(l00f8)	; Get buffer index
+	ex	de,hl
+l0783	equ	$+1
+	ld	hl,$-$		; Get disk buffer
+	ld	(hl),c		; Store byte
+	inc	hl
+	inc	de
+	ld	a,d
+	cp	HIGH l2000	; Test still room in buffer
+	jr	nz,l07b8	; Buffer not yet filled
+	ld	a,(l01ff)	; Get 'C' option
+	or	b		; Test selected
+	jr	nz,l07b2	; Yeap
+	ld	b,DskPag * 2	; Get max number of records
+	ld	hl,(l0804)	; Get disk buffer
+	ex	de,hl
+l0799:
+	push	bc
+	call	l0860		; Write record to disk
+	pop	bc
+	or	a		; Verify success
+	jr	z,l07ab		; Yeap
+l07a1:
+	call	l0870		; Close file
+l07a4:
+	ld	de,l0946
+	call	l01c0		; Tell disk full
+	rst	0		; Exit to CP/M
+l07ab:
+	ld	hl,reclng
+	add	hl,de		; Point to next address
+	ex	de,hl
+	djnz	l0799
+l07b2:
+	ld	de,0
+	ld	hl,(l0804)	; Get disk buffer
+l07b8:
+	ld	(l0783),hl	; Set disk buffer
+	ex	de,hl
+	ld	(l00f8),hl	; Set buffer index
+	ld	hl,l00f0	; Point to length
+	ld	e,(hl)		; Fetch length
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,e
+	sub	1		; Decrement by 1
+	ld	e,a
+	jr	nc,l07d3	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jr	nc,l07d3
+	dec	(hl)
+l07d3:
+	ld	a,(hl)
+	dec	hl
+	ld	(hl),d		; Bring back length
+	dec	hl
+	ld	(hl),e
+	or	e		; Test done
+	or	d
+	pop	bc
+	pop	hl
+	ret	nz		; Nope
+	pop	af
+	ld	a,(l0766)	; Set check flag
+	or	a
+	jr	z,l07f6
+	ld	a,(l0257)	; Get 'Q' option
+	or	a		; Test set
+	jr	nz,l0846	; Yeap
+	ld	de,l08d0
+	call	l0609		; Ask for extraction
+	ld	de,l096a
+	jr	z,l085a		; Yeap
+	rst	0		; Exit
+l07f6:
+	ld	a,(l01ff)	; Get 'C' option
+	or	a		; Tests elected
+	jr	nz,l0846	; Yeap
+	ld	hl,(l00f8)	; Get buffer index
+	ld	a,h
+	or	l		; Test any in buffer
+	jr	z,l081e		; Nope
+l0804	equ	$+1
+	ld	de,$-$		; Get disk buffer
+l0806:
+	push	hl
+	call	l0860		; Write record to disk
+	pop	bc
+	or	a		; Verify success
+	jp	nz,l07a1	; Nope
+	ld	hl,reclng
+	add	hl,de		; Update buffer
+	ex	de,hl
+	ld	hl,-reclng
+	add	hl,bc		; Test remainder
+	jr	nc,l081e	; Nope
+	ld	a,h		; Test any left
+	or	l
+	jr	nz,l0806	; Yeap
+l081e:
+	call	l0870		; Close file
+l0822	equ	$+1
+	ld	a,0		; Get 'A' option
+	or	a		; Test attributes selected
+	jr	z,l0846		; Nope
+	ld	hl,FCB+.drv+.nam
+l082a	equ	$+1
+	ld	a,0		; Get file attribute
+	rrca			; Test 1xxxxxxx
+	jr	nc,l0832	; Nope
+	ld	a,(hl)
+	or	MSB		; Set R/O
+	ld	(hl),a
+l0832:
+	inc	hl
+	ld	a,(l082a)	; Get file attribute
+	and	00000010b	; Test bit set
+	jr	z,l083e
+	ld	a,(hl)
+	or	MSB		; Set SYS
+	ld	(hl),a
+l083e:
+	ld	de,FCB
+	ld	c,.setatt
+	call	BDOS		; Set attribute
+l0846:
+	ld	hl,(l00f4)	; Get calculated CRC
+l084a	equ	$+1
+	ld	de,$-$		; Load file CRC
+	ld	a,h
+	xor	d		; Verify match
+	ld	c,a
+	ld	a,l
+	xor	e
+	or	c
+	ld	de,l0941	; Ok
+	jr	z,l085a
+	ld	de,l0956	; CRC error
+l085a:
+	call	l01c0		; Tell CRC result
+	jp	l01f3
+;
+; Write record to disk
+;
+l0860:
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.wrseq
+	call	BDOS		; Write to disk
+	pop	de
+	ret
+;
+; Close file
+;
+l0870:
+	ld	de,FCB
+	ld	c,.close
+	jp	BDOS		; Close file
+;;l0878:
+	ld	a,1
+	ret
+;;l087b:
+	xor	a
+	ret
+;;l087d:
+	db	0
+;
+; Read bit package
+;
+; -> 1 bit
+;
+l087e:
+	xor	a
+	jr	l08a8
+;
+; -> 2 bits
+;
+l0881:
+	xor	a
+	jr	l08a5
+;
+; -> 3 bits
+;
+l0884:
+	xor	a
+	jr	l08a2
+;
+; -> 4 bits
+;
+l0887:
+	xor	a
+	jr	l089f
+;
+; -> 5 bits
+;
+l088a:
+	xor	a
+	jr	l089c
+;
+; -> 6 bits
+;
+l088d:
+	xor	a
+	jr	l0899
+;
+; -> 7 bits
+;
+l0890:
+	xor	a
+	jr	l0896
+;
+; -> 8 bits
+;
+l0893:
+	call	l08a8
+l0896:
+	call	l08a8
+l0899:
+	call	l08a8
+l089c:
+	call	l08a8
+l089f:
+	call	l08a8
+l08a2:
+	call	l08a8
+l08a5:
+	call	l08a8
+;
+; Common read routine
+;
+l08a8:
+	ld	h,a		; Save entry value
+l08aa	equ	$+1
+	ld	a,0		; Get bit state
+	rrca			; Rotate bit
+	ld	(l08aa),a	; Bring back state
+	ld	l,a		; Save it
+l08b1	equ	$+1
+	ld	a,0		; Get value
+	jr	nc,l08ba	; Skip new
+	call	l06de		; Get byte from module
+	ld	(l08b1),a	; Save value
+l08ba:
+	and	l		; Mask bit
+	jr	z,l08be		; Not set
+	scf			; Set carry
+l08be:
+	ld	a,h
+	rla			; Shift bit in
+	ret
+;
+; Tell string of constant length
+; ENTRY	Reg HL points to string
+;	Reg B  holds length of string
+;
+l08c1:
+	ld	c,.conout
+l08c3:
+	ld	e,(hl)		; Get character
+	inc	hl
+	push	hl
+	push	bc
+	call	BDOS		; Put to console
+	pop	bc
+	pop	hl
+	djnz	l08c3
+	ret
+;
+l08cf:
+	db	' '
+l08d0:
+	db	'Extract? (Y/N) ',eot
+l08e0:
+	db	' Overwrite? (Y/N) ',eot
+l08f3:
+	db	' Skip this file.'
+	db	cr,lf,eot
+l0906:
+	db	' Unsupported method.',eot
+l091b:
+	db	' Displaying'
+	db	cr,lf,eot
+l0929:
+	db	' Checking ',eot
+l0934:
+	db	' Extracting ',eot
+l0941:
+	db	'OK'
+	db	cr,lf,eot
+l0946:
+	db	cr,lf,bell,'Disk full.'
+	db	cr,lf,eot
+l0956:
+	db	bell,'CRC error detected.'
+l096a:
+	db	cr,lf,eot
+l096d:
+	ds	19,0
+l0980::
+
+	end
+

@@ -1,0 +1,1601 @@
+	title	CP/M+ LIB
+	name	('LIB')
+
+; DASMed version of CP/M+ LIB -	Slightly modified by
+;				Werner Cirsovius
+;				Hohe Weide 44
+;				D-2000 Hamburg 20
+
+; Mod history
+
+; 1.11 Implement [U] option		December 1990
+; 1.12 Implement [R] option		March    1991
+; 1.13 Implement module count		August   1991
+; 1.14 Implement item check		April    1992
+; 1.15 Implement ZCPR style DU		July     1992
+; 1.16 Implement [N] option		December 1992
+; 1.17 Bug fix in heap alloc		June     1993
+; 1.18 Allow blanks in name field	February 1994
+;      Allow longer names in ()
+
+$HEAD:
+	db	'LIB 1.18',cr,lf,eot
+
+; Symbol table structure
+
+; Length of table entry : 12 bytes
+
+;    0      1      2      3      4      5     6 .. 12
+; +------+------+------+------+------+------+---..---+
+; | Ctrl | Ext  | Rec  | Byte |     Link    |  Name  |
+; +------+------+------+------+------+------+---..---+
+
+; Ctrl	Control field
+;	Bit 7	1=<>, 0=()
+;	Bit 6	1=ENTRY, 0=not
+;	Bit 5	1=EXTERNAL, 0=not
+;	Bit 4	1=Inconsistent, 0=not
+;	Bit 3	1=Double defined, 0=not
+;	Bit 0-2	Length of name
+; Ext	Extent of module within source file
+; Rec	Record ...
+; Byte	Byte offset ...
+; Link	Address of command line
+; Name	Up to 6 character name
+
+FALSE	equ	0
+TRUE	equ	1
+
+OS	equ	0000h
+BDOS	equ	0005h
+FCB	equ	005ch
+CCPbuf	equ	0080h
+defDMA	equ	0080h
+
+CCPlen	equ	128
+RecLng	equ	128
+RecMax	equ	128
+
+OSErr	equ	255
+
+OSver	equ	030h
+
+FCBnam	equ	 8
+FCBlen	equ	11
+FCBini	equ	15
+FCBmax	equ	32
+FCBspc	equ	36
+
+.ext	equ	9
+ext.len	equ	3
+
+.EX	equ	12
+.CR	equ	32
+
+.conout	equ	  2
+.dircon	equ	  6
+.string	equ	  9
+.vers	equ	 12
+.open	equ	 15
+.close	equ	 16
+.delete	equ	 19
+.rdseq	equ	 20
+.wrseq	equ	 21
+.make	equ	 22
+.rename	equ	 23
+.getdsk	equ	 25
+.setdma	equ	 26
+.usrcod	equ	 32
+.mulsec	equ	 44
+.SCB	equ	 49
+.parse	equ	152
+
+.PagLen	equ	01ch
+.PagMod	equ	02ch
+
+..dirin	equ	0fdh
+..dirst	equ	0feh
+
+_get	equ	-1
+
+RdLen	equ	 512
+WrLen	equ	1024
+
+.RD	equ	0
+.WR	equ	1
+
+_MaxUsr	equ	15
+
+CtrlC	equ	'C'-'@'
+null	equ	00h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+UPPmask	equ	01011111b
+HiMask	equ	11111000b
+LoMask	equ	00001111b
+NoMSB	equ	01111111b
+
+.bits	equ	8
+
+.BFlen	equ	8
+
+.Entry	equ	0000b
+.ModNam	equ	0010b
+.InvItm	equ	0100b		; Defined by MicroSoft only
+.COMsiz	equ	0101b
+.Extrn	equ	0110b
+.MinOff	equ	1000b
+.LocCnt	equ	1011b
+.EndMod	equ	1110b
+.EndFil	equ	1111b
+
+.EndREL	equ	10011110b
+.EndIRL	equ	0feh
+
+.AdrMod	equ	15
+.Const	equ	19
+
+.PrgRel	equ	1
+
+.BytOff	equ	 3
+.SymOff	equ	 4
+.SymLab	equ	 6
+.modlen	equ	 8
+.heapl	equ	13
+
+@sel	equ	 7
+@pos	equ	 6
+@inc	equ	 4
+@dob	equ	 3
+
+.Cnt	equ	00000111b
+
+.sel	equ	1 shl @sel
+.pos	equ	1 shl @pos
+.inc	equ	1 shl @inc
+.dob	equ	1 shl @dob
+
+@end	equ	 7
+@unk	equ	 6
+@exm	equ	 5
+@dmp	equ	 4
+@idx	equ	 3
+@mod	equ	 2
+@pub	equ	 1
+@rel	equ	 0
+
+.end	equ	1 shl @end
+.unk	equ	1 shl @unk
+.exm	equ	1 shl @exm
+.dmp	equ	1 shl @dmp
+.idx	equ	1 shl @idx
+.mod	equ	1 shl @mod
+.pub	equ	1 shl @pub
+.rel	equ	1 shl @rel
+
+@Esel	equ	 6
+@Eexm	equ	 4
+@to	equ	 3
+@att	equ	 2
+@1st	equ	 1
+@dis	equ	 0
+
+.Esel	equ	1 shl @Esel
+.Eexm	equ	1 shl @Eexm
+.to	equ	1 shl @to
+.att	equ	1 shl @att
+.1st	equ	1 shl @1st
+.dis	equ	1 shl @dis
+
+@lin	equ	 7
+@gen	equ	 6
+@ref	equ	 5
+@tmp	equ	 0
+
+.lin	equ	1 shl @lin
+.gen	equ	1 shl @gen
+.ref	equ	1 shl @ref
+.tmp	equ	1 shl @tmp
+
+;
+; ##############
+; # LIB starts #
+; ##############
+;
+LIB:
+	ld	sp,stack	; Get my stack
+	call	version		; Verify correct version
+	ld	a,(CCPbuf)
+	or	a		; Test any in buffer
+	jp	z,help		; .. give help if not
+	call	GetDsk		; Get current disk
+	ld	(LogDsk),a
+	call	GetUsr		; .. and user
+	ld	(LogUsr),a
+	ld	a,.PagMod
+	call	SysInfo		; Get page mode
+	ld	(PageMode),a
+	ld	a,.PagLen
+	call	SysInfo		; Get page length
+	ld	(PageLen),a
+	ld	ix,stat.flag	; Set status base
+	call	initLIB		; Init program
+	call	scanner		; Scan input line
+	ld	hl,copydma
+	ld	(strptr),hl	; Set command line
+	res	@end,(ix)	; Reset end
+	ld	a,TRUE
+	call	decode		; Allow assignment
+	call	sav.scr		; Unpack 1st item
+	ld	hl,(strptr)
+	ld	a,(hl)
+	cp	'='		; Check assignment
+	jr	nz,no.assig
+	bit	@sel,(ix+1)	; No () or <> if = found
+	jr	nz,Syntax.Err
+	bit	@exm,(ix+1)
+	jr	nz,Syntax.Err	; .. error
+	set	@rel,(ix)	; Set destination file flag
+	ld	a,FALSE
+	call	decode		; .. no assignment
+no.assig:
+	bit	@rel,(ix)	; Test output flag set
+	jr	nz,no.gen.file
+	bit	@idx,(ix)	; Test [I] option
+	jr	z,no.gen.idx
+	bit	@sel,(ix+1)
+	jr	nz,Syntax.Err
+	bit	@exm,(ix+1)	; Don't allow () or <> on index
+	jr	nz,Syntax.Err
+	set	@rel,(ix)	; Set flag
+	jr	no.gen.file
+no.gen.idx:
+	bit	@pub,(ix)
+	jr	nz,no.gen.file	; Must be [P], [D], [M],
+	bit	@dmp,(ix)	; [U] or [R]
+	jr	nz,no.gen.file
+	bit	@mod,(ix)
+	jr	nz,no.gen.file
+	bit	@unk,(ix)
+	jr	nz,no.gen.file
+	bit	@ref,(ix+2)
+	jr	z,Syntax.Err	; .. MUST
+no.gen.file:
+	call	OpenFiles	; Prepare files
+	xor	a
+	ld	(NamBuf-1),a	; Clear length of name
+	call	ExecTask	; Execute the task
+	call	CloseFiles	; Close files
+	bit	@unk,(ix)
+	call	nz,Statistic	; Give statistic on [U]
+	ld	hl,(ModCnt)	; Get count
+	ld	a,l
+	or	h		; Test any
+	call	nz,TellModules	; Tell number of modules found
+	jp	OS		; Exit
+Syntax.Err:
+	ld	de,$SYNTAX.ERR	; Give message and abort
+	call	string
+	ld	hl,(strptr)	; Get current pointer
+	ld	a,l
+	or	h		; .. test any in line
+	jr	z,GetSynt
+	ld	de,$NULL
+	push	hl
+	sbc	hl,de		; Test empty pointer
+	pop	hl
+	jr	nz,RegSynt
+GetSynt:
+	ld	hl,copydma
+	ld	bc,-1
+	xor	a
+	cpir			; Fine zero
+	dec	hl
+	dec	hl
+RegSynt:
+	inc	hl
+	ld	(hl),'?'
+	inc	hl
+	ld	(hl),eot
+	ld	de,copydma+1	; .. print line
+	jp	str.ERR
+;
+; ###############
+; # Subroutines #
+; ###############
+;
+; Get start pointer for HEAP access
+; ENTRY	Reg HL points to top
+;
+Set.Heap:
+	ld	de,-.heapl
+	add	hl,de		; .. make start
+	ld	(CurTop),hl	; .. set pointer
+	ret
+;
+; Search string on heap
+; ENTRY	Reg HL holds pointer to length of string
+;	followed by string
+; EXIT	Carry set if found
+;
+heap.find:
+	ld	a,(hl)		; Get length
+	ld	(avl.len),a
+	inc	hl		; .. point to string
+	ld	(avl.str),hl
+	ld	hl,(TopPtr)
+HF.loop:
+	call	Set.Heap	; Calculate entry
+	ld	bc,(decode.ptr)
+	ld	e,(hl)
+	or	a
+	sbc	hl,bc		; Test more
+	ccf
+	ret	nc		; .. not found
+	ld	a,.cnt
+	and	e		; Extract length
+	ld	hl,avl.len
+	cp	(hl)		; .. compare
+	jr	nz,HF.diffLen	; .. not same length
+	ld	de,(avl.str)
+	ld	bc,.SymLab
+	ld	hl,(CurTop)
+	add	hl,bc		; Point to symbol
+	ld	a,(avl.len)
+	ld	b,a
+	call	Compare		; Test symbol found
+	ret	c
+HF.diffLen:
+	ld	hl,(CurTop)	; Bump to next symbol
+	jr	HF.loop
+;
+; Save string on heap
+; ENTRY	Reg C  holds flag
+;	Reg DE holds command pointer
+; 	Reg HL holds pointer to length of string
+;	followed by string
+;
+heap.save:
+	ld	a,(hl)
+	ld	(heap.len),a	; Save length
+	inc	hl
+	ld	(heap.str),hl	; .. and buffer
+	ld	(heap.ptr),de	; .. and command pointer
+	ld	hl,(decode.ptr)
+	call	Set.Heap	; Calculate new entry
+	ld	b,.heapl	; Set count
+HS.zero:
+	ld	(hl),0		; Clear location
+	inc	hl
+	djnz	HS.zero
+	ld	a,c		; Get flag
+	ld	hl,heap.len
+	or	(hl)
+	ld	hl,(CurTop)
+	push	hl
+	ld	(hl),a		; Combine with length
+	ld	bc,.SymLab
+	add	hl,bc		; Point to symbol field
+	ex	de,hl
+	ld	hl,(heap.str)	; Get string pointer
+	ld	bc,(heap.len)	; Get length
+	call	Move		; Unpack symbol
+	ld	bc,.SymOff
+	pop	hl
+	ld	(decode.ptr),hl	; Set new pointer
+	add	hl,bc		; Point to offset
+	ld	de,(heap.ptr)
+	ld	(hl),e		; Save command line address
+	inc	hl
+	ld	(hl),d
+	ld	hl,(decode.ptr)
+Chk.Heap:
+	ld	bc,(heap.root)
+	or	a
+	sbc	hl,bc		; Test 1st entry
+	ret	nc
+	add	hl,bc
+	ld	(heap.root),hl	; .. init the root
+	ret
+;
+; Test enough memory
+;
+Check.MEM:
+	ld	hl,(decode.ptr)	; Get base of heap
+	ld	de,-2*.heapl
+	add	hl,de		; Make gap
+	ld	de,TOP
+	or	a
+	sbc	hl,de		; Check room
+	ret	nc
+	ld	de,$OVFL
+	jp	str.ERR
+;
+; Print decimal number
+; ENTRY	Reg HL holds number
+;
+Numb:
+	ld	bc,-10		; Get constants
+.Numb:
+	ld	de,-1
+..Numb:
+	add	hl,bc		; Subtract 10s
+	inc	de		; Count them
+	jr	c,..Numb	; If some left keep going
+	push	hl		; Save remainder - 10
+	ex	de,hl
+	ld	a,h		; Get the number of 10s found
+	or	l		; Check for quotient non zero
+	call	nz,.Numb	; If non zero, recurse
+	pop	hl		; Get the remainder - 10
+	ld	a,l
+	add	a,'0'+10	; Make the number printable
+	call	conout
+	ret
+;
+; Tell number of modules found
+;
+TellModules:
+	call	crlf
+	call	crlf
+	ld	de,$MFND
+	call	string		; Tell it
+	ld	hl,(ModCnt)	; Get count
+	call	Numb
+	call	crlf
+	ret
+;
+; Give statistic about LIB
+;
+Statistic:
+	ld	hl,(TopPtr)	; Init top
+ST.loop:
+	call	Set.Heap	; Calculate entry
+	ld	bc,(decode.ptr)
+	or	a
+	sbc	hl,bc		; Test more
+	ret	c
+	add	hl,bc
+	ld	a,(hl)
+	and	.Cnt		; Get length
+	ld	b,a
+	ld	de,$UND
+	bit	@pos,(hl)	; Test defined
+	jr	z,ST.pr
+	ld	de,$INC
+	bit	@inc,(hl)	; Test inconsistent
+	jr	z,ST.dob?
+	bit	@dob,(hl)	; Test double, too
+	jr	z,ST.pr
+	ld	de,$M.I
+	jr	ST.pr
+ST.dob?:
+	ld	de,$MUL
+	bit	@dob,(hl)	; Test double
+	jr	z,ST.no.pr
+ST.pr:
+	push	bc
+	push	hl
+	call	writeln		; Give mark
+	pop	hl
+	pop	bc
+	ld	de,.SymLab-1
+	add	hl,de		; Point to symbol
+	call	PrM.loop
+ST.no.pr:
+	ld	hl,(CurTop)	; Bump to next symbol
+	jr	ST.loop
+;
+; Rename file
+;
+FRename:
+	bit	@idx,(ix)	; Test [I]
+	ld	c,FCBlen+1
+	ld	de,REL.FCB
+	ld	hl,IRL.FCB
+	call	nz,Move		; Copy .IRL
+	ld	c,FCBlen+1
+	ld	de,IRL.FCB
+	ld	hl,SCR.FCB
+	call	Move		; Copy FCB
+	ld	a,(IRL.FCB+.ext)
+	cp	' '		; Test extension
+	jr	nz,FRn.ExtOK
+	bit	@idx,(ix)	; Test mode
+	ld	hl,$REL		; .. set .REL
+	jr	z,FRn.ExtREL
+	ld	hl,$IRL		; .. set .IRL
+FRn.ExtREL:
+	ld	c,ext.len
+	ld	de,IRL.FCB+.ext
+	call	Move
+FRn.ExtOK:
+	ld	de,IRL.FCB
+	call	delete		; Delete this file
+	ld	c,FCBlen+1
+	ld	de,REL.FCB+16
+	ld	hl,IRL.FCB
+	call	Move		; Set 2nd name
+	ld	de,REL.FCB
+	call	rename		; Rename
+	ret
+;
+; Write IDX header record
+;
+WrtIDXhead:
+	ld	hl,0
+	ld	(WrBfp),hl	; Clear pointer
+	ld	de,IRL.FCB
+	call	FOpen		; Open the file
+	ld	a,(..EX)
+	call	Wr.Byte		; Write EXtend
+	ld	a,(..CR)
+	call	Wr.Byte		; Write Current Record
+	ld	bc,256*(RecLng-2)
+WIH.loop:
+	push	bc
+	xor	a
+	call	Wr.Byte		; Fill rest by zero
+	pop	bc
+	djnz	WIH.loop
+	ld	bc,WrBuf
+	ld	de,IRL.FCB
+	ld	hl,RecLng
+	call	WrDsk		; Write bufffer
+	ld	de,IRL.FCB
+	call	FClose		; .. close file
+	ret
+;
+; Copy .REL to .IRL file
+;
+CopyREL:
+	ld	hl,(IDXpos)
+	ld	a,h
+	or	l
+	jr	z,CR.noCpy	; Test start of buffer
+	ld	de,REL.FCB
+	call	FOpen		; Open the file
+CR.loop:
+	ld	bc,RdBuf
+	ld	hl,(RELmax)
+	ld	de,REL.FCB
+	call	RdDsk		; Read .REL data
+	ld	(CR.recs),hl	; Save records read
+	call	MulRec		; Get real length
+	ld	de,IRL.FCB
+	ld	bc,RdBuf
+	call	WrDsk		; Write to .IRL file
+	ld	bc,(CR.recs)
+	ld	hl,(IDXpos)
+	or	a
+	sbc	hl,de		; Fix remainder
+	ld	(IDXpos),hl
+	ld	a,h		; Test end
+	or	l
+	jr	nz,CR.loop
+	ret
+CR.noCpy:	
+	ld	bc,IdxBuf
+	ld	hl,(IDXlen)
+	ld	de,IRL.FCB
+	call	WrDsk		; Write buffer to disk
+	ret
+;
+; Prepare files for a run
+;
+OpenFiles:
+	ld	hl,(TopPtr)
+	call	Chk.Heap	; Check heap
+	ld	bc,-RecLng
+	ld	hl,(heap.root)
+	add	hl,bc		; Get room for buffer
+	ld	bc,IdxBuf
+	sbc	hl,bc
+	ld	a,RecLng
+	and	l		; .. fix it
+	ld	l,a
+	ld	(IDXtop),hl	; Set as real top
+	ld	a,(SCR.FCB)
+	ld	(REL.FCB),a	; Set drive
+	ld	(IRL.FCB),a
+	ld	a,(SCR.FCB-1)
+	ld	(REL.FCB-1),a	; .. and user
+	ld	(IRL.FCB-1),a
+	bit	@idx,(ix)	; Test .IRL file
+	jr	z,OF.NoIdx
+	ld	de,IRL.FCB
+	call	rewrite		; Create .IRL file
+	ld	bc,RecLng*256	; Init count
+OF.IRLhead:
+	push	bc
+	xor	a
+	call	Wr.Byte		; Fill 1st record with 00
+	pop	bc
+	djnz	OF.IRLhead
+OF.NoIdx:
+	bit	@rel,(ix)	; Test destination
+	ld	de,REL.FCB	; .. create .REL file
+	call	nz,rewrite
+	ret
+;
+; Close file on end of run
+;
+CloseFiles:
+	bit	@rel,(ix)
+	jr	nz,CF.EOF	; Test .REL
+	bit	@idx,(ix)	; Test any created
+	ret	z
+CF.noREL:
+	call	GetIDXpos	; Get position
+	call	WrIDXitem	; Write item
+	ld	a,.EndIRL
+CF.FillIRL:
+	call	Wr.Byte		; Write to file
+	ld	a,(WrBfp)
+	and	RecLng-1	; Test buffer filled
+	jr	z,CF.IRL.full
+	ld	a,eof
+	jr	CF.FillIRL
+CF.IRL.full:
+	ld	bc,WrBuf
+	ld	hl,(WrBfp)
+	ld	de,IRL.FCB
+	call	WrDsk		; Write buffer to disk
+	ld	a,(IRL.FCB+.EX)
+	ld	(..EX),a	; Get disk data
+	ld	a,(IRL.FCB+.CR)
+	ld	(..CR),a
+	call	CopyREL		; Copy .REL file
+	ld	de,IRL.FCB
+	call	FClose
+	call	WrtIDXhead	; Write header record
+	ld	de,REL.FCB
+	call	delete
+CF.noIRL:
+	call	FRename		; Rename file
+	ret
+CF.EOF:
+	ld	a,.EndREL
+	call	Wr.REL		; Write 1.00.1111 on .REL file
+CF.FillREL:
+	ld	a,RecLng-1
+	ld	hl,(IDXlen)
+	and	l		; Mask pointer
+	jr	z,CF.RELfull	;.. test end
+	ld	a,eof
+	call	Wr.REL		; Fill EOF
+	jr	CF.FillREL
+CF.RELfull:
+	ld	hl,(IDXpos)
+	ld	a,h		; Test zero
+	or	l
+	jr	nz,CR..doIt
+	bit	@idx,(ix)	; Test IRL
+	jr	nz,CF.noREL
+CR..doIt:
+	ld	hl,(IDXlen)
+	call	DivRec		; Get records
+	ld	hl,(IDXpos)
+	add	hl,de
+	ld	(IDXpos),hl
+	ld	bc,IdxBuf
+	ld	hl,(IDXlen)	; Get length
+	ld	de,REL.FCB
+	call	WrDsk		; Write buffer
+	ld	de,REL.FCB
+	call	FClose		; Close file
+	jr	CF.noIRL
+;
+; Test symbol marked
+; ENTRY	Accu holds bit to be tested
+; EXIT	Carry set if marked
+;
+Marked??:
+	ld	hl,(CurTop)	; Get current
+	and	(hl)
+	ret	z
+	scf			; .. get return
+	ret
+;
+; Mark symbol
+; ENTRY	Accu holds bit to be set
+;
+SetMark:
+	ld	hl,(CurTop)
+	or	(hl)
+	ld	(hl),a		; Set bit
+	ret
+;
+; Read new disk buffer from source stream file
+;
+RdStream:
+	ld	hl,(PARS.FCB+.EX)
+	ld	h,0
+	call	MulRec		; Value * 128
+	ld	bc,(PARS.FCB+.CR)
+	ld	b,0
+	add	hl,bc		; Add offset
+	ld	(BitPos),hl	; .. into bit position
+	ld	bc,RdBuf
+	ld	hl,(RELmax)
+	ld	de,PARS.FCB
+	call	RdDsk		; Read buffer
+	ld	de,(BitPos)
+	add	hl,de		; Bump record count
+	dec	hl
+	ld	(Bit.Cnt),hl
+	ret
+;
+; Read new disk buffer from stream file
+;
+RdStream.:
+	ld	bc,$$$Buf
+	ld	hl,($$$Max)	; Set max
+	ld	de,$$$.FCB	; Get FCB
+	call	RdDsk		; .. read from disk
+	ret
+;
+; Read new disk buffer
+; ENTRY	Reg HL holds record
+;
+RdNewBuff:
+	call	DivRec		; Get extent
+	ld	d,a		; Save record pointer
+	ld	a,(PARS.FCB+.EX)
+	cp	e		; Test same extent
+	jr	z,RNB.ex
+	ld	a,e		; .. set new
+	ld	(PARS.FCB+.EX),a
+	push	de
+	ld	de,PARS.FCB
+	call	open		; Position file
+	pop	de
+	jr	nz,RNB.ex
+	ld	de,$FATAL	; .. error
+	jp	str.ERR
+RNB.ex:
+	ld	a,d		; Set record
+	ld	(PARS.FCB+.CR),a
+	call	RdStream	; Read new buffer
+	ret
+;
+; Position new disk buffer
+; ENTRY	Reg E holds record
+;	Reg L holds extent
+;	Accu holds byte offset
+;
+PosNewBuff:
+	push	af
+	ld	h,0
+	ld	d,h
+	call	MulRec		; Extent *128
+	add	hl,de		; .. add record
+	ld	e,l
+	ld	d,h		; Save record + offset
+	ld	bc,(BitPos)
+	or	a
+	sbc	hl,bc		; Test within buffer
+	jr	c,PNB.Rd
+	ld	hl,(Bit.Cnt)
+	sbc	hl,de
+PNB.Rd:
+	ex	de,hl
+	push	hl
+	call	c,RdNewBuff	; .. read new
+	ld	bc,(BitPos)
+	pop	hl
+	or	a
+	sbc	hl,bc
+	call	MulRec		; Get pointer
+	pop	af
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; .. add byte offset
+	ld	(RELptr),hl	; .. save
+	ld	hl,RELbit
+	ld	(hl),0		; Set empty
+	ret
+;
+; Set positions for current module
+;
+SetPos:
+	ld	a,.pos
+	call	SetMark		; Mark current as entry
+	ld	iy,(CurTop)
+	ld	a,(EXT.R.offs)
+	ld	(iy+1),a	; Save extent
+	ld	a,(REC.R.offs)
+	ld	(iy+2),a	; .. and record
+	ld	a,(BYT.R.OFFS)
+	ld	(iy+3),a	; .. and byte offset
+	ret
+;
+; Position a module
+;
+PosModule:
+	set	@dis,(ix+1)
+	set	@1st,(ix+1)	; Set flags
+PM.loop:
+	call	RdItem		; Read item
+	ld	(ItmSav),a
+	cp	.ModNam		; Test module name
+	jr	z,PM.skpEOF
+	cp	.EndFil		; .. or end of file
+	jr	nz,PM.loop
+	ld	iy,NamBuf-1
+	call	Set.End		; Set end
+PM.skpEOF:
+	bit	@unk,(ix)	; Test mode
+	ret	nz
+	ld	hl,NamBuf-1
+	call	heap.find	; Find symbol
+	call	c,SetPos	; Set positions if so
+	ret
+;
+; Read one module
+;
+RdModule.1:
+	set	@dis,(ix+1)	; Disable dump
+	jr	RM.loop
+RdModule.2:
+	set	@idx,(ix+2)	; Attache flag
+	res	@dis,(ix+1)	; Allow dump
+RM.loop:
+	call	RdItem		; Read items
+	cp	.EndMod		; .. till module end
+	jr	nz,RM.loop
+	ret
+;
+; Get file from list
+;
+OpnModFile:
+	ld	iy,(CurTop)
+	ld	l,(iy+.Symoff)	; Fetch command line pointer
+	ld	h,(iy+.Symoff+1)
+	ld	(PBblk),hl
+	ld	hl,$$$.FCB
+	ld	(PBblk+2),hl
+	ld	de,PBblk
+	call	parse.it	; Parse
+	ld	a,($$$.FCB+.ext)
+	cp	' '		; Test extension
+	ld	c,ext.len
+	ld	de,$$$.FCB+.ext
+	ld	hl,$REL
+	call	z,Move		; .. set .REL
+	ld	de,$$$.FCB
+	call	FOpen		; Open the file
+	set	@tmp,(ix+2)	; Set temporary file flag
+	res	@dis,(ix+1)	; Allow dump
+	ld	a,.bits		; Force read
+	ld	($$$Bit),a
+	ld	hl,($$$Max)
+	ld	($$$Ptr),hl
+	set	@idx,(ix+2)	; Set flag
+OMF.RdItm:
+	call	RdItem		; Read items
+	cp	.EndFil		; .. till end
+	jr	nz,OMF.RdItm
+	res	@tmp,(ix+2)	; Reset temporary file flag
+	ret
+;
+; Save parsed file/module name
+;
+sav.scr:
+	ld	c,FCBlen+1+1
+	ld	de,SCR.FCB-1
+	ld	hl,PARS.FCB-1
+Move:
+	ld	b,0
+	ldir			; Unpack
+	ret
+;
+; Print name of module on console
+;
+PrMod:
+	ld	hl,ModName-1
+PrR..:
+	ld	b,(hl)		; Set count
+PrM.loop:
+	inc	hl		; .. bump
+	ld	a,(hl)
+	call	conout		; Print
+	djnz	PrM.loop
+	ret
+;
+; Find module in file
+;
+FindModule:
+	ld	hl,ModName-1
+	call	heap.find	; Find symbol in table
+	ld	a,.pos
+	call	c,Marked??	; Test ENTRY
+	jr	nc,FM.ModSkp	; Not in table or not ENTRY
+	ld	iy,(CurTop)
+	ld	l,(iy+1)	; Get extent
+	ld	e,(iy+2)	; .. and record
+	ld	a,(iy+3)	; .. and byte offset
+	call	PosNewBuff	; Position file
+	ret
+FM.next:
+	call	RdModule.1	; .. read next
+FM.ModSkp:
+	call	PosModule	; Skip module
+	call	END.itm		; Test end item
+	jr	nc,FM.test	; .. not end
+	ld	de,$NO.MODULE	; Tell error
+	call	string
+	call	PrMod		; Tell name of module
+	jp	OS		; .. hard stop
+FM.test:
+	call	MOD.fnd		; Test module
+	jr	nc,FM.next	; .. not found
+	ld	hl,(EXT.R.offs)	; Set extent
+	ld	de,(REC.R.offs)	; .. and record
+	ld	a,(BYT.R.OFFS)	; .. and byte offset
+	call	PosNewBuff
+	ret
+;
+; Search for module
+;
+SearchModule:
+	bit	@att,(ix+1)	; Test file attached
+	jr	z,SM.notFirst	; .. skip positioning
+	ld	hl,(ext.num)	; Set extent
+	ld	de,(rec.num)	; .. and record
+	ld	a,0		; Set byte boundary
+	call	PosNewBuff	; Position within buffer
+	ld	hl,(RELmax)
+	ld	(RELptr),hl
+	ld	hl,RELbit
+	ld	(hl),.bits	; Force read
+	call	RdModule.2	; .. read
+	res	@att,(ix+1)	; Set not empty
+	ret
+SM.notFirst:
+	bit	@gen,(ix+2)	; Test flag
+	jr	z,SM.pos
+	call	FindModule	; Find module
+	jr	SM.skpPos
+SM.pos:
+	call	PosModule	; Skip module
+SM.skpPos:
+	call	END.itm		; Test end
+	ret	c		; .. exit if so
+	ld	hl,NamBuf-1
+	call	heap.find	; Find symbol
+	ld	a,.sel
+	call	c,Marked??	; Test selected
+	jr	nc,SM.srcNxt	; .. neither
+	ld	iy,(CurTop)
+	ld	a,(iy+.Symoff)
+	or	(iy+.Symoff+1)	; Test file on board
+	call	nz,OpnModFile	; Fetch file from list
+	call	RdModule.1	; Read file
+	ret
+SM.srcNxt:
+	ld	hl,(EXT.R.offs)	; Set extent
+	ld	de,(REC.R.offs)	; .. and record
+	ld	a,(BYT.R.OFFS)	; .. and byte offset
+	bit	@gen,(ix+2)	; Test position
+	call	z,PosNewBuff
+	call	RdModule.2
+	ret
+;
+; Find name on list and file
+;
+GetList:
+	call	MOD.fnd		; Test module found
+	ret	c		; .. found, exit
+	res	@gen,(ix+2)
+	call	SearchModule	; Set up module
+	jr	GetList		; .. and find next
+;
+; Position source file
+;
+PosFile:
+	ld	hl,ext.num	; Clear values
+	ld	(hl),0
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	ld	(hl),0
+	ld	a,(PARS.FCB+.ext)
+	cp	' '		; Test extension
+	ld	c,ext.len
+	ld	de,PARS.FCB+.ext
+	ld	hl,$REL
+	call	z,Move		; .. set .REL
+	ld	de,PARS.FCB+.ext
+	ld	b,ext.len
+	ld	hl,$IRL
+	call	Compare		; Test extension
+	push	af		; Save flag
+	jr	c,PF.IRL	; .. it's .IRL
+	ld	de,PARS.FCB
+	call	Reset		; Find file
+	jr	nz,PF.IRL	; .. ok
+	ld	c,ext.len
+	ld	de,PARS.FCB+.ext
+	ld	hl,$IRL
+	call	Move		; .. set .IRL
+	pop	af
+	scf			; Force .IRL
+	push	af
+PF.IRL:
+	ld	de,PARS.FCB
+	call	.FOpen		; Open file
+	pop	af		; Test extension
+	jr	nc,PF.noIRL
+	ld	bc,defDMA	; Here on .IRL
+	ld	de,PARS.FCB
+	ld	hl,RecLng
+	call	RdDsk		; Read one record
+	ld	a,(defDMA)	; Get extent number
+	ld	(ext.num),a
+	ld	a,(defDMA+1)	; .. and record number
+	ld	(rec.num),a
+	ld	hl,PARS.FCB+.EX
+	ld	a,(ext.num)
+	cp	(hl)		; Test extend number found
+	jr	z,PF.ExtOK
+	ld	a,(ext.num)
+	ld	(PARS.FCB+.EX),a
+	ld	de,PARS.FCB
+	call	open		; Position file on extent
+	jr	nz,PF.ExtOK
+	ld	de,$IDX.ERR	; .. should be opened
+	jp	str.ERR
+PF.ExtOK:
+	ld	a,(rec.num)	; Set record number
+	ld	(PARS.FCB+.CR),a
+PF.noIRL:
+	ld	hl,0
+	ld	(BitPos),hl	; Clear values
+	ld	(Bit.Cnt),hl
+	ld	hl,(RELmax)
+	ld	(RELptr),hl
+	ld	hl,RELbit
+	ld	(hl),.bits	; Force read
+	ret
+;
+; Execute one task
+;
+Task:
+	call	PosFile		; Position file
+	res	@Eexm,(ix+1)	; Reset ) flag
+	bit	@exm,(ix+1)	; Test extraction requested
+	jr	z,Tsk.noExt
+	ld	hl,(strptr)
+	ld	(SavePtr),hl
+	ld	hl,(ext.ptr)	; Get pointer back
+	ld	(strptr),hl
+Tsk.loop:
+	call	get.module	; Get module
+	set	@gen,(ix+2)
+	call	SearchModule	; Set up module
+	bit	@to,(ix+1)	; Test -
+	jr	z,Tsk.noMin	; .. no
+	call	get.module	; Get module
+	call	z,Set.M.End	; .. set end marker if none
+	call	GetList		; Get from list
+Tsk.noMin:	
+	bit	@Eexm,(ix+1)	; Test )
+	jr	z,Tsk.loop
+	ld	hl,(SavePtr)	; Get back string pointer
+	ld	(strptr),hl
+	ret
+Tsk.noExt:
+	call	Set.M.End	; Set end
+	xor	a
+	ld	(NamBuf-1),a	; Clear length
+	call	GetList		; .. get it
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%
+; %% THE MAIN TASK %%
+; %%%%%%%%%%%%%%%%%%%
+;
+ExecTask:
+	call	Task		; Do a run
+	bit	@end,(ix)	; Test end
+	ret	nz
+	ld	a,FALSE
+	call	decode		; No assignment
+	jr	ExecTask
+;
+; Initialize library program
+;
+initLIB:
+	ld	de,$HEAD
+	call	string		; Give message
+	ld	c,CCPlen
+	ld	de,copydma
+	ld	(strptr),de	; Set up pointer
+	ld	hl,CCPbuf
+	call	Move		; Copy command line
+	ld	hl,FCB
+	ld	(FCBptr),hl	; Set FCB
+	ld	hl,(BDOS+1)
+	ld	(TopPtr),hl	; Set top of TPA address
+	ret
+;
+; Set module end item
+;
+Set.M.End:
+	ld	iy,ModName-1	; .. set pointer
+;
+; Set end item
+; ENTRY	Reg IY points to item to be set to end
+;
+Set.End:
+	ld	(iy+0),1	; Set length
+	ld	(iy+1),'l'	; .. and descriptor
+	ret
+;
+; Dump word on screen
+; ENTRY	Reg BC holds word to be dumped
+;
+Dmp.Word:
+	push	bc
+	ld	a,c
+	call	Dmp.Byte	; Dump LO
+	pop	bc
+	ld	a,b		; .. and HI
+;
+; Dump byte on screen
+; ENTRY	Accu holds byte to be dumped
+;
+Dmp.Byte:
+	push	af
+	rra			; Put into right position
+	rra
+	rra
+	rra
+	call	Dmp.Nib		; .. dump HI
+	pop	af		; .. dump LO
+;
+; Dump nibble on screen
+; ENTRY	Accu holds nibble to be dumped
+;
+Dmp.Nib:
+	and	LoMask		; Get four bits
+	cp	10
+	jr	c,DN.0..9	; Test 0..9
+	add	a,'A'-'0'-10	; Fix A..F
+DN.0..9:
+	add	a,'0'		; Make ASCII
+	call	conout		; .. print
+	ret
+;
+; Give string, module name and exit
+; ENTRY	Reg DE points to string
+;
+Mstr.ERR:
+	ld	hl,NamBuf-1
+	ld	a,(hl)
+	or	a		; Test any name
+	jr	z,str.ERR	; .. nope
+	push	de
+	push	hl
+	ld	de,$IN.MODULE
+	call	string		; .. tell error
+	pop	hl
+	call	PrR..		; .. give name
+	pop	de
+;
+; Give string and exit
+; ENTRY	Reg DE points to string
+;
+str.ERR:
+	call	string		; Print string
+	jp	OS		; .. leave LIB hard
+;
+; Dump address including mode
+; ENTRY	Reg DE holds location counter
+;	Reg C  holds address mode
+;
+DmpAddr:
+	ld	b,0
+	ld	hl,Addr.mod
+	add	hl,bc
+	ld	a,(hl)		; Get address mode A,P,D,C
+	call	conout
+	ld	b,e		; .. swap bytes
+	ld	c,d
+	call	Dmp.Word	; Dump word
+	call	Blank
+	ret
+;
+; Get location counter
+; EXIT	Reg BC holds selected counter
+;	Reg HL points to HI location of address
+;
+GetLocCtr:
+	ld	hl,(AF.idx)	; Get address mode
+	ld	h,0
+	ld	bc,LocTab
+	add	hl,hl
+	add	hl,bc		; Point to location counter
+	ld	c,(hl)		; Get it
+	inc	hl
+	ld	b,(hl)
+	ret
+;
+; Dump address
+;
+TstNL:
+	call	GetLocCtr	; Get location counter
+	ld	a,c
+	and	LoMask		; Test boundary
+	jr	z,TN.pub
+	bit	@lin,(ix+2)	; Test printing
+	ret	z
+TN.pub:
+	push	bc
+	call	crlf		; .. new line
+	call	Blank
+	pop	de		; Fetch current loc. counter
+	ld	bc,(AF.idx)	; .. and address mode
+	call	DmpAddr		; Dump address
+Blank:
+	ld	a,' '
+	call	conout
+	ret
+;
+; Write byte to file
+; ENTRY	Accu holds byte to be written
+;
+Wr.Byte:
+	ld	de,(WrBfp)
+	ld	hl,WrBuf
+	add	hl,de		; Get buffer pointer
+	ld	(hl),a		; .. save byte
+	inc	de		; Bump pointer
+	ld	(WrBfp),de
+	ld	hl,(WrMax)
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Test buffer filled
+	ret	c
+	ld	bc,WrBuf
+	ex	de,hl
+	ld	de,IRL.FCB
+	call	WrDsk		; Write buffer
+	ld	hl,0
+	ld	(WrBfp),hl	; Clear pointer
+	ret
+;
+; Compute stream values
+;
+CompStream:
+	ld	hl,(RELptr)	; Get current pointer
+	call	DivRec
+	ld	hl,(BitPos)
+	add	hl,de		; Fix records
+	ld	(BYT.R.OFFS),a	; Set byte offset
+	call	DivRec
+	ld	hl,EXT.R.offs
+	ld	(hl),e		; .. and extent
+	ld	(REC.R.offs),a	; .. and record
+	res	@1st,(ix+1)	; Clear flag
+	ret
+;
+; Calculate positions for index file
+;
+GetIDXpos:
+	ld	hl,(IDXlen)
+	call	DivRec
+	ld	hl,(IDXpos)
+	add	hl,de		; Fix records
+	ld	(BYT.W.offs),a	; Set byte offset
+	call	DivRec
+	ld	hl,EXT.W.offs
+	ld	(hl),e		; .. and extent
+	ld	(REC.W.offs),a	; .. and record
+	res	@idx,(ix+2)	; Clear flag
+	ret
+;
+; Write position of item to index file
+;
+WrIDXitem:
+	ld	a,(EXT.W.offs)
+	call	Wr.Byte		; Save extend
+	ld	a,(REC.W.offs)
+	call	Wr.Byte		; .. record
+	ld	a,(BYT.W.offs)
+	call	Wr.Byte		; .. and byte offset
+	ret
+;
+; Read 16 bit value from stream
+;
+RdVAL16:
+	call	RdVAL8		; Read LO
+	push	af
+	call	RdVAL8		; .. and HI
+	ld	h,a
+	pop	af
+	ld	l,a
+	ret
+;
+; Read AFIELD (mm.llllllll.hhhhhhhh)
+; mm		Address mode
+; llllllll	LO value
+; hhhhhhhh	HI value
+;
+RdAFIELD:
+	ld	b,2
+	call	RdBit?		; Get control
+	ld	(AF.mode),a
+	call	RdVAL16		; Get value
+	ld	(AFIELD),hl
+	ret
+;
+; Read BFIELD (ccc.ch1...cnn)
+; ccc		Length of symbol
+; chi		8 bit characters
+;
+RdBFIELD:
+	ld	b,3
+	call	RdBit?		; Read length
+	ld	hl,BFIELD-1
+	ld	(hl),a
+	ld	b,a
+	or	a		; Test zero
+	jr	nz,Rd.BF.loop
+	ld	b,.BFlen	; .. map to default
+Rd.BF.loop:
+	push	hl
+	push	bc
+	call	RdVAL8		; Read character
+	pop	bc
+	pop	hl
+	inc	hl
+	ld	(hl),a		; .. store it
+	call	ChkASCII	; Test valid one
+	djnz	Rd.BF.loop
+	ret
+;
+; Print AFIELD on console
+;
+prAF:
+	ld	bc,(AF.mode)	; Fetch mode
+	ld	hl,(AFIELD)	; .. and value
+	ex	de,hl
+	call	DmpAddr		; Dump address
+	ret
+;
+; Print BFIELD on console
+;
+PrBF:
+	ld	hl,BFIELD-1
+	ld	a,(hl)		; Get length
+	or	a
+	ld	b,a
+	call	nz,PrM.loop	; Print
+	call	Blank		; Give delimiter
+	ret
+;
+; Write byte to .REL file
+; ENTRY	Accu holds byte
+;
+Wr.REL:
+	ld	hl,(IDXlen)
+	ld	de,IdxBuf
+	add	hl,de
+	ld	(hl),a		; .. store byte
+	ld	hl,(IDXlen)
+	inc	hl		; Bump count
+	ld	(IDXlen),hl
+	ld	bc,(IDXtop)
+	or	a
+	sbc	hl,bc		; Test buffer filled
+	ret	c
+	ld	l,c
+	ld	h,b
+	ld	bc,IdxBuf
+	ld	de,REL.FCB
+	call	WrDsk		; Write buffer to disk
+	ld	hl,(IDXtop)
+	call	DivRec
+	ld	hl,(IDXpos)
+	add	hl,de
+	ld	(IDXpos),hl	; Fix position
+	ld	hl,0
+	ld	(IDXlen),hl	; .. clear length
+	ret
+;
+; Write bits to file
+; ENTRY	Reg B holds number of bits to be written
+;	Reg C holds value to be written
+;
+WrBit?:
+	push	bc
+	bit	@idx,(ix+2)	; Test flag
+	call	nz,GetIDXpos
+	pop	bc
+	ld	a,.bits
+	sub	b		; Test bits
+	call	nz,WB?.shft	; Position bits
+WrBit.loop:
+	rl	c		; Get bit
+	call	Wrt.1.Bit	; .. write
+	djnz	WrBit.loop
+	ret
+;
+; Position bits
+; ENTRY	Accu  holds number of bits to be shifted
+;	Reg C holds value
+;
+WB?.shft:
+	rl	c		; .. shift
+	dec	a
+	jr	nz,WB?.shft
+	ret
+;
+; Put one bit to stream
+; ENTRY	Carry flag reflects state of the bit
+;
+Wrt.1.Bit:
+	push	bc
+	ld	hl,WBitVal
+	ld	a,(hl)
+	rla			; Shift a bit
+	ld	(hl),a
+	inc	hl
+	inc	(hl)		; Bump count
+	jr	nz,Wrt.Bit.skp
+	call	Wr.REL
+	ld	hl,-.bits*256
+	ld	(WBitVal),hl	; Init count
+Wrt.Bit.skp:
+	pop	bc
+	ret
+;
+; Write AFIELD to .REL file
+;
+WrAF:
+	ld	bc,(AF.mode)
+	ld	b,2
+	call	WrBit?		; Write mode
+	ld	bc,(AFIELD)	; .. and value
+;
+; Write 16 bit value
+; ENTRY	Reg BC holds value
+;
+WrVAL16:
+	push	bc
+	call	WrVAL8		; .. write LO
+	pop	bc
+	ld	c,b		; .. and HI
+;
+; Write byte to stream file
+; ENTRY	Reg C holds 8 bit value
+;
+WrVAL8:
+	ld	b,8
+	call	WrBit?		; Write a byte
+	ret
+;
+; Write BFIELD to .REL file
+;
+WrBF:
+	ld	hl,BFIELD-1
+	ld	c,(hl)
+	push	hl
+	ld	b,3
+	call	WrBit?		; Write length
+	pop	hl
+	ld	b,(hl)		; Init count
+	inc	b
+	dec	b
+	ret	z		; .. Test zero
+WBF.loop:
+	inc	hl		; Bump pointer
+	push	bc
+	push	hl
+	ld	c,(hl)		; Get character
+	call	WrVAL8		; .. write it
+	pop	hl
+	pop	bc
+	djnz	WBF.loop
+	ret
+;
+; Write entry into IDX header
+;
+WrtIDXsym:
+	call	WrIDXitem
+	ld	hl,BFIELD-1
+	ld	a,(hl)
+	or	a
+	jr	z,WIS.ex
+	ld	b,a		; Init count
+WIS.loop:
+	inc	hl		; Bump position
+	push	bc
+	push	hl
+	ld	a,(hl)		; Get character
+	call	Wr.Byte		; .. to file
+	pop	hl
+	pop	bc
+	djnz	WIS.loop
+WIS.ex:
+	ld	a,.EndIRL
+	call	Wr.Byte		; Write end of name
+	ret
+;
+; Set constant
+;
+SetConst:	
+	call	RdVAL8		; Read it
+	ld	(VAL8),a
+	bit	@dis,(ix+1)	; Test dump possible
+	ret	nz
+	bit	@dmp,(ix)	; Test [D]
+	jr	z,SC.REL?
+	call	TstNL		; Dump address on boundary
+	ld	a,(VAL8)
+	call	Dmp.Byte	; Dump byte
+	call	Blank		; Set delimiter
+	call	GetLocCtr	; Get location counter
+	inc	bc		; .. bump
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	res	@lin,(ix+2)	; Reset line flag
+SC.REL?:
+	bit	@rel,(ix)	; Test write to file
+	ret	z
+	ld	b,1
+	ld	c,0
+	call	WrBit?		; Write constant
+	ld	bc,(VAL8)
+	call	WrVAL8		; .. and byte
+	ret
+;
+; Set address
+; ENTRY	Accu holds address mode
+;
+SetAdr:
+	ld	(SavAdrMod),a
+	call	RdVAL16		; Get 16 bits
+	ld	(VAL16),hl
+	bit	@dis,(ix+1)	; Test dump enabled
+	ret	nz
+	bit	@dmp,(ix)	; Test [D]
+	jr	z,SA.noDmp
+	call	TstNL		; Dump address on boundary
+	ld	bc,(SavAdrMod)
+	ld	de,(VAL16)
+	call	DmpAddr		; Dump address
+	call	GetLocCtr	; Get location counter
+	inc	bc
+	inc	bc		; .. bump
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	a,c
+	and	LoMask		; Test 1st address
+	dec	a
+	jr	z,SA.SetFlg
+	res	@lin,(ix+2)
+	jr	SA.SetFlg
+SA.SetFlg:
+	set	@lin,(ix+2)
+SA.noDmp:
+	bit	@rel,(ix)	; Test file enabled
+	ret	z
+	ld	b,1
+	ld	c,1
+	call	WrBit?		; Write link item
+	ld	bc,(SavAdrMod)
+	ld	b,2
+	call	WrBit?		; Write mode
+	ld	bc,(VAL16)
+	call	WrVAL16		; .. and value
+	ret
+

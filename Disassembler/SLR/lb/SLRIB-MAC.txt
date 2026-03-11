@@ -1,0 +1,2525 @@
+	title	SLRIB - SLR Librarian
+	name	('SLRIB')
+
+; This is the DASMed encrypted version of the SLR Lib
+; By W. Cirsovius
+
+NO	equ	0
+YES	equ	NOT NO
+
+FALSE	equ	NO
+TRUE	equ	YES
+
+@RUN@	equ	TRUE		;; If we bypass mystery code
+;;@RUN@	equ	FALSE		;; If we run mystery code
+
+OS	equ	0000h
+BDOS	equ	0005h
+CCP	equ	0080h
+
+.OS	equ	 0
+.conin	equ	 1
+.conout	equ	 2
+.lstout	equ	 5
+.string	equ	 9
+.rdcon	equ	10
+.vers	equ	12
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.rename	equ	23
+.retdsk	equ	25
+.setdma	equ	26
+.mulsec	equ	44
+
+CPM3	equ	30h
+
+@drv	equ	 1
+@nam	equ	 8
+@ext	equ	 3
+
+_EX	equ	12
+_CR	equ	32
+
+FCBlen	equ	36
+
+RecLng	equ	128
+
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+.eot	equ	-1
+
+LoMask	equ	00001111b
+HiMask	equ	11110000b
+NoMSB	equ	01111111b
+
+_RET	equ	0c9h
+
+_LOWNIB	equ	0b0h
+_EXTOFF	equ	0c0h
+_SPCITM	equ	0e0h
+_MODNAM	equ	0f9h
+_ENDFIL	equ	0ffh
+
+@CTRL	equ	0fh		; Special SLR control
+
+MaxMod	equ	64		; Max length of SLR module name
+
+MaxCol	equ	4		; Symbols per line
+
+_ENT	equ	7
+_EXT	equ	6
+
+_ASK	equ	0
+_LST	equ	1
+_MAP	equ	2
+_UNDEF	equ	3
+_???	equ	4
+
+@ASK	equ	1 SHL 0
+@LST	equ	1 SHL 1
+@MAP	equ	1 SHL 2
+@UNDEF	equ	1 SHL 3
+@???	equ	1 SHL 4
+
+FIBhead	equ	5
+
+_Recs_	equ	16		; Records for I/O
+
+l0200	equ	0200h
+l0400	equ	0400h
+l0800	equ	0800h
+
+l0100	equ	0100h
+
+_go	macro
+	nop
+	endm
+;
+; #############################################################
+;
+; File link of command file nesting:
+;	Each entry requires:
+;	  5 bytes header
+;	 36 bytes FCB
+;	128 bytes buffer
+; Header definition:
+; Byte	0,1	Address of previous FIB
+;	 2	Pointer within buffer
+;	3,4	Current buffer of previous file
+;
+; #############################################################
+;
+IF	@RUN@
+	jp	MAIN_
+ELSE
+	jp	MAIN
+ENDIF	; @RUN@
+;
+	dw	2130h		; Version number
+$DI$:
+	db	NO		; NO do not touch interrupts
+$MULS$:
+	db	YES		; NO is CP/M 2.x
+$REL$:
+	db	'REL'		; REL file extension
+$LIB$:
+	db	'REL'		; LIB file extension
+$IND$:
+	db	'SUB'		; Command file extension
+TMP$F.N:
+	db	'NEWLIB  $$$'
+;
+	db	'Copyright (c) 1984 by SLR Systems, Butler, PA'
+	db	'**CHRIST is the Answer**'
+;
+; ##### START OF ENCRYPT #####
+;
+; Get character from command line
+; EXIT	Accu holds character
+;
+GetCmdChr:
+	ld	hl,(CmdPtr)	; Get pointer
+	ld	a,(hl)		; .. fetch character
+	cp	cr		; Test end of line
+	ret	z
+	inc	hl		; .. bump if not
+	ld	(CmdPtr),hl
+	ret
+;
+; Get UPPER case character from command line
+; EXIT	Accu holds character
+;
+GetUPPchr:
+	call	GetCmdChr	; Get character
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	xor	'a'-'A'		; Convert to UPPER case
+	ret
+;
+; Command line processor
+;
+.GetNewCmdLine:
+	ld	sp,(StkSav)	; Get back main stack
+GetNewCmdLine:
+	call	RdCmdLine	; Get command line
+ProcCmdLine:
+	xor	a		; Clear ..
+	ld	($F.N),a	; .. file
+	ld	(Status),a	; .. status
+	call	GetUPPchr	; Get character
+	cp	','		; Test delimiter
+	jr	z,ProcCmdLine
+	cp	cr		; .. end of line
+	jr	z,GetNewCmdLine	; .. get new line
+	cp	'/'		; .. test option
+	jr	z,PC.option
+	cp	' '		; .. another delimiter
+	jr	z,ProcCmdLine
+	call	Parse		; Must be file, so parse it
+NexItem:
+	call	ScanCtrl	; Scan control table
+	jr	c,ThisModDone	; .. end of table
+	call	DoOptions
+	jr	NexItem
+ThisModDone:
+	ld	a,(Status)	; Get status
+	bit	_UNDEF,a	; Test UNDEFINED
+	call	nz,AnyUndef	; .. yeap, check it
+	ld	a,(Status)
+	bit	_???,a		; Test ???
+	call	nz,?DUMMY?
+	call	REL.close	; Close .REL file
+	jr	ProcCmdLine	; .. get more
+PC.option:
+	call	GetOpt		; Get option
+	jr	ProcCmdLine	; .. get more from line
+;
+; Close .REL file if activated
+;
+REL.close:
+	ld	de,REL$FCB
+	ld	a,(de)		; Test file active
+	or	a
+	ret	z		; .. nope
+	ld	c,.close
+	call	.BDOS		; Close file
+	xor	a
+	ld	(REL$FCB),a	; .. set file passive
+	ret
+;
+; Command table
+;
+CmdTable:
+	dw	$$A$$		; A
+	dw	IllOpt		; B -
+	dw	IllOpt		; C -
+	dw	IllOpt		; D -
+	dw	$$E$$		; E
+	dw	IllOpt		; F -
+	dw	IllOpt		; G -
+	dw	IllOpt		; H -
+	dw	$$I$$		; I
+	dw	IllOpt		; J -
+	dw	IllOpt		; K -
+	dw	$$L$$		; L
+	dw	$$M$$		; M
+	dw	$$N$$		; N
+	dw	IllOpt		; O -
+	dw	IllOpt		; P -
+	dw	$$Q$$		; Q
+	dw	$$R$$		; R
+	dw	IllOpt		; S -
+	dw	IllOpt		; T -
+	dw	$$U$$		; U
+	dw	IllOpt		; V -
+	dw	IllOpt		; W -
+	dw	$$X$$		; X
+	dw	IllOpt		; Y -
+	dw	IllOpt		; Z -
+;
+; Get option
+;
+GetOpt:
+	call	GetUPPchr	; Get character
+	sub	'A'		; Test range
+	jr	c,IllOpt	; .. invalid
+	cp	'Z'-'A'+1
+	jr	nc,IllOpt
+	add	a,a		; Get as index
+	ld	c,a
+	ld	b,0
+	ld	hl,CmdTable	; Point to table
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; .. go
+IllOpt:
+	ld	hl,$ILL.OPT
+	jp	PrErrStr	; Tell option invalid
+;
+$ILL.OPT:
+	db	15,'Not Implemented'
+;
+; Option A : ASK
+;
+$$A$$:
+	ld	hl,Status
+	set	_ASK,(hl)	; Set ask
+	ret
+;
+; Option E : END
+;
+$$E$$:
+	ld	a,(ProcFlg)	; Test exit
+	or	a
+	jr	z,Exit		; .. exit if nothing running
+	ld	a,_ENDFIL
+	call	Putc		; Set end of SLR file
+	call	Flush		; .. flush buffers
+	ld	de,LIB$FCB
+	ld	a,(de)		; Get disk
+	or	a		; Test default
+	jr	z,Exit		; .. yeap
+	dec	a		; .. fix it
+	call	SelDsk		; Log disk
+	ld	de,LIB$FCB
+	ld	c,.open
+	call	.BDOS		; Open resulting file
+	inc	a
+	jr	z,NewFile	; .. not there
+	ld	de,LIB$FCB
+	ld	c,.close
+	call	.BDOS		; .. close file
+	ld	hl,$DELETE
+	call	String		; Ask for deletion
+	call	YES.NO		; Get resonse
+	cp	'Y'		; .. test delete
+	ret	nz		; .. nope
+	ld	de,LIB$FCB
+	ld	c,.delete
+	call	.BDOS		; Delete file
+NewFile:
+	ld	hl,Tmp$FCB	; Get temp file
+	ld	de,LIB$OLD
+	ld	bc,@drv+@nam+@ext+1
+	ldir			; .. copy
+	ld	de,LIB$OLD
+	ld	c,.rename
+	call	.BDOS		; Rename file
+Exit:
+	ld	a,(LogFDsk)	; Get logged disk
+	dec	a		; .. fix for zero relative
+	call	SelDsk		; Log disk
+	ld	c,.OS
+	jp	.BDOS		; .. exit
+;
+$DELETE:
+	db	'Output File Exists, Delete Old ',.eot
+;
+; Option I : INDIRECT
+;
+$$I$$:
+	jp	IndCmd		; .. jump over
+;
+; Option L : LIST
+;
+$$L$$:
+	ld	hl,Status	; Get status
+	ld	a,(hl)
+	and	@???+@UNDEF	; Test ??? or UNDEF
+	jp	nz,BadCombine	; .. bad combination
+	set	_LST,(hl)	; Set LIST
+	ret
+;
+; Option M : MAP
+;
+$$M$$:
+	ld	hl,Status	; Get status
+	ld	a,(hl)
+	and	@???+@UNDEF	; Test ??? or UNDEF
+	jp	nz,BadCombine	; .. bad combination
+	set	_MAP,(hl)	; Set MAP
+	set	_LST,(hl)	; .. and LIST
+	ret
+;
+; Option N : NAME
+;
+$$N$$:
+	ld	hl,$F.N		; Point to file name
+	ld	de,LIB$FCB
+	ld	bc,@drv+@nam
+	ldir			; .. copy name to result file
+	ld	hl,$LIB$	; Get lib file extension
+	ldi			; .. unpack
+	ldi
+	ldi
+	xor	a
+	ld	(de),a		; Clear extent
+	ld	hl,LIB$FCB	; Get pointer
+	ld	a,(Tmp$FCB)	; Get temp drive
+	or	a
+	jr	z,NameOk	; .. empty
+	cp	(hl)		; Verify same
+	jr	z,NameOk
+	ld	hl,$ILL.CHNG
+	jp	ErrorCmd	; .. error
+NameOk:
+	ld	sp,(StkSav)	; Get back main stack
+	jp	ProcCmdLine	; .. re-enter
+;
+$ILL.CHNG:
+	db	32,'Too Late To Change Output Drive!'
+;
+; Option Q : QUIT
+;
+$$Q$$:
+	call	$Close$		; Close temp file
+	jp	Exit		;.. and exit
+;
+; Close temp file if defined
+;
+$Close$:
+	ld	de,Tmp$FCB	; Get temp FCB
+	ld	a,(de)
+	or	a
+	ret	z		; .. not specified
+	ld	c,.close
+	call	.BDOS		; Close file
+	ld	de,Tmp$FCB
+	ld	c,.delete
+	jp	.BDOS		; .. then delete
+;
+; Option R : RESET
+;
+$$R$$:
+	call	$Close$		; Close temp file
+	xor	a
+	ld	(CCP),a		; Clear command input
+	jp	Restart		; .. and restart
+;
+; Option U : UNDEFINED
+;
+$$U$$:
+	ld	hl,Status	; Get status
+	ld	a,(hl)
+	and	@???+@MAP+@LST	; Test bits set
+	jr	nz,BadCombine	; .. bad combination
+	set	_UNDEF,(hl)	; Set UNDEFINED
+	ret
+BadCombine:
+	ld	hl,$BAD.COMB
+	jp	ErrorCmd	; .. error
+;
+$BAD.COMB:
+	db	22,'Bad Option Combination'
+;
+; Option X : 'UNDOCUMENTED'
+;
+$$X$$:
+	ld	hl,Status	; Get status
+	ld	a,(hl)
+	and	@UNDEF+@MAP+@LST; Test bits
+	jr	nz,BadCombine	; .. bad combination
+	set	_???,(hl)	; Set UNDOC
+	ret
+;
+l037a:
+	db	19,'Abort - Disk Full !'
+;
+; Give drive error message
+;
+BadDrive:
+	ld	hl,$BAD.DRV
+;
+; Process command line error
+;
+ErrorCmd:
+	call	PrErrStr	; Give error
+	jp	.GetNewCmdLine	; Get new line
+;
+$BAD.DRV:
+	db	9,'Bad Drive'
+;
+; Process syntax error
+;
+BadSyntax:
+	ld	hl,$BAD.SYNTAX
+	jp	ErrorCmd	; .. error
+;
+; Got drive delimter, so calculate drive
+;
+ParseDrv:
+	ld	a,c		; Get drive
+	sub	'A'-1		; Test range
+	jr	z,BadDrive	; .. error
+	cp	'P'-'@'+1
+	jr	nc,BadDrive
+	ld	(de),a		; .. save drive
+	inc	de
+	ld	b,@drv+@nam	; Set length
+	jr	ParseLoop	; .. fall in parse
+;
+; Parse file and prepare for processing
+;
+Parse:
+	ld	c,a		; Save last character
+	ld	hl,SLRbuf	; Prepare SLR name buffer
+	ld	(SLRctrl),hl	; .. set pointer
+	ld	(hl),0		; .. clear control request
+	inc	hl
+	ld	(hl),.eot	; .. set end of control
+	ld	a,(LogFDsk)	; Get logged disk
+	ld	de,$F.N
+	ld	(de),a		; .. save into name
+	call	GetUPPchr	; Get character
+	cp	':'		; Test drive delimiter
+	jr	z,ParseDrv	; .. yeap, get drive
+	inc	de
+	ld	b,a
+	ld	a,c
+	ld	(de),a		; Set 1st character
+	inc	de
+	ld	a,b
+	ld	b,@nam		; Set length
+	jr	.ParseLoop
+ParseLoop:
+	call	GetUPPchr	; Get character
+.ParseLoop:
+	cp	' '+1		; Test valid character
+	jr	c,ParseEndFN
+	cp	','		; .. delimiter
+	jr	z,ParseEndFN
+	cp	'/'		; .. option
+	jr	z,ParseEndFN
+	cp	'<'		; .. selector
+	jr	z,ParseEndFN
+	ld	(de),a		; .. assemble file name
+	inc	de
+	djnz	ParseLoop
+	ld	hl,$LONG.NAME
+	jp	ErrorCmd	; .. overflow
+ParseEndFN:
+	dec	b		; Test name filled
+	jr	z,ParseSkpFill	; .. yeap
+	push	af
+	ld	a,' '
+ParseFillFN:
+	ld	(de),a		; Blank remainder
+	inc	de
+	djnz	ParseFillFN
+	pop	af
+ParseSkpFill:
+	cp	'<'		; Test selector
+	jr	nz,ParseNoSel
+	ld	de,SLRbuf
+l0409::
+	ld	a,2
+	ld	(de),a		; Set value
+l040c:
+	call	GetCmdChr	; Get character
+	cp	'>'		; Test closure
+	jr	z,l0475
+	cp	' '		; .. skip blanks
+	jr	z,l040c
+	jr	c,.BadSyntax	; .. bad syntax on control
+	inc	de
+	cp	'.'		; Test dot
+	jr	nz,l042d
+	call	GetCmdChr	; Get character
+	cp	'.'
+	jr	nz,.BadSyntax	; .. verify second dot
+	ld	a,1
+	dec	de
+	ld	(de),a		; .. change flag
+	inc	de
+	call	GetCmdChr	; Get character
+l042d:
+	cp	','		; Test delimiter
+	jr	z,l0467
+	cp	'.'		; .. another dot
+	jr	z,l0447
+	cp	'>'		; .. closure
+	jr	z,l0471
+	cp	' '+1		; Verify valid input
+	jr	c,.BadSyntax
+	ld	(de),a
+	inc	de
+	call	GetCmdChr	; Get character
+	jr	l042d
+.BadSyntax:
+	jp	BadSyntax	; .. syntax error
+l0447:
+	ld	a,.eot
+	ld	(de),a		; Close input
+	inc	de
+	call	GetCmdChr	; Get character
+	cp	'.'		; .. verify dot
+	jr	nz,.BadSyntax
+	xor	a
+	ld	(de),a
+	inc	de
+	call	GetCmdChr	; Get character
+	cp	','		; Test delimiter
+	jr	z,l046b
+	cp	'>'		; .. closure
+	jr	z,l0475
+	ld	h,d
+	ld	l,e
+	dec	hl
+	ld	(hl),1
+	jr	l042d
+l0467:
+	ld	a,.eot
+	ld	(de),a
+	inc	de
+l046b:
+	ld	a,3
+	ld	(de),a
+	inc	de
+	jr	l0409
+l0471:
+	ld	a,.eot
+	ld	(de),a
+	inc	de
+l0475:
+	ld	a,.eot
+	ld	(de),a
+l0478:
+	call	GetUPPchr	; Get character
+ParseNoSel:
+	cp	'/'		; Test option
+	jr	nz,ParseProcFN	; .. nope, that's all
+	call	GetOpt		; .. get it
+	jr	l0478
+ParseProcFN::
+	ld	hl,$F.N		; Get name
+	ld	de,REL$FCB	; .. and .REL file
+	ld	bc,@drv+@nam
+	ldir			; Copy file name
+	ld	hl,$REL$	; Get extension
+	ldi			; .. unpack
+	ldi
+	ldi
+	xor	a
+	ld	(de),a
+	ld	de,@RdBuff
+	ld	(BufPtr),de	; Init pointer
+	ld	c,.setdma
+	call	.BDOS		; Set disk buffer
+	ld	a,(REL$FCB)	; Get drive
+	dec	a
+	call	SelDsk		; .. log it
+	ld	de,REL$FCB
+	ld	c,.open		; Open .REL file
+	call	.BDOS
+	inc	a
+	jr	z,NoFile	; .. not found
+	ld	hl,REL$FCB+_CR
+	ld	(hl),0		; Clear current record
+	call	RdBuff		; Read disk buffer
+	call	IniSLR		; Prepare processing
+	ld	hl,(l114f)
+	ld	a,h
+	or	l
+	ret	nz
+	ld	de,$OPN.ERR
+	call	FileErr		; .. cannot open file
+	call	REL.close	; Close .REL file
+	jr	l04e3
+NoFile:
+	ld	de,$OPN.ERR
+	call	FileErr		; .. cannot open file
+	xor	a
+	ld	(REL$FCB),a	; Set file passive
+	jr	l04e3
+l04e0:
+	call	FileErr		; Process error ** N.C. **
+l04e3:
+	jp	.GetNewCmdLine	; .. get new line
+;
+; Process file error
+; ENTRY	Reg DE points to message
+;
+FileErr:
+	ld	hl,(FIB)	; Get file pointer
+	push	hl		; .. save
+	ld	hl,REL$FCB	; Set .REL file
+	ld	(FIB),hl	; .. into error FCB
+	ex	de,hl
+	call	PrErrStr	; .. give error
+	pop	hl
+	ld	(FIB),hl	; Restore pointer
+	ret
+;
+$BAD.SYNTAX:
+	db	18,'Bad Command Syntax'
+$OPN.ERR:
+	db	15,'Can''t Open File'
+$LONG.NAME:
+	db	18,'File Name Too Long'
+;
+; Following code will be overwritten by ENCRYPT
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+MAIN:
+	ld	hl,l0535+1
+	ld	de,GetCmdChr
+l0535:
+	call	l0543
+;
+; ##### END OF ENCRYPT #####
+;
+; Next is a fragment of remaining decryption routine
+;
+	ld	hl,FIB
+	ld	de,MAIN_
+	call	l0543
+	jr	MAIN_
+l0543:
+	or	a
+	sbc	hl,de
+	srl	h
+	rr	l
+	ld	b,l
+	ld	c,h
+	inc	c
+	ex	de,hl
+l054e:
+	rrc	(hl)
+	inc	hl
+	rlc	(hl)
+	inc	hl
+	djnz	l054e
+	dec	c
+	jr	nz,l054e
+	ret
+;
+; ##### START OF MAIN ENCRYPT #####
+;
+MAIN_:
+	ld	hl,0
+	ld	c,.vers
+	call	BDOS		; Get OS version
+	dec	h		; Test MP/M
+	jr	z,GotMPM
+	ld	a,l
+	cp	CPM3		; Test CP/M 3.x
+	jr	nc,GotCPM3
+	xor	a
+	ld	($MULS$),a	; Clear multisector flag
+	jr	GotCPM2
+GotMPM:
+	ld	a,2
+	jr	GotCPM2
+GotCPM3:
+	ld	a,1
+GotCPM2:
+	ld	(OSver),a	; Set OS version
+	ld	de,@RdBuff
+	ld	(BufPtr),de	; Init pointer
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	c,.retdsk
+	call	BDOS		; Get current disk
+	ld	(LogDsk),a	; .. save
+	inc	a
+	ld	(LogFDsk),a	; .. same for FCB mode
+;
+; Restart librarian
+;
+Restart:
+	ld	hl,(BDOS+1)	; Get top of memory
+	ld	sp,hl		; .. into stack
+	dec	h		; .. allow one stack page
+	ld	(dHeap),hl	; .. init top down heap
+	ld	hl,$HEAD
+	call	String		; Tell id
+	ld	hl,IniDat
+	ld	de,l105a
+	ld	bc,IniLen
+	ldir			; Init addresses and data
+	ld	hl,FIB
+	ld	de,FIB+1
+	ld	bc,l10f4-FIB-1
+	ld	(hl),0		; Clear a region
+	ldir
+	ld	hl,CCP
+	ld	a,(hl)		; Get length of line
+	or	a
+	inc	hl
+	ld	(CmdPtr),hl	; Init pointer
+	call	z,RdCmdLine	; .. get line if empty
+	ld	hl,CCP-1
+	ld	(hl),0		; Clear max
+	inc	hl
+	ld	c,(hl)		; Get length
+	inc	c
+	ld	b,0
+	add	hl,bc		; Point to end
+	ld	(hl),cr		; .. clear it
+	ld	(StkSav),sp	; Save main stack
+	ld	de,@WrBuff	; Init buffer
+	ld	hl,l0800	; .. length
+	ld	(l10fc),hl
+	ld	c,0		; .. count
+	exx
+	ld	hl,TMP$F.N
+	ld	de,Tmp$FCB+@drv
+	ld	bc,@nam+@ext
+	ldir			; Set temporary file
+	ld	a,(LogFDsk)	; Get logged disk
+	ld	(LIB$FCB),a	; .. save
+	jp	ProcCmdLine	; .. and go
+;
+$HEAD:
+	db	'SuperLibrarian Copyright (C) 1984 by SLR Systems Rel. 1.30'
+	db	cr,lf,lf,.eot
+IniDat:
+	db	0,RecLng
+	dw	l24f3,l22f3
+IniLen	equ	$-IniDat
+;
+; Perform indirect command file input
+;
+IndCmd:
+	call	GetFIBchn	; Get chain
+	ld	bc,FIBhead+FCBlen+RecLng
+	call	z,_d.alloc	; .. allocate memory if needed
+	ld	de,(FIB)	; Get base file pointer
+	ld	(hl),e		; .. save into array
+	inc	hl
+	ld	(hl),d
+	ld	bc,FIBhead-1
+	add	hl,bc		; .. bump over header
+	ld	(FIB),hl	; .. fix pointer
+	ld	a,d
+	or	e		; Test 1st enty
+	jr	z,BaseChn	; .. yeap
+	dec	de
+	ld	hl,iRecBuf+1
+	ldd			; .. save set up of previous
+	ldd
+	ldd
+BaseChn:
+	ld	a,1
+	ld	(iRecPtr),a	; Force one character
+	ld	de,(FIB)	; Get FCB
+	ld	hl,$F.N
+	ld	bc,@drv+@nam
+	ldir			; Copy name
+	ld	hl,$IND$	; Get command file extension
+	ldi			; .. unpack
+	ldi
+	ldi
+	xor	a
+	ld	(de),a		; Clear extent
+	ld	hl,FCBlen-@drv-@nam-@ext-1
+	add	hl,de		; Bump to pointer
+	ld	(BufPtr),hl	; .. set new
+	ex	de,hl
+	ld	c,.setdma
+	call	.BDOS		; Set disk buffer
+	ld	de,(FIB)	; Get FIB pointer
+	push	de
+	ld	a,(de)		; .. fetch drive
+	dec	a
+	call	SelDsk		; .. log it
+	pop	de
+	ld	c,.open
+	call	.BDOS		; Open file
+	inc	a
+	jr	z,NoCmdFile	; .. not found
+	ld	hl,FILE.CmdLine
+	ld	(@CMDIO@),hl	; .. set file for command input
+	ld	hl,(FIB)	; Get FCB
+	ld	de,_CR
+	add	hl,de
+	ld	(hl),0		; .. clear current record
+	jp	.GetNewCmdLine	; .. and get new line
+NoCmdFile:
+	ld	hl,$OPN.ERR
+	call	PrErrStr	; Cannot open file
+	jp	_free		; .. free link
+;
+; Get FIB address
+; EXIT	Zero set on NIL
+;	Reg HL holds address
+;
+GetFIBchn:
+	ld	hl,(FIBchn)	; Get chain
+	ld	a,h		; Test zero
+	or	l
+	ret	z		; .. yeap, exit
+	ld	e,(hl)		; .. fetch previous link
+	inc	hl
+	ld	d,(hl)
+	ld	(FIBchn),de	; .. save
+	dec	hl
+	ret
+;
+$CRLF:
+	db	cr,lf,eot
+;
+; Get command line
+;
+RdCmdLine:
+	jp	CON.CmdLine	; .. maybe redirected
+@CMDIO@	equ	$-2
+;
+; Get line from console
+;
+CON.CmdLine:
+	call	Prompt		; Give prompt
+	ld	hl,CCP-1
+	ld	(hl),80		; Set max length
+	ex	de,hl
+	ld	c,.rdcon
+	call	.BDOS		; .. read from console
+	ld	de,$CRLF
+	ld	c,.string
+	call	.BDOS		; Close line
+	ld	hl,CCP-1
+	ld	(hl),0		; Clear max length
+	inc	hl
+	ld	a,(hl)		; Get current length
+	or	a
+	jr	z,CON.CmdLine	; .. retry if empty
+	inc	hl
+	ld	(CmdPtr),hl	; .. set pointer
+	ld	c,a
+	ld	b,0
+	add	hl,bc
+	ld	(hl),cr		; Set end of line
+	ret
+;
+; Get line from command file
+;
+FILE.CmdLine:
+	ld	hl,iRecPtr
+	ld	b,(hl)		; Get length
+	ld	hl,(iRecBuf)	; .. file buffer
+	ld	c,0
+	ld	de,CCP+1
+	ld	(CmdPtr),de	; Init pointer
+	jr	F..CmdLine
+F..loop:
+	ld	a,(hl)		; Get character
+	inc	hl
+	and	NoMSB		; .. less MSB
+	cp	eof
+	jr	z,F..eof	; .. end of file
+	ld	(de),a		; Save character
+	cp	lf
+	jr	z,F..eol	; .. end of line
+	inc	e		; *** ???? not C ***
+	jr	z,F..long	; .. line overflow
+F..CmdLine:
+	djnz	F..loop
+	push	bc
+	push	de
+	ld	hl,(FIB)	; Get FCB
+	ld	a,(hl)		; Fetch drive
+	dec	a
+	call	SelDsk		; .. log it
+	call	push.r		; Push regs
+	ld	a,($MULS$)	; Test multisector allowed
+	or	a
+	ld	c,.mulsec
+	ld	e,1
+	call	nz,BDOS		; .. nope, set to one
+	ld	hl,(FIB)	; Get FCB
+	ld	de,FCBlen
+	ex	de,hl
+	add	hl,de		; Point to buffer
+	ex	de,hl
+	call	SetBuf		; .. set it
+	ex	de,hl
+	ld	c,.rdseq
+	call	BDOS		; Read from file
+	call	pop.r		; Pop regs
+	pop	de
+	pop	bc
+	ld	hl,(BufPtr)	; Get pointer
+	ld	b,RecLng
+	or	a		; Test end of file
+	jp	z,F..loop	; .. nope, retry
+F..eof:
+	ld	de,(FIB)	; Get FCB
+	ld	c,.close
+	call	.BDOS		; Close file
+_free:
+	ld	hl,(FIB)	; Get file pointer
+	ld	de,-FIBhead
+	add	hl,de		; Point to previous chain
+	ld	e,(hl)		; Get file pointer
+	inc	hl
+	ld	d,(hl)
+	push	de
+	call	PopFIB		; Restore FIB
+	pop	hl		; Get back file pointer
+	ld	a,h
+	or	l		; Test empty
+	jp	nz,.GetNewCmdLine
+	ld	hl,CON.CmdLine
+	ld	(@CMDIO@),hl	; Set console if end of chain
+	jp	.GetNewCmdLine	; .. get new line
+F..long:
+	ld	hl,$TOO.LONG
+	call	PrErrStr	; .. line too long
+	jr	F..eof		; .. process end of file
+F..eol:
+	inc	de
+	ld	a,.eot		; Set end of line
+	ld	(de),a
+	ld	(iRecBuf),hl	; Save pointer
+	ld	a,b
+	ld	(iRecPtr),a	; .. length
+	call	Prompt		; Give prompt prefix
+	ld	hl,CCP+1
+	jp	String		; Print command line
+;
+; Indicate ready for command
+;
+Prompt:
+	ld	e,'%'
+	ld	c,.conout
+	jp	.BDOS		; .. print
+;
+; Unlink command file chain
+; ENTRY	Reg HL points to current link
+;	Reg DE points to new FIB
+;
+PopFIB:
+	push	de
+	ld	de,(FIBchn)	; Get chain
+	ld	(hl),d		; .. save
+	dec	hl
+	ld	(hl),e
+	ld	(FIBchn),hl	; .. new chain
+	pop	hl
+	ld	(FIB),hl	; Set file pointer
+	ld	a,h
+	or	l
+	ret	z
+	ld	de,iRecBuf+1
+	dec	hl
+	ldd			; .. get back setting
+	ldd
+	ldd
+	ret
+;
+$TOO.LONG:
+	db	13,'Line Too Long'
+;
+; Scan control function
+; EXIT	Carry set on end of control table
+;
+ScanCtrl::
+	ld	a,_RET		; Disable ..
+	ld	(@COPY),a	; .. file copy
+	ld	(l0b4c),a
+	ld	(@INSERT),a	; .. symbol insertion
+	ld	(@STAT),a	; .. statistic display
+	ld	(@PUB),a	; .. public display
+	ld	hl,(SLRctrl)	; Get SLR pointer
+	ld	a,(hl)		; .. get control
+	cp	3		; Test ???
+	call	z,IniRead	; .. yeap, new read
+	ld	hl,(SLRctrl)	; Get back pointer
+	ld	a,(hl)
+	cp	.eot		; Test of table
+	jr	z,l0822
+	call	Getc		; Get byte
+	cp	_MODNAM		; Test module definition
+	jr	nz,l0824	; .. nope
+	call	RdSLRname	; Read module name
+	call	RdWord		; .. read program size
+	ld	(Csize),hl	; .. save
+	call	RdWord		; .. read data size
+	ld	(Dsize),hl	; .. save
+	ld	hl,(SLRctrl)	; Get pointer
+	ld	a,(hl)
+	or	a		; Test simple read
+	ret	z		; .. yeap
+	call	IsModule?	; Test module found
+	jr	nz,l0816	; .. nope
+	ld	hl,(SLRctrl)	; Get pointer
+	ld	bc,0
+	ld	a,.eot
+	cpir			; Fix for end of table
+	ld	(SLRctrl),hl
+	xor	a
+	ret
+l0816:
+	ld	hl,(SLRctrl)	; Get pointer
+	ld	a,(hl)		; .. get control
+	cp	1		; Test ????
+	ret	z
+	call	ProcSLRctrl	; Process SLR control
+	jr	ScanCtrl	; .. next scan
+l0822:
+	scf			; Set end of table
+	ret
+l0824:
+	inc	a		; Verify end of file
+	jr	z,l082d		; .. yeap
+	ld	hl,$INV.FORMAT
+	jp	ErrorCmd	; .. invalid format
+l082d:
+	ld	hl,(SLRctrl)	; Get pointer
+	ld	a,(hl)		; .. get control
+	inc	hl
+	ld	(SLRctrl),hl	; Bump pointer
+	or	a		; Test scan successfully
+	jr	z,ScanCtrl	; .. yeap
+	call	String		; Tell what's wrong
+	ld	hl,$NOT.FOUND
+	jp	ErrorCmd	; .. error
+;
+$INV.FORMAT:
+	db	33,'Not a valid SLR Format REL File !'
+$NOT.FOUND:
+	db	18,' Not Found in File'
+;
+; Test library module found
+; EXIT	Zero set if found
+;
+IsModule?:
+	ld	hl,(SLRctrl)	; Get control pointer
+	inc	hl		; .. skip control
+	ld	de,$MODULE	; Init name
+	ld	bc,MaxMod	; .. and length
+..IsModule:
+	ld	a,(de)		; Get name
+	inc	de
+	cpi			; Compare
+	jr	nz,NotThisMod	; .. not same
+	jp	pe,..IsModule	; .. still any in buffer
+	ret			; .. end
+NotThisMod:
+	dec	hl		; .. fix pointer
+	dec	hl
+	ld	a,(hl)		; Fetch control
+	inc	a		; .. set non zero
+	ret
+;
+; Init read drom SLR file
+;
+IniRead::
+	inc	hl
+	ld	(SLRctrl),hl
+	ld	a,(REL$FCB+_EX)	; Get extent
+	or	a
+	jr	nz,l08bc	; .. not zero
+	ld	a,(REL$FCB+_CR)
+	cp	_Recs_		; Test max records
+	jr	z,l08af		; .. yeap
+l08a0:
+	xor	a
+	ld	(REL$FCB+_CR),a	; Clear extent
+	call	RdBuff		; Read disk buffer
+	exx
+	ld	hl,@RdBuff	; Init buffer
+	ld	b,0		; .. clear count
+	exx
+	ret
+l08af:
+	exx
+	ld	hl,@RdBuff	; Init buffer
+	ld	b,0		; .. clear count
+	exx
+	ld	hl,rPages
+	ld	(hl),_Recs_ / 2	; Init read pages
+	ret
+l08bc:
+	ld	de,REL$FCB
+	ld	c,.close	; Close file
+	call	.BDOS
+	xor	a
+	ld	(REL$FCB+_EX),a	; Clear extent
+	ld	de,REL$FCB
+	ld	c,.open
+	call	.BDOS		; .. re-open it
+	jr	l08a0
+;
+; Read 16 bit from SLR file
+; EXIT	Reg HL holds address
+;
+RdWord:
+	call	Getc		; Get lo
+	ld	l,a
+	call	Getc		; .. and hi
+	ld	h,a
+	ret
+;
+; Perform options
+;
+DoOptions:
+	ld	hl,Status	; Get status
+	bit	_ASK,(hl)	; Test ASK
+	jr	z,NoASK		; .. nope
+	ld	hl,$MODULE
+	call	String		; Tell module
+	call	YES.NO		; Ask for processing
+	cp	'Y'
+	jr	nz,ProcSLRctrl	; .. nope
+NoASK::
+	ld	hl,Status	; Get status
+	ld	a,(hl)
+	and	NOT @ASK	; .. test any other option
+	jr	nz,l0917	; .. yeap
+	xor	a
+	ld	(@COPY),a	; Enable copy
+	ld	a,_MODNAM
+	ld	(ProcFlg),a	; Cancel plane exit
+	call	.Putc		; .. put to file
+	ld	hl,$MODULE	; Point to module
+	call	l0a5a
+	ld	hl,(Csize)	; Get program size
+	call	l0a7b
+	ld	hl,(Dsize)	; Get data size
+	call	l0a7b
+	jr	ProcSLRctrl	; .. process control
+l0917:
+	ld	a,(hl)
+	and	@???+@MAP+@LST	; Test bits
+	jr	z,l092f
+	ld	hl,ModLen	; Point to length of module
+	ld	de,$MODCPY
+	ld	c,(hl)
+	ld	b,0
+	inc	bc
+	ldir			; .. save module name
+	xor	a
+	ld	(@STAT),a	; Enable statistic
+	ld	hl,Status
+l092f:
+	ld	a,(hl)
+	and	@???+@UNDEF+@MAP; Test bits
+	jr	z,ProcSLRctrl	; .. skip
+	xor	a
+	ld	(l0b4c),a
+	ld	(@INSERT),a	; Enable symbol insertion
+	bit	3,(hl)
+	jr	nz,l0942
+	ld	(@PUB),a	; Enable public display
+l0942:
+	ld	hl,(dHeap)	; Mark heap
+	ld	(dMark),hl
+;
+; Process SLR control
+;
+ProcSLRctrl:
+	call	Getc		; Get byte
+	or	a		; Test control
+	jp	m,Itm.80_FF	; .. yeap
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Got code 00..7F, implies constant bytes 01..80 %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+	inc	a		; .. fix length
+	ld	b,a
+GetConstItm:
+	call	Getc		; .. keep on reading
+	djnz	GetConstItm
+	jr	ProcSLRctrl	; .. get next
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Got code 80..FF, implies control code %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+Itm.80_FF:
+	sub	_SPCITM		; Test range
+	jp	c,Itm.80_DF
+	sub	3
+	jr	c,ProcSLRctrl	; .. E0..E2 - skip
+	sub	2
+	jr	c,Itm.E3_E4	; .. E3..E4
+	sub	3
+	jr	c,IllSLRctrl	; .. E5..E7
+	jr	z,Itm.E8	; .. E8
+	sub	3
+	jr	c,ProcSLRctrl	; .. E9..EA - skip
+	sub	9
+	jr	c,IllSLRctrl	; .. EB..F3
+	jr	z,Itm.F4	; .. F4
+	dec	a
+	jr	z,Itm.F5.FD	; .. F5
+	dec	a
+	jr	z,Itm.F6	; .. F6
+	dec	a
+	jr	z,Itm.F7	; .. F7
+	dec	a
+	jr	z,Itm.F8	; .. F8
+	dec	a
+	jr	z,IllSLRctrl	; .. F9 - only used at start
+	dec	a
+	jp	z,Itm.FA	; .. FA
+	dec	a
+	jr	z,Itm.FB	; .. FB
+	dec	a
+	jp	z,Itm.FC	; .. FC
+	dec	a
+	jr	z,Itm.F5.FD	; .. FD
+	dec	a
+	jr	z,Itm.FE	; .. FE
+IllSLRctrl:
+	ld	hl,$ILL.SLR.CTRL
+	jp	AbortStr	; .. invalid code, break
+;
+; Control item F6 : Assembly Time Error
+;
+Itm.F6:
+	ld	a,TRUE
+	ld	(AssErr),a	; Set flag
+	jr	ProcSLRctrl	; .. try next
+;
+; Control item F7 : Time and Date
+;
+Itm.F7:
+	ld	hl,TOD		; Set array
+	ld	b,4
+GetTOD:
+	call	Getc		; Fetch time and date
+	ld	(hl),a		; .. save
+	inc	hl
+	djnz	GetTOD
+	jr	ProcSLRctrl	; Try next
+;
+; Control item E3 and E4 : Generate Byte from External
+;
+Itm.E3_E4:
+	call	SpecItm		; Get special item
+..ProcSLTc:
+	jr	ProcSLRctrl	; .. loop on
+;
+; Control item F8 : Chain external
+;
+Itm.F8:
+	call	RdSLRname	; Read name
+	ld	hl,SymStat	; Load dummy status
+	call	InsertLabel	; Insert label into table
+	set	_EXT,(hl)	; Set external
+	res	_ENT,(hl)	; .. clear entry
+	call	Getc		; Get byte
+;
+; Control item F4 : Reserved :-)
+;
+Itm.F4:
+	call	Getc		; .. get two bytes
+;
+; Control item E8 : Generate Bit Type instruction
+;
+Itm.E8:
+	call	Getc		; .. get bit byte
+	jr	..ProcSLTc	; .. loop on
+;
+; Control item FB : COMMON Definition
+;
+Itm.FB:
+	call	RdSLRname	; Read name
+	call	Getc		; Get block length lo
+	ld	(Value),a
+	call	Getc		; .. hi
+	ld	(Value+1),a
+	call	?RET?		; .. dummy RET
+	jr	..ProcSLTc	; .. loop on
+;
+; Control item F5 and FD : Select Library
+;
+Itm.F5.FD:
+	call	RdSLRname	; Read name of lib
+	jr	..ProcSLTc	; .. loop on
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Got code 80..DF, implies control code %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+Itm.80_DF:
+	add	a,_SPCITM	; .. real so far
+	cp	_LOWNIB		; Test range
+	jr	c,ChkSpec
+	cp	_EXTOFF
+	jr	c,Oper
+ChkSpec:
+	and	LoMask		; Get lower bits
+	cp	@CTRL		; Test special type
+	jr	z,Itm.E3_E4	; .. yeap
+	call	Getc		; Skip 16 bit if not
+	call	Getc
+	jr	..ProcSLTc	; .. loop on
+Oper:
+	cp	_LOWNIB+@CTRL	; Test leader byte
+	call	z,Getc		; .. yeap get next
+	jr	..ProcSLTc	; .. loop on
+;
+; Control item FE : End of Module
+;
+Itm.FE:
+	call	Getc		; Get control
+	call	IsSpec?		; .. process it
+	call	TellStat	; Give statistic
+	call	TellPublics	; .. display publics
+	ret
+;
+; Control item FA : Entry Definition
+;
+Itm.FA:
+	call	RdSLRname	; Read name
+	call	Getc		; Get type
+	ld	(AdrType),a
+	call	Getc		; Get lo offset
+	ld	l,a
+	call	Getc		; .. and hi
+	ld	h,a
+	ld	(Value),hl
+	ld	hl,SymStat	; Load dummy status
+	call	InsertLabel	; Insert label into table
+	ld	a,(AdrType)	; Get type
+	ld	b,a		; .. save
+	ld	a,(hl)		; Get state
+	and	HiMask		; .. upper bits
+	or	b		; Insert address mode
+	ld	(hl),a
+	set	_ENT,(hl)	; Set entry
+	res	_EXT,(hl)	; .. clear external
+	ld	de,Value
+	ex	de,hl
+	inc	de
+	ldi			; .. save offset
+	ldi
+	jp	ProcSLRctrl	; Process next
+;
+; Control item FC : External Declaration
+;
+Itm.FC:
+	call	RdSLRname	; Read name
+	ld	hl,SymStat	; Load dummy status
+	call	InsertLabel	; Insert label into table
+	set	_EXT,(hl)	; Set external
+	res	_ENT,(hl)	; Clear entry
+	jp	ProcSLRctrl	; Process next
+;
+; *** DUMMY ***
+;
+?RET?:
+	ret
+l0a56:
+	call	.Putc		; Put to file
+	inc	hl
+l0a5a:
+	ld	a,(hl)
+	cp	.eot		; Test end of file
+	jr	nz,l0a56
+	jr	.Putc		; Put to file
+;
+; Read name from SLR item control
+;
+RdSLRname:
+	ld	de,$MODULE	; Point to module
+	ld	b,MaxMod+1	; .. set max length
+..RdSLRname:
+	call	Getc		; Get charccter
+	ld	(de),a		; .. save
+	inc	de
+	cp	.eot		; .. test end
+	jr	z,EndSLRname	; .. yeap
+	djnz	..RdSLRname
+	jp	IllSLRctrl	; .. invalid
+EndSLRname:
+	ld	a,MaxMod+1
+	sub	b		; Calculate length
+	ld	(ModLen),a	; .. save
+	ret
+;
+;
+;
+l0a7b:
+	ld	a,l
+	call	.Putc		; Put lo
+	ld	a,h
+	jr	.Putc		; .. and hi
+;
+; Fetch byte from file - copy to output if enabled
+; EXIT	Accu holds byte
+;
+Getc:
+	exx
+	ld	a,(hl)		; Get byte
+	inc	hl
+	dec	b		; .. count down
+	call	z,RdFromFile	; .. aha, get buffer
+	exx
+;
+; Write byte to file if enabled
+; ENTRY	Accu holds byte
+;
+.Putc:
+@COPY:
+	_go			; NOP or RET
+;
+; Write byte to file
+; ENTRY	Accu holds byte
+;
+Putc:
+	exx
+	ld	(de),a		; Save byte
+	inc	de
+	dec	c		; Test all written
+	exx
+	ret	nz		; .. nope
+	push	hl
+	ld	hl,wPages
+	dec	(hl)		; Count down pages
+	pop	hl
+	ret	nz		; .. still room
+	exx
+	push	hl
+	push	bc
+	push	af
+	call	WrToFile	; Write to file
+	pop	af
+	pop	bc
+	pop	hl
+	ld	de,@WrBuff	; Init base buffer
+	exx
+	ret
+;
+; Test special item - process if specified
+; EXIT	If not special, reg HL holds address
+;
+IsSpec?:
+	and	LoMask		; Get lower bits
+	cp	@CTRL		; Test special item
+	jr	z,SpecItm	; .. yeap
+	push	af
+	call	Getc		; Get lo
+	ld	l,a
+	call	Getc		; .. and hi
+	ld	h,a
+	pop	af
+	ret
+;
+; Get special item
+; If next byte is not zero, then it determines the external ref
+;
+SpecItm:
+	call	Getc		; Get byte
+	or	a		; Test zero
+	ret	nz		; .. nope
+	jr	Itm.FC		; Fetch name
+;
+; Read from file
+;
+RdFromFile:
+	jp	.RdFromFile	; ** DUMMY **
+.RdFromFile:
+	push	hl
+	ld	hl,rPages
+	dec	(hl)		; Count down reda pages
+	pop	hl
+	ret	nz		; .. still amy in buffer
+	push	af
+	push	de
+	push	bc
+	call	RdBuff		; Read disk buffer
+	ld	hl,@RdBuff	; Return buffer
+	pop	bc
+	pop	de
+	ld	b,0		; .. clear remainder
+	pop	af
+	ret
+;
+; Init SLR file after reading buffer
+;
+IniSLR:
+	exx
+	ld	hl,@RdBuff	; Set buffer
+	ld	b,0		; .. clear count
+	exx
+	ret
+;
+$ILL.SLR.CTRL:
+	db	12,'File Corrupt'
+l0aed:
+	scf
+	ret
+;
+; Insert label into symbol table
+; EXIT	Reg HL holds symbol address
+;
+InsertLabel::
+@INSERT:
+	_go
+	call	l0b4c
+	jr	nc,l0aed
+	push	hl
+	ex	de,hl
+	ld	hl,(l105e)
+	inc	hl
+	inc	hl
+	ld	(l105e),hl
+	dec	hl
+	sbc	hl,de
+	jr	z,l0b10
+	ld	b,h
+	ld	c,l
+	ld	hl,(l105e)
+	dec	hl
+	ld	d,h
+	ld	e,l
+	dec	hl
+	dec	hl
+	lddr
+l0b10:
+	ld	a,(ModLen)	; Get length of module
+	add	a,6		; .. add header
+	ld	b,0
+	ld	c,a
+	call	_d.alloc	; Allocate memory
+	pop	de
+	push	hl
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0b47
+	ldi
+	ldi
+	ldi
+	ldi
+	ldi
+	ld	hl,$MODULE	; Point to module
+	ldir			; .. unpack it
+	ld	hl,l105b
+	dec	(hl)
+	pop	hl
+	ret	nz
+	push	hl
+	ld	bc,l0100
+	call	_u.alloc	; Allocate memory
+	ld	a,80h
+	ld	(l105b),a
+	pop	hl
+	ret
+l0b47:
+	ds	5
+l0b4c:
+	_go
+	ld	bc,l22f2
+	ld	hl,(l105e)
+	ld	(l0b58+1),hl
+	jr	l0b5c
+l0b58:
+	ld	hl,0
+	inc	bc
+l0b5c:
+	scf
+	sbc	hl,bc
+	jr	z,l0b8e
+	srl	h
+	rr	l
+	set	0,l
+	add	hl,bc
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	hl,5
+	add	hl,de
+	ld	de,$MODULE	; Point to module
+l0b73:
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,l0b83
+	inc	de
+	inc	hl
+	inc	a
+	jr	nz,l0b73
+	pop	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	or	a
+	ret
+l0b83:
+	jr	nc,l0b8b
+	pop	hl
+	ld	(l0b58+1),hl
+	jr	l0b5c
+l0b8b:
+	pop	bc
+	jr	l0b58
+l0b8e:
+	or	0ffh
+	scf
+	ld	hl,(l0b58+1)
+	ret
+;
+; Allocate memory top down
+; ENTRY	Reg BC holds value to be allocated
+; EXIT	Reg HL points to start of memory
+;
+_d.alloc:
+	ld	hl,(dHeap)	; Get top down heap
+	or	a
+	sbc	hl,bc		; .. get new bottom
+	ld	(dHeap),hl	; .. save
+	push	hl
+	push	de
+	ld	de,(uHeap)	; Get bottom up heap
+	inc	d
+	sbc	hl,de		; Test room
+	pop	de
+	pop	hl
+	ret	nc		; .. yeap
+	jr	MemOvl		; .. no memory
+;
+; Allocate memory bottom up
+; ENTRY	Reg BC holds value to be allocated
+; EXIT	Reg HL points to start of memory
+;
+_u.alloc:
+	ld	hl,(uHeap)	; Get bottom up heap
+	push	hl
+	add	hl,bc		; Get new top
+	ld	(uHeap),hl	; .. save
+	push	de
+	ld	de,(dHeap)	; Get top down heap
+	dec	d
+	sbc	hl,de		; Test room
+	pop	de
+	pop	hl
+	ret	c		; .. yeap
+MemOvl:
+	ld	hl,$MEM.OVL
+	jp	AbortStr	; .. no memory, break
+;
+$MEM.OVL:
+	db	15,'OUT OF MEMORY !'
+;
+; Flush buffers and close temp file
+;
+Flush:
+	exx
+	push	de
+	exx
+	pop	hl
+	ld	de,@WrBuff-RecLng+1
+	or	a
+	sbc	hl,de
+	add	hl,hl
+	ld	a,h		; Get remaining records
+	or	h
+	call	nz,.WrToFile	; .. write to file if any
+	ld	de,Tmp$FCB
+	ld	c,.close	; Close temp file
+	jp	.BDOS
+;
+; Give message and abort librarian
+;
+AbortStr:
+	call	PrErrStr	; Give error
+	ld	c,.OS
+	jp	.BDOS		; .. exit librarian
+l0bf5:
+	call	PrErrStr
+	jp	.GetNewCmdLine	; Get new line
+
+; Print string defined by length
+; ENTRY	Reg HL points to message
+;
+PrErrStr:
+	ld	de,$MESSTR	; Get pointer to line
+	push	hl		; .. save message
+	call	FCBtoStr	; Convert FCB to string
+	ld	hl,$DELIM
+	call	strcpy		; Copy delimiter
+	pop	hl
+	call	strcpy		; .. and message
+	ex	de,hl
+	ld	(hl),cr		; Close line
+	inc	hl
+	ld	(hl),lf
+	inc	hl
+	ld	(hl),.eot
+	ld	hl,$MESSTR
+	jp	String
+;
+$DELIM:
+	db	3,' - '
+;
+; Convert current FCB to string
+;
+FCBtoStr:
+	ld	hl,(FIB)	; Get file pointer
+	ld	a,h
+	or	l		; Test empty
+	ret	z		; .. yeap
+	inc	hl		; .. skip drive
+	ld	b,@nam		; Get length
+FCBto..nam:
+	ld	a,(hl)		; Get name
+	and	NoMSB		; .. less attribute
+	cp	' '
+	jr	z,FCBto..nameOk	; .. no blanks in string
+	ld	(de),a		; Unpack name
+	inc	de
+	inc	hl
+	djnz	FCBto..nam
+FCBto..nameOk:
+	ld	c,b		; Get remainder as index
+	ld	b,0
+	add	hl,bc		; Point to extension
+	ld	a,(hl)
+	and	NoMSB
+	cp	' '		; Test extension
+	ret	z		; .. nope
+	ld	a,'.'
+	ld	(de),a		; Set delimiter
+	inc	de
+	ld	b,@ext		; Set length
+FCBto..ext:
+	ld	a,(hl)		; Unpack extension
+	and	NoMSB		; .. less MSB
+	ld	(de),a
+	inc	de
+	inc	hl
+	djnz	FCBto..ext
+	ret
+;
+; Copy new line to string
+;
+cpyNL:
+	ld	hl,$NL	; .. load new line
+;
+; Copy string
+; ENTRY	Reg HL points to source string started with length
+;	Reg DE points to destination
+;
+strcpy:
+	ld	c,(hl)		; Fetch length
+	inc	hl
+	ld	b,0		; .. as 16 bit
+	ldir			; .. unpack
+	ret
+l0c57:				;;;
+	ld	hl,$MESSTR
+	jp	String
+;
+; Perform BDOS function
+; ENTRY	Reg C holds function
+;	Reg (D)E holds parameter as required
+; EXIT	Accu and/or reg HL hold result
+;
+.BDOS:
+	call	push.r		; Push regs
+	inc	c		; Test wram start
+	dec	c
+	jp	z,OS		; .. yeap
+	call	BDOS		; Excecute BDOS
+	call	pop.r		; .. pop regs
+	ret
+l0c6c:
+	db	eof,.eot
+l0c6e:				;;;;
+	ld	hl,l0400
+	ld	de,(l114b)
+	or	a
+	sbc	hl,de
+	jr	z,l0c9e
+	add	hl,hl
+	push	hl
+	inc	l
+	dec	l
+	jr	z,l0c89
+	ld	hl,l0c6c
+	call	l0cd3
+	pop	hl
+	inc	h
+	push	hl
+l0c89:
+	ld	hl,Tmp$FCB	; Get temp FCB
+	ld	a,(hl)		; Fetch drive
+	dec	a
+	call	SelDsk		; .. log it
+	pop	bc
+	ld	hl,(l1149)
+l0c95:
+	call	WrBuff		; Write buffer
+	ld	de,RecLng
+	add	hl,de		; .. bump address
+	djnz	l0c95		; .. loop
+l0c9e:
+	ld	hl,Tmp$FCB
+	ld	c,.close	; Close temp file
+	jp	.BDOS
+l0ca6:				;;;
+	call	push.r		; Save regs
+	ld	de,Tmp$FCB
+	ld	c,.delete
+	call	BDOS		; Delete temp file
+	ld	de,Tmp$FCB
+	ld	c,.make
+	call	BDOS		; .. create new one
+	inc	a
+	jr	z,DskFull	; .. error
+	ld	hl,Tmp$FCB+_CR
+	ld	(hl),0		; Clear current record
+	inc	hl
+	ld	(TmpBuf),hl	; Save buffer
+	ex	de,hl
+	call	SetBuf		; .. set it
+	ld	hl,RecLng
+	ld	(l114b),hl
+	call	pop.r		; Pop regs
+	ret
+l0cd3:
+	ld	de,(TmpBuf)	; Get buffer
+	ld	bc,(l114b)
+l0cdb:
+	ld	a,-1
+l0cdd:
+	cp	(hl)
+	jr	z,l0cf0
+	ldi
+	jp	pe,l0cdd
+	call	WrBuff		; .. write buffer
+	ld	de,l10ad
+	ld	bc,RecLng
+	jr	l0cdb
+l0cf0:
+	ld	(TmpBuf),de	; .. save buffer
+	ld	(l114b),bc
+	ret
+;
+; Write buffer to temp file
+; ENTRY	Reg HL holds address of buffer
+;
+WrBuff:
+	push	hl
+	push	bc
+	ex	de,hl
+	call	SetBuf		; Set buffer
+	ld	de,Tmp$FCB
+	ld	c,.wrseq
+	call	BDOS		; Write to temp file
+	or	a
+	jr	z,Wr.OK		; .. ok
+	ld	de,Tmp$FCB
+	ld	c,.close
+	call	BDOS		; Close file
+DskFull:
+	call	pop.r		; Pop regs
+	ld	hl,$DISK.FULL
+	call	String		; Give error message
+	ld	c,.OS
+	jp	.BDOS		; .. break
+Wr.OK:
+	pop	bc
+	pop	hl
+	ret
+;
+$DISK.FULL:
+	db	'Disk Full!!',cr,lf,.eot
+;
+	ret			; *** WHY ***
+;
+; Print string to list device
+; ENTRY	Reg HL points to string closed by -1
+;
+LstOut:				; *** NEVER CALLED ***
+	ld	a,(hl)		; Get character
+	or	a
+	ret	m		; .. end on hi bit set
+	inc	hl
+	ld	e,a
+	ld	c,.lstout
+	push	hl
+	call	BDOS		; .. print to list device
+	pop	hl
+	jr	LstOut
+	ret
+;
+; Print string closed by -1
+; ENTRY	Reg HL points to string
+;
+PrStr:
+	ld	a,(hl)		; Get character
+	or	a
+	ret	m		; .. end if > valid ASCII
+	inc	hl
+	ld	e,a
+	ld	c,.conout
+	push	hl
+	call	BDOS		; .. print
+	pop	hl
+	jr	PrStr
+;
+l0d4f:				;;;;
+	db	6,'Abort!'
+;
+; Give new line on console
+;
+NL:
+	ld	hl,$NL+1	; Get string
+;
+; Print string closed by -1
+; ENTRY	Reg HL points to string
+;
+String:
+	call	push.r		; Save regs
+	call	PrStr		; .. print string
+	call	pop.r		; Pop regs
+	ret
+;
+; Set disk buffer if new one
+; ENTRY	Reg DE points to disk buffer
+;
+SetBuf:
+	push	hl
+	ld	hl,(BufPtr)	; Get pointer
+	or	a
+	sbc	hl,de		; .. get difference
+	jr	z,l0d79		; .. same
+	ld	(BufPtr),de	; .. set new pointer
+	push	de
+	push	bc
+	ld	c,.setdma
+	call	BDOS		; .. set buffer
+	pop	bc
+	pop	de
+l0d79:
+	pop	hl
+	ret
+;
+; Log disk if not selected
+; ENTRY	Accu holds disk
+;
+SelDsk:
+	ld	hl,LogDsk	; Get logged disk
+	cp	(hl)		; Test same
+	ret	z		; .. yeap
+	ld	(hl),a		; Set it
+	ld	e,a
+	ld	c,.seldsk
+	jp	.BDOS		; .. and log it
+;
+; Save alternate registers
+;
+push.r:
+	exx
+	ex	(sp),hl
+	push	de		; .. save
+	push	bc
+	push	ix
+	push	iy
+	push	hl
+	exx
+	ld	a,($DI$)	; Test attache interrupts
+	or	a
+	ret	z		; .. nope
+	ei			; Enable explicitely
+	ret
+;
+; Pop alternate registers
+;
+pop.r:
+	push	af
+	ld	a,($DI$)	; Test attache interrupts
+	or	a
+	jr	z,l0da0		; .. nope
+	di			; .. disable
+l0da0:
+	pop	af
+	exx
+	pop	hl		; Pop registers
+	pop	iy
+	pop	ix
+	pop	bc
+	pop	de
+	ex	(sp),hl
+	exx
+	ret
+;
+; Get UPPER case character
+; EXIT	Accu holds UPPER case character
+;
+Conin:
+	ld	c,.conin
+	call	.BDOS		; Get character
+	push	af
+	call	NL		; Give new line
+	pop	af
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	res	5,a		; .. convert to UPPER case
+	ret
+;
+$NL:
+	db	3,cr,lf,.eot
+;
+DirFull:
+	ld	hl,$DIR.FULL
+	jp	AbortStr	; Give message and break
+;
+$DIR.FULL:
+	db	15,'Directory Full!'
+;
+; Write buffer to temp file
+;
+WrToFile:
+	ld	a,_Recs_	; Set full records
+;
+; Write buffer to temp file
+; ENTRY	Accu holds record count
+;
+.WrToFile:
+	ld	(_wRecs_),a	; Save record count
+	ld	hl,wPages
+	ld	(hl),_Recs_ / 2	; Set pages
+	ld	a,(Tmp$FCB)	; Get temp drive
+	or	a
+	jr	nz,l0dec	; .. defined
+	ld	a,(LIB$FCB)	; Get from result file if not
+l0dec:
+	dec	a
+	call	SelDsk		; Log disk
+	call	push.r		; Save regs
+	ld	a,(CrecFlg)	; Test file already created
+	or	a
+	jr	nz,l0e17	; .. yeap
+	ld	a,(LIB$FCB)	; Get drive
+	ld	de,Tmp$FCB
+	ld	(de),a		; .. store into temp FCB
+	ld	c,.delete
+	call	BDOS		; Delete temp file
+	ld	de,Tmp$FCB
+	ld	c,.make
+	call	BDOS		; .. create new one
+	inc	a
+	jr	z,DirFull	; .. not possible
+	ld	(CrecFlg),a	; .. set creation flag
+	xor	a
+	ld	(Tmp$FCB+_CR),a	; Clear current record
+l0e17:
+	ld	a,(_wRecs_)	; Get records to be processed
+	ld	b,a
+	ld	a,($MULS$)	; Test multisector allowed
+	or	a
+	jr	z,l0e29		; .. nope
+	ld	e,b
+	ld	c,.mulsec
+	call	BDOS		; Set records requested
+	ld	b,1		; .. set virtual count
+l0e29:
+	ld	hl,@WrBuff	; Init base buffer
+l0e2c:
+	call	WrBuff		; Write buffer
+	ld	de,RecLng
+	add	hl,de		; .. bump address
+	djnz	l0e2c
+	call	pop.r		; Pop registers
+	ret
+;
+; Read buffer from specified file
+;
+RdBuff::
+	ld	a,($MULS$)	; Test multisector allowed
+	or	a
+	jr	nz,l0e78	; .. yeap
+	ld	a,(REL$FCB)	; Get drive
+	dec	a
+	call	SelDsk		; .. log it
+	call	push.r		; Save regs
+	ld	b,_Recs_	; Set max records
+	push	bc
+	ld	de,@RdBuff	; Init buffer
+	jr	l0e5a
+l0e51:
+	push	bc
+	ld	hl,(BufPtr)	; Get pointer
+	ld	de,RecLng
+	add	hl,de
+	ex	de,hl
+l0e5a:
+	call	SetBuf		; Set disk buffer
+	ld	de,REL$FCB
+	ld	c,.rdseq	; Read record
+	call	BDOS
+	pop	bc
+	or	a		; Test more
+	jr	nz,l0e6b	; .. nope, end of file
+	djnz	l0e51
+l0e6b:
+	ld	a,_Recs_	; Calculate records read
+	sub	b
+l0e6e:
+	inc	a
+	srl	a
+	ld	(rPages),a	; .. set reminder
+	call	pop.r		; Pop registers
+	ret
+l0e78:
+	call	push.r		; Save regs
+	ld	de,@RdBuff	; Init buffer
+	call	SetBuf		; .. set it
+	ld	e,_Recs_
+	ld	c,.mulsec
+	call	BDOS		; Set max records
+	ld	de,REL$FCB
+	ld	c,.rdseq	; Read from file
+	call	BDOS
+	or	a
+	ld	a,_Recs_	; .. return max on success
+	jr	z,l0e6e
+	ld	a,(OSver)	; Get OS version
+	dec	a
+	ld	a,h
+	jr	z,l0ea0		; CP/M 3.x
+	rra
+	rra
+	rra
+	rra
+l0ea0:
+	and	0fh
+	jr	l0e6e
+;
+; Ask for YES or NO
+; EXIT	Accu holds response in UPPER case
+;
+YES.NO:
+	ld	hl,$YES.NO
+	call	String		; .. tell what we want
+	jp	Conin		; Get character
+;
+$YES.NO:
+	db	' (Y/N)?',.eot
+;
+; Give statistic on end of module
+;
+TellStat:
+@STAT:
+	_go
+	ld	de,$MESSTR
+	ld	hl,$MODCPY
+	call	strcpy		; Copy module name
+	ld	hl,$PRG.SIZE
+	call	strcpy
+	ld	hl,(Csize)	; Get program size
+	call	CnvWord		; .. convert
+	ld	hl,$DAT.SIZE
+	call	strcpy
+	ld	hl,(Dsize)	; Get data size
+	call	CnvWord		; .. convert
+	call	cpyNL		; Close line
+	ld	hl,$MESSTR
+	jp	String
+;
+$PRG.SIZE:
+	db	11,tab,'Prog Size '
+$DAT.SIZE:
+	db	11,tab,'Data Size '
+;
+; Look for undefined entries and tell it
+;
+AnyUndef::
+	ld	a,MaxCol
+	ld	(SymCol),a	; Init symbols in line
+	ld	hl,$ONE.PASS
+	jr	l0f34
+;
+; Give public symbol report
+;
+TellPublics:
+@PUB:
+	_go
+	ld	a,MaxCol
+	ld	(SymCol),a	; Init symbols in line
+	ld	hl,$PUBLIC
+	call	String		; Tell publics
+	ld	hl,$MESSTR
+	ld	(l10f4),hl
+	call	l102b
+l0f17:
+	call	l1041
+	jr	z,l0f27
+	bit	7,(hl)		;; _ENT
+	jr	z,l0f17
+	res	7,(hl)
+	call	l0f8d
+	jr	l0f17
+l0f27:
+	ld	hl,SymCol
+	ld	a,MaxCol
+	cp	(hl)		; Test init value
+	ld	(hl),a		; .. set max
+	call	nz,l0f6e
+	ld	hl,$EXTERNALS
+l0f34:
+	call	String		; Tell EXTERNALS or ONE PASS
+	ld	hl,$MESSTR
+	ld	(l10f4),hl
+	call	l102b
+l0f40:
+	call	l1041
+	jr	z,l0f50
+	bit	6,(hl)		;; _EXT
+	jr	z,l0f40
+	res	6,(hl)
+	call	l0f8d
+	jr	l0f40
+l0f50:
+	ld	a,(SymCol)
+	cp	MaxCol		; Test init value
+	call	nz,l0f6e
+	call	l0f6e
+	ld	a,(Status)	; Get status
+	and	@???+@UNDEF	; Test bits
+	ret	nz
+	ld	hl,(dMark)	; Release heap
+	ld	(dHeap),hl
+	ld	hl,l22f3
+	ld	(l105e),hl
+	ret
+l0f6e:
+	ld	hl,(l10f4)
+	ld	a,' '
+l0f73:
+	dec	hl
+	cp	(hl)
+	jr	z,l0f73
+	inc	hl
+	ld	(hl),cr
+	inc	hl
+	ld	(hl),lf
+	inc	hl
+	ld	(hl),.eot
+	ld	hl,$MESSTR
+	call	String
+	ld	hl,$MESSTR
+	ld	(l10f4),hl
+	ret
+l0f8d:
+	ld	de,5
+	add	hl,de
+	ld	de,(l10f4)
+	ld	c,11h
+	ld	a,0ffh
+	jr	l0f9d
+l0f9b:
+	ldi
+l0f9d:
+	cp	(hl)
+	jr	nz,l0f9b
+	ld	hl,SymCol
+	dec	(hl)		; Count down columns
+	jr	z,l0fad		; .. that's it
+	ld	b,c
+	ld	a,' '
+l0fa9:
+	ld	(de),a
+	inc	de
+	djnz	l0fa9
+l0fad:
+	ld	(l10f4),de
+	ret	nz
+	ld	(hl),MaxCol	; Reset to max
+	jr	l0f6e
+;
+$PUBLIC:
+	db	cr,lf,'Public Symbols Defined:',cr,lf,.eot
+$EXTERNALS:
+	db	cr,lf,'External Symbols Referenced:',cr,lf,.eot
+$ONE.PASS:
+	db	cr,lf,'Undefined In One Pass:',cr,lf,.eot
+;
+; Convert word to ASCII
+; ENTRY	Reg HL holds word
+;	Reg DE points to buffer
+;
+CnvWord:
+	ld	a,h		; Get hi
+	call	CnvByte
+	ld	a,l		; .. and lo
+;
+; Convert byte to ASCII
+; ENTRY	Accu holds byte
+;	Reg DE points to buffer
+;
+CnvByte:
+	push	af
+	rra			; Get hi bits
+	rra
+	rra
+	rra
+	call	CnvNibble
+	pop	af		; .. get lo bits
+;
+; Convert nibble to ASCII
+; ENTRY	Accu holds word
+;	Reg DE points to buffer
+;
+CnvNibble:
+	and	LoMask		; Mask bits
+	or	'0'
+	cp	'9'+1		; Test range
+	jr	c,Cnv0..9
+	add	a,'A'-'9'-1	; Fix for hex ASCII
+Cnv0..9:
+	ld	(de),a		; .. store
+	inc	de
+	ret
+;
+; Anybody there who knows what that means ???
+;
+?DUMMY?:
+	ret
+	ret
+;
+;
+;
+l102b:
+	ld	hl,(l105e)
+	ld	de,l22f3
+	ld	(l104b+1),de
+	or	a
+	sbc	hl,de
+	srl	h
+	rr	l
+	inc	hl
+	ld	(l1058),hl
+	ret
+;
+;
+;
+l1041:
+	ld	hl,(l1058)
+	dec	hl
+	ld	(l1058),hl
+	ld	a,h
+	or	l
+	ret	z
+l104b:
+	ld	hl,$-$
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(l104b+1),hl
+	ex	de,hl
+	ld	a,(hl)
+	ret
+l1058:
+	dw	0
+;
+; Initialized on restart to the indicated values
+; >>>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<<
+;
+l105a:
+	db	0		; 0
+l105b:
+	db	0		; RecLng
+uHeap:
+	dw	0		; l24f3
+l105e:
+	dw	0		; l22f3
+;
+; ##### END OF MAIN ENCRYPT #####
+;
+; >>>>> CLEAR NEXT AREA <<<<<
+;
+FIB:
+	dw	0
+BufPtr:
+	dw	0
+ProcFlg:
+	db	0
+FIBchn:
+	dw	0
+CrecFlg:
+	db	0
+REL$FCB:
+	ds	24
+l1080::
+
+Tmp$FCB	equ	REL$FCB+FCBlen	; \
+l10ad	equ	Tmp$FCB+_CR+1	; |
+$F.N	equ	Tmp$FCB+FCBlen	; /
+;
+LIB$OLD	equ	$F.N+9		; \
+LIB$FCB	equ	LIB$OLD+16	; /
+;
+TOD	equ	LIB$FCB+FCBlen
+AssErr	equ	TOD+5
+SymCol	equ	AssErr+1
+l10f4	equ	SymCol+1
+;
+; >>>>> END OF CLEAR <<<<<
+;
+dMark	equ	l10f4+2
+_wRecs_	equ	dMark+2
+SymStat	equ	_wRecs_+1
+l10fc	equ	SymStat+3
+wPages	equ	l10fc+1
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+; | NC  | NC  | NC  | ??? | UND | MAP | LST | ASK |
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+;
+; ASK	Ask for module
+; LST	List option
+; MAP	Map option, also sets LST
+; UND	Undefined option
+; ???
+; NC	Not used
+;
+Status	equ	wPages+1
+OSver	equ	Status+1
+AdrType	equ	OSver+1
+Value	equ	AdrType+1
+ModLen	equ	Value+2		; \
+$MODULE	equ	ModLen+1	; /
+dHeap	equ	$MODULE+MaxMod+1
+LogDsk	equ	dHeap+2
+LogFDsk	equ	LogDsk+1
+l1149	equ	LogFDsk+1
+l114b	equ	l1149+2
+TmpBuf	equ	l114b+2
+l114f	equ	TmpBuf+2
+rPages	equ	l114f+1
+$MODCPY	equ	rPages+1
+Csize	equ	$MODCPY+MaxMod+3
+Dsize	equ	Csize+2
+CmdPtr	equ	Dsize+2
+iRecPtr	equ	CmdPtr+130	; \
+iRecBuf	equ	iRecPtr+1	; /
+StkSav	equ	iRecBuf+2
+$MESSTR	equ	StkSav+2
+SLRbuf	equ	$MESSTR+80
+SLRctrl	equ	SLRbuf+RecLng
+@WrBuff	equ	SLRctrl+2
+@RdBuff	equ	@WrBuff+l0800
+l22f2	equ	@RdBuff+l0800+1
+l22f3	equ	l22f2+1		; Init
+l24f3	equ	l22f3+l0200	; Bottom up heap
+
+	end
+

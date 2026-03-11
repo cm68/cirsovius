@@ -1,0 +1,217 @@
+	title	CROMEMCO PROGRAM DEBUGGER
+	name	('DEBUG')
+
+; Loader for Cromemco program debugger
+; DASMed by W.Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+TPAPAG	equ	TPATOP+1
+FCB	equ	005ch
+
+.string	equ	 9
+.vers	equ	12
+
+.drv	equ	 1
+DIRlen	equ	16
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+CPMmin	equ	20h		; Min CP/M version
+
+RSTbas	equ	11000111b	; Base RST code
+;
+; !!!! From kernel !!!!
+;
+KERNlen	equ	20d7h		; Length of kernel
+KERN.BP	equ	   11		; Offset to breakpoint code in kernel
+;
+; !!!!!!!!!!!!!!!!!!!!!
+;
+l0004	equ	04h
+l0005	equ	05h
+l0009	equ	09h
+
+l0101	equ	0101h
+
+l0100:
+	jp	l0148
+
+	db	'Copyright (c) 1978, 1979 Cromemco, Inc.  All rights reserved.  00.03 '
+;
+; ######################
+; ### Start DEBUGGER ###
+; ######################
+;
+l0148:
+	ld	sp,l0148	; Set local stack
+	ld	c,.string
+	ld	de,l0202
+	call	l0240		; Init RST if requested
+	ld	hl,(TPATOP)	; Get top of memory
+	push	hl
+	ld	bc,(l0200)	; Load length of kernel
+	and	a
+	sbc	hl,bc		; Calculate bottom of kernel
+	ld	l,0		; As page boundary
+	ld	(TPATOP),hl	; Set as new top of memory
+	push	hl
+	push	bc
+	ld	hl,l0300	; Point to base of kernel code
+	ld	e,l
+	ld	d,h
+	add	hl,bc		; Point to top of kernel
+	ex	de,hl
+	dec	de		; Bit map starts here 
+	push	de
+l016e:
+	inc	de
+	ld	a,8		; Init bit count
+	push	af
+	ld	a,(de)		; Load map byte
+l0173:
+	rla			; Shift bit
+	jr	nc,l017d	; Nothing to relocate
+	ex	af,af'
+	ld	a,(TPAPAG)	; Get page of top of memory
+	add	a,(hl)		; Allocate kernel page
+	ld	(hl),a
+	ex	af,af'
+l017d:
+	ex	af,af'
+	inc	hl		; Next kernel location
+	dec	bc		; Count down length
+	ld	a,b
+	or	c		; Test relocation done
+	jr	z,l018c		; Yeap
+	pop	af		; Get back bit count
+	dec	a		; Count down
+	jr	z,l016e		; Get next map byte
+	push	af
+	ex	af,af'
+	jr	l0173
+l018c:
+	pop	af		; Clean stack
+
+	exx
+	pop	de
+	pop	bc		; Get back length of kernel		20D7
+	pop	hl		; Get back top of memory
+	push	hl
+	add	hl,bc		; Point to end of kernel		BDD7
+	dec	hl
+	ex	de,hl
+	lddr			; Move down kernel to top of memory	23D6 -> BDD7
+	pop	de
+	pop	hl
+	push	de
+	ld	bc,l0009
+	ldir			; BE00 -> 9D00
+	ex	de,hl
+	exx
+
+	inc	de
+	pop	hl
+	and	a
+	sbc	hl,de		; 9D00-27F2=750E
+	jr	nc,l01ac
+	ld	de,(TPATOP)
+l01ac:
+	ld	hl,l01ca
+	ex	de,hl
+	ld	bc,l0004
+	and	a
+	sbc	hl,bc		; 27F2-4=27EE
+	push	hl
+	ex	de,hl
+	ldir			; 01CA->27EE
+	pop	hl
+	push	hl
+	ld	de,l0101
+	and	a
+	sbc	hl,de		; 27EE-0101=26ED
+	ld	c,l
+	ld	b,h
+	ld	hl,l0100
+	sub	a
+	ld	(hl),a
+	ret
+l01ca:
+	ldir			; 0100->0101 26ED Bytes (00H)
+	exx
+	jp	(hl)		; BC=0, DE=BE09, HL=9D09
+;
+l01ce	equ	$
+
+	ds	($+000ffh AND 0ff00h)-l01ce
+
+l0200:
+	dw	KERNlen		; Length of kernel
+l0202:
+	db	' DEBUG CPM version 00.17 rel 3'
+	db	cr,lf
+	db	' modified by LeSve KARLSTAD'
+	db	cr,lf,eot
+;
+; Init RST if requested
+;
+l0240:
+	call	BDOS		; Print message
+	ld	hl,(FCB+.drv)
+	ld	a,' '
+	cp	l		; Test filename given
+	jr	z,l026d		; Nope
+	cp	h		; Test one character only
+	push	af
+	jr	nz,l0252	; Nope, try 2nd location
+	ld	a,l
+	jr	l0255
+l0252:
+	ld	a,(FCB+DIRlen+.drv)
+l0255:
+	cp	'1'		; Test valid range of breakpoint
+	jr	c,l026c		; Nope
+	cp	'7'+1
+	jr	nc,l026c
+	rlca			; Shift into right place
+	rlca
+	rlca
+	or	RSTbas		; Build RST
+	ld	(l0300+KERN.BP),a; Save breakpoint RST
+	pop	af
+	push	hl
+	jr	nz,l026c
+	ld	(FCB+.drv),a	; Reset character
+l026c:
+	pop	hl
+l026d:
+	ld	c,.vers
+	call	BDOS		; Get OS version
+	ld	a,l
+	cp	CPMmin		; Test CP/M version not 1.x
+	ret	nc		; Ok
+	ld	de,OS
+	push	de		; Set warm start return
+
+;;	ld	c,.string	;		<<<--- MISSING IN ORIGINAL
+
+	ld	de,l0280
+	jp	BDOS		; Print abort message
+;
+l0280:
+	db	'Wrong version of CP/M',eot
+;
+; ++++++++++++++++++++++++++++++++++++++++++++
+; +++ DEBUG kernel starts at page boundary +++
+; ++++++++++++++++++++++++++++++++++++++++++++
+;
+l0300	equ	$+000ffh AND 0ff00h
+
+	end

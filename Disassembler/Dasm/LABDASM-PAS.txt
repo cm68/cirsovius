@@ -1,0 +1,308 @@
+program LABDASM(input,output);
+{$V-}
+(*
+   Build reference list from disassembled source
+   This one searches for CALL instructions
+
+   Dynamic routines base upon RODNAY ZAKS
+   (German) Einfuehrung in PASCAL p.308
+
+   Less procedure 'loeschen'
+   But expanded by function 'Find'
+
+   TURBO program written by W.Cirsovius
+*)
+
+const
+  tab          = ^I;
+  space        = ' ';
+  labcolumn    = 8;
+
+type
+  LStr         = string[255];
+  FStr         = string[ 14];
+  SStr         = string[ 20];
+  ErrType      = (NoFI,SamFI,CtrlC,IO,RT,Intern);
+  SymPtr       = ^SymList;
+  SymList      = record
+                   next    : SymPtr;
+                   SymName : SStr;
+                 end;
+
+var
+  Symbol       : SStr;
+  FNI,
+  FNO          : FStr;
+  FI,
+  FO           : text;
+  FLine        : LStr;
+  Root,
+  Symb         : SymPtr;
+  cidx         : integer;
+
+procedure Error(Err:ErrType);
+(* Print error messages and exit *)
+Begin
+  case Err of
+    NoFI   : writeln('Cannot find source file ',FNI);
+    SamFI  : writeln('Files must be different');
+    CtrlC  : writeln('User abort');
+    IO     : writeln('Destination file ',FNO,' error');
+    RT     : writeln('Runtime error');
+    Intern : writeln('Unknown error');
+  end;
+  halt;
+End;
+
+procedure ErrorHandler(Code,PC:integer);
+(* Print redirected file error messages and exit *)
+Begin
+  {$I-}close(FO){$I+};
+  if IOResult<>0 then Error(IO);
+  case Hi(code) of
+    0 :  Error(CtrlC);
+    1 :  Error(IO);
+    2 :  Error(RT);
+    else Error(Intern);
+  end;
+End;
+
+(* ========== START DYNAMIC ROUTINES ========== *)
+
+function Find(Symb:SymPtr):boolean;
+(* Find label in list *)
+var
+  p            : SymPtr;
+  found        : boolean;
+Begin
+  if Root=NIL then found:=false
+              else
+              begin
+                p:=Root;
+                repeat
+                  found:=p^.SymName=Symb^.SymName;
+                  p:=p^.next;
+                until ((found) or (p=NIL));
+              end;
+  Find:=found;
+End;
+
+function Insert(Symb:SymPtr):boolean;
+(* Insert label into list *)
+var
+  p,q          : SymPtr;
+Begin
+  if Root=NIL then
+                begin
+                  Symb^.next:=NIL;
+                  Root:=Symb;
+                end
+  else
+    if Root^.SymName>Symb^.SymName then
+       begin
+         Symb^.next:=Root;
+         Root:=Symb;
+       end
+    else
+      begin
+        p:=Root;
+        q:=Root;
+        while (p^.next<>NIL) and (p=q) do
+          begin
+            p:=p^.next;
+            if p^.SymName>Symb^.SymName then
+              begin
+                q^.next:=Symb;
+                Symb^.next:=p;
+              end
+            else
+              q:=p;
+          end;
+        if (p^.next=NIL) and (p^.SymName<Symb^.SymName) then
+          begin
+            Symb^.next:=NIL;
+            p^.next:=Symb
+          end
+      end
+End;
+
+procedure printSymbols(p:SymPtr);
+(* Print symbols to file *)
+var
+  col          : integer;
+Begin
+  col:=0;
+  while p<>NIL do
+  begin
+    write(FO,p^.SymName,tab);
+    p:=p^.next;
+    col:=succ(col);
+    if (col mod labcolumn)=0 then writeln(FO);
+  end;
+End;
+
+(* ========== END DYNAMIC ROUTINES ========== *)
+
+function Putlist(Symb:SymPtr; var cnt:integer;dbg:boolean):boolean;
+(* Insert label into list and update count *)
+Begin
+  if dbg then
+  begin
+    writeln;
+    write('  -->> Insert ',Symb^.SymName);
+  end;
+  cnt:=succ(cnt);
+  Putlist:=Insert(Symb)
+End;
+
+procedure upline(var Line:LStr);
+(* Convert line to upper case *)
+var
+  i            : integer;
+Begin
+  for i:=1 to length(Line) do Line[i]:=upcase(Line[i]);
+End;
+
+function white(i:integer):boolean;
+(* Test white space in line *)
+Begin
+  white:=FLine[cidx+i] in [tab,space];
+End;
+
+function comment:boolean;
+(* Test comment in line *)
+Begin
+  comment:=FLine[cidx]=';';
+End;
+
+procedure listSymbols(cnt:integer);
+(* Write listing of labels to file *)
+Begin
+  writeln;
+  rewrite(FO);
+  writeln(FO,cnt:5,' symbols found:');
+  writeln(FO,'--------------------');
+  printSymbols(Root);
+  close(FO);
+End;
+
+procedure findCALL(var cnt:integer;dbg:boolean);
+(* Extract label from line *)
+var
+  work         : boolean;
+Begin
+  cidx:=cidx+3;
+  repeat
+    cidx:=succ(cidx);
+  until not white(0);
+  Symbol:='';
+  cidx:=pred(cidx);
+  repeat
+    cidx:=succ(cidx);
+    if ((not white(0)) and (not comment)) then Symbol:=Symbol+FLine[cidx];
+  until ((white(0)) or comment or (cidx>=length(FLine)));
+  if Symbol[2]=',' then delete(Symbol,1,2)
+                   else if Symbol[3]=',' then delete(Symbol,1,3);
+  new(Symb);
+  Symb^.SymName:=Symbol;
+  work:=not Find(Symb);
+  if work then work:=Putlist(Symb,cnt,dbg);
+  if not work then dispose(Symb);
+End;
+
+procedure Help;
+(* Print help *)
+Begin
+  writeln('Build reference list from disassembled source');
+  writeln('This one searches for CALL instructions');
+  writeln;
+  writeln('Call it:');
+  writeln;
+  writeln(tab,'LAB [+]source [destination]');
+  writeln;
+  writeln('Prefix "+" enables dump of labels inserted');
+  halt;
+End;
+
+procedure GetInFile;
+(* Get source file *)
+Begin
+  FNI:=Paramstr(1);
+  upline(FNI);
+End;
+
+procedure GetTwoFiles;
+(* Get two different files *)
+Begin
+  GetInFile;
+  FNO:=Paramstr(2);
+  upline(FNO);
+End;
+
+procedure GetFromOneFile;
+(* Build two files from one file *)
+var
+  p            : integer;
+Begin
+  GetInFile;
+  p:=pos('.',FNI);
+  if p=0 then p:=length(FNI)
+         else p:=pred(p);
+  FNO:=copy(FNI,1,p)+'.SSM';
+End;
+
+var
+  DUMP         : boolean;
+  codx,
+  Symcnt       : integer;
+
+procedure isCALL;
+(* Test CALL pssible *)
+Begin
+  if cidx<>0 then                  (* Check any CALL              *)
+  begin
+   if ((white(4) and               (* Verify delimiter after CALL *)
+       ((cidx=1) or                (* Ok if at left               *)
+       (cidx>1) and (white(-1))))) (* Verify previous delimiter   *)
+                                   then findCALL(Symcnt,DUMP);
+  end;
+End;
+
+BEGIN (* MAIN *)
+  DUMP:=false;
+  case Paramcount of
+    0 :  Help;
+    1 :  GetFromOneFile;
+    2 :  GetTwoFiles;
+    else Help;
+  end;
+  if FNI[1]='+' then
+  begin
+    delete(FNI,1,1);
+    DUMP:=true;
+    if FNO[1]='+' then delete(FNO,1,1);
+  end;
+  if FNI=FNO then Error(SamFI);
+  Symcnt:=0;
+  assign(FI,FNI);
+  assign(FO,FNO);
+  {$I-}reset(FI);{$I+}
+  if IOresult <>0 then Error(NoFI);
+  Root:=NIL;
+  while not eof(FI) do
+  begin
+    readln(FI,FLine);
+    upline(FLine);
+    cidx:=pos('CALL',FLine);
+    codx:=pos(';',FLine);
+    case codx of
+      0 :   isCALL;
+      else  if codx>cidx then isCALL;
+    end;
+  end;
+  close(FI);
+  ErrorPtr:=Addr(ErrorHandler);
+  listSymbols(Symcnt);
+  writeln('File ',FNO,' written with ',Symcnt,' symbols');
+END.
+

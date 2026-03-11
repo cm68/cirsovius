@@ -1,0 +1,681 @@
+	title	GENGRAF utility
+	name	('GENGRAF')
+
+; DASMed version of CP/M PLUS GENGRAF.COM
+; By W. Cirsovius
+
+OS	equ	0000h
+BDOS	equ	0005h
+FCB	equ	005ch
+FCB2	equ	006ch
+DMA	equ	0080h
+TPA	equ	0100h
+
+RecLng	equ	128
+
+_FN	equ	 8
+_Fext	equ	 3
+_ext	equ	 9
+_ex	equ	12
+_cr	equ	32
+_rrn	equ	33
+
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.RdSeq	equ	20
+.WrSeq	equ	21
+.make	equ	22
+.rename	equ	23
+.setDMA	equ	26
+.filsiz	equ	35
+
+MemBuff	equ	16384		; 16kByte buffer
+
+_MulSec	equ	MemBuff / RecLng
+
+MaxDev	equ	5
+
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Following header will be copied to selected .COM file %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; #####################
+; ## START OF LOADER ##
+; #####################
+;
+; MUST be absolute cause of code length computation
+
+	ASEG
+	org	TPA
+
+	jp	GENGRAF		; .. cold start
+ExitGENGRAF:
+	ret
+COMlen:
+	dw	0		; Length of COM file (2's com.)
+;
+; Real start of loader
+;
+RealGO:
+	ld	hl,TPA
+	ld	sp,hl
+	call	OpenAssign.Sys	; Find ASSIGN.SYS
+	call	RdRecord	; Read a record from file
+	ld	a,MaxDev	; Set count
+	push	af
+	ld	hl,ASS.buff	; Point to buffer
+	ld	de,DevTable	; .. and number
+LoadDev:
+	ld	a,(hl)		; Get character
+	cp	eof		; .. test eof
+	jp	z,EndNum	; .. end
+	cp	'1'		; Test digit
+	jp	nc,Dig.1
+	xor	a		; .. clear 1st
+	jp	Dig.zero
+Dig.1:
+	sub	'0'		; Strip off offset
+	add	a,a		; * 2
+	ld	b,a
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,b		; *10
+Dig.zero:
+	ld	b,a		; .. save hi
+	inc	hl
+	ld	a,(hl)		; Get 2nd
+	sub	'0'		; .. without offset
+	add	a,b		; .. add hi
+	ld	(de),a		; .. and save
+	xor	a
+	inc	de
+	ld	(de),a		; Clear 2nd entry
+	inc	de
+	inc	hl
+	inc	hl		; Skip blank
+	call	UPcase		; Get next character
+	sub	'A'-1		; .. strip off drive offset
+	ld	(de),a
+	inc	de
+	inc	hl		; .. skip ':'
+	ld	c,_FN
+GetFN:
+	call	UPcase		; Get character
+	cp	';'		; .. till comment
+	jp	z,GotComm
+	cp	cr		; .. or new line
+	jp	nz,GotnoCR
+GotComm:
+	ld	a,' '		; .. set blank
+	dec	hl		; .. fix pointer
+GotnoCR:
+	ld	(de),a		; Save into file name
+	inc	de
+	dec	c
+	jp	nz,GetFN
+	ld	a,lf
+WtLF:
+	cp	(hl)		; .. wait for real end of line
+	inc	hl
+	jp	nz,WtLF
+	pop	af		; Get device count
+	dec	a		; .. bump down
+	push	af
+	jp	nz,LoadDev	; Load all
+EndNum:
+	pop	af		; Clean stack
+	call	CloseAssign.Sys	; Close file
+	ld	hl,(BDOS+1)
+	ld	(TOP.TPA),hl	; Save top of memory
+	ld	de,DevTable+2
+	ld	hl,ASSIGN.SYS
+	ld	c,_ext
+	call	Move.		; Get 1st file
+	ld	(hl),'P'	; Set extension PRL
+	inc	hl
+	ld	(hl),'R'
+	inc	hl
+	ld	(hl),'L'
+	call	RdPRLfile	; Read device file
+	ld	hl,(NewTOP)	; Set new top
+	ld	(TOP.TPA),hl
+	ld	de,$GSX.SYS
+	ld	hl,ASSIGN.SYS
+	ld	c,1+_FN+_Fext
+	call	Move.		; Copy FCB for GSX.SYS
+	call	RdPRLfile	; .. read GSX.SYS file
+	ld	hl,(NewTOP)	; Get new top
+	push	hl
+	ld	bc,4		; Point to chain address
+	add	hl,bc
+	ld	de,BDOS+1
+	ld	c,2
+	call	Move.		; Copy jump to BDOS
+	ld	de,DevTable
+	ld	c,2
+	call	Move.		; Copy 1st device
+	dec	de
+	dec	de
+	ld	c,MaxDev*DevLen
+	call	Move.		; Copy device table
+	ex	de,hl
+	inc	de
+	inc	de		; .. skip two places
+	ld	c,.string
+	call	BDOS		; Give GSX.SYS message
+	ld	hl,(COMlen)
+	pop	de
+	add	hl,de		; Add what we loaded
+	jp	nc,MemOvl	; .. test overflow
+	ex	de,hl
+	ld	(BDOS+1),hl	; Set new top
+	ld	c,.setDMA
+	ld	de,DMA
+	call	BDOS		; Set default DMA
+	ld	de,Loader
+	ld	hl,(NewTOP)
+	ld	bc,-13
+	add	hl,bc		; Let a small gap
+	push	hl
+	ld	(LoadRef+1),hl	; Relocate address
+	ld	c,LoadLen
+	call	Move.		; Move small loader there
+	ld	hl,COMstrt	; Get next record after loader
+	pop	de		; Get loader entry
+	push	de		; .. save as start
+	ld	a,e
+	sub	l
+	ld	c,a		; Calculate length
+	ld	a,d
+	sbc	a,h
+	ld	b,a
+	ld	de,TPA		; Set destination
+	jp	ExitGENGRAF	; .. start
+;
+; +++ Small loader will be moved below new BDOS entry
+; Move COM file followed next record behind complete loader
+;
+Loader:
+	ld	a,(hl)		; Move COM file to right place
+	ld	(de),a
+	inc	hl
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+LoadRef:
+	jp	nz,$-$
+	jp	TPA		; .. start it
+LoadLen	equ	$-Loader
+
+;
+; Get UPPER case character from file buffer
+; ENTRY	Reg HL points to current buffer
+; EXIT	Accu holds UPPER case character
+;	Reg HL incremented
+;
+UPcase:
+	ld	a,(hl)		; .. get character
+	inc	hl		; .. bump pointer
+	cp	'a'		; Test lower case
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; Fix to A..Z
+	ret
+;
+; Move bytes
+; ENTRY	Reg DE points to source
+;	Reg HL points to destination
+;	Reg C  holds length
+;
+Move.:
+	ld	a,(de)		; .. get
+	ld	(hl),a		; .. put
+	inc	de
+	inc	hl
+	dec	c
+	jp	nz,Move.
+	ret
+MemOvl:
+	ld	de,$OVL
+	jp	..Done
+$OVL:
+	db	'Not enough memory',eot
+$GSX.SYS:
+	db	0,'GSX     SYS'
+
+DevTable:
+	rept	MaxDev
+	dw	-1
+	db	0
+	db	'        '
+	endm
+DevLen	equ	($-DevTable) / MaxDev
+;
+; Read device file
+;
+RdPRLfile:
+	call	OpenAssign.Sys	; Find xxxxxx.PRL
+	call	RdRecord	; .. read 1st record
+	ld	hl,(ASS.buff+1)	; Fetch length
+	push	hl
+	ex	de,hl
+	ld	hl,(TOP.TPA)	; Get current top
+	ld	a,l
+	sub	e
+	ld	a,h		; Calculate new top
+	sbc	a,d
+	ld	h,a
+	ld	l,0
+	ld	(NewTOP),hl	; .. set it
+	push	hl
+	push	hl
+	push	de
+	call	RdRecord	; Skip 2nd record
+	pop	bc
+	pop	hl
+RPf.read.code:
+	call	RdByte		; Read file byte by byte
+	ld	(hl),a
+	inc	hl
+	dec	bc		; .. count down
+	ld	a,c
+	or	b
+	jp	nz,RPf.read.code
+	pop	hl
+	ld	b,h		; Load page
+	dec	b		; .. fix cause of base 0100h
+	pop	de
+RPf.nxtByte:
+	ld	c,8		; Init counter
+	call	RdByte		; .. read relocation control
+RPf.nxtBit:
+	rlca			; Get bit
+	push	af
+	jp	nc,RPf.noRel	; .. test set
+	ld	a,b
+	add	a,(hl)		; Relocate
+	ld	(hl),a
+RPf.noRel:
+	inc	hl
+	dec	de
+	ld	a,d		; Test raedy
+	or	e
+	jp	z,RPf.ready
+	pop	af
+	dec	c		; Count down
+	jp	nz,RPf.nxtBit	; .. next bit
+	jp	RPf.nxtByte	; .. next byte
+RPf.ready:
+	pop	af
+	call	CloseAssign.Sys	; Close file
+	ret
+;
+; Read byte from file
+; EXIT	Accu holds byte
+;
+RdByte:
+	push	hl
+	push	de
+	ld	hl,(RecPtr)	; Get current pointer
+	inc	l		; .. bump
+	jp	p,RB.buff	; .. within limit
+	push	bc
+	call	RdRecord	; .. read record
+	pop	bc
+	ld	hl,0
+RB.buff:
+	ld	(RecPtr),hl	; .. set resulting pointer
+	ld	de,ASS.buff
+	add	hl,de
+	ld	a,(hl)		; Get byte
+	pop	de
+	pop	hl
+	ret
+;
+; Open ASSIGN.SYS
+;
+OpenAssign.Sys:
+	ld	de,ASSIGN.SYS	; .. point to FCB
+;
+; Reset existing file
+; ENTRY	Reg DE points to FCB
+;
+Reset:
+	push	de
+	ld	hl,_ex
+	add	hl,de
+	ld	(hl),0		; Clear extension
+	inc	hl
+	inc	hl
+	ld	(hl),0		; .. and 2nd byte
+	ld	a,RecLng
+	ld	(RecPtr),a	; Init record pointer
+	ld	c,.open
+	call	BDOS		; Open file
+	pop	de
+	ld	hl,_cr
+	add	hl,de
+	ld	(hl),0		; Clear current record
+ChkIORes:
+	or	a		; Check result
+	ret	p		; .. ok
+	call	PrFCB		; Tell file
+	ld	de,$NOT.FND	; .. and file not found
+	jp	..Done
+CloseAssign.Sys:
+	ld	de,ASSIGN.SYS
+	ld	c,.close
+	call	BDOS		; Close file
+	jp	ChkIORes	; .. check result
+;
+; Tell name of file
+; ENTRY	Reg DE points to FCB
+;
+PrFCB:
+	ex	de,hl
+	ld	a,(hl)		; Test default drive
+	or	a
+	jp	z,PF.noDrv		; .. skip printing
+	add	a,'A'-1		; .. make ASCII
+	ld	e,a
+	call	conout		; .. print
+	ld	e,':'
+	call	conout		; Print delimiter
+PF.noDrv:
+	inc	hl
+	ld	a,_FN+1
+	call	FixString	; Print name
+	ld	e,'.'
+	call	conout		; .. delimiter
+	ld	a,_Fext+1
+	call	FixString	; .. and extension
+	ret
+;
+; Print character on console
+; ENTRY	Reg E holds character
+;
+conout:
+	push	hl
+	ld	c,.conout
+	call	BDOS		; .. print
+	pop	hl
+	ret
+;
+; Print string with fix length
+; ENTRY	Reg HL points to string
+;	Accu holds length+1
+;
+FixString:
+	dec	a
+	ret	z		; Test end
+	ld	e,(hl)
+	inc	hl
+	push	af
+	call	conout		; .. print
+	pop	af
+	jp	FixString
+;
+; Read record from file ASSIGN.SYS
+;
+RdRecord:
+	ld	de,ASS.buff
+	ld	c,.setDMA
+	call	BDOS		; Set DMA
+	ld	de,ASSIGN.SYS
+	push	de
+	ld	c,.RdSeq
+	call	BDOS		; .. read
+	pop	de
+	or	a		; Verify success
+	ret	z
+	call	PrFCB		; Tell name of file
+	ld	de,$ILL.EOF	; .. error
+..Done:
+	ld	c,.string
+	call	BDOS		; Give final message
+	jp	OS		; .. and exit
+
+$ILL.EOF:
+	db	':  unexpected EOF',eot
+$NOT.FND:
+	db	' not found',eot
+
+ASSIGN.SYS:
+	db	0,'ASSIGN  SYS'
+	ds	24
+TOP.TPA:
+	dw	0
+NewTOP:
+	dw	0
+RecPtr:
+	dw	0
+ASS.buff:
+	ds	RecLng
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !! Calculate next record behind resident portion of code !!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+LdLen	equ	$-TPA				;; Code length
+NxtRec	equ	(LdLen+RecLng) and -RecLng	;; Next record
+COMstrt	equ	NxtRec+TPA			;; .COM offset
+;
+; ###################
+; ## END OF LOADER ##
+; ###################
+;
+; %%%%%%%%%%%%%%%%%%%
+; %% GENGRAF entry %%
+; %%%%%%%%%%%%%%%%%%%
+;
+GENGRAF:
+	ld	de,$HEAD
+	ld	c,.string	; Give header
+	call	BDOS
+	ld	hl,FCB+_ext
+	ld	(hl),'C'	; Set extension COM
+	inc	hl
+	ld	(hl),'O'
+	inc	hl
+	ld	(hl),'M'
+	ld	de,FCB
+	ld	c,.filsiz	; Get size of COM file
+	call	BDOS
+	ld	hl,(FCB+_rrn)
+	add	hl,hl		; *  2
+	add	hl,hl		; *  4
+	add	hl,hl		; *  8
+	add	hl,hl		; * 16
+	add	hl,hl		; * 32
+	add	hl,hl		; * 64
+	add	hl,hl		; *128
+	ld	de,COMstrt+LoadLen
+	add	hl,de		; Add space
+	ld	a,l		; Get two's complement
+	cpl
+	ld	l,a
+	ld	a,h
+	cpl
+	ld	h,a
+	inc	hl
+	ld	(COMlen),hl	; .. save
+	xor	a
+	ld	(FCB+_cr),a	; Clear current record
+	ld	hl,FCB
+	ld	de,$$$FCB
+	push	de
+	ld	c,36
+	call	Move		; Copy FCB
+	pop	de
+	push	de
+	ld	hl,_ext
+	add	hl,de
+	ld	(hl),'$'	; Set extension $$$
+	inc	hl
+	ld	(hl),'$'
+	inc	hl
+	ld	(hl),'$'
+	ld	c,.delete
+	call	BDOS		; Delete temp file
+	pop	de
+	ld	c,.make
+	call	BDOS		; .. create it
+	inc	a		; Test possible
+	jp	z,CreateErr	; .. error
+	ld	hl,RealGO
+	ld	(TPA+1),hl	; Set up start
+	ld	de,TPA		; .. init DMA
+WrtHead:
+	push	de
+	ld	c,.setDMA	; Set disk buffer
+	call	BDOS
+	ld	de,$$$FCB
+	ld	c,.WrSeq
+	call	BDOS		; Write header to temp disk
+	pop	de
+	ld	hl,RecLng
+	add	hl,de		; Point to next
+	ex	de,hl
+	ld	hl,GENGRAF
+	ld	a,e		; Test header written
+	sub	l
+	ld	a,d
+	sbc	a,h
+	jp	c,WrtHead
+	ld	de,FCB
+	call	Reset		; Now get .COM file
+RdCOM:
+	ld	c,_MulSec	; Init sectors
+	ld	de,$$$DMA	; .. and buffer
+RdCOMloop:
+	push	de
+	push	bc
+	ld	c,.setDMA
+	call	BDOS		; Set buffer
+	ld	de,FCB
+	ld	c,.RdSeq
+	call	BDOS		; Read from .COM file
+	ld	(IORes),a	; .. set result
+	or	a
+	pop	bc
+	pop	de
+	jp	nz,EndCOM	; Test EOF
+	dec	c
+	jp	z,EndCOM	; .. or buffer done
+	ld	hl,RecLng
+	add	hl,de		; Bump pointer
+	ex	de,hl
+	jp	RdCOMloop	; .. and get next
+EndCOM:
+	ld	a,_MulSec
+	sub	c		; Get records read
+	ld	c,a
+	ld	de,$$$DMA	; Init buffer
+Wr$$$loop:
+	push	bc
+	push	de
+	ld	c,.setDMA
+	call	BDOS		; Set buffer
+	ld	de,$$$FCB
+	ld	c,.WrSeq	; Write to temp file
+	call	BDOS
+	or	a		; Test success
+	pop	de
+	pop	bc
+	jp	nz,WrtErr	; .. error
+	dec	c		; Test ready
+	jp	z,End$$$
+	ld	hl,RecLng
+	add	hl,de
+	ex	de,hl		; Bump pointer
+	jp	Wr$$$loop	; .. and put next
+End$$$:
+	ld	a,(IORes)	; Test more to read
+	or	a
+	jp	z,RdCOM		; .. do it
+	ld	de,$$$FCB
+	ld	c,.close
+	call	BDOS		; Close temp file
+	ld	de,FCB
+	ld	c,.delete	; Delete original file
+	call	BDOS
+	ld	de,$$$FCB
+	ld	hl,FCB2-FCB
+	add	hl,de
+	ld	c,FCB2-FCB
+	ex	de,hl
+	call	Move		; Copy to 2nd FCB
+	ld	hl,$$$FCB+FCB2-FCB+_ext
+	ld	(hl),'C'	; .. set extension COM
+	inc	hl
+	ld	(hl),'O'
+	inc	hl
+	ld	(hl),'M'
+	ld	c,.rename
+	ld	de,$$$FCB
+	call	BDOS		; Rename file
+	ld	c,0
+	jp	BDOS		; .. exit
+;
+; Move bytes
+; ENTRY	Reg HL points to source
+;	Reg DE points to destination
+;	Reg C  holds length
+;
+Move:
+	ld	a,(hl)		; .. get
+	ld	(de),a		; .. put
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,Move
+	ret
+;
+; File write error
+;
+WrtErr:
+	ld	de,$WRT.ERR
+	jp	..Done
+;
+; Creation error
+;
+CreateErr:
+	ld	de,$NO.SPC
+	jp	..Done
+
+IORes:
+	dw	0
+$$$FCB:
+	ds	36
+$WRT.ERR:
+	db	'Write Error.',eot
+$NO.SPC:
+	db	'No Directory Space.',eot
+
+$$$DMA:	; COM file buffer starts here
+
+$HEAD:
+	db	'---------------------------------------------------'
+	db	cr,lf
+	db	'GENGRAF 1.0  15 Nov 82   Serial No 5000-1232-654321'
+	db	cr,lf
+	db	'Copyright (C) 1982                                 '
+	db	cr,lf
+	db	'Digital Research, Inc.          All Rights Reserved'
+	db	cr,lf
+	db	'---------------------------------------------------'
+	db	cr,lf,eot
+
+	end
+

@@ -1,0 +1,1062 @@
+	title	Assembler Formatter
+	name	('NEAT')
+
+; DASMed version of NEAT.COM
+; By W. Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+.drv	equ	 1
+.nam	equ	 8
+_EX	equ	12
+_DIR	equ	16
+_CR	equ	32
+
+null	equ	00h
+bell	equ	07h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+DEL	equ	7fh
+
+NOMSB	equ	01111111b
+UPPER	equ	01011111b
+
+COLTAB	equ	7
+
+MTCLEN	equ	15
+
+l0005	equ	05h
+l005c	equ	5ch
+l0080	equ	80h
+
+l1000	equ	1000h
+l8000	equ	8000h
+
+	jp	l0104
+l0103:
+	db	0fh
+l0104:
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	(l0ffe),hl	; Save it
+	ld	sp,ll0ffe	; Get local stack
+	call	l094b		; Give header
+	db	cr,lf
+	db	'NEAT - Irv Hoff - copyright 1985 - 04/27/85'
+	db	cr,lf
+	db	'Uniformly changes source code and comments'
+	db	cr,lf,null
+	ld	a,(l005c+.drv)
+	cp	' '		; Test file name given
+	jp	nz,l04e5	; Yeap
+	call	l094b		; Give help if not
+	db	cr,lf,cr,lf
+	db	tab,'NEAT is used for assembly level source code files.'
+	db	cr,lf
+	db	tab,'There are 7 different options.  It can insure that'
+	db	cr,lf
+	db	tab,'all source code is upper, (or lower) case.  It can'
+	db	cr,lf
+	db	tab,'change all full-line comments to lower case, upper'
+	db	cr,lf
+	db	tab,'case or leave intact.  It can do the same thing to'
+	db	cr,lf
+	db	tab,'all inline comments.  Areas in DB strings are left'
+	db	cr,lf
+	db	tab,'intact, as are areas between "double quotes" which'
+	db	cr,lf
+	db	tab,'are in any comment line.  "High bits" are removed.'
+	db	cr,lf
+	db	tab,'Byte 0103H controls the CRT line progress display.'
+	db	cr,lf,cr,lf
+	db	tab,'* on the menu indicates options requiring a string'
+	db	cr,lf
+	db	tab,'  of characters to commence action.  Typing RETURN'
+	db	cr,lf
+	db	tab,'  starts the action on the first line of the file.'
+	db	cr,lf,cr,lf
+	db	tab,'B>NEAT HELLO.ASM <ret>'
+	db	cr,lf
+	db	tab,tab,'renames the original file to HELLO.BAK'
+	db	cr,lf
+	db	tab,tab,'and the new file to the original name.'
+	db	cr,lf,cr,lf
+	db	tab,'B>NEAT HELLO.ASM NUNAME.ASM <ret>'
+	db	cr,lf
+	db	tab,tab,'keeps the original file intact, making'
+	db	cr,lf
+	db	tab,tab,'a new file having the 2nd name/extent.',null
+	jp	l0940		; Exit
+l04e5:
+	ld	a,(l005c+.drv+_DIR)
+	cp	' '		; Test second name given
+	jp	nz,l0516	; Yeap
+	ld	de,l0d8d
+	ld	hl,l005c
+	ld	b,.drv+.nam
+	call	l0970		; Copy file name
+	ld	c,13h
+	ld	de,l0d8d
+	call	l0005		; Delete .$$$ file
+	ld	de,l0dce
+	ld	hl,l005c
+	ld	b,.drv+.nam
+	call	l0970		; Copy file name again
+	ld	c,13h
+	ld	de,l0dce
+	call	l0005		; Delete .BAK file
+	jp	l0521
+l0516:
+	ld	hl,l005c+_DIR
+	ld	de,l0d8d
+	ld	b,_DIR
+	call	l0970		; Copy second file name
+l0521:
+	xor	a
+	ld	(l005c+_CR),a	; Prepare files
+	ld	(l0d8d+_CR),a
+	ld	c,0fh
+	ld	de,l005c
+	call	l0005		; Open source file
+	inc	a		; Test file found
+	jp	nz,l0558	; Yeap
+	call	l094b		; Tell missing source
+	db	cr,lf
+	db	'++ SOURCE FILE NOT FOUND ++',null
+	jp	l0940		; Exit
+l0558:
+	xor	a
+	ld	(l0d8d+_EX),a	; Prepare destination file
+	ld	(l0d8d+_CR),a
+	ld	hl,l8000
+	ld	(l0de1),hl	; Init last record index
+	ld	hl,0
+	ld	(l0de3),hl	; Init record index
+	ld	c,0fh
+	ld	de,l0d8d
+	call	l0005		; Test file does exist
+	inc	a
+	jp	z,l05ef		; Nope
+l0577:
+	call	l094b		; Tell it and ask for deletion
+	db	cr,lf
+	db	'File exists - erase? (Y/N): ',bell,null
+	ld	c,1
+	call	l0005		; Input answer
+	and	NOMSB
+	cp	cr		; Test empty
+	jp	z,l0577
+	cp	' '
+	jp	z,l0577
+	cp	'0'		; Test valid input
+	jp	c,l05c1
+	cp	'9'+1
+	jp	c,l0577
+	and	UPPER
+	cp	'A'
+	jp	z,l0577
+	cp	'Y'
+	jp	z,l05e1
+l05c1:
+	call	l094b		; Tell abandon
+	db	cr,lf,cr,lf
+	db	'  [Returning to CP/M]',null
+	jp	l0938		; Exit
+l05e1:
+	ld	c,13h
+	ld	de,l0d8d
+	call	l0005		; Delete file
+	call	l094b
+	db	cr,lf,null
+l05ef:
+	ld	c,16h
+	ld	de,l0d8d
+	call	l0005		; Create file
+	inc	a		; Test success
+	jp	nz,l0618	; Yeap
+	call	l094b
+	db	cr,lf
+	db	'NO DIR SPACE: OUTPUT',null
+	jp	l0930		; Exit
+l0618:
+	call	l0c57		; Select options
+	call	l094b
+	db	cr,lf,cr,lf
+	db	'  0 ',null
+	ld	de,l0e01
+	ld	b,0ffh
+l062c:
+	push	bc
+	push	de
+	ld	c,1ah
+	ld	de,l0080
+	call	l0005		; Set disk buffer
+	ld	c,14h
+	ld	de,l005c
+	call	l0005		; Read record
+	pop	de
+	pop	bc
+	or	a		; Test success
+	jp	z,l0670		; Yeap
+	cp	1		; Test end of file
+	jp	z,l0a99		; Yeap
+	call	l094b		; Tell error
+	db	cr,lf,cr,lf
+	db	'++ SOURCE FILE READ ERROR ++',null
+	jp	l0930		; Exit
+l0670:
+	ld	hl,l0080	; Init buffer address
+l0673:
+	ld	a,(hl)
+	and	NOMSB
+	cp	DEL
+	jp	z,l080e
+	cp	eof
+	jp	z,l0a99
+	inc	b
+	ld	c,a
+	ld	a,b
+	cp	0ffh
+	ld	a,c
+	jp	nc,l06c4
+	cp	' '
+	jp	nz,l0699
+	push	af
+	push	hl
+	ld	hl,(l0df5)	; Get original space count
+	inc	hl		; Advance it
+	ld	(l0df5),hl
+	pop	hl
+	pop	af
+l0699:
+	cp	tab
+	jp	nz,l06b7
+	push	hl
+	ld	hl,(l0dfb)	; Get original tab count
+	inc	hl		; Advance it
+	ld	(l0dfb),hl
+	pop	hl
+l06a7:
+	ld	a,' '
+	ld	(de),a
+	inc	de
+	inc	b
+	ld	a,b
+	and	COLTAB
+	or	a
+	jp	nz,l06a7
+	dec	b
+	jp	l080e
+l06b7:
+	ld	(de),a
+	inc	de
+	cp	lf
+	jp	nz,l080e
+	call	l0a11		; Test user break
+	jp	l06cb
+l06c4:
+	ld	a,cr
+	ld	(de),a
+	inc	de
+	ld	a,lf
+	ld	(de),a
+l06cb:
+	dec	b
+	jp	z,l06ef
+	dec	de
+	dec	de
+l06d1:
+	dec	de
+	ld	a,(de)
+	cp	' '
+	jp	z,l06dd
+	cp	tab
+	jp	nz,l06e7
+l06dd:
+	dec	b
+	jp	z,l06e7
+	call	l0904		; Update trailing space delete count
+	jp	l06d1
+l06e7:
+	inc	de
+	ld	a,cr
+	ld	(de),a
+	inc	de
+	ld	a,lf
+	ld	(de),a
+l06ef:
+	push	hl
+	ld	hl,l0e01
+	ld	a,(hl)
+	cp	'*'
+	jp	nz,l06fb
+	ld	(hl),';'
+l06fb:
+	call	l08d3
+l06fe:
+	ld	a,(hl)
+	cp	' '
+	jp	c,l0750
+	jp	nz,l07ad
+	ld	a,(l0dee)
+	or	a
+	jp	nz,l071b
+	ld	a,(l0ded)
+	or	a
+	jp	z,l071b
+	ld	a,' '
+	push	af
+	jp	l07d4
+l071b:
+	ld	a,(l0def)
+	inc	a
+	ld	(l0def),a
+	ld	a,(l0de6)	; Get current column
+	inc	a		; Advance it
+	ld	(l0de6),a
+	and	COLTAB		; Mask it
+	or	a		; Test left margin
+	jp	nz,l07fb	; Nope
+	ld	a,(l0def)
+	cp	1
+	jp	nz,l0747
+	ld	a,(l0dee)
+	or	a
+	jp	z,l0747
+	xor	a
+	ld	(l0def),a
+	ld	a,' '
+	jp	l07f3
+l0747:
+	xor	a
+	ld	(l0def),a
+	ld	a,tab
+	jp	l07f3
+l0750:
+	cp	cr
+	jp	z,l0796
+	cp	lf
+	jp	z,l0772
+	cp	tab
+	jp	nz,l07f3
+	xor	a
+	ld	(l0def),a
+	ld	a,(l0de6)	; Get current column
+	add	a,COLTAB+1	; Calculate next column position
+	and	NOT COLTAB
+	ld	(l0de6),a
+	ld	a,tab
+	jp	l07f3
+l0772:
+	push	hl
+	ld	hl,(l0df3)	; Get line number
+	inc	hl		; Advance it
+	ld	(l0df3),hl
+	push	af
+	ld	a,(l0103)
+	and	l
+	jp	nz,l0794
+	call	l094b
+	db	cr
+	db	'  ',null
+	ld	hl,(l0df3)
+	call	l090e		; Print line number
+	ld	a,' '
+	call	l0c4a		; Put blank to console
+l0794:
+	pop	af
+	pop	hl
+l0796:
+	push	af
+	xor	a
+	ld	(l0de6),a	; Clear current column
+	ld	(l0ded),a
+	ld	(l0dee),a
+	ld	(l0def),a
+	ld	(l0df0),a
+	ld	(l0df1),a
+	jp	l07f2
+l07ad:
+	push	af
+	cp	''''
+	jp	nz,l07ba
+	ld	a,(l0ded)
+	cpl
+	ld	(l0ded),a
+l07ba:
+	cp	';'
+	jp	nz,l07d4
+	ld	a,(l0dee)
+	or	a
+	jp	nz,l07d4
+	ld	a,(l0ded)
+	or	a
+	jp	nz,l07d4
+	inc	a
+	ld	(l0dee),a
+	call	l0a5f
+l07d4:
+	ld	a,(l0de6)	; Get current column
+	inc	a		; Advance it
+	ld	(l0de6),a
+	ld	a,(l0def)
+	or	a
+	jp	z,l07f2
+l07e2:
+	push	af
+	ld	a,' '
+	push	hl
+	call	l0979		; Put blank to file
+	pop	hl
+	pop	af
+	dec	a
+	ld	(l0def),a
+	jp	nz,l07e2
+l07f2:
+	pop	af
+l07f3:
+	push	hl
+	call	l0889
+	call	l0979		; Put character to file
+	pop	hl
+l07fb:
+	inc	hl
+	cp	lf
+	jp	nz,l06fe
+	ld	de,l0e01
+	ld	b,0ffh
+	pop	hl
+	ld	a,(l0dea)
+	or	a
+	ret	nz
+	ld	a,lf
+l080e:
+	inc	l
+	jp	z,l062c
+	jp	l0673
+;
+; Input match string
+;
+l0815:
+	call	l094b		; Tell action
+	db	cr,lf,cr,lf
+	db	'  String to start (15 chars. max): ',null
+	ld	b,0		; Clear count
+	ld	hl,l0d7d	; Init pointer
+l0845:
+	call	l095a		; Get character
+	cp	cr		; Test end of input
+	jp	z,l086f		; Yeap
+	cp	bs		; Test backspace
+	jp	nz,l0858	; Nope
+	call	l0870		; Delete last input
+	jp	l0845
+l0858:
+	cp	' '		; Test control
+	jp	c,l0845		; Ignore it
+	ld	(hl),a		; Unpack character
+	inc	hl
+	inc	b		; Update count
+	ld	a,b
+	cp	MTCLEN+1	; Test in range
+	jp	c,l0845		; Yeap
+	call	l0883		; Give backspace
+	call	l087a		; Delete last input
+	jp	l0845
+l086f:
+	ret
+;
+; Delete last input if any there
+;
+l0870:
+	ld	a,b
+	or	a		; Test first column
+	jp	nz,l087a	; Nope
+	ld	a,' '
+	jp	l0885		; Blank it
+;
+; Delete last input
+;
+l087a:
+	dec	b		; Fix counter
+	dec	hl		; Fix pointer
+	ld	a,' '
+	call	l0c4a		; Put blank to console
+	ld	(hl),null	; Close line
+;
+; Give backspace
+;
+l0883:
+	ld	a,bs		; Give backspace
+l0885:
+	call	l0c4a		; Put to console
+	ret
+;
+;
+;
+l0889:
+	ld	c,a
+	ld	a,(l0dee)
+	or	a
+	jp	nz,l08a9
+	ld	a,(l0ded)
+	or	a
+	ld	a,c
+	ret	nz
+	ld	a,(l0de5)	; Get selection
+	cp	'7'		; Test lower case
+	ld	a,c
+	jp	z,l08ca		; Yeap
+l08a0:
+	cp	'a'
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	UPPER
+	ret
+l08a9:
+	ld	a,c
+	cp	'"'
+	ld	a,(l0deb)
+	jp	nz,l08b6
+	cpl
+	ld	(l0deb),a
+l08b6:
+	or	a
+	ld	a,c
+	ret	nz
+	ld	a,(l0df0)
+	or	a
+	ld	a,c
+	jp	nz,l08ca
+	ld	a,(l0df1)
+	or	a
+	ld	a,c
+	jp	nz,l08a0
+	ret
+l08ca:
+	cp	'A'
+	ret	c
+	cp	'Z'+1
+	ret	nc
+	or	'a'-'A'
+	ret
+l08d3:
+	ld	a,(l0df2)
+	or	a
+	ret	nz
+	push	hl
+	ld	de,l0d7d
+	ld	a,(de)
+	or	a
+	jp	z,l08fe
+l08e1:
+	ld	de,l0d7d
+l08e4:
+	ld	a,(hl)
+	cp	cr
+	jp	z,l0902
+	ld	a,(de)
+	cp	(hl)
+	inc	hl
+	jp	nz,l08e4
+l08f0:
+	inc	de
+	ld	a,(de)
+	or	a
+	jp	z,l08fe
+	cp	(hl)
+	inc	hl
+	jp	z,l08f0
+	jp	l08e1
+l08fe:
+	inc	a
+	ld	(l0df2),a
+l0902:
+	pop	hl
+	ret
+;
+; Update trailing space delete count
+;
+l0904:
+	push	hl
+	ld	hl,(l0dff)	; Get trailing space delete count
+	inc	hl		; Update it
+	ld	(l0dff),hl
+	pop	hl
+	ret
+;
+; Print word as decimal ASCII
+;
+l090e:
+	push	bc
+	push	de
+	push	hl
+	ld	bc,-10		; Init divisor
+	ld	de,-1		; Init quotient
+l0917:
+	add	hl,bc		; Divide
+	inc	de		; Bump quotient
+	jp	c,l0917		; Till less 0
+	ld	bc,10
+	add	hl,bc		; Make positive
+	ex	de,hl
+	ld	a,h
+	or	l		; Test remainder
+	call	nz,l090e	; Yeap, recursive division
+	ld	a,e		; Get result
+	add	a,'0'
+	call	l0c4a		; Put digit to console
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Delete file and exit
+;
+l0930:
+	ld	c,13h
+	ld	de,l0d8d
+	call	l0005
+;
+; Close file and exit to OS
+;
+l0938:
+	ld	c,10h
+	ld	de,l005c
+	call	l0005
+;
+; Exit to OS
+;
+l0940:
+	call	l094b
+	db	cr,lf,null
+	ld	hl,(l0ffe)	; Get back stack
+	ld	sp,hl
+	ret			; Exit
+;
+; Put immediate string to console
+;
+l094b:
+	ex	(sp),hl		; Get pointer
+l094c:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	jp	z,l0958		; Yeap
+	call	l0c4a		; Put character to console
+	jp	l094c
+l0958:
+	ex	(sp),hl		; Bring back return address
+	ret
+;
+; Get character and check abort
+;
+l095a:
+	push	hl
+	push	bc
+	ld	c,1
+	call	l0005		; Get character
+	and	NOMSB
+	pop	bc
+	pop	hl
+	cp	'C'-'@'		; Test abort
+	jp	z,l05c1
+	cp	'X'-'@'
+	jp	z,l05c1
+	ret
+;
+; Copy B bytes from ^HL to ^DE
+;
+l0970:
+	ld	a,(hl)		; Get byte
+	ld	(de),a		; Unpack it
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,l0970
+	ret
+;
+; Put character to file
+;
+l0979:
+	push	af
+	cp	' '
+	jp	nz,l0986
+	ld	hl,(l0df7)	; Get current spaces
+	inc	hl		; Advance it
+	ld	(l0df7),hl
+l0986:
+	pop	af
+	push	af
+	cp	tab
+	jp	nz,l0994
+	ld	hl,(l0dfd)	; Get current tabs
+	inc	hl		; Advance it
+	ld	(l0dfd),hl
+l0994:
+	ld	hl,(l0de1)	; Get last record index
+	ex	de,hl
+	ld	hl,(l0de3)	; Get record index
+	ld	a,l		; Test within buffer
+	sub	e
+	ld	a,h
+	sbc	a,d
+	jp	c,l0a01		; Yeap
+	ld	hl,0
+	ld	(l0de3),hl	; Init record index
+l09a8:
+	ex	de,hl
+	ld	hl,(l0de1)	; Get last record index
+	ld	a,e
+	sub	l		; Test within buffer
+	ld	a,d
+	sbc	a,h
+	jp	nc,l09f3	; Nope, all written
+	ld	hl,(l0ddf)	; Get base disk buffer
+	add	hl,de
+	ex	de,hl
+	ld	c,1ah
+	call	l0005		; Set disk buffer
+	ld	c,15h
+	ld	de,l0d8d
+	call	l0005		; Write record to disk
+	or	a		; Verify success
+	jp	nz,l09d6	; Error
+	ld	de,l0080
+	ld	hl,(l0de3)	; Get record index
+	add	hl,de		; Advance it
+	ld	(l0de3),hl
+	jp	l09a8
+l09d6:
+	call	l094b		; Tell error
+	db	cr,lf,cr,lf
+	db	'DISK FULL: OUTPUT',null
+	pop	af
+	jp	l0930		; Exit
+l09f3:
+	ld	c,1ah
+	ld	de,l0080
+	call	l0005		; Reset disk buffer
+	ld	hl,0
+	ld	(l0de3),hl	; Reset record index
+l0a01:
+	ex	de,hl
+	ld	hl,(l0ddf)	; Get base disk buffer
+	add	hl,de
+	ex	de,hl
+	pop	af
+	ld	(de),a		; Store character in buffer
+	ld	hl,(l0de3)	; Get record index
+	inc	hl		; Advance it
+	ld	(l0de3),hl
+	ret
+;
+; Test user break
+;
+l0a11:
+	push	hl
+	push	de
+	push	bc
+	ld	c,0bh
+	call	l0005		; Test key state
+	rra
+	jp	nc,l0a5b	; No key pressed
+	ld	c,1
+	call	l0005		; Read character
+	cp	'C'-'@'		; Test abort
+	jp	z,l0a2c		; Yeap
+	cp	'X'-'@'
+	jp	nz,l0a5b
+l0a2c:
+	pop	bc
+	pop	de
+	pop	hl
+	pop	hl
+	call	l094b		; Tell aborted
+	db	'  ++ ABORTED, OUTPUT FILE DELETED ++',null
+	jp	l0930		; Exit
+l0a5b:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0a5f:
+	ld	a,(l0de5)	; Get selection
+	or	a		; Test any requested
+	ret	z		; Nope
+	ld	c,a
+	ld	a,(l0de6)	; Get current column
+	or	a
+	jp	z,l0a85
+	ld	a,c		; Get selection
+	cp	'2'		; Test SRC=U;FUL=n/c;INL=L
+	jp	z,l0a91		; Yeap
+	cp	'3'		; Test SRC=U;FUL=n/c;INL=U
+	jp	z,l0a95
+	ld	a,(l0df2)
+	or	a
+	ret	z
+	ld	a,c		; Get selection
+	cp	'6'		; Test SRC=U|L;FUL=L;INL=L
+	jp	nc,l0a91
+	jp	l0a95
+l0a85:
+	ld	a,(l0df2)
+	or	a
+	ret	z
+	ld	a,c		; Get selection
+	cp	'4'		; Test matching string requested
+	ret	c		; Nope
+	jp	z,l0a95
+l0a91:
+	ld	(l0df0),a
+	ret
+l0a95:
+	ld	(l0df1),a
+	ret
+l0a99:
+	ld	(l0dea),a
+	inc	de
+	inc	b
+	call	nz,l06c4
+	call	l094b
+	db	cr
+	db	'  ',null
+	ld	hl,(l0df3)
+	call	l090e		; Print line number
+	call	l094b
+	db	' ',null
+l0ab3:
+	ld	hl,(l0de3)	; Get record index
+	ld	a,l
+	and	l0080-1		; Test record boundary
+	jp	nz,l0abf	; Nope
+	ld	(l0de1),hl	; Truncate last record index
+l0abf:
+	ld	a,eof
+	push	af
+	call	l0979		; Put end of file to file
+	pop	af
+	jp	nz,l0ab3	; Fill entire buffer
+	ld	c,10h
+	ld	de,l005c
+	call	l0005		; Close files
+	ld	c,10h
+	ld	de,l0d8d
+	call	l0005
+	inc	a		; Verify success
+	jp	nz,l0af9
+	call	l094b
+	db	cr,lf
+	db	'CANNOT CLOSE OUTPUT',null
+	jp	l0930		; Exit
+;
+; Give final statistic
+;
+l0af9:
+	call	l094b
+	db	cr,'  ',null
+	ld	hl,(l0df3)	; Get line number
+	call	l090e		; Print it
+	call	l094b
+	db	' lines in file'
+	db	cr,lf,cr,lf,tab,null
+	ld	hl,(l0df5)	; Get original space count
+	call	l090e		; Print it
+	call	l094b
+	db	tab,'original spaces'
+	db	cr,lf,tab,null
+	ld	hl,(l0dfb)	; Get original tab count
+	call	l090e		; Print it
+	call	l094b
+	db	tab,'original tabs'
+	db	cr,lf,cr,lf,tab,null
+	ld	hl,(l0df7)	; Get current spaces
+	call	l090e		; Print it
+	call	l094b
+	db	tab,'current  spaces'
+	db	cr,lf,tab,null
+	ld	hl,(l0dfd)	; Get current tabs
+	call	l090e		; Print it
+	call	l094b
+	db	tab,'current  tabs'
+	db	cr,lf,tab,null
+	ld	hl,(l0dff)	; Get trailing space delete count
+	call	l090e		; Print it
+	call	l094b
+	db	tab,'trailing spaces deleted ',null
+	ld	a,(l0df2)
+	or	a
+	jp	nz,l0bfb
+	call	l094b
+	db	cr,lf,cr,lf
+	db	'  ++ No string match found, comment areas not changed ++'
+	db	bell,' ',null
+l0bfb:
+	ld	a,(l0d8d+.drv+.nam)
+	cp	'$'		; Test .$$$ file
+	jp	nz,l0940	; Exit if not
+	ld	hl,l005c
+	ld	de,l0dae
+	ld	b,_DIR
+	call	l0970		; Copy file name
+	ld	hl,l005c+.drv
+	ld	de,l0dae+_DIR+.drv
+	ld	b,.nam
+	call	l0970		; Unpack new name
+	ld	hl,l005c
+	ld	de,l0dce
+	ld	b,.drv+.nam
+	call	l0970
+	ld	c,13h
+	ld	de,l0dce
+	call	l0005		; Delete old file
+	ld	c,17h
+	ld	de,l0dae
+	call	l0005		; Rename file
+	ld	hl,l005c+.drv
+	ld	de,l0d8d+_DIR+.drv
+	ld	b,_DIR
+	call	l0970		; Copy file name
+	ld	c,17h
+	ld	de,l0d8d
+	call	l0005		; Rename file
+	jp	l0940		; Exit
+;
+; Put character to console
+;
+l0c4a:
+	push	bc
+	push	de
+	push	hl
+	ld	e,a
+	ld	c,2
+	call	l0005
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Select options
+;
+l0c57:
+	call	l094b		; Tell options available
+	db	cr,lf
+	db	'            SRC  FUL  INL'
+	db	cr,lf
+	db	'            ---  ---  ---'
+	db	cr,lf
+	db	'        1)   U   n/c  n/c'
+	db	cr,lf
+	db	'        2)   U   n/c   L'
+	db	cr,lf
+	db	'        3)   U   n/c   U'
+	db	cr,lf
+	db	'      * 4)   U    U    U'
+	db	cr,lf
+	db	'      * 5)   U    L    U'
+	db	cr,lf
+	db	'      * 6)   U    L    L'
+	db	cr,lf
+	db	'      * 7)   L    L    L'
+	db	cr,lf,cr,lf
+	db	tab,'   select: ',null
+	call	l095a		; Get character
+	cp	cr		; Test end of selection
+	ret	z
+	cp	'1'		; Test range
+	jp	c,l0d74
+	cp	'7'+1
+	jp	nc,l0d74
+	cp	'1'
+	ret	z
+	ld	(l0de5),a	; Save numeric selection
+	cp	'4'		; Test string required
+	jp	nc,l0815	; Yeap
+	ret
+l0d74:
+	call	l094b
+	db	cr,lf,null
+	jp	l0c57
+;
+; Match string
+;
+l0d7d:
+	ds	MTCLEN
+	db	null
+;
+; --------------
+;
+l0d8d:
+	db	0,'        $$$'
+	ds	21
+;
+; --------------
+;
+l0dae:
+	db	0,'           '
+	ds	4
+	db	0,'        BAK'
+	ds	4
+l0dce:
+	db	0,'        BAK'
+	ds	5
+l0ddf:
+	dw	l1000		; Base disk buffer
+l0de1:
+	dw	l8000		; Last record index
+l0de3:
+	dw	0		; Record index
+l0de5:
+	db	0		; Selection '1'..'7'
+l0de6:
+	db	0		; Current column
+	ds	3
+l0dea:
+	db	0
+l0deb:
+	db	0
+	ds	1
+l0ded:
+	db	0
+l0dee:
+	db	0
+l0def:
+	db	0
+l0df0:
+	db	0
+l0df1:
+	db	0
+l0df2:
+	db	0
+l0df3:
+	dw	0		; Line number
+l0df5:
+	dw	0		; Original space count
+l0df7:
+	dw	0		; Current spaces
+	ds	2
+l0dfb:
+	dw	0		; Original tab count
+l0dfd:
+	dw	0		; Current tabs
+l0dff:
+	dw	0		; Trailing space delete count
+l0e01:
+	ds	126
+	db	0
+l0e80::
+l0ffe	equ	0ffeh
+ll0ffe	equ	l0ffe
+
+	end
+

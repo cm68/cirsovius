@@ -1,0 +1,1062 @@
+	title	DASM Z80 Disassembler
+	name	('DASMZ80')
+
+	maclib	dasm
+
+	entry	dasm,prntde,pdertn,prID,MType,tpasm
+
+	ext	hsym,nwln0,cout,dcrlf,pstg,phex,pdec,symsch
+	ext	bldsym,pstrng,pashex,prH,prnt,AddA,semi,.tab
+	ext	xcsw,rplptr,pc,biased,opctp,build,fget
+
+;
+; #############################################
+; ### Machine dependent routines for kernel ###
+; #############################################
+;
+MType:
+	db	1		;<>0 for Z80
+tpasm:
+	db	'MAC'		;Mac file type
+prID:
+	call	pstrng		;Print initial info
+	db	cr,lf
+	db	'DASM for M80 Assembler Z80 Mnemonics       '
+	db	'++ Derived from ZZSOURCE/RESOURCE ++',null
+	ret
+; 
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%         This is the Disassembler Module         %%
+; %% Instruction to be disassembled is pted to by PC %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+dasm:
+	ld	hl,(pc)		;Fetch current pc
+	call	fget		;Fetch opcode - Just for validity check
+	push	af
+;
+	call	hsym		;Write a symbol if it exists
+				;.. and put pc on the crt
+	ld	hl,(rplptr)	;See if this line is replaced
+	ld	a,h
+	or	l
+	jr	z,dasm1
+	ld	b,(hl)
+	inc	hl		;Skip the '*'
+	dec	b
+	call	nwln0		;Print the replacing line as a comment
+dasm1:
+	pop	af		;Get back opcode
+	ld	b,a
+	ld	hl,(pc)		;Fetch current pc
+	ld	(biased),hl	;Save it
+	inc	hl
+	ld	(pc),hl		;The new pc (next byte)
+	ld	hl,opc-4
+	call	gtcd
+	call	typeoc		;Type string
+	cp	9+1		;Types 0 thru 9 are 1 byte
+	jr	c,oldpc		; .. so don't change the pc
+	ld	hl,(pc)
+	inc	hl
+	cp	15+1		;Types 0a thru 0fh are 2-byters
+	jr	c,newpc
+	cp	22		;Types 10h thru 15h are 3 bytes
+	jr	nc,newpc
+	inc	hl
+newpc:
+	ld	(pc),hl
+oldpc:
+	push	de		;Save the 'e' register (may be 'x' or 'y')
+	ld	e,a
+	ld	d,0
+	ld	hl,jmptbl
+	add	hl,de		;Add 2*opcode type to jmptbl to get
+	add	hl,de		;.. routine address
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl		;Hl now contains the routine address
+	pop	de
+	push	hl
+	ld	hl,(biased)
+	ret			;'return' to the routine
+;
+; Find code in reg B in table ptd to by reg HL
+; Return opcode type in accu
+;
+gtcd:
+	ld	de,4		;Set increment
+nxtcd:
+	add	hl,de		;Position pointer
+nxtcd1:
+	ld	a,(hl)		;Get mask
+	or	a		;See if we're at the next mask yet
+	inc	hl
+	jp	p,nxtcd1	;Jump if not
+	and	b		;Mask out variables in the instruction
+	cp	(hl)		;Check the generic instruction type
+	jr	nz,nxtcd
+	inc	hl
+	ld	a,(hl)		;After a match, get the opcode type
+	ld	(opctp),a
+	ret	
+;
+; Type opcode ptd to by reg HL
+; Return PC in reg HL and type of opcode in Accu
+;
+toc2:
+	cp	' '		;Convert spaces in the table to tabs
+	jr	nz,toc1
+	ld	a,tab		;Map to tabs
+toc1:
+	call	cout		;Print code
+typeoc:
+	inc	hl		;Type the opcode that hl is pointing to
+	ld	a,(hl)
+	or	a		;Test code to be skipped
+	jr	z,typeoc	;Yeap, ignore NULL
+	jp	p,toc2		;Print if not end
+	ld	hl,(pc)		;Return pc
+	ld	a,(opctp)	;And type
+	ret	
+;
+; Opcode type jump table
+;
+jmptbl:
+;
+;1 byte instructions
+;
+	dw	t0		;Simple 1 byte instructions
+	dw	t1		;8 bit, register arithmetic & logical
+	dw	t2		;Dec & inc
+	dw	t3		;Double register single byte arithmetic
+	dw	t4		;8 bit load from memory
+	dw	t5		;8 bit load to memory
+	dw	t6		;Pop's and push's
+	dw	t7		;Conditional returns
+	dw	t8		;The rst instructions
+	dw	t9		;Register to register loads
+;
+;2 byte instructions
+;
+	dw	ta		;8 bit load immediates
+	dw	tb		;8 bit immediate arith. & logical
+	dw	tc		;In a,(n)
+	dw	td		;Out (n),a
+	dw	te		;Conditional, relative jumps
+	dw	tf		;Other relative jumps
+;
+;3 byte instructions
+;
+	dw	t10		;16 bit loads
+	dw	t11		;Jumps & calls
+	dw	t12		;Direct loads
+	dw	t13		;Direct stores
+	dw	t14		;Ld (nn),a
+	dw	t15		;Conditional jumps & calls
+;
+;Multi-byte opcodes
+;
+	dw	t16		;The 'cb' series {1, 1a, 2a}
+	dw	t17		;The 'dd' series {1b thru 25 & 2a}
+	dw	t18		;The 'fd' series {1b thru 25 & 2a}
+	dw	t19		;The 'ed' series {0, 2, 3, 26 thru 2a}
+;
+;1 byte
+;
+	dw	t1a		;The bit, res & set for 'cb'
+	dw	t1b		;Index register loads
+	dw	t1c		;Jump indirect index register
+	dw	t1d		;Index register add
+;
+;2 byte
+;
+	dw	t1e		;Index register arith. and logical
+	dw	t1f		;Indexed load to register
+	dw	t20		;Indexed register store
+;
+;3 bytes after 'dd' or 'fe'
+;
+	dw	t21		;Ld xx,nn
+	dw	t22		;Ld (nn),n
+	dw	t23		;Ld xx,(nn)
+	dw	t24		;Ld (xx+d),n
+	dw	t25		;The 'cb' extensions to 'dd' or 'fd'
+;
+;1 byte after 'ed'
+;
+	dw	t26		;In r,(c)
+	dw	t27		;Block moves
+;
+;3 bytes afteR 'ed'
+;
+	dw	t28		;Ld (nn),dd
+	dw	t29		;Ld dd,(nn)
+;
+;Whatever is left
+;
+	dw	t2a		;Indefined opcodes	
+;
+;Arithmetic & logival, 8 bit, register
+;
+t1:
+	call	psreg		;Print the source register
+;
+;One byte instructions, simple
+;
+t0:
+	jp	dcrlf		;Close line
+;
+;Dec and inc instructions
+;
+t2:
+	call	pdreg		;Print the destination register
+	jp	dcrlf
+;
+;Double register single byte
+;
+t3:
+	call	pxsreg		;Print hl, de, bc, or sp
+	jp	dcrlf
+t4:
+	call	lpar		;  ld a,(bc or de)
+	call	pxsreg
+	call	rpar
+	jp	dcrlf
+t5:
+	call	lpar		;  ld (bc or de),a
+	call	pxsreg
+	call	rpar
+	call	pcmaa
+	jp	dcrlf
+;
+;Pop and push
+;
+t6:
+	call	pxqreg		;Print hl, de, bc, or af
+	jp	dcrlf
+;
+;Conditional returns
+;
+t7:
+	call	prcnd
+	jp	dcrlf
+;
+;The rst instructions
+;
+t8:
+	call	fget		;Get code
+	and	00111000b	;Mask bits
+	call	prst		;Print
+	jp	dcrlf
+;
+;Register to register loads
+;
+t9:
+	call	pdreg		;Print reg
+	call	comma		;And comma
+	ld	hl,(biased)
+	jp	t1
+;
+;Two byte instructions
+;8 bit immediate loads
+;
+ta:
+	call	pdreg		;Print reg
+	call	comma		;And comma
+	ld	hl,(biased)	;Get pointer
+;
+;Arithmetic & logical immediates
+;
+tb:
+	inc	hl		;Skip opcode
+dtabyt:
+	call	fget		;Fetch immediate byte
+	cp	' '		;Test printable
+	jr	c,notasc	;Nope
+	cp	'Z'+1
+	jr	nc,notasc
+	call	pascii		;Print as ASCII
+	ld	a,''''		;Close it
+	call	cout
+	ld	a,(xcsw)	;Want symbol comments?
+	or	a
+	jp	z,dcrlf		;Nope, close line
+	call	.tab		;Tabulate
+	call	semi
+notasc:
+	call	fget		;Get byte
+	cp	9+1		;Test range
+	jr	c,ntsc0		;0..9, simple decimal
+	call	pashex		;Print as hex
+	ld	a,'H'-'0'	;Followed by 'H'
+ntsc0:
+	add	a,'0'		;Make printable
+	call	cout		;Print character
+	jp	dcrlf
+;
+;In
+;
+tc:
+	call	lpar		;For 'in a,(c)'
+	inc	hl
+	call	fget
+	call	pashex		;Print port
+	call	prH
+	call	rpar
+	jp	dcrlf
+;
+;Out
+;
+td:
+	call	lpar
+	inc	hl
+	call	fget
+	call	pashex		;Print port
+	call	prH
+	call	rpar
+	call	comma
+	ld	a,'A'		;Close by ',a'
+	call	cout
+	jp	dcrlf
+;
+;Conditional relative jumps
+;
+te:
+	call	prcnd1		;The special cc list
+	ld	hl,(biased)
+	call	comma
+;
+;Other relative instruction
+;
+tf:
+	inc	hl
+	call	fget		;Fetch relative byte
+	ld	e,a		;Expand for address
+	ld	d,0
+	ld	hl,(pc)		;Get current pc
+	or	a		;Test sign
+	jp	p,pstv
+	dec	d		;Negate hi offset
+pstv:
+	add	hl,de		;Build address
+	ex	de,hl
+	call	prntde		;Print it
+	call	c,pdertn
+	jp	dcrlf
+;
+;Three byte instructions
+;16 bit loads
+;
+t10:
+	call	pxsreg		;Print regs
+	call	comma
+	ld	hl,(biased)	;Get pc
+;
+;Jumps and calls
+;
+t11:
+	call	prnn		;Print 16 bit
+	call	c,pdertn
+	jp	dcrlf
+;
+;Load direct
+;
+t12:
+	call	dradr		;Print address
+	call	c,pdertn
+	jp	dcrlf
+;
+;Print the value for de in parenthesis
+;
+dradr:
+	call	lpar		;Print '('
+	call	prnn		;16 bit
+	push	af
+	call	rpar		;And final ')'
+	pop	af
+	ret	
+;
+;Store direct
+;
+t13:
+	call	dradr		;Print address
+	push	af
+	call	comma
+	call	prHL		;Print 'HL'
+	pop	af
+	call	c,pdertn
+	jp	dcrlf
+;
+;Print register pair HL
+;
+prHL:
+	call	prH
+	ld	a,'L'
+	jp	cout
+;
+;Store accumulator direct
+;
+t14:
+	call	dradr		;Print address
+	push	af
+	call	pcmaa		;And ',a'
+	pop	af
+	call	c,pdertn
+	jp	dcrlf
+;
+;Conditioanl jumps & calls
+;
+t15:
+	call	prcnd
+	call	comma
+	ld	hl,(biased)
+	call	prnn		;Print address
+	call	c,pdertn
+	jp	dcrlf
+;
+;The 'cb' series lead in
+;
+t16:
+	inc	hl
+	call	fget
+	ld	b,a		;The second byte of the instruction
+	ld	(biased),hl
+	ld	hl,opc2-4
+	call	gtcd		;Find the type of the 'cb' instruction
+	call	typeoc		;And print it
+	jp	oldpc
+;
+;The 'dd' series lead in
+;
+t17:
+	ld	e,'X'		;For the 'ix' instructions
+t170:
+	push	de
+	inc	hl
+	ld	(biased),hl
+	call	fget
+	ld	b,a
+	ld	hl,opc3-4
+	call	gtcd		;Find opcode
+	call	typeoc		;And print it
+	pop	de
+	cp	29+1		;Test range
+	jp	c,oldpc
+	cp	42
+	jp	z,oldpc
+	cp	32+1
+	inc	hl
+	jp	c,newpc
+	inc	hl
+	jp	newpc
+;
+;The 'fd' series lead in
+;
+t18:
+	ld	e,'Y'
+	jr	t170
+;
+;The 'ed' series lead in
+;
+t19:
+	inc	hl
+	ld	(biased),hl
+	call	fget
+	ld	b,a
+	ld	hl,opc4-4
+	call	gtcd		;Find opcode
+	call	typeoc		;And print it
+	cp	39+1		;Test range
+	jp	c,oldpc
+	cp	42
+	jp	z,oldpc
+	inc	hl
+	inc	hl
+	jp	newpc
+;
+;Bit, res and set
+;
+t1a:
+	call	pbit		;Print bit requested
+	call	comma
+	jp	t1
+;
+;Index register moves
+;
+t1b:
+	call	prxx		;To type either 'ix' or 'iy'
+	jp	dcrlf
+;
+;Jump indirect to index register
+;
+t1c:
+	call	lpar
+	call	prxx
+	call	rpar
+	jp	dcrlf
+;
+;Index register addition
+;
+t1d:
+	call	prxx
+	call	comma
+	ld	a,e
+	cp	'X'		;Test index register
+	call	fget
+	ld	hl,ixregs
+	jr	z,t1d0
+	ld	hl,iyregs
+t1d0:
+	call	pxreg
+	jp	dcrlf
+;
+;Index register arithmetic and logical
+;
+t1e:
+	inc	hl
+	call	pdisp		;Print '(ix(y)+d)
+	jp	dcrlf
+;
+;Indexed load to register
+;
+t1f:
+	call	pdreg
+	call	comma
+	ld	hl,(biased)
+	inc	hl
+	call	pdisp
+	jp	dcrlf
+;
+;Indexed register store
+;
+t20:
+	inc	hl
+	call	pdisp
+	call	comma
+	ld	hl,(biased)
+	jp	t1
+;
+; LD xx,nn
+;
+t21:
+	call	prxx
+	call	comma
+	call	prnn
+	call	c,pdertn
+	jp	dcrlf
+;
+; LD (nn),xx
+;
+t22:
+	call	lpar
+	push	de
+	call	prnn
+	ex	de,hl		;Hl now contains the number
+	pop	de		;Recover the 'e' reg.  ('x' or 'y')
+	push	af		;Save the carry for a later 'pedrtn'
+	call	rpar
+	call	comma
+	call	prxx
+	pop	af		;The carry flag is restored
+	ex	de,hl		;De again contains the value for nn
+	call	c,pdertn
+	jp	dcrlf
+;
+; LD xx,(nn)
+;
+t23:
+	call	prxx
+	call	comma
+	call	lpar
+	call	prnn
+	push	af		;Save cy value
+	call	rpar
+	pop	af
+	call	c,pdertn
+	jp	dcrlf
+;
+; LD (xx+d),n
+;
+t24:
+	inc	hl
+	call	pdisp
+	call	comma
+	jp	tb
+;
+;The 'cb' extensions to 'dd' or 'fd'
+;
+t25:
+	inc	hl
+	inc	hl
+	call	fget
+	ld	b,a		;Fetch byte
+	ld	hl,opc2-4
+	push	de		;Save 'x' or 'y'
+	call	gtcd		;Find opcode
+	call	typeoc		;Print it
+	pop	de
+	ld	a,b		;Get the o.c.
+	and	00000111b	;Validate 0x06 and 0x0E
+	cp	00000110b
+	jr	nz,illeg
+	ld	a,(opctp)	;Get back type
+	ld	hl,(biased)
+	cp	25+1		;Test range
+	jp	c,t1e
+	jr	z,dd12
+illeg:
+	ld	hl,(pc)
+	dec	hl
+	dec	hl
+	ld	(pc),hl
+	jp	t2a
+dd12:
+	inc	hl
+	inc	hl
+	call	pbit		;Print bit requested
+	call	comma
+	dec	hl
+	dec	hl
+	jp	t1e
+;
+; IN r,(C)
+;
+t26:
+	call	pdreg
+	call	comma
+	call	lpar
+	ld	a,'C'
+	call	cout
+	call	rpar
+	jp	dcrlf
+;
+;The block moves and I/O
+;
+t27:
+	call	fget
+	and	00001000b
+	ld	a,'I'		;An incrementing type of instruction?
+	jp	z,t270
+	ld	a,'D'		;No, it was decrementing
+t270:
+	call	cout		;Print type
+	call	fget
+	and	00010000b
+	jp	z,dcrlf
+	ld	a,'R'		;A repeating instruction type
+	call	cout
+	jp	dcrlf
+;
+; LD (nn),dd
+;
+t28:
+	call	lpar
+	call	prnn
+	push	af		;Save cy value
+	push	de		;Save the 'nn' value
+	call	rpar
+	call	comma
+	ld	hl,(biased)
+	call	pxsreg
+	pop	de
+	pop	af
+	call	c,pdertn
+	jp	dcrlf
+;
+; LD dd,(nn)
+;
+t29:
+	call	pxsreg
+	call	comma
+	ld	hl,(biased)
+	call	lpar
+	call	prnn
+	push	af
+	call	rpar
+	pop	af
+	call	c,pdertn
+	jp	dcrlf
+;
+;All undefined OpCodes come here for a 'DB value' treatment
+;
+t2a:
+	ld	hl,(pc)
+	dec	hl
+	ld	(pc),hl
+	ld	hl,(biased)
+	dec	hl
+	call	pstg
+	db	'DB',tab,null
+	jp	dtabyt
+;
+;Various characters to print
+;
+comma:
+	ld	a,','
+	jp	cout
+lpar:
+	ld	a,'('
+	jp	cout
+rpar:
+	ld	a,')'
+	jp	cout
+pcmaa:
+	call	comma
+	ld	a,'A'
+	jp	cout
+;
+;Print the condition code letters for this instruction.
+;
+prcnd1:
+	ld	a,00011000b
+	jr	prc
+prcnd:
+	ld	a,00111000b	;For a full set of condition codes
+prc:
+	push	af
+	call	fget
+	ld	b,a
+	pop	af
+	and	b		;Mask code
+	rrca			;Shift into position
+	rrca	
+	ld	hl,cndtab
+	call	AddA		;Position within table
+	ld	a,(hl)
+	call	cout		;Print first letter
+	inc	hl
+	ld	a,(hl)
+	cp	'.'
+	call	nz,cout		;Second if not a dot
+	ret	
+cndtab:
+	db	'NZZ.NCC.POPEP.M.'
+;
+;Print the destination register for a byte
+;
+pdreg:
+	call	fget		;Get code
+	rra			;Into right position
+	rra	
+	rra	
+	jr	preg
+;
+;Print the source register for a byte
+;
+psreg:
+	call	fget		;Get code
+preg:
+	ld	hl,regtab
+	and	00000111b	;Mask reg
+	cp	00000110b	;Must catch the (hl) references
+	jp	z,phlreg
+	call	AddA		;Position within table
+	ld	a,(hl)		;And print reg
+	jp	cout
+phlreg:
+	call	lpar		;Map 'm' to '(hl)'
+	call	prHL
+	jp	rpar
+regtab:
+	db	'BCDEHLMA'	;'m' is never printed - '(hl)' is instead
+;
+; Print a double register pair
+;
+pxsreg:
+	call	fget		;Get code
+	ld	hl,dregs	;And table
+	jr	pxreg
+pxqreg:
+	call	fget
+	ld	hl,dregq
+pxreg:
+	rra			;Shift code
+	rra	
+	rra	
+	and	00000110b	; Mask reg pair
+	call	AddA		;Position within table
+	ld	a,(hl)		;And print pair
+	call	cout
+	inc	hl
+	ld	a,(hl)
+	jp	cout
+dregs:
+	db	'BCDEHLSP'
+dregq:
+	db	'BCDEHLAF'
+ixregs:
+	db	'BCDEIXSP'
+iyregs:
+	db	'BCDEIYSP'
+;
+;Print bit
+;
+pbit:
+	call	fget		;Fetch code
+	rra			;Isolate bit
+	rra	
+	rra	
+	and	00000111b	;Mask for 0..7
+	add	a,'0'		;Make ASCII
+	jp	cout
+;
+;Print index reg 'ix' or 'iy'
+;
+prxx:
+	ld	a,'I'
+	call	cout
+	ld	a,e		;Get reg
+	jp	cout
+;
+;Print a leading quote and then the ASCII
+;.. (Print '' for ').
+;
+pascii:
+	push	af
+	ld	a,''''
+	call	cout		;Give leading quote
+	pop	af
+	cp	''''		;Test character a quote
+	jp	nz,cout		;Nope, print
+	push	af
+	call	cout		;Else print two quotes
+	pop	af
+	jp	cout
+;
+;Print a displacement in the form '(IX+/-d)'
+;
+pdisp::
+	call	lpar		; (
+	call	prxx		; X..Y
+	call	fget
+	bit	7,a		; .. test sign
+	ld	a,'+'
+	jr	z,pdisp.plus
+	ld	a,'-'
+pdisp.plus:
+	call	cout		; Give sign
+	call	fget		; Get offset
+	bit	7,a		; Test sign
+	jr	z,pdisp.pos
+	neg			; .. make >0
+pdisp.pos:
+	push	bc
+	push	de
+	push	hl
+	ld	l,a		; Make 16 bit
+	ld	h,0
+	call	pdec		; Print decimal
+	pop	hl
+	pop	de
+	pop	bc
+	jp	rpar		; )
+;
+;Print the next 2 bytes as a symbol (and return Cy=1) if possible
+;
+prnn:
+	inc	hl
+	call	fget
+	ld	e,a		;Fetch value
+	inc	hl
+	call	fget
+	ld	d,a
+prntde:
+	push	de
+	call	symsch
+	jr	c,nomtch
+	call	prnt		;Got one, so print it
+	pop	de
+	scf			;Indicate that a symbol was printed
+	ret	
+nomtch:
+	ld	a,(build)	;Do we build a symbol?
+	or	a
+	pop	de
+	jr	z,nobld		;Just print the hex value
+	push	de
+	call	bldsym
+	pop	de
+	jr	nobld
+;
+; Print hex address if comment write enabled
+;
+pdertn:
+	ld	a,(xcsw)
+	or	a
+	ret	z		;Don't print the symbol as a comment
+	call	.tab		;We'll print a value as a comment
+	call	.tab
+	call	semi
+nobld:
+	ld	a,d
+	or	e
+	ld	a,'0'
+	jr	z,nobld1
+	ld	a,d
+	or	a
+	jr	z,nobld2
+	call	pashex		;Print the high order byte
+	ld	a,e
+	call	phex
+	jp	prH
+nobld2:
+	ld	a,e
+prst:
+	cp	9+1
+	jr	c,nobld3
+	call	pashex
+	jp	prH
+nobld3:
+	add	a,'0'
+nobld1:
+	call	cout
+	or	a		;Clear the carry
+	ret	
+;
+; OpCode tables
+; Byte +0	Opcode mask (MSB always set)
+; Byte +1	Generic opcode
+; Byte +2	Opcode type
+; Byte +3..	Base mnemonic
+;
+opc:
+	db	11111111b,0ebh, 0,'EX DE,HL'
+	db	11111111b,008h, 0,'EX AF,AF'''
+	db	11111111b,0d9h, 0,'EXX'
+	db	11111111b,0e3h, 0,'EX (SP),HL'
+	db	11111111b,027h, 0,'DAA'
+	db	11111111b,0f3h, 0,'DI'
+	db	11111111b,0fbh, 0,'EI'
+	db	11111111b,076h, 0,'HALT'
+	db	11111111b,02fh, 0,'CPL'
+	db	11111111b,03fh, 0,'CCF'
+	db	11111111b,000h, 0,'NOP'
+	db	11111111b,037h, 0,'SCF'
+	db	11111111b,0e9h, 0,'JP (HL)'
+	db	11111111b,007h, 0,'RLCA'
+	db	11111111b,017h, 0,'RLA'
+	db	11111111b,00fh, 0,'RRCA'
+	db	11111111b,01fh, 0,'RRA'
+	db	11111111b,0c9h, 0,'RET'
+	db	11111111b,0f9h, 0,'LD SP,HL'
+	db	11111000b,088h, 1,'ADC A,'
+	db	11111000b,080h, 1,'ADD A,'
+	db	11111000b,0a0h, 1,'AND '
+	db	11111000b,0b8h, 1,'CP '
+	db	11111000b,0b0h, 1,'OR '
+	db	11111000b,098h, 1,'SBC A,'
+	db	11111000b,090h, 1,'SUB '
+	db	11111000b,0a8h, 1,'XOR '
+	db	11000111b,005h, 2,'DEC '
+	db	11000111b,004h, 2,'INC '
+	db	11001111b,009h, 3,'ADD HL,'
+	db	11001111b,00bh, 3,'DEC '
+	db	11001111b,003h, 3,'INC '
+	db	11101111b,00ah, 4,'LD A,'
+	db	11101111b,002h, 5,'LD '
+	db	11001111b,0c1h, 6,'POP '
+	db	11001111b,0c5h, 6,'PUSH '
+	db	11000111b,0c0h, 7,'RET '
+	db	11000111b,0c7h, 8,'RST '
+	db	11000000b,040h, 9,'LD '
+	db	11000111b,006h,10,'LD '
+	db	11111111b,0c6h,11,'ADD A,'
+	db	11111111b,0ceh,11,'ADC A,'
+	db	11111111b,0e6h,11,'AND '
+	db	11111111b,0feh,11,'CP '
+	db	11111111b,0f6h,11,'OR '
+	db	11111111b,0d6h,11,'SUB '
+	db	11111111b,0deh,11,'SBC A,'
+	db	11111111b,0eeh,11,'XOR '
+	db	11111111b,0dbh,12,'IN A,'
+	db	11111111b,0d3h,13,'OUT '
+	db	11100111b,020h,14,'JR '
+	db	11111111b,010h,15,'DJNZ '
+	db	11111111b,018h,15,'JR '
+	db	11001111b,001h,16,'LD '
+	db	11111111b,0c3h,17,'JP '
+	db	11111111b,0cdh,17,'CALL '
+	db	11111111b,03ah,18,'LD A,'
+	db	11111111b,02ah,18,'LD HL,'
+	db	11111111b,022h,19,'LD '
+	db	11111111b,032h,20,'LD '
+	db	11000111b,0c4h,21,'CALL '
+	db	11000111b,0c2h,21,'JP '
+	db	11111111b,0cbh,22,0,0
+	db	11111111b,0ddh,23,0,0
+	db	11111111b,0fdh,24,0,0
+	db	11111111b,0edh,25
+opc2:
+	db	11111000b,000h, 1,'RLC '
+	db	11111000b,008h, 1,'RRC '
+	db	11111000b,010h, 1,'RL '
+	db	11111000b,018h, 1,'RR '
+	db	11111000b,020h, 1,'SLA '
+	db	11111000b,028h, 1,'SRA '
+	db	11111000b,038h, 1,'SRL '
+	db	11000000b,040h,26,'BIT '
+	db	11000000b,080h,26,'RES '
+	db	11000000b,0c0h,26,'SET '
+	db	10000000b,000h,42
+opc3:
+	db	11111111b,0e3h,27,'EX (SP),'
+	db	11111111b,0e9h,28,'JP '
+	db	11111111b,0f9h,27,'LD SP,'
+	db	11111111b,0e1h,27,'POP '
+	db	11111111b,0e5h,27,'PUSH '
+	db	11001111b,009h,29,'ADD '
+	db	11111111b,023h,27,'INC '
+	db	11111111b,02bh,27,'DEC '
+	db	11111111b,034h,30,'INC '
+	db	11111111b,035h,30,'DEC '
+	db	11111111b,086h,30,'ADD A,'
+	db	11111111b,08eh,30,'ADC A,'
+	db	11111111b,096h,30,'SUB '
+	db	11111111b,09eh,30,'SBC A,'
+	db	11111111b,0a6h,30,'AND '
+	db	11111111b,0aeh,30,'XOR '
+	db	11111111b,0b6h,30,'OR '
+	db	11111111b,0beh,30,'CP '
+	db	11000111b,046h,31,'LD '
+	db	11111000b,070h,32,'LD '
+	db	11111111b,021h,33,'LD '
+	db	11111111b,022h,34,'LD '
+	db	11111111b,02ah,35,'LD '
+	db	11111111b,036h,36,'LD '
+	db	11111111b,0cbh,37,0,0
+	db	10000000b,000h,42,0,0
+	db	10000000b,080h,42
+opc4:
+	db	11111110b,070h,42,0,0	;Prevents 'in (hl),(c)'
+	db	11111111b,044h, 0,'NEG'
+	db	11111111b,045h, 0,'RETN'
+	db	11111111b,046h, 0,'IM 0'
+	db	11111111b,056h, 0,'IM 1'
+	db	11111111b,05eh, 0,'IM 2'
+	db	11111111b,047h, 0,'LD I,A'
+	db	11111111b,04dh, 0,'RETI'
+	db	11111111b,04fh, 0,'LD R,A'
+	db	11111111b,057h, 0,'LD A,I'
+	db	11111111b,05fh, 0,'LD A,R'
+	db	11111111b,067h, 0,'RRD'
+	db	11111111b,06fh, 0,'RLD'
+	db	11001111b,042h, 3,'SBC HL,'
+	db	11001111b,04ah, 3,'ADC HL,'
+	db	11000111b,040h,38,'IN '
+	db	11000111b,041h, 2,'OUT (C),'
+	db	11100111b,0a0h,39,'LD'
+	db	11100111b,0a1h,39,'CP'
+	db	11100111b,0a2h,39,'IN'
+	db	11110111b,0a3h,39,'OUT'
+	db	11110111b,0b3h,39,'OT'
+	db	11001111b,043h,40,'LD '
+	db	11001111b,04bh,41,'LD '
+	db	10000000b,000h,42,0,0
+	db	10000000b,080h,42
+;
+; End of OpCode table
+;
+	end
+

@@ -1,0 +1,2373 @@
+	title	JOYCE Terminal Emulator
+	name	('MAIL232')
+
+; ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; + Disassembled program MAIL232 - The 'simple' terminal   +
+; + emulation program distributed by CP/M+ machine PCW8xxx +
+; +                                                        +
+; + Disassembled by W.Cirsovius               January 1986 +
+; ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+OS	equ	0000h
+BDOS	equ	0005h
+
+_nam	equ	8
+_ext	equ	3
+
+.auxin	equ	 3
+.auxout	equ	 4
+.condir	equ	 6
+.auxsta	equ	 7
+.string	equ	 9
+.consta	equ	11
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.setdma	equ	26
+
+_USERF	equ	30
+
+.get	equ	0ffh
+
+SAinit	equ	00b6h
+SAbaud	equ	00b9h
+TEask	equ	00bfh
+TEreset	equ	00c2h
+SETkey	equ	00d7h
+SCRrun	equ	00e9h
+
+ROLLER	equ	0b600h
+COMRAM	equ	0c000h
+
+LftArrw	equ	01h		; <-
+RgtArrw	equ	06h		; ->
+bell	equ	07h
+bs	equ	08h
+lf	equ	0ah
+cr	equ	0dh
+f7	equ	10h
+f3	equ	11h
+f5	equ	13h
+PLUS	equ	16h		; [+]
+f1	equ	1ah
+esc	equ	1bh
+MINUS	equ	1ch		; [-]
+DwnArrw	equ	1eh		; NOT ^
+UpArrow	equ	1fh		; ^
+eot	equ	'$'
+del	equ	7fh
+
+STX	equ	02h
+ETX	equ	03h
+ACK	equ	06h
+NAK	equ	15h
+EOF	equ	1ah
+
+delim	equ	080h		; Delimiter character
+cpyrig	equ	0a4h		; Copyright character
+WHAT	equ	0a5h
+STOP	equ	0fch
+
+low.lft	equ	83h		; Window elements
+mid.ver	equ	85h
+upp.lft	equ	86h
+low.rgt	equ	89h
+mid.hor	equ	8ah
+upp.rgt	equ	8ch
+
+reclen	equ	128
+DotPos	equ	8
+FileLen	equ	11
+MaxPos	equ	12
+FileBlk	equ	16
+
+Menue.1	equ	1
+Menue.2	equ	2
+Menue.3	equ	3
+Menue.4	equ	4
+Menue.5	equ	5
+Menue.6	equ	6
+
+MenWid	equ	21
+
+Toggle	equ	0ffh
+
+MinData	equ	5
+MaxData	equ	8
+
+AllBits	equ	11111111b
+NoMSB	equ	01111111b
+
+VidCol	equ	90
+VidPatL	equ	 8
+VidGet	equ	 1
+VidPut	equ	 0
+VidLine	equ	30
+pixlen	equ	VidPatL*VidCol
+;
+; Game boards for GAME OF LIFE
+;
+l1ad7	equ	1ad7h
+l25bd	equ	l1ad7+VidCol*(VidLine+1)
+
+	ld	hl,(OS+1)	; Fetch BIOS base
+	ld	de,3*(_USERF-1)
+	add	hl,de		; Build XBIOS vector
+	ld	(_XBIOS),hl	; Save it
+	call	l0757		; Unpack roller access into common memory
+	ld	de,l1021
+	ld	c,.string
+	call	BDOS		; Give hello
+	ld	bc,0
+l0118:
+	dec	bc		; Delay a bit
+	push	af
+	push	af
+	push	af
+	push	af
+	pop	af
+	pop	af
+	pop	af
+	pop	af
+	ld	a,b
+	or	c
+	jr	nz,l0118
+	call	l026d		; Init screen
+	call	l0c30		; Set up UART
+	ld	b,bs
+	ld	c,72		; Key <-DEL
+	ld	d,00001b	; Normal
+	call	l0b4d		; Set to BACKSPACE
+	dw	SETkey
+	ld	b,STOP
+	ld	c,66		; Key STOP
+	ld	d,00100b	; Control
+	call	l0b4d
+	dw	SETkey
+	call	l0416		; Init main line
+l0144:
+	ld	c,.condir
+	ld	e,.get
+	call	BDOS		; Get character
+	or	a
+	jr	z,l016a
+	ld	hl,l0f4c
+	ld	bc,funclen	; Find special key
+	cpir
+	jr	nz,l015d	; Nope
+	call	l027e		; Execute control
+	jr	l0144
+l015d:
+	call	l0b2e		; Test online set
+	jr	z,l0167		; Nope
+	call	l0b08		; Put to SIO if so
+	jr	l016a
+l0167:
+	call	l0224		; Echo on screen
+l016a:
+	call	l0b2e		; Test online set
+	jr	z,l0144		; Nope
+	call	l0b0f		; Get from SIO
+	or	a		; Test any
+	jr	z,l0144		; Nope
+	call	l0224		; Echo on screen
+	jr	l0144
+;
+; Output window and print text
+; ENTRY	Reg HL holds start of window coordinates
+;	Reg  E holds length of text
+;	Reg D  holds depth of menue
+;
+l017a:
+	ld	(l0f1a),hl	; Save pointer
+	inc	d
+	ld	(l0f18),de	; Set depth
+	call	l0202		; Position cursor
+	ld	c,.condir
+	ld	e,upp.lft
+	call	BDOS		; Set upper left corner
+	ld	bc,(l0f18)
+	ld	b,c
+l0191:
+	push	bc
+	ld	e,mid.hor
+	ld	c,.condir
+	call	BDOS		; Build middle part
+	pop	bc
+	djnz	l0191
+	ld	e,upp.rgt
+	ld	c,.condir
+	call	BDOS		; Close line
+	ld	bc,(l0f18)
+	dec	b
+l01a8:
+	push	bc
+	ld	hl,(l0f1a)	; Get cursor
+	inc	h		; Advance row
+	ld	(l0f1a),hl
+	call	l0202		; Position cursor
+	ld	e,mid.ver
+	ld	c,.condir
+	call	BDOS		; Build vertical line
+	ld	bc,(l0f18)
+	ld	b,c
+	ld	hl,(l0f1e)
+l01c2:
+	push	bc
+	inc	hl
+	push	hl
+	ld	e,(hl)
+	ld	c,.condir
+	call	BDOS		; Output menue text
+	pop	hl
+	pop	bc
+	djnz	l01c2
+	ld	(l0f1e),hl
+	ld	e,mid.ver
+	ld	c,.condir
+	call	BDOS		; Close vertical
+	pop	bc
+	djnz	l01a8
+	ld	hl,(l0f1a)	; Get cursoe
+	inc	h		; Set row
+	call	l0202		; Position cursor
+	ld	e,low.lft
+	ld	c,.condir
+	call	BDOS		; Give corner
+	ld	bc,(l0f18)
+	ld	b,c
+l01ef:
+	push	bc
+	ld	e,mid.hor
+	ld	c,.condir
+	call	BDOS		; Give lower line
+	pop	bc
+	djnz	l01ef
+	ld	e,low.rgt
+	ld	c,.condir
+	call	BDOS		; Close window
+	ret
+;
+; Position cursor on screen
+; ENTRY	Reg H holds Y position
+;	Reg L holds X position
+;
+l0202:
+	push	bc
+	push	de
+	push	af
+	push	hl
+	ld	e,'Y'
+	call	l0b3e		; Give ESCape
+	pop	hl
+	push	hl
+	ld	a,' '		; Add offset
+	add	a,h
+	ld	e,a
+	ld	c,.condir	; Give row
+	call	BDOS
+	pop	hl
+	ld	a,' '		; Add offset
+	add	a,l
+	ld	e,a
+	ld	c,.condir	; Give column
+	call	BDOS
+	pop	af
+	pop	de
+	pop	bc
+	ret
+;
+; Echo character on screen
+; ENTRY	Accu holds character to be echoed
+;
+l0224:
+	push	af
+	ld	hl,l0f50
+	ld	bc,speclen
+	cpir			; Test special character
+	jr	z,l0245
+	cp	' '		; Test control
+	jr	c,l0239
+l0233:
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Put onto screen
+l0239:
+	pop	af
+	cp	cr		; Test new line
+	ret	nz
+	call	l0b2e		; Test online
+	ret	nz		; Yeap
+	ld	a,lf		; Give Line Feed
+	jr	l0224
+l0245:
+	cp	cr		; Test RETURN
+	jr	z,l0233
+	cp	bell		; Or BELL
+	jr	z,l0233
+	cp	bs		; Or backspace
+	jr	nz,l0257
+	ld	e,'D'
+	pop	af
+	jp	l0b3e		; Move cursor left if so
+l0257:
+	call	l0b4d		; Get size of screen
+	dw	TEask
+	push	hl		; Save cursor position
+	ld	hl,1*256+0
+	call	l0202		; Position cursor
+	ld	e,'M'
+	call	l0b3e		; Clear line
+	pop	hl		; Get back cursor
+	pop	af
+	jp	l0202		; Reset cursor
+;
+; Init screen
+;
+l026d:
+	call	l0b4d		; Reset screen
+	dw	TEreset
+	ld	e,'w'
+	call	l0b3e		; Turn off scroll
+	ld	h,VidLine+1
+	ld	l,0
+	jp	l0202		; Set cursor
+;
+; Execute main window request
+;
+l027e:
+	ld	a,funclen-1
+	sub	c		; Get index
+	push	af
+	ld	e,'f'
+	call	l0b3e		; Make cursor invisible
+	call	l0772		; save video lines
+	xor	a
+	ld	(l0f3d),a
+	call	l0b4d		; Get screen values
+	dw	TEask
+	pop	af
+	push	hl
+	call	l03a5		; Generate data set for main window
+	ld	e,'f'
+	call	l0b3e		; Make cursor invisible
+	ld	a,1
+	ld	(l0f29),a	; Init menue line
+l02a2:
+	ld	hl,(l0f20)
+	inc	hl
+	ld	a,(l0f25)
+	ld	e,a
+	ld	a,(l0f29)	; Get line
+	ld	d,0
+	or	a
+	ld	b,a
+	sbc	hl,de
+l02b3:
+	add	hl,de		; Advance to correct line
+	djnz	l02b3
+	push	hl
+	ld	hl,(l0f1c)
+	inc	l
+	push	af
+	add	a,h
+	ld	h,a
+	ld	a,(l0f24)
+	ld	b,a
+	ld	a,h
+	sub	b
+	ld	h,a
+	pop	af
+	ld	(l0f26),hl
+	call	l0202		; Position cursor
+	ld	e,'q'
+	call	l0b3e		; Turn off invers
+	ld	a,(l0f25)
+	ld	b,a
+	pop	hl
+l02d6:
+	ld	e,(hl)
+	ld	c,.condir
+	push	hl
+	push	bc
+	call	BDOS		; Output text
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l02d6
+	ld	e,'p'
+	call	l0b3e		; Set invers
+	ld	hl,(l0f32)
+	inc	h
+	ld	a,VidLine	; Test line
+	cp	l
+	jr	nc,l02f3
+	ld	l,Vidline	; Set max column
+l02f3:
+	call	l0202		; Position cursor
+l02f6:
+	ld	a,(l0f3d)
+	or	a		; Test any selection
+	jr	nz,l0303
+	inc	a
+	ld	(l0f3d),a
+	xor	a
+	jr	l030d
+l0303:
+	ld	e,.get
+	ld	c,.condir
+	call	BDOS
+	or	a
+	jr	z,l02f6
+l030d:
+	cp	esc		; Test exit
+	jr	z,l0343
+	cp	UpArrow		; Test cursor up
+	jr	nz,l032c
+	ld	a,(l0f29)	; Test on top
+	cp	1
+	jr	z,l02f6
+	call	l035d		; Print previous text
+	dec	a		; Decrement
+	ld	(l0f29),a
+l0323:
+	push	af
+	xor	a
+	ld	(l0f3d),a
+	pop	af
+	jp	l02a2
+l032c:
+	cp	DwnArrw		; Test cursor down
+	jp	nz,l038d
+	ld	a,(l0f29)	; Test on bottom
+	ld	hl,l0f24
+	cp	(hl)
+	jr	z,l02f6
+	call	l035d		; Print previous text
+	inc	a		; Increment
+	ld	(l0f29),a
+	jr	l0323
+l0343:
+	call	l040d
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	ld	hl,l0f30
+	ld	a,(hl)		; Get flag
+	or	a
+	jr	z,l0357		; Test it
+	push	hl
+	call	l026d		; Init screen
+	pop	hl
+l0357:
+	ld	(hl),0		; Clear flag
+	pop	hl
+	jp	l0202		; Position cursor
+;
+; Print previous text
+;
+l035d:
+	push	af
+	ld	hl,(l0f20)	; Fetch pointer
+	inc	hl
+	ld	a,(l0f25)
+	ld	e,a
+	ld	a,(l0f29)	; Fetch line
+	ld	d,0
+	or	a
+	ld	b,a
+	sbc	hl,de
+l036f:
+	add	hl,de		; Position pointer
+	djnz	l036f
+	push	hl
+	ld	hl,(l0f26)
+	call	l0202		; Position cursor
+	ld	a,(l0f25)
+	ld	b,a
+	pop	hl
+l037e:
+	ld	e,(hl)		; Fetch character
+	ld	c,.condir
+	push	hl
+	push	bc
+	call	BDOS		; Print line
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l037e
+	pop	af
+	ret
+;
+; Execute main menue
+;
+l038d:
+	push	af
+	ld	a,(l0f29)	; Get current line
+	ld	b,a
+	ld	a,(l0f22)
+	or	a
+	sla	a
+	ld	e,a		; Calculate index
+	ld	d,0
+	ld	hl,l0f08
+	add	hl,de		; Position menue pointer
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	pop	af
+	push	de		; Save for execution
+	ret
+;
+; Generate data set for main window
+; ENTRY	Accu holds index 0..3 -> f1..f7
+;
+l03a5:
+	push	af
+	ld	e,'p'
+	call	l0b3e		; Set invers
+	pop	af
+	ld	(l0f22),a	; Save index
+	push	af
+	or	a
+	sla	a
+	ld	hl,l0b51
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	e,(hl)		; Get window address
+	inc	hl
+	ld	d,(hl)
+	ld	(l0f1e),de	; Save pointers
+	ld	(l0f20),de
+	pop	af
+	inc	a
+	ld	b,a
+	ld	a,-21
+	ld	c,22
+l03cc:
+	add	a,c		; Fix mysterious
+	djnz	l03cc
+	ld	b,a
+	ld	a,(l0f22)
+	or	a
+	sla	a
+	ld	e,a
+	ld	d,0
+	ld	hl,l0b51
+	add	hl,de		; Get pointer again
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	d,(hl)		; Fetch items in window
+	ld	(l0f24-1),de
+	push	de
+	ld	hl,l0f10
+	ld	a,(l0f22)
+	add	a,a
+	ld	e,a
+	ld	d,0
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	pop	de
+	ld	e,MenWid
+	ld	a,e
+	ld	(l0f25),a	; Set width
+	push	hl
+	call	l017a		; Build menue frame
+	pop	hl
+	ld	de,(l0f24-1)
+	ld	a,d
+	add	a,h
+	ld	h,a
+	ld	(l0f1c),hl
+	ret
+;
+; Reset all video
+;
+l040d:
+	ld	e,'q'
+	call	l0b3e		; Turn off invers
+	call	l0786
+	ret
+;
+; Init main window
+;
+l0416:
+	call	l0b4d		; Get screen values
+	dw	TEask
+	push	hl
+	ld	hl,0*256+0
+	call	l0202		; Set cursor into upper left
+	ld	e,'p'
+	call	l0b3e		; Set invers
+	ld	de,l0b59
+	ld	c,.string
+	call	BDOS		; Give main header
+	ld	e,'q'
+	call	l0b3e		; Set normal
+	pop	hl
+	jp	l0202		; Reset cursor
+;
+; ############################
+; # Main menue F1 : Set UART #
+; ############################
+;
+l0438:
+	cp	PLUS		; Test turn ON
+	jp	nz,l06bb
+	ld	a,b
+	cp	Menue.6		; Test menue points
+	jp	z,l04c4
+	cp	Menue.5
+	jr	z,l04b1
+	cp	Menue.4
+	jr	z,l049e
+	cp	Menue.3
+	jr	z,l0487
+	cp	Menue.2
+	jr	z,l0460
+	cp	Menue.1
+	jp	nz,l06bb
+;
+; Select Tx Baud Rate
+;
+	ld	hl,l0e3c
+	ld	de,l0bc2
+	jr	l0466
+;
+; Select Rx Baud Rate
+;
+l0460:
+	ld	hl,l0e3d
+	ld	de,l0bd7
+l0466:
+	ld	a,(hl)
+	inc	a
+	cp	Bd.len		; Test overflow
+	jr	nz,l046d
+	xor	a
+l046d:
+	ld	(hl),a
+	ld	hl,l0de2
+l0471:
+	add	a,a		; Index * 4
+	add	a,a
+	push	de
+	ld	d,0
+	ld	e,a
+	add	hl,de		; Add to table
+	pop	de
+	ld	b,F1.len
+l047b:
+	ld	a,(hl)
+	ld	(de),a		; Unpack
+	inc	hl
+	inc	de
+	djnz	l047b
+	call	l0c30		; Set SIO to new value
+	jp	l02a2
+;
+; Select Data bits
+;
+l0487:
+	ld	hl,l0e3e	; Point to value
+	ld	a,(hl)
+	inc	a
+	cp	MaxData+1	; Test overflow
+	jr	nz,l0492
+	ld	a,MinData
+l0492:
+	ld	(hl),a		; Set new value
+	add	a,'0'		; As ASCII, too
+	ld	(l0bec),a
+	call	l0c30		; Init new value
+	jp	l02a2
+;
+; Select Parity
+;
+l049e:
+	ld	hl,l0e3f	; Point to state
+	ld	a,(hl)
+	inc	a
+	cp	maxpari		; Test end
+	jr	nz,l04a8
+	xor	a
+l04a8:
+	ld	(hl),a		; Set new value
+	ld	hl,l0e2a
+	ld	de,l0c01
+	jr	l0471
+l04b1:
+	ld	hl,l0e40	; Point to state
+	ld	a,(hl)
+	inc	a
+	cp	maxstop		; Test end
+	jr	nz,l04bb
+	xor	a
+l04bb:
+	ld	(hl),a		; Set new value
+	ld	hl,l0e1e
+	ld	de,l0c16
+	jr	l0471
+l04c4:
+	ld	hl,l0e41	; Get state
+	ld	a,(hl)
+	xor	Toggle		; Toggle it
+	ld	(hl),a
+	ld	hl,l0e36
+	jr	z,l04d3		; Test new state
+	ld	hl,l0e39
+l04d3:
+	ld	de,l0c2b
+	ld	bc,HS.len
+	ldir			; Set new text
+	call	l0c30
+	jp	l02a2
+;
+; #################################
+; # Main menue F2 : File transfer #
+; #################################
+;
+l04e1:
+	ld	(l0f28),a
+	ld	c,a
+	ld	a,b
+	cp	Menue.3		; Test transfer type
+	jp	z,l072c
+	jp	nc,l06bb
+	ld	(l0f33),a	; Save selection (WHY ??????)
+	push	af
+	push	bc
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	pop	bc
+	pop	af
+	ld	(l0ea0),a
+	ld	d,0
+	ld	e,a
+	dec	e
+	ld	hl,l0e98
+	add	hl,de		; Get pointer
+	push	hl
+	ld	hl,l0e42	; Init window
+	ld	de,w2.len
+	or	a
+	sbc	hl,de
+l050f:
+	add	hl,de		; Fix send/receice
+	djnz	l050f
+	pop	de
+	push	de
+	ld	a,(de)		; Get relative pointer
+	add	a,9		; Fix
+	ld	d,0
+	ld	e,a
+	add	hl,de		; Advance pointer
+	add	a,FileLen
+	ld	(l0f32),a	; Set max length
+	ld	a,e
+	pop	de
+	ld	(l0ea1),de	; Save parameter pointer
+	ld	a,(l0f28)
+	push	hl
+	push	de
+	call	l0ae7		; Test valid character
+	pop	de
+	pop	hl
+	cp	bs		; Test BS
+	jp	z,l05e1
+	cp	cr		; Or RETURN
+	jr	z,l059e
+	cp	' '		; Test blank
+	jr	z,l0543
+	jr	c,l055d
+	cp	'.'		; Test dot
+	jr	nz,l057f
+l0543:
+	ld	a,(de)
+	cp	DotPos
+	jr	nc,l056f
+	ld	b,a
+	ld	a,DotPos
+	sub	b
+	ld	b,a
+l054d:
+	ld	(hl),' '
+	inc	hl
+	djnz	l054d
+l0552:
+	ld	a,9
+	ld	(de),a
+	ld	a,MINUS
+	ld	(l0f32),a
+	jp	l02a2
+l055d:
+	or	a
+	jr	nz,l0565
+	ld	(de),a
+	ld	a,f5
+	jr	l0569
+l0565:
+	ld	a,(l0f32)
+	dec	a
+l0569:
+	ld	(l0f32),a
+	jp	l02a2
+l056f:
+	ld	a,'.'
+l0571:
+	dec	hl
+	cp	(hl)
+	jr	nz,l0571
+	inc	hl
+	ld	b,3
+l0578:
+	ld	(hl),' '
+	inc	hl
+	djnz	l0578
+	jr	l0552
+l057f:
+	ld	b,a
+	ld	a,(de)		; Test overflow
+	cp	MaxPos+1
+	jp	z,l02a2
+	cp	MaxPos
+	jr	nc,l0593
+	ld	a,b
+	ld	(hl),a		; Unpack character
+	ld	a,(de)
+	inc	a
+	ld	(de),a
+	cp	DotPos
+	jr	nz,l059b
+l0593:
+	inc	a
+	cp	MaxPos+1
+	jr	c,l059a
+	ld	a,cr
+l059a:
+	ld	(de),a
+l059b:
+	jp	l02a2
+l059e:
+	ld	a,f5
+	ld	(l0f32),a	; Set menue
+	ld	a,(de)
+	push	de
+	ld	d,0
+	ld	e,a
+	or	a
+	sbc	hl,de
+	ld	de,l0f55
+	ld	bc,_nam		; Unpack name
+	ldir
+	inc	hl
+	ld	bc,_ext		; And extension
+	ldir
+	ld	de,l0f60
+	xor	a
+	ld	b,32
+l05bf:
+	ld	(de),a
+	inc	de
+	djnz	l05bf
+	ld	e,'f'
+	call	l0b3e		; Make cursor visible
+	pop	de
+	ld	a,(l0ea0)
+	cp	Menue.2		; Test send
+	jp	z,l07a9
+	cp	Menue.1		; Test receive
+	jp	z,l0a65
+	jp	l06bb
+l05d9:
+	ld	a,f5
+	ld	(l0f32),a
+	jp	l02a2
+l05e1:
+	ld	a,(de)		; Test any in buffer
+	or	a
+	jr	z,l05d9		; Nope
+	dec	hl		; Fix pointer
+	dec	a		; And counter
+	ld	(de),a
+	cp	DotPos		; Test dot position
+	jr	z,l0620
+	cp	0ch
+	jr	z,l0620
+	ld	(de),a
+	push	af
+	cp	0bh
+	jr	nz,l05fa
+	ld	(hl),' '
+	jr	l0617
+l05fa:
+	inc	hl
+	ld	d,h
+	ld	e,l
+	dec	de
+	ld	b,a
+	cp	9
+	jr	c,l0607
+	ld	a,0ch
+	jr	l0609
+l0607:
+	ld	a,DotPos
+l0609:
+	sub	b
+	jr	z,l0617
+	dec	a
+	jr	z,l0617
+	ld	c,a
+	ld	b,0
+	ldir
+	ld	a,' '
+	ld	(de),a
+l0617:
+	pop	af
+	add	a,f5
+	ld	(l0f32),a
+	jp	l02a2
+l0620:
+	dec	a		; Fix again
+	dec	hl
+	ld	(hl),' '	; Clear entry
+	ld	(de),a
+	dec	hl
+	ld	b,a
+	ld	a,' '
+	cp	(hl)		; Test delimiter
+	inc	hl
+	ld	a,b
+	jr	z,l0620
+	add	a,f5
+	ld	(l0f32),a
+	jp	l02a2
+;
+; ###################################
+; # Main menue F3 : Online or local #
+; ###################################
+;
+l0636:
+	cp	PLUS		; Test turn on
+	jp	nz,l06bb
+	ld	a,b
+	cp	Menue.1
+	jr	z,l0678
+	jp	l06bb
+;
+; Z19/VT52 Emulator
+; Leave loop by pressing [ALT][STOP]
+;
+l0643:
+	call	l0b4d		; Reset screen
+	dw	TEreset
+l0648:
+	call	l0b0f		; Get a key
+	or	a		; Test any
+	jr	z,l0654
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Echo if data here
+l0654:
+	ld	c,.condir
+	ld	e,.get
+	call	BDOS		; Test data from keyboard
+	or	a
+	jr	z,l0648
+	cp	STOP		; Test stop I/O
+	jr	z,l0667
+	call	l0b08		; Echo if not
+	jr	l0648
+l0667:
+	call	l026d		; Set up screen
+	call	l0416		; Init main frame
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	pop	hl
+	ld	l,0
+	jp	l0202		; Set cursor
+l0678:
+	ld	a,(l0f2a)	; Toggle online/local
+	xor	Toggle
+	ld	(l0f2a),a
+	ld	hl,l0eb9	; Get value
+	jr	z,l0688
+	ld	hl,l0ecb
+l0688:
+	ld	de,l0ea4
+	ld	bc,F5.len
+	ldir			; Give new state
+	jp	l02a2
+;
+; ##################################
+; # Main menue F7 : End or emulate #
+; ##################################
+;
+l0693:
+	cp	cr		; Test end of input
+	jr	nz,l06bb
+	ld	a,b
+	cp	Menue.1		; Test emulator
+	jp	z,l0643
+	ld	b,del
+	ld	c,72		; Key <-DEL
+	ld	d,00001b	; Normal
+	call	l0b4d		; Set delete
+	dw	SETkey
+	call	l0b4d		; Reset screen
+	dw	TEreset
+	jp	OS
+l06b0:
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	xor	a
+	ld	hl,(l0ea1)
+	ld	(hl),a
+	inc	a
+l06bb:
+	ld	e,bell
+	ld	c,.condir
+	or	a
+	call	nz,BDOS		; Give bell on NOT zero
+	jp	l02a2
+;
+; Put character to file
+; ENTRY	Accu holds character
+;
+l06c6:
+	push	hl
+	ld	hl,(l0f2d)	; Get buffer
+	ld	(hl),a		; Save character
+	inc	hl
+	push	hl
+	xor	a
+	inc	a
+	ld	(l0f31),a	; Init file access
+	ld	de,l0fa0+reclen
+	sbc	hl,de		; Get position
+	pop	hl
+	jr	c,l06eb		; Test buffer filled
+	push	bc
+	ld	de,l0f54
+	ld	c,.wrseq
+	call	BDOS		; Write record
+	pop	bc
+	xor	a
+	ld	(l0f31),a	; Clear access
+	ld	hl,l0fa0
+l06eb:
+	ld	(l0f2d),hl
+	pop	hl
+	ret
+;
+; Close file, fix up F3 window
+;
+l06f0:
+	ld	de,l0f54
+	ld	c,.close
+	call	BDOS		; Close file
+l06f8:
+	call	l06fe
+	jp	l02a2		; Restart
+;
+; Close and fix window for file transfer
+;
+l06fe:
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	ld	hl,l0e4b
+	ld	de,21
+	ld	a,(l0ea0)
+	ld	b,a
+	or	a
+	sbc	hl,de
+l0710:
+	add	hl,de
+	djnz	l0710
+	ex	de,hl
+	xor	a
+	ld	hl,(l0ea1)
+	ld	(hl),a
+	ld	hl,l0e82
+	ld	bc,l0e8e-l0e82
+	ldir
+	ret
+;
+; ### NEVER CALLED !!?? ###
+;
+l0722:
+	ld	de,l0f54
+	ld	c,.delete
+	call	BDOS
+	jr	l06f8
+;
+; Determine mode of transfer
+;
+l072c:
+	ld	e,'f'
+	call	l0b3e		; Make cursor invisible
+	ld	a,(l0f28)
+	cp	WHAT		; Test very special
+	jp	z,l079a
+	cp	PLUS		; Test toggle
+	jp	nz,l06bb
+	ld	a,(l0f2c)
+	xor	Toggle		; Toggle file mode
+	ld	(l0f2c),a
+	ld	hl,l0e8e
+	call	nz,l07a5
+	ld	de,l0e79
+	ld	bc,Xfr.len
+	ldir			; Unpack text
+	jp	l02a2
+;
+; Copy video access code into hi memory
+;
+l0757:
+	ld	hl,l10d4
+	ld	de,COMRAM
+	ld	bc,comlen
+	ldir			; Move it
+	ret
+;
+; Execute function in hi memory
+;
+l0763:
+	push	hl
+	push	bc
+	push	de
+	ld	bc,COMRAM
+	call	l0b4d		; Execute in common
+	dw	SCRrun
+	pop	de
+	pop	bc
+	pop	hl
+	ret
+;
+; Save video lines into hi memory
+;
+l0772:
+	ld	de,VidPut*256+0	; Init mode
+	ld	hl,COMRAM+comlen; And buffer
+	ld	bc,pixlen
+l077b:
+	inc	e		; Advance line
+	ld	a,e
+	cp	VidPatL+1	; Test end
+	ret	z
+	call	l0763		; Call screen environment
+	add	hl,bc		; Advance pointer
+	jr	l077b
+;
+; Restore video lines from hi memory
+;
+l0786:
+	ld	de,VidGet*256+0	; Init mode
+	ld	hl,COMRAM+comlen; And buffer
+	ld	bc,pixlen
+l078f:
+	inc	e		; Advance line
+	ld	a,e
+	cp	VidPatL+1	; Test end
+	ret	z
+	call	l0763		; Call screen environment
+	add	hl,bc		; Advance pointer
+	jr	l078f
+;
+; Execute F3 function - Game of Life
+;
+l079a:
+	call	l0b4d		; Reset terminal
+	dw	TEreset
+	call	l0c5e		; Call the game
+	jp	l0667
+;
+; Load HEX xfer string
+;
+l07a5:
+	ld	hl,l0e93
+	ret
+;
+; Send file over serial line
+;
+l07a9:
+	ld	de,l0f55
+	ld	a,(de)		; Test name
+	cp	' '
+	jp	z,l06b0
+	dec	de
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a
+	jp	z,l06b0
+	ld	de,l0fa0
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	a,(l0f2c)
+	or	a
+	jp	nz,l0843
+	call	l0786		; Get back video
+	ld	e,'q'
+	call	l0b3e		; Set invers off
+	pop	hl
+	call	l0202		; Set cursor to old state
+l07d7:
+	ld	de,l0f54
+	ld	c,.rdseq
+	call	BDOS		; Read a sector
+	or	a		; Test end
+	jp	nz,l083a
+	ld	hl,l0fa0	; Set buffer
+	ld	b,reclen
+l07e8:
+	ld	a,(hl)		; Get character
+	cp	EOF		; Test end of text file
+	jr	z,l0816
+	push	af
+	push	bc
+	push	hl
+	call	l0b08		; Put to serial line
+l07f3:
+	call	l0b0f		; Test echo from line
+	or	a
+	jr	z,l07fe
+	call	l0224		; Echo on screen
+	jr	l07f3
+l07fe:
+	ld	e,.get
+	ld	c,.condir
+	call	BDOS
+	cp	STOP		; Test STOP
+	jr	z,l0811
+	pop	hl
+	pop	bc
+	pop	af
+	inc	hl
+	djnz	l07e8
+	jr	l07d7
+l0811:
+	pop	hl
+	pop	bc
+	pop	af
+	jr	l0819
+l0816:
+	call	l06fe
+l0819:
+	call	l0b0f		; Test CR from SIO
+	or	a
+	cp	cr
+	jr	z,l082d
+	call	l0224		; Echo if not
+	ld	c,.consta
+	call	BDOS		; Test keyboard
+	or	a
+	jp	z,l0819
+l082d:
+	ld	de,l0f54
+	ld	c,.close
+	call	BDOS		; Close file
+	ld	e,'e'
+	jp	l0b3e		; Make cursor visible
+l083a:
+	ld	e,bell
+	ld	c,.condir
+	call	BDOS		; Indicate read error
+	jr	l082d
+;
+; Send file in hex mode
+;
+l0843:
+	call	l0849
+	jp	l06f0
+;
+l0849:
+	ld	a,reclen
+	ld	(l0f2d),a	; Set pointer
+	xor	a
+	ld	(l0f31),a	; Clear access
+	ld	de,-1
+	ld	(l0f34),de	; Init block
+l0859:
+	ld	a,STX
+	call	l0b08		; Send STX
+	call	l09f9		; Wait for ACK
+	jr	nc,l0859
+l0863:
+	ld	de,(l0f34)
+	inc	de		; Update block number
+	ld	(l0f34),de
+	call	l09d3		; Send file name
+	call	l09f0		; .. and block
+	ld	de,0
+	ld	(l0f36),de	; Init checksum
+	ld	hl,l0fa0
+	call	l097f
+	ld	a,(l0f31)	; Test data
+	or	a
+	jr	nz,l08c2
+l0885:
+	ld	a,reclen
+	push	af
+	call	l0b08		; Give record length
+	pop	bc
+	ld	hl,l0fa0
+	call	l09bb		; Output block
+	ld	a,(l0f36)
+	call	l0b08		; Give checksum
+	ld	a,(l0f36+1)
+	call	l0b08
+	call	l09f9		; Wait for ACK
+	jr	c,l08b3
+	call	l09d3		; Retry ig not
+	call	l09f0
+	ld	de,0
+	ld	(l0f36),de
+	jp	l0885		; Send record again
+l08b3:
+	jr	l0863
+l08b5:
+	ld	de,0
+	ld	(l0f36),de	; Init checksum
+	call	l09d3		; Send filename again
+	call	l09f0		; As well as block
+l08c2:
+	xor	a
+	call	l0b08		; Give three zeroes
+	xor	a
+	call	l0b08
+	xor	a
+	call	l0b08
+	call	l09f9		; Wait for accepted
+	jr	nc,l08b5
+	ret
+;
+; Receive file in hex mode
+;
+l08d4:
+	call	l0a5f		; Get from SIO
+	cp	STX		; Wait for start
+	jp	nz,l08d4
+	call	l0a42		; Tell remore ready
+	call	l08e8
+	call	l0a42		; Tell ready
+	jp	l06f0
+l08e8:
+	ld	de,-1
+	ld	(l0f34),de	; Init block count
+l08ef:
+	ld	de,(l0f34)
+	inc	de		; Advance block count
+	ld	(l0f34),de
+l08f8:
+	call	l0a27		; Get name of file
+	call	l0a39		; And block number
+	call	l0a5f		; And length of block
+	ld	(l0f3c),a
+	or	a		; Test any
+	jr	nz,l0910
+	ld	de,0
+	ld	(l0f36),de	; Reset checksum
+	jr	l091a
+l0910:
+	ld	a,(l0f3c)	; Load length
+	ld	b,a
+	ld	hl,l0fa0
+	call	l0a0a		; Get this block
+l091a:
+	ld	hl,(l0f36)
+	push	hl		; Save checksum
+	ld	hl,l0f3a
+	ld	b,2
+	call	l0a0a		; Get checksum
+	ld	hl,(l0f38)
+	ld	de,(l0f34)
+	xor	a
+	sbc	hl,de		; Compare block numbers
+	ld	a,l
+	or	h
+	jp	nz,l0a48	; Error
+	ld	a,d
+	or	e		; Test first block
+	jr	z,l094a
+	ld	b,FileLen+1
+	ld	hl,l0f90
+	ld	de,l0f80
+l0941:
+	ld	a,(de)
+	cp	(hl)		; Compare filenames
+	jp	nz,l0a48	; Oops
+	inc	hl
+	inc	de
+	djnz	l0941
+l094a:
+	ld	bc,FileBlk
+	ld	hl,l0f90
+	ld	de,l0f80
+	ldir			; Save name read
+	pop	hl
+	ld	de,(l0f3a)
+	or	a
+	sbc	hl,de		; Compare checksums
+	ld	a,l
+	or	h
+	jr	nz,l096f
+	ld	a,(l0f3c)	; Test any length
+	or	a
+	ret	z		; Last block, so go away
+	call	l0977
+	call	l0a42
+	jp	l08ef
+l096f:
+	ld	a,NAK
+	call	l0b08		; Send NAK cause of error
+	jp	l08f8
+l0977:
+	ld	de,l0f54
+	ld	c,.wrseq
+	jp	BDOS		; Write record to file
+;
+; Fill buffer with disk data
+; ENTRY	Reg HL points to buffer
+;
+l097f:
+	ld	b,reclen	; Set length
+l0981:
+	push	bc
+	push	hl
+	call	l098e		; Get it
+	pop	hl
+	pop	bc
+	ret	c		; End
+	ld	(hl),a		; Put into buffer
+	inc	hl
+	djnz	l0981
+	ret
+;
+; Get byte from file
+; EXIT	Accu holds byte
+;	Carry set on end of file
+;
+l098e:
+	ld	a,(l0f2d)	; Test any in buffer
+	cp	reclen
+	jr	nz,l09ad
+	xor	a
+	ld	(l0f2d),a	; Clear pointer
+	ld	c,.rdseq
+	ld	de,l0f54
+	call	BDOS		; Get record
+	or	a		; Test physical EOF
+	jr	z,l09ad
+	push	af
+	ld	a,-1
+	ld	(l0f31),a	; Set no access
+	pop	af
+	scf			; Indicate EOF
+	ret
+l09ad:
+	ld	e,a
+	ld	d,0
+	inc	a		; Advance pointer
+	ld	(l0f2d),a
+	ld	hl,l0fa0
+	add	hl,de
+	ld	a,(hl)		; Get character
+	or	a
+	ret
+;
+; Send multiple bytes to serial line
+; ENTRY	Reg HL points to buffer
+;	Reg B  holds count
+;
+l09bb:
+	ld	a,(hl)		; Get character
+	inc	hl
+	push	hl
+	ld	hl,(l0f36)
+	ld	d,0
+	ld	e,a
+	add	hl,de		; Update checksum
+	ld	(l0f36),hl
+	pop	hl
+	push	hl
+	push	bc
+	call	l0b08		; Give to line
+	pop	bc
+	pop	hl
+	djnz	l09bb		; Loop
+	ret
+;
+; Send name of file
+;
+l09d3:
+	ld	hl,l0f54	; Point to FCB
+	push	hl
+	ld	a,(hl)
+	or	'A'-1
+	call	l0b08		; Give drive
+	pop	hl
+	inc	hl
+	ld	b,FileLen
+	call	l09bb		; And filename
+	ld	b,FileBlk-FileLen-1
+l09e6:
+	push	bc
+	ld	a,0
+	call	l0b08		; Give filler
+	pop	bc
+	djnz	l09e6
+	ret
+;
+; Output block number
+;
+l09f0:
+	ld	hl,l0f34	; Point to block
+	ld	b,2
+	call	l09bb		; Two bytes
+	ret
+;
+; Wait for ACK character
+; EXIT	Carry set if found
+; NOTE	Break transfer if ETX found
+; ====
+;
+l09f9:
+	call	l0a5f		; Get character
+	cp	ETX		; Test end
+	jr	nz,l0a04
+	pop	af		; Clean stack
+	pop	af
+	jr	l0a48
+l0a04:
+	cp	ACK		; Fix for ACK
+	scf
+	ret	z
+	ccf
+	ret
+;
+; Receive multiple bytes from serial line
+; ENTRY	Reg HL points to buffer
+;	Reg B  holds count
+;
+l0a0a:
+	ld	de,0
+	ld	(l0f36),de	; Clear checksum
+l0a11:
+	push	hl
+	push	bc
+	call	l0a5f		; Get from line
+	ld	hl,(l0f36)
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	(l0f36),hl	; Update checksum
+	pop	bc
+	pop	hl
+	ld	(hl),a		; Save what we got
+	inc	hl
+	djnz	l0a11
+	ret
+;
+; Receive name of file
+;
+l0a27:
+	call	l0a5f		; Get from SIO
+	cp	' '		; Wait for valid ASCII
+	jr	c,l0a27
+	ld	hl,l0f90
+	ld	(hl),a		; Save character
+	inc	hl
+	ld	b,FileBlk-1
+	call	l0a0a		; Get remainder of name
+	ret
+;
+; Input block number
+;
+l0a39:
+	ld	hl,l0f38	; Point to block
+	ld	b,2
+	call	l0a0a		; Get two bytes
+	ret
+;
+; Send ACK via SIO
+;
+l0a42:
+	ld	a,ACK
+	call	l0b08		; Send it
+	ret
+;
+; Stop hex transfer
+;
+l0a48:
+	ld	a,ETX
+	call	l0b08		; Inform orger site
+	ld	e,bell
+	ld	c,.condir
+	call	BDOS		; Inform this side
+	ld	de,l0f54
+	ld	c,.close
+	call	BDOS		; Close file
+	jp	l02a2		; Restart
+;
+; Get pure byte from serial line
+; EXIT	Accu holds byte
+;
+l0a5f:
+	call	l0b0f		; Get from line
+	jr	z,l0a5f		; Loop till any there
+	ret
+;
+; Receive file over serial line
+;
+l0a65:
+	ld	de,l0f55
+	ld	a,(de)
+	cp	' '		; Test filename
+	jp	z,l06b0
+	dec	de
+	ld	c,.delete
+	call	BDOS		; Delete existent file
+	ld	de,l0f54
+	ld	c,.make
+	call	BDOS		; Create new one
+	or	a
+	jp	nz,l06b0	; Error
+	ld	de,l0fa0
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	a,(l0f2c)	; Test transfer mode
+	or	a
+	jp	nz,l08d4
+	call	l0786		; Get back old screen
+	pop	hl
+	call	l0202		; Set cursor
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	ld	e,'q'
+	call	l0b3e		; Turn off invers
+	ld	hl,l0fa0
+	ld	(l0f2d),hl	; Set pointer
+l0aa6:
+	ld	e,.get
+	ld	c,.condir
+	call	BDOS		; Test keyboard
+	or	a
+	jr	z,l0ab7
+	cp	STOP		; Test STOP
+	jr	z,l0ac6
+	call	l0b08
+l0ab7:
+	call	l0b0f		; Get from serial line
+	jr	z,l0aa6
+	push	af
+	call	l06c6		; Put to file if any
+	pop	af
+	call	l0224		; Echo on screen
+	jr	l0aa6
+l0ac6:
+	ld	a,EOF
+	call	l06c6		; Close file
+	ld	de,l0f54
+	ld	c,.wrseq
+	ld	a,(l0f31)
+	or	a
+	call	nz,BDOS		; Write record if any data
+	ld	de,l0f54
+	ld	c,.close	; .. close file
+	call	BDOS
+	ld	e,'e'
+	call	l0b3e		; Make cursor visible
+	jp	l06fe
+;
+; Test valid file character
+; ENTRY	Accu holds character
+; EXIT	Accu holds character (in UPPER case)
+;	Zero if invalid
+;
+l0ae7:
+	ld	hl,l0f3e
+	ld	bc,FC.len
+	cpir			; Find special character
+	ret	z		; Ok, so leave
+	bit	7,a		; Test control
+	jr	nz,l0b06
+	cp	'A'		; Test A..Z
+	jr	c,l0b06
+	cp	'Z'
+	ret	c		; Ok
+	cp	'a'		; Test a..z
+	jr	c,l0b06
+	cp	'z'+1
+	jr	nc,l0b06
+	sub	'a'-'A'		; Map to upper case
+	ret
+l0b06:
+	xor	a
+	ret
+;
+; Put character to SIO via auxiliary line
+; ENTRY	Accu holds character to be put
+;
+l0b08:
+	ld	c,.auxout
+	ld	e,a
+	call	BDOS		; Just do it
+	ret
+;
+; Get character from SIO via auxiliary line
+; EXIT	Zero set on no character available
+;
+l0b0f:
+	ld	c,.auxsta
+	call	BDOS		; Test character available
+	or	a
+	ret	z		; Nope
+	ld	c,.auxin
+	call	BDOS		; Get it
+	push	af
+	ld	c,AllBits	; Init mask
+	ld	a,(l0e3e)
+	cp	MaxData		; Test 8 bits
+	jr	z,l0b27
+	ld	c,NoMSB		; Change mask
+l0b27:
+	pop	af
+	and	c		; Mask data
+	ld	b,a
+	xor	a
+	inc	a		; Set no zero
+	ld	a,b
+	ret
+;
+; Test online option
+; EXIT	Zero flag set if local
+;
+l0b2e:
+	push	hl
+	ld	hl,l0f2a
+	bit	0,(hl)		; Look for the bit
+	pop	hl
+	ret
+;
+; ### NEVER CALLED !!?? ###
+;
+l0b36:
+	push	hl
+	ld	hl,l0f2b
+	bit	0,(hl)
+	pop	hl
+	ret
+;
+; Give escape character
+; ENTRY	Reg E holds escape sequence character
+;
+l0b3e:
+	push	de
+	ld	e,esc
+	ld	c,.condir
+	call	BDOS		; Give real ESCape
+	pop	de
+	ld	c,.condir	; Then character
+	call	BDOS
+	ret
+l0b4d:
+_XBIOS	equ	$+1
+	jp	$-$
+;
+	db	4
+l0b51:
+	dw	l0bb1
+	dw	l0e42
+	dw	l0ea3
+	dw	l0edd
+l0b59:
+	db	' F1 = Framing ',delim
+	db	' F3 = Files ',delim
+	db	' F5 = Connect',delim
+	db	' F7 = OFF ',delim
+	db	'      MAIL TERMINAL PROGRAM V1.2  '
+	db	eot
+l0bb1:
+	db	6
+	db	'Tx Baud Rate .. '
+l0bc2:
+	db	'9600 '
+	db	'Rx Baud Rate .. '
+l0bd7:
+	db	'9600 '
+	db	'Data bits ..... '
+l0bec:
+	db	'8    '
+	db	'Parity  ....... '
+l0c01:
+	db	'NONE '
+	db	'Stop Bits  .... '
+l0c16:
+	db	'1    '
+	db	'H/W Handshaking '
+l0c2b:
+	db	'OFF  '
+;
+; Init the UART
+;
+l0c30:
+	ld	a,(l0e3c)	; Get transmit baud rate
+	inc	a
+	ld	l,a
+	ld	a,(l0e3d)	; Receive baud rate, too
+	inc	a
+	ld	h,a
+	call	l0b4d		; Set UART baud rate
+	dw	SAbaud
+	ld	a,(l0e40)	; Get stop bits
+	ld	d,a
+	ld	a,(l0e3f)	; Get parity
+	ld	e,a
+	ld	a,(l0e3e)	; Load length of data
+	ld	h,a		; For both channels same length
+	ld	l,h
+	ld	a,(l0e41)	; Test handshake
+	or	a
+	jr	z,l0c56
+	ld	a,0fdh		; DTR off
+	jr	l0c58
+l0c56:
+	ld	a,0feh		; DTR on
+l0c58:
+	call	l0b4d		; Init the UART
+	dw	SAinit
+	ret
+;
+; The GAME OF LIFE
+;
+l0c5e:
+	ld	hl,l1ad7
+	ld	bc,2*VidCol*(VidLine+1)
+	ld	de,l1ad7+1
+	ld	(hl),0		; Clear both game boards
+	ldir
+	ld	a,0
+	ld	(l0ddb),a	; Set current board
+	call	l0dd5		; Home cursor
+	ld	a,lf
+	call	l0daf		; Give new line
+	call	l0db5		; Make cursor visible
+	ld	hl,l1ad7+VidCol	; Point to 2nd line
+l0c7e:
+	push	hl
+	call	l0dce		; Get character from console
+	pop	hl
+	or	a
+	jr	z,l0c7e		; Wait for any
+	ld	(l0de0),hl	; Save board pointer
+	cp	' '		; Test input
+	jr	z,l0cfb
+	cp	UpArrow
+	jr	z,l0ca3
+	cp	DwnArrw
+	jr	z,l0cb5
+	cp	LftArrw
+	jr	z,l0cc1
+	cp	RgtArrw
+	jr	z,l0cca
+	cp	cr
+	jr	z,l0cd3
+	jr	l0c7e
+;
+; Input: Cursor up
+;
+l0ca3:
+	ld	de,VidCol
+	or	a
+	sbc	hl,de		; Calculate previous line
+	call	l0ce0		; Check within range
+	push	hl
+	ld	e,'A'		; Move cursor up a row
+l0caf:
+	call	l0b3e		; Set cursor movement
+	pop	hl
+	jr	l0c7e
+;
+; Input: Cursor down
+;
+l0cb5:
+	ld	de,VidCol
+	add	hl,de		; Calculate next line
+	call	l0ce0		; Check within range
+	push	hl
+	ld	e,'B'		; Move cursor down a row
+	jr	l0caf
+;
+; Input: Cursor left
+;
+l0cc1:
+	dec	hl		; Calculate previous column
+	call	l0ce0		; Check within range
+	push	hl
+	ld	e,'D'
+	jr	l0caf		; Move cursor left a column
+;
+; Input: Cursor right
+;
+l0cca:
+	inc	hl		; Calculate next column
+	call	l0ce0		; Check within range
+	push	hl
+	ld	e,'C'
+	jr	l0caf		; Move cursor right a column
+;
+; Input: ENTER
+;
+l0cd3:
+	ld	a,(hl)		; Get cell content
+	xor	1		; Toggle it
+	ld	(hl),a
+	dec	a
+	push	hl
+	call	l0dbf		; Print piece
+	ld	e,'D'
+	jr	l0caf		; Move cursor left a column
+;
+; Check board pointer within range
+; ENTRY	Reg HL points to board location
+; EXIT	Reg HL points to board location
+;
+l0ce0:
+	push	hl
+	ld	de,l1ad7	; Point to first board
+	or	a
+	sbc	hl,de		; Test location within first board
+	jr	nc,l0cf0	; Maybe
+l0ce9:
+	pop	hl		; Clean stack
+	pop	hl		; And level of call
+	ld	hl,(l0de0)	; Reset board pointer
+	jr	l0c7e		; Reenter input
+l0cf0:
+	add	hl,de		; Reset location
+	ld	de,l1ad7+VidCol*VidLine
+	or	a
+	sbc	hl,de		; Test within first board
+	jr	nc,l0ce9	; Nope
+	pop	hl
+	ret
+;
+; Input: Blank - Start the "Game of Life"
+;
+l0cfb:
+	call	l0dba		; Make cursor invisible
+l0cfe:
+	call	l0d5a		; Set current board
+	ld	bc,VidLine*VidCol
+l0d04:
+	push	hl
+	pop	ix		; Copy board
+	call	l0d40		; Calculate population
+	cp	1		; Test death
+	jr	z,l0d16
+	cp	2
+	jr	z,l0d37		; Test survival
+	cp	3
+	jr	z,l0d3b		; Test birth
+l0d16:
+	xor	a
+	ld	(de),a		; Set unoccupied
+l0d18:
+	inc	hl		; Advance pointers
+	inc	de
+	dec	bc
+	ld	a,b		; Test all locations scanned
+	or	c
+	jr	nz,l0d04	; Nope
+	call	l0d7c		; Print board
+	ld	a,(l0ddb)
+	cpl			; Toggle current board
+	ld	(l0ddb),a
+	ld	a,' '
+	call	l0dce		; Test character from console
+	or	a
+	jr	z,l0cfe		; Nope, so loop
+	call	l0dd5		; Home cursor
+	jp	l0db5		; Make cursor visible
+l0d37:
+	ld	a,(hl)		; Copy for survival
+	ld	(de),a
+	jr	l0d18
+l0d3b:
+	ld	a,1
+	ld	(de),a		; Set new piece
+	jr	l0d18
+;
+; Calculate neighbours
+; (Pieces that touch horizontally, vertically
+; or diagonally are said to be neighboring pieces)
+;
+l0d40:
+	xor	a		; Reset sum
+	add	a,(ix-VidCol-1)	; Add the eight neighbours
+	add	a,(ix-VidCol)
+	add	a,(ix-VidCol+1)
+	add	a,(ix-1)
+	add	a,(ix+1)
+	add	a,(ix+VidCol-1)
+	add	a,(ix+VidCol)
+	add	a,(ix+VidCol+1)
+	ret
+;
+; Set current board
+; EXIT	Reg HL holds primary board
+;	Reg DE holds secondary board
+;
+l0d5a:
+	ld	a,(l0ddb)	; Get current board
+	or	a		; Test selection
+	jr	z,l0d6e
+	ld	de,l1ad7	; Set secondary board
+	ld	(l0dde),de
+	ld	hl,l25bd	; And primary
+	ld	(l0ddc),hl
+	ret
+l0d6e:
+	ld	hl,l1ad7	; Set primary board
+	ld	(l0ddc),hl
+	ld	de,l25bd	; And secondary
+	ld	(l0dde),de
+	ret
+;
+; Print board
+;
+l0d7c:
+	ld	hl,0
+	call	l0202		; Home cursor
+	ld	de,(l0ddc)	; Get primray
+	ld	b,VidLine
+	ld	hl,(l0dde)	; Get secondary
+l0d8b:
+	push	bc
+	ld	b,VidCol
+l0d8e:
+	push	bc
+	ld	a,(hl)		; Get from secondary
+	ex	de,hl
+	cp	(hl)		; Compare ** BUT WHY????
+	ex	de,hl
+	inc	hl
+	inc	de
+	push	hl
+	push	de
+	dec	a
+	call	l0dbf		; Print piece
+	pop	de
+	pop	hl
+l0d9d:
+	pop	bc
+	djnz	l0d8e		; Get thru colums
+	push	hl
+	pop	hl
+	pop	bc
+	djnz	l0d8b		; Get thru lines
+	ret
+;
+; ### NEVER CALLED !!?? ###
+;
+l0da6:
+	ld	e,'C'
+	call	l0b3e		; Move cursor right
+	pop	de
+	pop	hl
+	jr	l0d9d
+;
+; Put character to console
+;
+l0daf:
+	ld	e,a
+	ld	c,.condir
+	jp	BDOS		; Just put it
+;
+; Make cursor visible
+;
+l0db5:
+	ld	e,'e'
+	jp	l0b3e		; Make cursor visible
+;
+; Make cursor invisible
+;
+l0dba:
+	ld	e,'f'
+	jp	l0b3e		; Make cursor invisible
+;
+; Print piece
+; ENTRY	Accu reflects state:	00 is piece set
+;				FF is not
+l0dbf:
+	or	a		; Test state
+	jr	z,l0dca		; It is set
+	ld	e,' '		; Blank on reset
+l0dc4:
+	ld	c,.condir
+	call	BDOS
+	ret
+l0dca:
+	ld	e,'O'		; Indicate set
+	jr	l0dc4
+;
+; Get character from console
+;
+l0dce:
+	ld	e,.get
+	ld	c,.condir
+	jp	BDOS		; Just get it
+;
+; Home cursor
+;
+l0dd5:
+	ld	hl,0*256+0
+	jp	l0202		; Home cursor
+;
+l0ddb:
+	db	0
+l0ddc:
+	dw	0
+l0dde:
+	dw	0
+l0de0:
+	dw	0
+l0de2:
+	db	'  50'
+F1.len	equ	$-l0de2
+	db	'  75'
+	db	' 110'
+	db	'134',0a9h
+	db	' 150'
+	db	' 300'
+	db	' 600'
+	db	'1200'
+	db	'1800'
+	db	'2400'
+	db	'3600'
+	db	'4800'
+	db	'7200'
+	db	'9600'
+	db	'19k2'
+Bd.len	equ	($-l0de2) / F1.len
+l0e1e:
+	db	'1   '
+	db	'1',0a9h,'  '
+	db	'2   '
+maxstop	equ	($-l0e1e) / F1.len
+l0e2a:
+	db	'NONE'
+	db	' ODD'
+	db	'EVEN'
+maxpari	equ	($-l0e2a) / F1.len
+l0e36:
+	db	'OFF'
+HS.len	equ	$-l0e36
+l0e39:
+	db	'ON '
+l0e3c:
+	db	Bd.len-1	; 9600 Bd
+l0e3d:
+	db	Bd.len-1
+l0e3e:
+	db	8
+l0e3f:
+	db	0
+l0e40:
+	db	0
+l0e41:
+	db	0
+l0e42:
+	db	3
+l0e43:
+	db	'Receive['
+l0e4b:
+	db	'        .   ]'
+w2.len	equ	$-l0e43
+	db	'Send   [        .   ]'
+	db	'Transfer as '
+l0e79:
+	db	'ASCII    '
+l0e82:
+	db	'        .   '
+l0e8e:
+	db	'ASCII'
+Xfr.len	equ	$-l0e8e
+l0e93:
+	db	'HEX. '
+l0e98:
+	ds	8
+l0ea0:
+	db	0
+l0ea1:
+	dw	0
+l0ea3:
+	db	1
+l0ea4:
+	db	'ONLINE / local       '
+l0eb9:
+	db	'online / LOCAL    '
+F5.len	equ	$-l0eb9
+l0ecb:
+	db	'ONLINE / local    '
+l0edd:
+	db	2
+	db	'Z19 / VT52 Emulation '
+	db	'* RETURN TO CP/M + * '
+l0f08:
+	dw	l0438
+	dw	l04e1
+	dw	l0636
+	dw	l0693
+l0f10:
+	db	 1,1
+	db	10,1
+	db	20,1
+	db	33,1
+l0f18:
+	dw	0
+l0f1a:
+	db	0		; Column
+	db	0		; Row
+l0f1c:
+	dw	0
+l0f1e:
+	dw	l0b59
+l0f20:
+	dw	0
+l0f22:
+	db	0
+	db	0		; Belongs to next
+l0f24:
+	db	0
+l0f25:
+	db	0
+l0f26:
+	db	0		; Column
+	db	0		; Row
+l0f28:
+	db	0
+l0f29:
+	db	0
+l0f2a:
+	db	Toggle
+l0f2b:
+	db	0
+l0f2c:
+	db	0
+l0f2d:
+	dw	0
+	db	0
+l0f30:
+	db	0
+l0f31:
+	db	0
+l0f32:
+	db	0
+l0f33:
+	db	0
+l0f34:
+	dw	0
+l0f36:
+	dw	0
+l0f38:
+	dw	0
+l0f3a:
+	dw	0
+l0f3c:
+	db	0
+l0f3d:
+	db	-1
+l0f3e:
+	db	' 0123456789.',cr,bs
+FC.len	equ	$-l0f3e
+l0f4c:
+	db	f1,f3,f5,f7
+funclen	equ	$-l0f4c
+l0f50:
+	db	cr,lf,bell,bs
+speclen	equ	$-l0f50
+l0f54:
+	db	0
+l0f55:
+	db	'DATA    DAT'
+l0f60:
+	ds	0020h
+l0f80:
+	ds	FileBlk
+l0f90:
+	ds	FileBlk
+l0fa0:
+	ds	reclen
+	db	EOF
+l1021:
+	db	esc,'y'		; Exit 24x80 mode
+	db	esc,'Y',45,52	; Position cursor
+	db	'Amstrad PCW8256 Electronic Mail Terminal'
+	db	cr,lf,lf
+	db	'              '
+	db	'       Requires RS232C / Centronics Interface.'
+	db	cr,lf,lf
+	db	'                     ',cpyrig
+	db	'1985 Amstrad Consumer Electronics plc.'
+	db	esc,'f'		; Make cursor invisible
+	db	eot
+;
+	db	0,0,0,0
+;
+; Execute screen environment
+; ENTRY	Reg HL points to buffer where data are or will be
+;	Reg  E holds line number
+;	Reg  D holds mode (0 is save video lines)
+;
+l10d4:
+	ld	c,d
+	push	hl		; Save buffer address
+	ld	h,0
+	ld	l,e		; Expand line number
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl		; *16
+	ld	de,ROLLER
+	add	hl,de		; Add roller RAM base
+	ld	e,(hl)		; Fetch decoded address
+	inc	hl
+	ld	d,(hl)
+	ld	a,e
+	and	00000111b
+	ld	l,a		; Build real address
+	ld	a,e
+	rla
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	ld	a,e
+	and	11110000b
+	or	l
+	ld	e,a
+	pop	hl		; Get back buffer address
+	ld	a,c		; Get mode
+	or	a
+	jr	nz,l10f9	; Go to load into buffer
+	ex	de,hl		; Otherwise swap addresses
+l10f9:
+	ld	bc,pixlen
+	ldir
+	ret
+;
+comlen	equ	$-l10d4
+
+l10ff::
+
+	end
+

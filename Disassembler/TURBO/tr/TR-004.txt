@@ -1,0 +1,1158 @@
+;
+; Load constant 1.0
+;
+ONE:
+	ld	hl,Exp.One	; Load 6 bytes 2^0
+	ld	b,h
+	ld	c,h
+	ld	d,h
+	ld	e,h
+	ret
+;
+; Load constant PI=3.141592654
+;
+PI:
+	ld	bc,0490fh	; Load 6 bytes
+	ld	de,0daa2h
+	ld	hl,02182h
+	ret
+;
+; Load constant SQRT (2)=1.414213562
+;
+SQRT.2:
+	ld	bc,03504h	; Load 6 bytes
+	ld	de,0f333h
+	ld	hl,0fa81h
+	ret
+;
+; Load constant LN (2)=0.693147181
+;
+LN.2:
+	ld	bc,03172h	; Load 6 bytes
+	ld	de,017f7h
+	ld	hl,0d280h
+	ret
+;
+; Copy real number
+; ENTRY	Regs (HL,DE,BC) hold number
+; EXIT	Number copied to alternating regs (HL,DE,BC)'
+;
+Real.Copy:
+	push	bc		; Push onto stack
+	push	de
+	push	hl
+	exx			; Copy into alternating regs
+	pop	hl		; .. pop back
+	pop	de
+	pop	bc
+	ret
+;
+; Function RANDOM:real;
+; EXIT	Regs (HL,DE,BC) hold number
+;
+Random:
+	call	Randomget	; Get current random
+	ld	hl,exp.offset	; Init exponent
+	ld	a,mant.bits-8	; Init count
+RndLoop:
+	bit	sgn.bit,b	; Test MSB set
+	jr	nz,RndDone
+	sla	e		; .. shift left
+	rl	d
+	rl	c
+	rl	b
+	dec	l		; Count down exponent
+	dec	a
+	jr	nz,RndLoop	; .. check loop
+	ld	l,a
+RndDone:
+	res	sgn.bit,b	; .. make 1.0> x >=0.0
+	ret
+;
+; Function ROUND(real):integer
+;
+Round:
+	bit	sgn.bit,b	; Attache sign
+	exx
+	call	ONE		; Load constant
+	jr	z,Round.GT.0	; Test < 0
+	set	sgn.bit,b	; .. make constant <0
+Round.GT.0:
+	dec	l		; .. make .5
+	call	ADD.Real	; Add
+;
+; Function TRUNC(real):integer
+;
+Trunc:
+	or	a
+	bit	sgn.bit,l	; Test exponent < 0
+	jr	z,Trunc.0	; .. return zero if so
+	bit	sgn.bit,b	; Mark sign
+	ex	af,af'
+	set	sgn.bit,b	; Set bit
+TruncLoop:
+	ld	a,int.max
+	cp	l		; Test overflow
+	jr	c,Trunc.ERR
+	jr	z,TruncRdy	; .. or end
+	call	Shf.Mant.R	; Shift mantissa right
+	inc	l		; .. bump exponent
+	jr	TruncLoop	; Loop
+TruncRdy:
+	call	Shf.Mant.R	; Fix mantissa
+	ex	af,af'
+	ld	h,b		; Get result
+	ld	l,c
+	ret	z		; .. end if > 0
+	jp	complint	; Make < 0
+Trunc.0:
+	ld	hl,0		; Return 0
+	ret
+Trunc.ERR:
+	ld	a,092h
+	jp	SetRTerror	; .. set error
+;
+; Convert integer to floating point
+; ENTRY	Reg HL holds signed integer
+; EXIT	Regs (HL,DE,BC) hold real
+;
+IntFlt:
+	ld	a,h		; Test zero
+	or	l
+	jp	z,ZeroFLP	; Set 0 if so
+	bit	_MB,h
+	ex	af,af'		; Freeze sign
+	call	absint		; Make >0
+	ld	a,090h		; Set default exponent
+ShfINTmant:
+	bit	_MB,h		; Test normalized
+	jr	nz,INTnorm
+	add	hl,hl		; .. else shift mantissa
+	dec	a		; .. fix exponent
+	jr	ShfINTmant
+INTnorm:
+	ld	b,h		; Get into highest mantissa
+	ld	c,l
+	ld	de,0		; Clear rest of mantissa
+	ld	h,d
+	ld	l,a		; Get exponent
+	ex	af,af'
+	ret	nz		; Test integer sign
+	res	_MB,b		; Set >0
+	ret
+;
+; Convert real to formatted ASCII string
+; ENTRY	Reg HL holds fix comma places (-1 on none)
+;	Reg DE holds decimal places
+;	Regs (HL,BC,DE)' hold real number
+;	Reg IX points to ASCII buffer
+;
+Real.Cnv:
+	call	VALget		; Get fix comma places
+	ex	de,hl
+	ld	e,0
+	jr	c,RC.notfix	; Test fix comma
+	cp	real.dig+1	; Test max digits
+	jr	c,RC.fix
+RC.notfix:
+	dec	e
+	call	VALget		; Get decimal places
+	exx
+	bit	sgn.bit,b	; Test sign
+	exx
+	ld	d,real.field	; Init field size
+	jr	z,RC.posfld
+	inc	d		; .. fix for <0.0
+RC.posfld:
+	sub	d		; Test against field length
+	jr	nc,RC.field..
+	xor	a
+RC.field..:
+	cp	real.field+2	; Test max
+	jr	c,RC.fix..
+	ld	a,real.field+2
+RC.fix..:
+	inc	a
+RC.fix:
+	ld	d,a
+	push	de
+	exx
+	ld	iy,number
+	push	ix
+	call	IniCnvReal	; Prepare conversion
+	pop	ix
+	pop	de
+	ld	c,a		; Save result exponent
+	ld	a,d
+	inc	a
+	bit	sgn.bit,e	; Test sign
+	jr	nz,RC.neg	; .. < 0
+	add	a,c		; Fix exponent
+	jp	p,RC.exp.ok
+	ld	(iy),0		; Clear entry
+	jr	RC.tstSgn
+RC.exp.ok:
+	cp	real.ASCII	; Test decinal places
+	jr	c,RC.neg
+	ld	a,real.ASCII-1	; .. truncate it
+RC.neg:
+	push	de
+	call	NormASCII	; Normalize ASCII
+	pop	de
+RC.tstSgn:
+	bit	sgn.bit,b	; Test sign
+	jr	z,RC.posSgn
+	ld	a,'-'
+	call	StFLP		; Set sign
+RC.posSgn:
+	bit	sgn.bit,e	; Test sign
+	jr	z,RC.noSgn	; .. nope
+	ld	h,c		; Unpack
+	ld	c,0
+RC.noSgn:
+	bit	sgn.bit,c	; Test sign
+	jr	z,RC.noSetSgn
+	call	StFLP.0		; Set zero
+	jr	RC.zero
+RC.noSetSgn:
+	call	CpyFLP		; Copy ASCII
+	dec	c		; .. bump down
+	jp	p,RC.noSetSgn
+RC.zero:
+	ld	a,d		; Test mantissa
+	or	a
+	jr	z,RC.zeroMan	; .. none
+	ld	a,'.'
+	call	StFLP		; Set decimal dot
+RC.moreZero:
+	inc	c		; Fix exponent
+	jr	z,RC.manEx
+	call	StFLP.0		; Set zero
+	dec	d
+	jr	nz,RC.moreZero	; .. till count down
+RC.manEx:
+	dec	d
+	jp	m,RC.zeroMan
+	call	CpyFLP		; Copy ASCII
+	jr	RC.manEx
+RC.zeroMan:
+	bit	sgn.bit,e
+	ret	z
+	ld	a,'E'
+	call	StFLP		; Set 'E'xponent
+	ld	a,'+'
+	bit	sgn.bit,h	; Test sign
+	jr	z,RC.manSgn	; .. positive
+	ld	a,h
+	neg			; Make exponent > 0
+	ld	h,a
+	ld	a,'-'		; Set minus
+RC.manSgn:
+	call	StFLP		; Store sign of exponent
+	ld	a,h		; .. get exponent
+	ld	b,'0'-1		; Init HI
+RC.expToASC:
+	inc	b		; Fix number
+	sub	10		; .. divide by 10
+	jr	nc,RC.expToASC
+	add	a,'9'+1		; Make remainder ASCII
+	ld	(ix),b		; Save HI
+	inc	ix
+	jr	StFLP		; .. store LO
+;
+; Copy from buffer, set 0 if end
+;
+CpyFLP:
+	ld	a,(iy)		; Get number
+	inc	iy
+	or	a		; Test end
+	jr	nz,StFLP	; .. nope
+	dec	iy		; .. store zero
+;
+; Store ASCII zero into number
+;
+StFLP.0:
+	ld	a,'0'		; Set zero
+;
+; Store ASCII into number
+;
+StFLP:
+	ld	(ix),a		; Store number
+	inc	ix		; .. bump pointer
+	ret
+;
+; Prepare ASCII for real to formatted ASCII conversion
+; ENTRY	Reg IY points to ASXII buffer
+;	Regs (HL,BC,DE) hold real number
+; EXIT	Buffer pre-filled
+;	Accu holds exponent equivalent
+;
+IniCnvReal:
+	push	iy		; Save buffer
+	inc	l		; Test zero number
+	dec	l
+	jr	nz,ICR.go
+	ld	b,real.ASCII
+ICR.clr:
+	ld	(iy),'0'	; Clear ASCII number
+	inc	iy
+	djnz	ICR.clr
+	xor	a
+	jp	ICR.exit
+ICR.go:
+	push	bc		; Save sign
+	res	sgn.bit,b	; Reset sign
+	ld	a,l		; Get exponent
+	exx
+	sub	exp.offset	; Strip off offset
+	ld	l,a
+	sbc	a,a
+	ld	h,a		; Expand to signed 16 bit
+	ld	de,77
+	call	multint		; Multiply exponent
+	ld	de,10 / 2
+	add	hl,de		; .. fix
+	ld	a,h
+	cp	0d9h		; Test range
+	jr	nz,ICR.rng
+	inc	a		; Fix result
+ICR.rng:
+	ld	(iy),a		; Set into buffer
+	neg
+	call	Cnv.REAL.Exp
+	ld	a,l
+	cp	Exp.One		; Test exponent
+	jr	nc,ICR.exp1
+	call	Cnv.Real.Mant	; Fix mantissa
+	dec	(iy)		; .. and actual exponent
+ICR.exp1:
+	set	sgn.bit,b	; Set bit
+	ld	a,exp.offset+4
+	sub	l		; Test exponent
+	ld	l,0		; .. preset
+	jr	z,ICR.cnv.beg
+ICR.shf.mant:
+	call	Shf.Mant.R	; Shift mantissa right
+	rr	l
+	dec	a
+	jr	nz,ICR.shf.mant
+ICR.cnv.beg:
+	ld	a,(iy)		; Get exponent
+	push	af
+	ld	a,real.ASCII	; Set count
+ICR.ASCII:
+	ex	af,af'
+	ld	a,b		; Get MSB
+	rra			; .. isolate HI
+	rra
+	rra
+	rra
+	and	LoMask
+	add	a,'0'		; Make ASCII
+	ld	(iy),a
+	inc	iy		; Bump ASCII
+	ld	a,b
+	and	LoMask		; Strip off bits
+	ld	b,a
+	push	bc
+	push	de
+	push	hl
+	sla	l
+	call	rot.mant.l	; Rotate mantissa *2
+	sla	l
+	call	rot.mant.l	; .. *4
+	ex	de,hl
+	ex	(sp),hl
+	add	hl,de		; .. *5
+	pop	de
+	ex	(sp),hl
+	adc	hl,de
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	sla	l
+	call	rot.mant.l	; .. *10
+	ex	af,af'
+	dec	a
+	jr	nz,ICR.ASCII
+	pop	af
+	pop	bc
+ICR.exit:
+	pop	iy
+	ret
+;
+; Normalize ASCII number
+; ENTRY	Accu holds length of number
+;
+NormASCII:
+	push	iy
+	pop	hl		; Copy buffer
+	ld	e,a
+	ld	d,0
+	add	hl,de
+	ld	a,(hl)		; Get last digit
+	ld	(hl),0		; .. clear it
+	cp	'5'		; Test digit
+	ret	c		; .. not to be normalized
+NA.loop:
+	dec	e		; .. bump count
+	jp	m,NA.done
+	dec	hl		; Get previous
+	ld	a,(hl)
+	inc	a		; .. increment
+	ld	(hl),a
+	cp	'9'+1		; Test range
+	ret	c		; .. ok
+	ld	(hl),0		; Clear this
+	jr	NA.loop
+NA.done:
+	ld	(hl),'1'	; Set carry
+	inc	hl
+	ld	(hl),0		; .. clear next
+	inc	c
+	ret
+;
+; Convert ASCII string to Floating Point number
+; ENTRY	Reg IX points to ASCII number
+; EXIT	Regs HL,DE,BC hold real
+;	Carry set indicates conversion error
+;
+Cnv.Flp:
+	exx
+	ld	bc,0		; Reset flags
+	exx
+	call	ZeroFLP		; Init real number for zero
+CF.dot:
+	ld	a,(ix)		; Get character
+	call	DoUPCASE
+	cp	'.'		; Test decimal point
+	jr	nz,CF.tstE	; .. no skip
+	exx
+	bit	dot.bit,b	; Test dot already found
+	scf
+	ret	nz		; .. exit with carry set if so
+	set	dot.bit,b	; Set bit
+	exx
+CF.loop:
+	inc	ix
+	jr	CF.dot		; Loop on
+CF.tstE:
+	cp	'E'		; Test exponent
+	jr	z,CF.EXP
+	call	GetFLPdig	; Test number
+	jr	nc,CF.exit	; .. no
+	ex	af,af'
+	call	Cnv.Real.Mant
+	ret	c		; .. error
+	ex	af,af'
+	exx
+	push	bc
+	ld	l,a
+	ld	h,0
+	call	IntFlt		; Convert digit to real
+	call	ADDReal		; .. and add to real
+	exx
+	pop	bc
+	ret	c		; .. overflow
+	bit	dot.bit,b	; Test decimal point
+	jr	z,CF.l..
+	dec	c		; Fix counter if so
+CF.l..:
+	exx
+	jr	CF.loop		; .. loop
+;
+; Found 'E'xponent
+;
+CF.EXP:
+	call	CF.exit		; Fix mantissa
+	ret	c		; .. overflow
+	exx
+	set	exp.bit,b	; Set bit
+	inc	ix
+	ld	a,(ix)
+	cp	'+'		; Test any sign
+	jr	z,CF.E.pos
+	cp	'-'
+	jr	nz,CF.E.nosign
+	set	exps.bit,b	; Indicate negative exponent
+CF.E.pos:
+	inc	ix
+CF.E.nosign:
+	call	GetFLPXdig	; Get 1st digit
+	ccf
+	ret	c		; .. illegal
+	ld	c,a
+	inc	ix
+	call	GetFLPXdig	; Get 2nd digit
+	jr	nc,CF.E.sngl	; .. only one
+	inc	ix
+	ld	d,a
+	ld	a,c
+	add	a,a		; 1st times 10
+	add	a,a
+	add	a,c
+	add	a,a
+	add	a,d		; Insert 2nd
+	ld	c,a
+CF.E.sngl:
+	bit	exps.bit,b	; Test exponent < 0
+	jr	z,CF.EXP.notmin
+	ld	a,c
+	neg			; Change sign if so
+	ld	c,a
+CF.EXP.notmin:
+	exx
+CF.exit:
+	exx
+	ld	a,c
+	add	a,exp.offset	; Set offset
+	cp	05ah		; Check range
+	ret	c		; .. underflow
+	cp	0a6h
+	ccf
+	ret	c		; .. overflow
+	push	bc
+	push	ix
+	ld	a,c
+	call	Cnv.REAL.Exp	; Fix exponent
+	pop	ix
+	exx
+	pop	bc		; .. fix stack
+	exx
+	ret
+;
+; Get character and test if digit
+; ENTRY	Reg IX points to character
+; EXIT	Accu holds byte
+;	Carry reset if in range
+;
+GetFLPXdig:
+	ld	a,(ix)		; Get character
+;
+; Get character and test if digit
+; ENTRY	Accu holds character
+; EXIT	Accu holds byte
+;	Carry reset if in range
+;
+GetFLPdig:
+	sub	'0'		; Strip off offset
+	ccf
+	ret	nc		; .. illegal
+	cp	10		; Test range
+	ret
+;
+; Fix exponent for real to ASCII conversion
+; ENTRY	Accu holds exponent equivalent
+; EXIT	Real fixed
+;
+Cnv.REAL.Exp:
+	push	af		; Save exponent
+	or	a		; Test sign
+	jp	p,CRE.pos
+	neg			; .. make >0
+CRE.pos:
+	push	af
+	srl	a		; Shift
+	srl	a
+	inc	a		; .. and fix
+	ld	hl,-Real.Len	; Init index
+	ld	de,Real.Len
+CRE.idx:
+	add	hl,de		; Fix index
+	dec	a
+	jr	nz,CRE.idx
+	ex	de,hl
+	ld	ix,EXP.Table	; Get table
+	add	ix,de
+	call	Load.R.Tab	; Get number from table
+	pop	af		; Get positive exponent
+	and	11b		; .. modulo 4
+	jr	z,CRE.mod	; .. skip if no remainder
+CRE.fix:
+	push	af
+	call	Cnv.Real.Mant	; Fix mantissa
+	pop	af
+	dec	a
+	jr	nz,CRE.fix
+CRE.mod:
+	pop	af		; Get exponent
+	or	a
+	jp	p,MULT.Real	; Multiply on >0
+	exx
+	jp	DIV.Real	; .. divide on <0
+;
+; Fix up table
+;
+EXP.Table:
+	db	081h,000h,000h,000h,000h,000h	; 1E 0
+	db	08eh,000h,000h,000h,040h,01ch	; 1E 4
+	db	09bh,000h,000h,020h,0bch,03eh	; 1E 8
+	db	0a8h,000h,010h,0a5h,0d4h,068h	; 1E12
+	db	0b6h,004h,0bfh,0c9h,01bh,00eh	; 1E16
+	db	0c3h,0ach,0c5h,0ebh,078h,02dh	; 1E20
+	db	0d0h,0cdh,0ceh,01bh,0c2h,053h	; 1E24
+	db	0deh,0f9h,078h,039h,03fh,001h	; 1E28
+	db	0ebh,02bh,0a8h,0adh,0c5h,01dh	; 1E32
+	db	0f8h,0c9h,07bh,0ceh,097h,040h	; 1E36
+;
+; Fix mantissa for real to ASCII conversion
+; ENTRY	Regs (BC,DE,HL) hold real
+; EXIT	Real fixed
+;
+Cnv.Real.Mant:
+	ld	a,l		; Test exponent
+	or	a
+	ret	z		; .. zero
+	set	_MB,b		; Set bit
+	push	bc
+	push	de
+	ld	a,h		; Save LSB
+	call	Shf.Mant.R	; Shift mantissa right
+	call	Shf.Mant.R	; .. two places
+	add	a,h		; .. add LSB
+	ld	h,a
+	ex	(sp),hl		; Get middle part
+	adc	hl,de		; .. add
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	adc	hl,bc		; .. same for HI
+	ld	b,h		; Copy to HI
+	ld	c,l
+	pop	hl		; Get back old HI
+	jr	nc,CRM.ok	; .. no carry
+	call	Rot.Mant.R	; Shif mantissa right
+	inc	l		; .. fix exponent
+	scf			; Set carry
+	ret	z
+CRM.ok:
+	ld	a,l
+	add	a,3		; Fix exponent
+	ld	l,a
+	res	_MB,b		; .. clear bit
+	ret
+;
+; Test sets not equal (<>)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+set.NEQ:
+	ld	c,.TRUE		; Set flag
+	jr	set.N..E	; .. compare
+;
+; Test sets equal (=)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+set.EQ:
+	ld	c,FALSE
+set.N..E:
+	call	set..get	; Get sets
+set..NE.loop:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,set.SUB.ex	; .. not equal
+	inc	hl
+	inc	de
+	djnz	set..NE.loop
+	ld	a,c
+	xor	1		; Toggle flag if equal
+	ld	c,a
+set.SUB.ex:
+	ld	hl,2*Set.Len
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ld	l,c		; Get state
+	ld	h,0
+	jp	(ix)		; Exit
+;
+; Test two sets included (1st in 2nd, <=)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+SetSb2:
+	ld	c,.TRUE		; Set flag
+	jr	set.S..1.2	; Compare
+;
+; Test two sets included (2nd in 1st, >=)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+SetSb1:
+	ld	c,FALSE
+set.S..1.2:
+	call	set..get	; Get sets
+	dec	c		; Test mode
+	jr	nz,set.S.1..3.sw
+	ex	de,hl
+set.S.1..3.sw:
+	ld	c,FALSE		; Init FALSE
+set.S.1.2.loop:	
+	ld	a,(de)
+	or	(hl)		; Combine
+	cp	(hl)		; .. compare
+	jr	nz,set.SUB.ex
+	inc	hl
+	inc	de
+	djnz	set.S.1.2.loop	; Go thru the loop
+	ld	c,.TRUE
+	jr	set.SUB.ex	; Return TRUE
+;
+; Combine two sets (add, +)
+; ENTRY	Both sets on stack
+; EXIT	Combined set on stack
+;
+set.ADD:
+	call	set..get	; Get sets
+set.ADD.loop:
+	ld	a,(de)
+	or	(hl)		; Combine
+	ld	(hl),a		; .. and save
+	inc	hl
+	inc	de
+	djnz	set.ADD.loop
+set.S.A.ex:
+	ex	de,hl
+	ld	sp,hl
+	jp	(ix)
+;
+; Combine two sets (subtract, -)
+; ENTRY	Both sets on stack
+; EXIT	Combined set on stack
+;
+set.SUB:
+	call	set..get	; Get sets
+set.SUB.loop:
+	ld	a,(de)
+	cpl			; Compliment
+	and	(hl)		; Mask
+	ld	(hl),a		; .. and save
+	inc	hl
+	inc	de
+	djnz	set.SUB.loop
+	jr	set.S.A.ex
+;
+; Combine two sets (intersection, *)
+; ENTRY	Both sets on stack
+; EXIT	Combined set on stack
+;
+SetINT:
+	call	set..get	; Get sets
+set.INT.loop:
+	ld	a,(de)
+	and	(hl)		; Mask
+	ld	(hl),a		; .. and save
+	inc	hl
+	inc	de
+	djnz	set.INT.loop
+	jr	set.S.A.ex
+;
+; Get addresses of sets
+; ENTRY	Both sets on stack
+; EXIT	Regs HL and DE point to sets
+;	Reg  IX holds caller address
+;	Reg  B  holds set length
+;
+set..get:
+	pop	iy		; Get routine caller
+	pop	ix		; .. and main caller
+	ld	hl,0
+	add	hl,sp
+	ex	de,hl		; Get 1st set
+	ld	hl,Set.Len
+	ld	b,l		; Get length
+	add	hl,sp		; Get 2nd set
+	jp	(iy)		; .. return
+;
+; Test element in set (IN)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+SetIN:
+	pop	ix		; Get caller
+	ld	hl,Set.Len+1
+	add	hl,sp		; Get pointer to set
+	ld	a,(hl)
+	or	a		; Test any set
+	jr	z,set.IN.0
+	xor	a
+	jr	set.IN.fix	; Force FALSE
+set.IN.0:
+	dec	hl
+	ld	b,(hl)
+	call	set.acc.bit	; Get state
+	and	(hl)
+set.IN.fix:
+	ld	hl,Set.Len+2
+	add	hl,sp
+	ld	sp,hl		; Set return stack
+	ld	hl,FALSE	; Init FALSE
+	jr	z,set.IN.ex	; Test result
+	inc	hl		; .. set TRUE
+set.IN.ex:
+	jp	(ix)
+;
+; Procedure ASSIGN(file,filename)
+; ENTRY	Filenname as string on stack
+;	FIB followed string
+;
+; Assign text file
+;
+AssTxt:
+	db	SKIP		; Set nonzero
+;
+; Assign (un)typed file
+;
+AssUntype:
+	xor	a		; Set zero
+	ld	(FilIniMode),a	; .. into mode
+	pop	iy		; Get caller
+	ld	hl,(TopRam)	; Set destination
+	ld	b,16		; .. and max
+	call	AsStr		; Get string
+	xor	a
+	ld	(de),a		; .. close
+	pop	hl		; Fetch FIB
+	ld	(IOdev),hl	; .. into device
+	push	iy		; Reset caller
+	ld	a,h		; Test FIB
+	or	a
+	jr	nz,AssignOk	; .. must not be standard
+	ld	a,_StdAssErr	; Set illegal FIB
+	ld	(IOResult),a
+	ret
+AssignOk:
+	ld	a,(FilIniMode)	; Test type
+	or	a
+	jr	z,AssUnTyp	; .. (un)typed
+	call	FindStdIO	; Find standard device
+	jr	nz,AssUnTyp	; .. no
+	ld	hl,(IOdev)
+	ld	(hl),a		; Set FIB flag
+	ret
+AssUnTyp:
+	call	assignFCB	; Assign FCB
+	ld	hl,(IOdev)
+	ld	(hl),0		; Reset FIB flag
+IF	@@DU
+	ld	de,FIB.DU
+	add	hl,de		; Point to user
+	ex	de,hl
+	ld	hl,FCB-1
+	ld	bc,FCBlen+1
+ELSE
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	hl,FCB
+	ld	bc,FCBlen
+ENDIF	;@@DU
+	ldir			; .. move to FIB
+	ret
+;
+; Find standard IO device
+; ENTRY	TOPRAM filled with device string
+; EXIT	Zero flag set if device found
+;	Accu holds FIB flag if so
+;
+FindStdIO:
+	ld	b,Std.Len	; Init length
+	ld	hl,StdIOTbl	; .. and table
+FSI.loop:
+	push	bc
+	push	hl
+	ld	b,Std.Itm-1	; Set length of one item
+	ld	de,(TopRam)	; Get pointer to string
+FSI.blskp:
+	inc	de
+	ld	a,(de)
+	cp	' '		; Skip leading blanks
+	jr	z,FSI.blskp
+FSI.more:
+	ld	a,(de)		; Get character
+	call	DoUPCASE	; .. as UPPER case
+	sub	(hl)		; Compare
+	jr	z,FSI??		; .. maybe found
+	pop	hl
+	pop	bc
+	ld	de,Std.Itm	; Fix for next
+	add	hl,de
+	djnz	FSI.loop	; .. try more
+	or	a
+	ret
+FSI??:
+	inc	hl
+	inc	de
+	djnz	FSI.more	; .. loop till all found
+	pop	bc
+	pop	bc
+	ld	a,(de)
+	cp	':'		; Verify standard device
+	ret	nz
+	ld	a,(hl)		; .. get flag if so
+	ret
+;
+; Standard character I/O devices
+;
+StdIOTbl:
+	db	'CON'
+	db	11000001b	; Input output for CON
+Std.Itm	equ	$-StdIOTbl
+	db	'TRM'
+	db	11000001b	; Input output for TRM
+	db	'KBD'
+	db	10000010b	; Input for KBD
+	db	'LST'
+	db	01000011b	; Output for LST
+	db	'AUX'
+	db	11000100b	; Input Output for AUX
+	db	'USR'
+	db	11000101b	; Input Output for USR
+Std.Len	equ	($-StdIOTbl) / Std.Itm
+;
+; Function EXIST(file)
+; ENTRY	Reg HL holds FIB
+; EXIT	Reg HL holds TRUE if file exists
+;	Reg HL holds FALSE if it does not
+;
+Exist:
+	call	NoIOerr		; .. clear I/O error
+	ld	(IOdev),hl	; Save address of FIB
+	call	clearFIB.FCB	; .. clear FCB
+	ld	c,.Open
+	call	FIB.FILE	; .. find file
+	inc	a		; Test on board
+	ld	hl,FALSE
+	ret	z		; .. not found
+	inc	hl		; Set TRUE
+	ret
+;
+; Procedure APPEND(text_file)
+; ENTRY	Reg HL holds FIB
+;
+Append:
+	ld	(IOdev),hl	; Save address of FIB
+	ld	a,(hl)
+	and	FIBtype		; Get type
+	jp	nz,RwrText	; .. end if not a file
+	ld	de,FIB.FCB
+	add	hl,de
+	ld	(App.FCB),hl	; .. FCB
+	ld	de,FIB.buff-FIB.FCB
+	add	hl,de
+	ld	(App.DMA),hl	; .. DMA
+	call	clearFIB.FCB	; Prepare FCB
+	ld	c,.Open
+	call	FIB.FILE	; Find file
+	jp	nz,Rewrite	; .. not there
+	ld	c,.FilSiz
+	call	FIB.FILE	; Get size of file
+	jp	nz,Rewrite	; .. impossible
+	ld	de,_rrn
+	ld	hl,(App.FCB)
+	add	hl,de		; Point to record number
+	ld	b,(hl)		; .. fetch it, start LO
+	inc	hl
+	ld	e,(hl)		; .. MIDDLE
+	inc	hl
+	ld	d,(hl)		; .. HIGH
+	ld	a,b
+	or	d		; Test empty file
+	or	e
+	ld	c,a
+	jr	z,Got.EOF	; .. yeap
+	dec	b		; decrement
+	jp	p,Not.Borrow
+	dec	de		; .. fix HI
+Not.Borrow:
+	ld	(hl),d		; Bring it back
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),b
+	ld	c,.RdRnd
+	call	FIB.FILE	; Read last record
+	jp	nz,Rewrite	; .. error
+	ld	hl,(App.DMA)
+	ld	c,0		; Clear counter
+	ld	b,RecLng	; .. set length
+	ld	a,eof		; Set search character
+Get.EOF:
+	cp	(hl)		; .. find it
+	jr	z,Got.EOF	; .. got it
+	inc	hl
+	inc	c
+	djnz	Get.EOF
+Got.EOF:
+	ld	hl,(IOdev)	; Fetch FIB
+	ld	(hl),..out	; .. force output
+	inc	hl
+	inc	hl
+	ld	(hl),c		; Save position
+NoIOerr:
+	ld	a,_NoIOErr		; Set success
+	ld	(IOResult),a
+	ret
+App.FCB:
+	dw	0
+App.DMA:
+	dw	0
+Rewrite:
+	ld	hl,(IOdev)	; Get FIB, fall in rewrite
+;
+; Prepare files
+; ENTRY	Reg HL points to FIB
+;
+; Procedure REWRITE(text_file)
+;
+RwrText:
+	db	SKIP
+;
+; Procedure RESET(text_file)
+;
+ResetText:
+	xor	a
+	ld	(FilIniMode),a	; Set mode (0=RESET)
+	call	CloseText	; Close open file
+	ld	a,(IOResult)	; .. test error
+	or	a
+	ret	nz		; .. end if so
+	ld	hl,(IOdev)	; Get FIB
+	res	wr.bit,(hl)	; Reset write flag
+	ld	a,(hl)
+	and	FIBtype		; Get type
+	ret	nz		; Exit on standard device
+	call	prepare.FIB	; Prepare file operation
+	ld	a,(IOResult)	; .. test error
+	or	a
+	ret	nz		; .. end if so
+	ld	hl,(IOdev)	; Get back FIB
+	ld	a,(FilIniMode)	; Test mode
+	or	a
+	ld	bc,RecLng*256+..in
+	jr	z,RT.set
+	ld	bc,0*256+..out
+RT.set:
+	ld	(hl),c		; Set flag
+	inc	hl
+	inc	hl
+	ld	(hl),b		; Set buffer pointer
+	ret
+;
+; Prepare file operation for current FIB
+;
+prepare.FIB:
+	call	clearFIB.FCB	; Clear FCB of this FIB
+	ld	hl,(IOdev)	; .. get FIB
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	a,(FilIniMode)	; Test requested mode
+	or	a
+	ld	bc,_NoFile*256+.open
+	jr	z,Prep.Reset	; .. go open
+	push	de
+	U.BDOS
+	ld	c,.delete
+	call	BDOS		; Delete file on rewrite
+	pop	de
+	ld	bc,_DirFull*256+.make
+Prep.Reset:
+	push	bc
+	U.BDOS
+	call	BDOS		; Now open or make
+	pop	bc
+	inc	a
+	ret	nz		; Test error
+	ld	a,b
+	ld	(IOResult),a	; Set code if any error
+	ret
+;
+; Clear FCB of current FIB
+;
+clearFIB.FCB:
+	ld	hl,(IOdev)	; Get FIB
+	ld	de,FIB.FCB+_ex
+	add	hl,de		; Point to ex field
+	ld	b,FCBlen-_ex	; Set length
+clr.FIB.ex:
+	ld	(hl),0		; .. clear
+	inc	hl
+	djnz	clr.FIB.ex
+	ret
+;
+; Close text file
+;
+; Procedure CLOSE(text_file)
+;
+; ENTRY	Reg HL holds FIB
+;
+CloseText:
+	ld	(IOdev),hl	; Save FIB as current device
+	ld	a,(hl)
+	and	FIBtype		; Get type
+	ret	nz		; .. exit non file
+	bit	out.bit,(hl)	; Test output
+	jr	z,TmpFIBinp	; .. skip
+	ld	a,EOF
+	call	PutDevice	; .. close file via EOF
+	call	Flash		; .. then flash buffer
+	jr	CloseFIB
+TmpFIBinp:
+	bit	in.bit,(hl)	; Test input
+	ret	z		; .. no, end
+CloseFIB:
+	ld	c,.close
+	call	FIB.BDOS	; Close file
+	inc	a		; Test error
+	jr	nz,FIBclosed
+	ld	a,_NoClose
+	ld	(IOResult),a	; .. set error
+FIBclosed:
+	ld	(hl),0		; Reset FIB flag
+	ret
+;
+; Set standard INPUT
+;
+INPUT:
+	ex	(sp),hl
+	ld	(IOPc),hl	; Save caller
+	ex	(sp),hl
+	push	hl
+	ld	hl,StdIODev
+	ld	(IOdev),hl	; Set standard as FIB
+	pop	hl
+	ret
+;
+; Check file before read
+; ENTRY	Reg HL points to FIB
+;
+SetReadText:
+	ex	(sp),hl
+	ld	(IOPc),hl	; Save caller for error
+	ex	(sp),hl
+	ld	(IOdev),hl	; Save FIB
+	bit	in.bit,(hl)	; Test read allowed
+	ret	nz		; .. ok
+	ld	a,_NoRead
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Check file before write
+; ENTRY	Reg HL points to FIB
+;
+SWrTxt:
+	ex	(sp),hl
+	ld	(IOPc),hl	; Save caller for error
+	ex	(sp),hl
+	ld	(IOdev),hl	; Save FIB
+	bit	out.bit,(hl)	; Test write allowed
+	ret	nz		; .. ok
+	ld	a,_NoWrite
+	ld	(IOResult),a	; Set error
+	ret
+

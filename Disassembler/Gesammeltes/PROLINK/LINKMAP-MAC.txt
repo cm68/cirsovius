@@ -1,0 +1,1018 @@
+	title	Link Mapper
+	name	('LINKMAP')
+
+; DASMed version of LINKMAP.COM
+; By W.Cirsovius
+
+BDOS	equ	0005h
+FCB	equ	005ch
+DMA	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.consta	equ	11
+.open	equ	15
+.rdseq	equ	20
+
+OSerr	equ	255
+
+.drv	equ	 1
+.nam	equ	 8
+_DIR	equ	16
+
+reclng	equ	128
+
+null	equ	00h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+LOMASK	equ	00001111b
+
+DMPlen	equ	16
+
+	ld	(StkSav),sp	; Save stack
+	ld	sp,LocStk	; Get local stack
+	call	ID.msg
+	db	cr,lf
+	db	'LINKMAP v1.0'
+	db	cr,lf
+	db	'Copyright (C) 1984 by'
+	db	cr,lf
+	db	'   NightOwl Software, Inc.'
+	db	cr,lf,eot
+ID.msg:
+	pop	de
+	ld	c,.string
+	call	BDOS		; Tell what we are
+	call	FReset		; Prepare source file
+RELloop:
+	xor	a		; Disable console
+	call	PrcRELfile
+	bit	2,(ix+0)	; Test end of file
+	jp	nz,RdError	; Yeap
+	bit	0,(ix+0)
+	jr	z,l016d
+	call	PrcRELmem	; Process .REL file with data from memory
+	jr	RELloop
+l016d:
+	bit	1,(ix+0)
+	jr	z,l017d
+	ld	a,1
+	ld	(FileFlag),a	; Disable read from file
+	call	l06fd		; Print name of program
+	jr	RELloop
+l017d:
+	ld	de,l0897
+	ld	hl,l088f	; Point to program name
+	ld	b,6
+	call	l06f0		; Compare strings
+	jr	nz,RELloop
+	call	PrcRELmem	; Process .REL file with data from memory
+	jp	RdError
+;
+; Process .REL file with data from memory
+;
+PrcRELmem:
+	ld	a,1		; Enable console
+	call	PrcRELfile	; Process .REL file
+	ret
+;
+; Process .REL file
+;
+PrcRELfile:
+	ld	(FileFlag),a	; Set file flag
+	call	l05ce		; Init environment
+	call	l06fd		; Print name of program
+	call	l0721		; Give new line, flush buffers
+RELfileLoop:
+	call	TstAbort	; Test user break
+	push	bc
+	ld	b,1
+	call	RdBits		; Read bit from file
+	pop	bc
+	ld	b,' '		; Init ASEG
+	ld	hl,(l086f)	; Fetch current address
+	or	a		; Test constant
+	jr	z,l01d8		; Yeap
+	push	bc
+	ld	b,2
+	call	RdBits		; Read next two bits from file
+	pop	bc
+	or	a		; Test special link item
+	jp	z,MS.LINK.item	; Yeap
+	call	l082f		; Get segment code
+	push	bc
+	ld	b,8
+	call	RdBits		; Read low bits from file
+	pop	bc
+	call	l01e4		; Dump hex
+	push	bc
+	ld	b,8
+	call	RdBits		; Read high bits from file
+	pop	bc
+	call	l01e4		; Dump hex
+	jr	RELfileLoop
+l01d8:
+	push	bc
+	ld	b,8
+	call	RdBits		; Read byte from file
+	pop	bc
+	call	l01e4		; Dump hex
+	jr	RELfileLoop
+;
+; Dump hex
+;
+l01e4:
+	push	af
+	bit	2,(ix+1)	; Test ASCII pending
+	call	z,l0744		; Yeap
+	ld	a,(l086a)	; Get length of bytes
+	cp	DMPlen		; Test all filled
+	call	nc,l0744	; Yeap, dump ASCII
+	inc	a
+	ld	(l086a),a	; Advance byte length
+	pop	af
+	push	hl
+	ld	hl,(l0882)	; Get buffer address
+	ld	(hl),a		; Store byte
+	inc	hl
+	ld	(l0882),hl	; Update pointer
+	ld	hl,l0884
+	inc	(hl)		; Advance byte count
+	pop	hl
+	call	l070c		; Put hex byte to console
+	inc	hl
+	ld	(l086f),hl	; Update address
+	ld	a,b
+	call	l0808		; Put to console
+	set	2,(ix+1)	; Set binary pending
+	ret
+;
+; Process special link item
+;
+MS.LINK.item:
+	push	bc
+	ld	b,4
+	call	RdBits		; Read link bits from file
+	pop	bc
+	ld	l,a
+	ld	h,0
+	ld	de,MS.LINK.tab
+	add	hl,hl
+	add	hl,de		; Build index into table
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	call	j.r		; Execute link item
+	jp	RELfileLoop
+;
+j.r:
+	jp	(hl)
+;
+MS.LINK.tab:
+	dw	LINK.item.0000	; 0000 : Entry symbol
+	dw	LINK.item.0001	; 0001 : Select COMMON block
+	dw	LINK.item.0010	; 0010 : Program name
+	dw	LINK.item.0011	; 0011 : Request library
+	dw	LINK.item.0100	; 0100 : Extension MS link
+	dw	LINK.item.0101	; 0101 : Define COMMON size
+	dw	LINK.item.0110	; 0110 : Chain external
+	dw	LINK.item.0111	; 0111 : Define entry point
+	dw	LINK.item.1000	; 1000 : External minus offset
+	dw	LINK.item.1001	; 1001 : External plus offset
+	dw	LINK.item.1010	; 1010 : Define data size
+	dw	LINK.item.1011	; 1011 : Set location counter
+	dw	LINK.item.1100	; 1100 : Chain address
+	dw	LINK.item.1101	; 1101 : Define program size
+	dw	LINK.item.1110	; 1110 : End module
+	dw	LINK.item.1111	; 1111 : End file
+;
+; Special link item 0000 : Entry symbol
+;
+LINK.item.0000:
+	bit	0,(ix+1)	; Test 1st access
+	jr	z,l0273		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	6
+	jr	c,l0286
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l0286
+l0273:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'entry:      ',null
+l0286:
+	set	0,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l0606		; Read and dump BFIELD
+	ld	a,'|'
+	call	l0808		; Put to console
+	ret
+;
+; Special link item 0001 : Select COMMON block
+;
+LINK.item.0001:
+	call	l0744		; Init new line, flushing buffers
+	call	prImStrg
+	db	'Sel. common:',null
+	call	l0606		; Read and dump BFIELD
+	ret
+;
+; Special link item 0010 : Program name
+;
+LINK.item.0010:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Module name:',null
+	call	l0606		; Read and dump BFIELD
+	ld	hl,l0887	; Point to name read
+	ld	de,l088f	; Point to program name
+	ld	bc,ll0887
+	ldir			; Unpack
+	ret
+;
+; Special link item 0011 : Request library
+;
+LINK.item.0011:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Lib. Srch:  ',null
+	call	l0606		; Read and dump BFIELD
+	ret
+;
+; Special link item 0100 : Extension MS link
+;
+LINK.item.0100:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'link ext.   ',null
+	call	Rd.BFIELD	; Read BFIELD
+	ret
+;
+; Special link item 0101 : Define COMMON size
+;
+LINK.item.0101:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'common size:',null
+l0310:
+	call	l05ee		; Read and dump AFIELD
+	ld	a,' '
+	call	l0808		; Put to console
+	call	l0606		; Read and dump BFIELD
+	ret
+;
+; Special link item 0110 : Chain external
+;
+LINK.item.0110:
+	bit	3,(ix+1)	; Test 1st access
+	jr	z,l033e		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	4
+	jr	c,l0351
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l0351
+l033e:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Chn Extrnl: ',null
+l0351:
+	set	3,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l0310
+	ld	a,'|'
+	call	l0808		; Put to console
+	ret
+;
+; Special link item 0111 : Define entry point
+;
+LINK.item.0111:
+	bit	1,(ix+1)	; Test 1st access
+	jr	z,l0383		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	4
+	jr	c,l0396
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l0396
+l0383:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Entry Pnt:  ',null
+l0396:
+	set	1,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l0310
+	ld	a,'|'
+	call	l0808		; Put to console
+	ret
+;
+; Special link item 1000 : External minus offset
+;
+LINK.item.1000:
+	bit	4,(ix+1)	; Test 1st access
+	jr	z,l03c8		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	6
+	jr	c,l03db
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l03db
+l03c8:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Ext-Offset: ',null
+l03db:
+	set	4,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l05ee		; Read and dump AFIELD
+	ld	a,'|'
+	call	l0808		; Put to console
+	ret
+;
+; Special link item 1001 : External plus offset
+;
+LINK.item.1001:
+	bit	5,(ix+1)	; Test 1st access
+	jr	z,l040d		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	6
+	jr	c,l0420
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l0420
+l040d:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Ext+Offset: ',null
+l0420:
+	set	5,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l05ee		; Read and dump AFIELD
+	ld	a,'|'
+	call	l0808		; Put to console
+	ret
+;
+; Special link item 1010 : Define data size
+;
+LINK.item.1010:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Data area size: ',null
+	call	l05ee		; Read and dump AFIELD
+	ld	hl,(l089f)	; Get value read
+	ld	(l08a3),hl	; Save data size
+	ret
+;
+; Special link item 1011 : Set location counter
+;
+LINK.item.1011:
+	bit	7,(ix+1)	; Test 1st access
+	jr	z,l0473		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	6
+	jr	c,l0486
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l0486
+l0473:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Set PC:     ',null
+l0486:
+	set	7,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l05ee		; Read and dump AFIELD
+	ld	a,'|'
+	call	l0808		; Put to console
+	ld	hl,(l089f)	; Get value read
+	ld	(l086f),hl	; Save address
+	ld	a,(l08a1)	; Get address mode
+	ld	(l0871),a
+	ret
+;
+; Special link item 1100 : Chain address
+;
+LINK.item.1100:
+	bit	6,(ix+1)	; Test 1st access
+	jr	z,l04c4		; Yeap
+	ld	a,(l0869)	; Get item counter
+	cp	6
+	jr	c,l04d7
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'            ',null
+	jr	l04d7
+l04c4:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Chain Adr:  ',null
+l04d7:
+	set	6,(ix+1)
+	inc	(ix+3)		; Advance item counter
+	call	l05ee		; Read and dump AFIELD
+	ld	a,'|'
+	call	l0808		; Put to console
+	ret
+;
+; Special link item 1101 : Define program size
+;
+LINK.item.1101:
+	call	l0721		; Give new line, flush buffers
+	call	prImStrg
+	db	'Pgm. size:  ',null
+	call	l05ee		; Read and dump AFIELD
+	ld	hl,(l089f)	; Get value read
+	ld	(l08a5),hl	; Save program size
+	ret
+;
+; Special link item 1110 : End module
+;
+LINK.item.1110:
+	call	PutNL		; Put new line on console
+	call	prImStrg
+	db	'-------------[ module end ]--------------   (',null
+	call	l05ee		; Read and dump AFIELD
+	ld	a,')'
+	call	l0808		; Put to console
+	pop	de
+	call	PutNL		; Put new line on console
+	ret
+;
+; Special link item 1111 : End file
+;
+LINK.item.1111:
+	set	2,(ix+0)	; Set end of file
+	call	PutNL		; Put new line on console
+	call	prImStrg
+	db	'++ end of file ++',null
+	pop	de
+	ret
+;
+; Prepare source file
+;
+FReset:
+	ld	ix,l0866	; Init status word
+	ld	a,reclng
+	ld	(RdRecIdx),a	; Force read
+	ld	hl,l0872	; Init buffer
+	ld	(l0882),hl
+	ld	hl,FCB+_DIR+.drv
+	ld	a,(hl)
+	set	0,(ix+0)
+	cp	' '		; Test second name given
+	jr	z,l059e		; Nope
+	cp	'-'
+	jr	nz,l0592
+	inc	hl
+	ld	a,(hl)
+	cp	'H'
+	jr	nz,l059e
+	res	0,(ix+0)
+	set	1,(ix+0)
+	jr	l059e
+l0592:
+	res	0,(ix+0)
+	ld	de,l0897
+	ld	bc,.nam
+	ldir
+l059e:
+	ld	a,(FCB+.drv+.nam)
+	cp	' '		; Test extension given
+	jr	nz,l05b0	; Yeap
+	ld	hl,'R'+'E'*256	; Set .REL
+	ld	(FCB+.drv+.nam),hl
+	ld	a,'L'
+	ld	(FCB+.drv+.nam+2),a
+l05b0:
+	ld	c,.open
+	ld	de,FCB
+	call	BDOS		; Open file
+	cp	OSerr		; Test success
+	ret	nz		; Nope
+	call	ErrorEXIT	; Tell error and exit
+	db	'File not found.',eot
+;
+; Init environment
+;
+l05ce:
+	ld	hl,l090e
+	ld	(RecPtr),hl	; Init data pointer
+	xor	a
+	ld	(RELbits),a	; Init bit count
+	ld	a,1
+	ld	(l0871),a
+	ld	hl,0
+	ld	(l086f),hl	; Clear address
+	ld	(l08a3),hl	; Clear data size
+	ld	(l08a5),hl	; Clear program size
+	xor	a
+	ld	(l0867),a	; Clear status word
+	ret
+;
+; Read and dump AFIELD
+;
+l05ee:
+	call	Rd.AFIELD	; Read AFIELD
+	push	hl
+	push	bc
+	ld	hl,(l089f)	; Get value read
+	call	l0707		; Put hex word to console
+	ld	a,(l08a1)	; Get address mode
+	call	l082f		; Get segment code
+	ld	a,b
+	call	l0808		; Put to console
+	pop	bc
+	pop	hl
+	ret
+;
+; Read and dump BFIELD
+;
+l0606:
+	call	Rd.BFIELD	; Read BFIELD
+	push	hl
+	push	bc
+	ld	a,(l08a2)	;			??? WHY
+	ld	b,8
+	ld	hl,l0887
+l0613:
+	ld	a,b
+	or	a
+	jr	z,l061f
+	dec	b
+	ld	a,(hl)
+	inc	hl
+	call	l0808		; Put to console
+	jr	l0613
+l061f:
+	pop	bc
+	pop	hl
+	ret
+;
+; Read B bits from file
+;
+RdBits:
+	push	hl
+	push	de
+	xor	a		; Clear result
+RBloop:
+	call	RdBit		; Read bit from file
+	rla			; Shift it in
+	dec	b
+	jp	nz,RBloop
+	pop	de
+	pop	hl
+	ret
+;
+; Read bit from file
+;
+RdBit:
+	push	bc
+	ld	b,a
+	ld	a,(RELbits)	; Get bit count
+	or	a
+	call	z,RdByte	; Read byte from file if empty
+	dec	a
+	ld	(RELbits),a	; Update it
+	ld	a,(RELbyte)	; Get byte
+	rla			; Shift it
+	ld	(RELbyte),a
+	ld	a,b
+	pop	bc
+	ret
+;
+; Read byte from source
+;
+RdByte:
+	ld	a,(FileFlag)	; Get file flag
+	or	a
+	jr	z,RdFile	; Read from file if enabled
+	push	hl
+	ld	hl,(RecPtr)	; Get data pointer
+	ld	a,(hl)		; Get byte
+	inc	hl
+	ld	(RecPtr),hl
+	pop	hl
+	ld	(RELbyte),a
+	ld	a,8
+	ld	(RELbits),a	; Reset bit count
+	ret
+RdFile:
+	push	bc
+	ld	a,(RdRecIdx)	; Get record pointer
+	cp	reclng		; Test buffer scanned
+	call	z,RdRecord	; Read record from file if so
+	ld	l,a
+	ld	h,0
+	inc	a
+	ld	(RdRecIdx),a	; Update pointer
+	ld	de,DMA
+	add	hl,de		; Build buffer address
+	ld	a,(hl)		; Get byte
+	ld	(RELbyte),a	; Store it
+	ld	hl,(RecPtr)	; Get data pointer
+	ld	(hl),a		; Store byte
+	inc	hl
+	ld	a,(BDOS+2)	; Get last memory page
+	cp	h		; Test enough memory
+	jr	z,MemOvl	; Nope, error
+	ld	(RecPtr),hl
+	ld	a,8
+	ld	(RELbits),a	; Reset bit count
+	pop	bc
+	ret
+MemOvl:
+	call	ErrorEXIT	; Tell error and exit
+	db	cr,lf
+	db	'Aborting...memory full.'
+	db	cr,lf,eot
+;
+; Read record from file
+;
+RdRecord:
+	ld	c,.rdseq
+	ld	de,FCB
+	call	BDOS		; Read record
+	cp	OSerr		; Verify not end
+	ld	a,0
+	ret	nz
+	call	ErrorEXIT	; Tell error and exit
+	db	'??? Unexpected end of file.',eot
+RdError:
+	call	ErrorEXIT	; Tell ready and exit
+	db	cr,lf
+	db	'Done.'
+	db	cr,lf,eot
+;
+; Give final (error) message and exit
+;
+ErrorEXIT:
+	pop	de		; Get message pointer
+	ld	c,.string
+	call	BDOS		; Tell it
+	ld	sp,(StkSav)	; Get user stack
+	ret			; Exit
+;
+; Compare ^DE:^HL for B characters
+;
+l06f0:
+	ld	a,b
+	or	a		; Test end
+	ret	z		; Yeap
+	dec	b
+	ld	a,(de)
+	cp	(hl)		; Compare
+	inc	hl
+	inc	de
+	ret	nz		; No match
+	djnz	l06f0
+	reti
+;
+; Print name of program
+;
+l06fd:
+	ld	hl,l088f	; Point to program name
+	call	l07fb		; Put it to console
+	call	PutNL		; Put new line on console
+	ret
+;
+; Put hex word to console
+;
+l0707:
+	ld	a,h		; Get hi
+	call	l070c
+	ld	a,l		; Then lo
+;
+; Put hex byte to console
+;
+l070c:
+	push	af
+	rrca			; Get upper bist first
+	rrca
+	rrca
+	rrca
+	call	l0715
+	pop	af
+l0715:
+	and	LOMASK		; Get lower bits
+	add	a,90h		; Convert to ASCII hex digit
+	daa
+	adc	a,40h
+	daa
+	call	l0808		; Put to console
+	ret
+;
+; Give new line, flushing buffers
+;
+l0721:
+	push	hl
+	push	bc
+	call	l077a		; Dump pending ASCII
+	call	PutNL		; Put new line on console
+	call	prImStrg
+	db	'      ',null
+	xor	a
+	ld	(l0869),a	; Clear item counter
+	jr	l0761		; Clear more values
+;
+; Put new line on console
+;
+PutNL:
+	ld	a,cr
+	call	l0808		; Put to console
+	ld	a,lf
+	call	l0808
+	ret
+;
+; Init new line, flushing buffers
+;
+l0744:
+	push	hl
+	push	bc
+	call	l077a		; Dump pending ASCII
+	call	PutNL		; Put new line on console
+	ld	hl,(l086f)	; Get address
+	call	l0707		; Put hex word to console
+	ld	a,(l0871)
+	call	l082f		; Get segment code
+	ld	a,b
+	call	l0808		; Put to console
+	ld	a,' '
+	call	l0808
+l0761:
+	xor	a
+	ld	(l0867),a	; Clear status word
+	ld	(l0868),a	; Clear dump state
+	ld	(l0884),a	; Clear byte count
+	ld	(l0869),a	; Clear item counter
+	ld	(l086a),a	; Clear length of bytes
+	ld	hl,l0872	; Init buffer
+	ld	(l0882),hl
+	pop	bc
+	pop	hl
+	ret
+;
+; Dump pending ASCII
+;
+l077a:
+	bit	2,(ix+1)	; Test binary pending
+	ret	z		; Nope
+	call	prImStrg
+	db	'     ',null
+l0788:
+	ld	a,(l0884)	; Get byte count
+	ld	b,a
+	ld	hl,l0872	; Init buffer
+l078f:
+	inc	b
+	dec	b		; Test end
+	ret	z		; Yeap
+	dec	b
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jr	nc,l079b	; Yeap
+	ld	a,'.'		; Map unprintable
+l079b:
+	call	l0808		; Put to console
+	jr	l078f
+;
+; Read AFIELD
+;
+Rd.AFIELD:
+	push	bc
+	ld	b,2
+	call	RdBits		; Read address bits from file
+	pop	bc
+	ld	(l08a1),a	; Save address mode
+	push	bc
+	ld	b,8
+	call	RdBits		; Read low bits from file
+	pop	bc
+	ld	(l089f),a	; Save address
+	push	bc
+	ld	b,8
+	call	RdBits		; Read high bits from file
+	pop	bc
+	ld	(l089f+1),a
+	ret
+;
+; Read BFIELD
+;
+Rd.BFIELD:
+	push	hl
+	push	bc
+	push	bc
+	ld	b,3
+	call	RdBits		; Read length from file
+	pop	bc
+	ld	(l08a2),a	; Save it
+	ld	b,a
+	ld	hl,l0887	; Point to current name
+	push	hl
+	ld	c,7		; Init symbol size
+l07d2:
+	ld	(hl),' '	; Blank symbol
+	inc	hl
+	dec	c
+	jr	nz,l07d2
+	pop	hl
+l07d9:
+	ld	a,b		; Test any remaining
+	or	a
+	jr	z,l07e9		; Nope
+	dec	b
+	push	bc
+	ld	b,8
+	call	RdBits		; Read characters from file
+	pop	bc
+	ld	(hl),a		; Fill buffer
+	inc	hl
+	jr	l07d9
+l07e9:
+	pop	bc
+	pop	hl
+	ret
+;
+; Put immediate string to console
+;
+prImStrg:
+	ex	(sp),hl		; Get pointer
+	call	prStrg		; Print
+	ex	(sp),hl
+	ret
+;
+; Put string to console
+;
+prStrg:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	ret	z		; Yeap
+	call	l0808		; Put to console
+	jr	prStrg
+;
+; Put name to console
+;
+l07fb:
+	ld	b,8		; Set length
+l07fd:
+	inc	b
+	dec	b
+	ret	z
+	dec	b
+	ld	a,(hl)
+	inc	hl
+	call	l0808		; Put to console
+	jr	l07fd
+;
+; Put character to console if enabled
+;
+l0808:
+	cp	' '		; Test printable
+	jr	nc,l081a	; Yeap
+	cp	cr		; Filter some control
+	jr	z,l081e
+	cp	lf
+	jr	z,l081e
+	cp	tab
+	jr	z,l081e
+l0818:
+	ld	a,'.'		; Map non printable
+l081a:
+	cp	'~'+1
+	jr	nc,l0818
+l081e:
+	push	hl
+	push	de
+	push	bc
+	ld	c,.conout
+	ld	e,a
+	ld	a,(FileFlag)	; Get file flag
+	or	a
+	call	nz,BDOS		; Put to console if file disabled
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Get segment code
+;
+l082f:
+	ld	b,' '		; ASEG
+	or	a
+	ret	z
+	ld	b,''''		; CSEG
+	dec	a
+	ret	z
+	ld	b,'"'		; DSEG
+	dec	a
+	ret	z
+	ld	b,'!'		; COMMON
+	ret
+;
+; Process user break
+;
+TstAbort:
+	ld	c,.consta
+	call	BDOS		; Test key pending
+	or	a
+	ret	z		; Nope
+	ld	c,.conin
+	call	BDOS		; Get it
+	cp	'C'-'@'		; Test abort requested
+	ret	nz		; Nope
+	call	ErrorEXIT	; Tell abort and exit
+	db	cr,lf
+	db	'++ Interrupted ++'
+	db	cr,lf,eot
+;
+; 0,(ix+0)	1=
+; 1,(ix+0)	1=
+; 2,(ix+0)	1=End of file
+;
+l0866:
+	db	00000000b
+;
+; 0,(ix+1)	0=1st entry symbol
+; 1,(ix+1)	0=1st define entry point
+; 3,(ix+1)	0=1st chain external
+; 4,(ix+1)	0=1st external minus offset
+; 5,(ix+1)	0=1st external plus offset
+; 6,(ix+1)	0=1st chain address
+; 7,(ix+1)	0=1st set location counter
+;
+l0867:
+	db	00000000b
+;
+; 2,(ix+1)	Test binary pending
+;
+l0868:
+	db	00000000b
+;
+; (ix+3)	Item counter
+;
+l0869:
+	db	0
+l086a:				; Length of bytes to be dumped
+	db	0
+FileFlag:			; File enable flag (0 enables file input)
+	db	0
+RdRecIdx:			; Record pointer
+	db	reclng
+RELbits:			; Bit count
+	db	0
+RELbyte:			; Byte from input file
+	db	0
+l086f:				; Dump address
+	dw	0
+l0871:
+	db	0
+l0872:
+	ds	DMPlen
+l0882:				; Dump buffer address
+	dw	0
+l0884:				; Dump byte count
+	db	0
+RecPtr:				; Data pointer
+	dw	0
+l0887:
+	db	'        '
+ll0887	equ	$-l0887
+l088f:
+	db	'        '	; Program name
+l0897:
+	db	'        '
+l089f:
+	dw	0		; Value read into AFIELD
+l08a1:
+	db	0		; Address mode
+l08a2:
+	db	0
+l08a3:
+	dw	0		; Data size
+l08a5:
+	dw	0		; Program size
+	db	0
+;
+	ds	2*50
+LocStk	equ	$
+;
+StkSav:
+	dw	0
+l090e	equ	$		; Start of buffer
+
+	end
+

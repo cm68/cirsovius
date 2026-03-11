@@ -1,0 +1,1516 @@
+;
+;
+;
+l683a:
+	ld	a,(Type)
+	cp	_Array
+	ret	nz
+	call	IsOpen		; Test [
+	ret	nz		; .. nope
+	call	l678b
+l6847:
+	call	StPUSH		; PUSH HL
+	call	.Expression	; Get expression
+	ld	hl,(High.Rng)	; Get pointer
+	call	Get$ENV		; Get name
+	ld	a,(l7b69)
+	cp	b
+	call	ErrNZ		; Invalid types if not the same
+	db	_InvType
+	ld	hl,(l7b6b)
+	ld	a,h
+	or	a
+	jr	nz,l6874
+	ld	a,l
+	cp	4
+	jr	nc,l6888
+l6867:
+	or	a
+	jr	z,l6893
+	push	af
+	call	StImm
+	db	@L68
+$I68:
+	DEC	HL
+@L68	equ	$-$I68
+	pop	af
+	dec	a
+	jr	l6867
+l6874:
+	inc	a
+	jr	nz,l6888
+	ld	a,l
+	cp	-3
+	jr	c,l6888
+l687c:
+	push	af
+	call	StImm
+	db	@L69
+$I69:
+	INC	HL
+@L69	equ	$-$I69
+	pop	af
+	inc	a
+	jr	nz,l687c
+	jr	l6893
+l6888:
+	call	NegateInt	; Negate number
+	call	StLD.DE		; Set LD DE,val16
+	call	StImm
+	db	@L70
+$I70:
+	ADD	HL,DE
+@L70	equ	$-$I70
+l6893:
+	ld	a,(LocOpt)
+	bit	.Ropt,a		; Test index checking
+	jr	z,l68ae		; .. nope
+	ld	hl,(LastAdr)	; Get last address
+	ld	de,(l7b6b)
+	or	a
+	sbc	hl,de
+	inc	hl
+	call	StLD.DE		; Set LD DE,val16
+	ld	hl,indexcheck
+	call	StCALL@		; Set CALL
+l68ae:
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$TYPE	; Get name
+	ld	hl,(TypLen)	; Get length
+	ld	a,h
+	or	a
+	jr	nz,l68d8	; .. no byte
+	ld	a,l
+	dec	a
+	jr	z,l68ed
+	dec	a
+	jr	nz,l68c9
+	call	StImm
+	db	@L71
+$I71:
+	ADD	HL,HL
+@L71	equ	$-$I71
+	jr	l68ed
+l68c9:
+	cp	4
+	jr	nz,l68d8
+	call	StImm		; Set times 10
+	db	@L72
+$I72:
+	ADD	HL,HL
+	LD	E,L
+	LD	D,H
+	ADD	HL,HL
+	ADD	HL,DE
+@L72	equ	$-$I72
+	jr	l68ed
+l68d8:
+	ld	a,(LocOpt)
+	bit	.Xopt,a		; Test optimizing array
+	jr	nz,l68ea	; .. yeap
+	call	StLD.DE		; Set LD DE,val16
+	ld	hl,multint
+	call	StCALL@		; Set CALL
+	jr	l68ed
+l68ea:
+	call	l690a
+l68ed:
+	call	StImm
+	db	@L73
+$I73:
+	POP	DE
+	ADD	HL,DE
+@L73	equ	$-$I73
+	ld	a,(Type)
+	cp	1
+	jr	nz,l6900
+	call	IsComma		; Test comma
+	jp	z,l6847		; .. yeap
+l6900:
+	call	MustClose	; Verify ]
+;;--	ld	a,(ArrMod)	; Test INC/DEC in progress
+;;--	or	a
+;;--	call	nz,StPUSH	; PUSH HL if so
+l6903:
+	ld	a,3
+	ld	(AdrMode),a	; Set address mode
+	xor	a
+	ret
+;
+;
+;
+l690a:
+	ld	b,1
+l690c:
+	ld	a,h
+	or	a
+	jr	nz,l6914
+	ld	a,l
+	dec	a
+	jr	z,l6927
+l6914:
+	bit	0,l
+	jr	z,l691c
+	call	StPUSH		; PUSH HL
+	inc	b
+l691c:
+	call	StImm
+	db	@L74
+$I74:
+	ADD	HL,HL
+@L74	equ	$-$I74
+	srl	h
+	rr	l
+	jr	l690c
+l6927:
+	dec	b
+	ret	z
+	call	StImm
+	db	@L75
+$I75:
+	POP	DE
+	ADD	HL,DE
+@L75	equ	$-$I75
+	jr	l6927
+;
+;
+;
+l6931:
+	ld	a,(Type)
+	cp	2
+	ret	nz
+	call	IsDot		; Test .
+	ret	nz		; .. nope
+	ld	a,(l7b5d)
+	ld	c,a
+	ld	b,_pointer
+	call	FndLABEL	; Find label
+	call	ErrNZ		; Syntax error if not found
+	db	_Undef
+l6948:
+	call	Get@Table	; Get values
+	ld	hl,(TypVal)	; Fetch operand
+	ld	a,h
+	or	l
+	ret	z
+	ld	hl,AdrMode	; Set address mode
+	bit	0,(hl)
+	jr	z,l6967
+	push	hl
+	call	l678b
+	pop	hl
+	ld	(hl),2
+	ld	hl,(TypVal)	; Unpack value
+	ld	(VarAdr),hl
+	xor	a
+	ret
+l6967:
+	ld	hl,(VarAdr)
+	ld	de,(TypVal)	; Fix value
+	add	hl,de
+	ld	(VarAdr),hl
+	xor	a
+	ret
+;
+;
+;
+l6974:
+	ld	a,(Type)
+	cp	_Ptr		; Test pointer
+	ret	nz
+	call	IsPtr		; Test ^
+	ret	nz		; .. nope
+	ld	hl,AdrMode
+	ld	a,(hl)		; Get address mode
+	or	a
+	jr	nz,l6988
+	inc	(hl)		; .. fix
+	jr	l6997
+l6988:
+	push	hl
+	call	l678b
+	pop	hl
+	ld	(hl),3		; .. force mode
+	call	StImm
+	db	@L76
+$I76:
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)
+	EX	DE,HL
+@L76	equ	$-$I76
+l6997:
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$TYPE	; Get name
+	xor	a
+	ret
+;
+;
+;
+l699f:
+	ld	a,(Type)
+	cp	_String
+	ret	nz
+	call	IsOpen		; Test [
+	ret	nz		; .. nope
+	call	l678b
+	call	StPUSH		; PUSH HL
+	ld	hl,(TypLen)	; Get length
+	push	hl
+	call	IntExpr		; Get integer expression
+	pop	hl
+	ld	a,(LocOpt)
+	bit	.Ropt,a		; Test index checking
+	jr	z,l69c7		; .. nope
+	call	StLD.DE		; Set LD DE,val16
+	ld	hl,indexcheck
+	call	StCALL@		; Set CALL
+l69c7:
+	call	StImm
+	db	@L77
+$I77:
+	POP	DE
+	ADD	HL,DE
+@L77	equ	$-$I77
+	call	MustClose	; Verify ]
+	ld	a,_Char
+	ld	(Type),a
+	ld	hl,1
+	ld	(TypLen),hl	; Set byte length
+	dec	hl
+	ld	(Low.Rng),hl	; .. save
+	dec	l
+	ld	(High.Rng),hl
+
+	jp	l6903
+
+;;	ld	a,3
+;;	ld	(AdrMode),a	; Set address mode
+;;	xor	a
+;;	ret
+;
+; Get constant - not from label
+;
+.GetConst:
+	call	GetConst	; .. get constant
+	ret	z		; .. real one
+	call	ERROR		; Syntax error
+	db	_Undef
+;
+; Get integer constant
+;
+.GetIntC:
+	call	.GetConst	; Get constant
+	ld	a,b		; Test type
+	cp	_Integ
+	ret	z
+	call	ERROR		; Integer const expected
+	db	_IntCexp
+;
+; Get string constant
+;
+.GetStrC:
+	call	.GetConst	; Get constant
+	ld	a,b		; test type
+	cp	_String
+	ret	z
+	cp	_Char
+	call	ErrNZ		; String constant expected
+	db	_StrCexp
+	ld	b,_String
+	ret
+;
+; Get constant
+; EXIT	Reg B holds type of constant
+;	Zero set if constant value
+;
+GetConst:
+	call	GetSign		; Get sign
+	push	de		; .. save it
+	call	GetLabType	; Get label or constant
+	pop	de
+	jr	z,NegateNum	; .. got constant
+	inc	e		; Verify no sign
+	dec	e
+	call	ErrNZ		; Integer or real expected
+	db	_IntRealCexp
+	dec	e
+	ret
+;
+; Negate number
+; ENTRY	Reg E holds sign of number
+;	Reg B holds type
+;
+NegateNum:
+	call	ChkNumSign	; Check sign of number
+	ret	z		; .. nothing to do
+	ld	a,b
+	cp	_Real		; Test real
+	jr	nz,NegateInt	; .. nope
+	exx			; Get number
+	ld	a,b
+	xor	MSB		; Flip sign
+	ld	b,a
+	exx
+	xor	a		; .. set result
+	ret
+;
+; Negate integer
+; ENTRY	Reg HL holds number
+; EXIT	Reg HL holds negated number
+;
+NegateInt:
+	ld	a,h
+	cpl			; Get one's compliment
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl		; .. fix for two's
+	xor	a		; .. set result
+	ret
+;
+; Get sign of constant number
+; EXIT	Reg E holds	-1 if '-' sign
+;			 0 if none
+;			+1 if '+' sign
+;
+GetSign:
+	ld	e,-1
+	LdSRC	a		; Get character
+	cp	'-'		; .. test sign
+	jr	z,l6a47
+	inc	e
+	cp	'+'
+	ret	nz
+	inc	e
+l6a47:
+	jp	NewLine		; Get new line
+;
+; Check sign of number
+; ENTRY	Reg E holds 0 if no sign found
+; EXIT	Zero set if no sign
+;
+ChkNumSign:
+	inc	e		; Check sign
+	dec	e
+	ret	z		; .. nope
+	ld	a,b		; Verify valid type
+	cp	_Integ
+	jr	z,CNS.valid	; .. nice
+	cp	_Real
+	jr	nz,CNS.bad	; Should be real here
+CNS.valid:
+	dec	e		; Reset zero
+	ret
+CNS.bad:
+	call	ERROR		; Integer or real expected
+	db	_IntRealCexp
+;
+; Get type of a label or constant
+; EXIT	Reg B holds type
+;	Zero set if constant found
+;
+GetLabType:
+	call	GetConstType	; Get type of constant
+	ret	z		; .. number or string
+	_BC	_const,0
+	call	FndLABEL	; Get label type
+	ret	nz		; .. not found
+	ld	b,(hl)
+	ld	a,b
+	dec	hl
+	cp	_Integ		; Test ordinal type
+	jr	c,GLT.noOrd	; .. nope
+	ld	d,(hl)		; Fetch it
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	xor	a
+	ret
+GLT.noOrd:
+	cp	_Real		; Test real
+	jr	nz,GLT.noReal	; .. nope
+	push	bc
+	ld	b,(hl)		; Fetch it
+	dec	hl
+	ld	c,(hl)
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	ld	a,(hl)
+	dec	hl
+	ld	l,(hl)
+	ld	h,a
+	exx			; Into alternate set
+	pop	bc
+	ret
+GLT.noReal:
+	ld	c,(hl)		; Get length of string
+	ld	de,l7a57
+	push	bc
+	inc	c
+GLT.cpyStr:
+	dec	c
+	jr	z,GLT.ex
+	dec	hl
+	ld	a,(hl)
+	ld	(de),a		; Unpack string
+	inc	de
+	jr	GLT.cpyStr
+GLT.ex:
+	pop	bc
+	ret
+;
+; Get type of constant
+; EXIT	Reg B holds type of constant
+;	Reg C holds optional character count
+;	Zero reset if neither number nor string
+;
+GetConstType:
+	LdSRC	a		; Get character
+	cp	''''		; Test string
+	jr	z,GCT.strg
+	cp	'^'		; .. or control prefix
+	jr	z,GCT.strg
+	cp	'#'		; .. or character prefix
+	jr	nz,GCT.noStrg
+GCT.strg:
+	ld	hl,l7a57	; Init buffer
+	ld	c,0		; .. and character counter
+GCT.chkMore:
+	LdSRC	a		; Get character again
+	cp	'^'		; .. test control
+	jr	z,GCT.ctrChr
+	cp	'#'
+	jr	z,GCT.chrPrfx
+	cp	''''
+	jr	nz,GCT.ex
+GCT.cpyStrg:
+
+	call	Inc.Ld		; Get character
+
+;;	IncSRC
+;;	LdSRC	a
+
+	or	a
+	call	ErrZ		; String too long if zero
+	db	_StrClen
+	cp	''''		; Test end of string
+	jr	nz,GCT.unp
+
+	call	Inc.Ld
+
+;;	IncSRC
+;;	LdSRC	a
+
+	cp	''''		; .. maybe 2nd one
+	jr	nz,GCT.chkMore
+GCT.unp:
+	ld	(hl),a		; Unpack string
+	inc	hl		; .. bump a bit
+	inc	c
+	jr	GCT.cpyStrg
+GCT.ctrChr:
+
+	call	Inc.Ld
+
+;;	IncSRC			; Skip prefix
+;;	LdSRC	a		; Get control
+
+	call	doupcase	; .. as UPPER case
+	or	a
+	call	ErrZ		; String too long if zero
+	db	_StrClen
+	xor	CtrBit		; Set bit
+	IncSRC
+GCT.sav:
+	ld	(hl),a		; Store character
+	inc	hl		; .. bump a bit
+	inc	c
+	jr	GCT.chkMore
+GCT.chrPrfx:
+	IncSRC
+	push	bc
+	push	hl
+	call	cnv.int		; Get integer
+	ld	a,l		; .. into accu
+	pop	hl
+	pop	bc
+	call	ErrCY		; Integer constant error
+	db	_IntCerr
+	jr	GCT.sav
+GCT.ex:
+	ld	b,_String
+	ld	a,c		; Get count
+	dec	a		; Test character
+	jr	nz,GCT.getLine	; .. nope
+	ld	h,a		; .. clear HI
+	ld	a,(l7a57)
+	ld	l,a		; .. get LO
+	ld	b,_Char		; Change mode
+GCT.getLine:
+	jp	GetLine
+GCT.noStrg:
+	cp	'$'		; Maybe hex
+	jr	z,GCT.hex
+	call	IsItDigit	; Test digit
+	jr	nc,GCT.numb	; .. yeap
+	xor	a
+	dec	a		; Set none zero
+	ret
+GCT.numb:
+	CopySRC	de		; Copy character pointer
+GCT.wtNoNum:
+	inc	de		; Skip digit
+	ld	a,(de)
+	call	IsItDigit	; Test digit
+	jr	nc,GCT.wtNoNum	; .. yeap, wait for none
+	call	doupcase
+	cp	'E'		; Check real exponent
+	jr	z,GCT.real
+	cp	'.'		; .. or decimal dot
+	jr	nz,GCT.hex
+	inc	de
+	ld	a,(de)
+	cp	'.'
+	jr	z,GCT.hex
+	cp	')'
+	jr	z,GCT.hex
+GCT.real:
+	call	cnv.flp		; Convert to real
+	call	ErrCY		; Real constant error
+	db	_IntRerr
+	exx			; Real into alternate set
+	ld	b,_Real		; .. set mode
+	jr	GCT.getLine
+GCT.hex:
+	call	cnv.int		; Convert to hex
+	call	ErrCY		; Integer constant error
+	db	_IntCerr
+	ld	b,_Integ	; Set mode
+	jr	GCT.getLine
+;
+; Transfer immediate code into memory
+; ENTRY	<SP> points to code started with length of code
+;
+StImm:
+	ex	(sp),hl		; Get pointer
+	push	bc
+	ld	b,(hl)		; Fetch length
+	inc	hl
+StI.loop:
+	ld	a,(hl)
+	call	StByte		; Save code
+	inc	hl
+	djnz	StI.loop
+	pop	bc
+	ex	(sp),hl		; Adjust return address
+	ret
+;
+; Transfer length and string to code
+; ENTRY	Reg C holds length of string
+;
+StLen:
+	ld	a,c
+	call	StByte		; Put length
+;
+; Transfer string to code
+; ENTRY	Reg C holds length of string
+;
+StConst:
+	ld	hl,l7a57	; Get string
+	inc	c
+StC.loop:
+	dec	c
+	ret	z
+	ld	a,(hl)
+	inc	hl
+	call	StByte		; .. put into
+	jr	StC.loop
+;
+; Store PUSH HL
+;
+StPUSH:
+	ld	a,.PUSH.HL
+	jr	StByte
+;
+; Store POP HL
+;
+StPOP:
+	ld	a,.POP.HL
+	jr	StByte
+;
+; Store JP
+;
+StJP:
+	ld	a,.JP
+	jr	StByte
+;
+; Insert operand
+; ENTRY	Reg DE holds operand
+;
+StOP:
+	ld	a,e		; Put LO
+	call	StByte
+	ld	a,d		; .. and HI
+	jr	StByte
+;
+; Store JP addr16
+; ENTRY	Reg HL holds address
+;
+StJP@:
+	ld	a,.JP
+	jr	StCode
+;
+; Store CALL addr16
+; ENTRY	Reg HL holds address
+;
+StCALL@:
+	ld	a,.CALL
+	jr	StCode
+;
+; Store LD BC,val16
+; ENTRY	Reg HL holds value
+;
+StLD.BC:
+	ld	a,.LD.BC
+	jr	StCode
+;
+; Store LD DE,val16
+; ENTRY	Reg HL holds value
+;
+StLD.DE:
+	ld	a,.LD.DE
+	jr	StCode
+;
+; Store LD HL,val16
+; ENTRY	Reg HL holds value
+;
+StLD.HL:
+	ld	a,.LD.HL
+;
+; Insert code and operand
+; ENTRY	Accu holds code
+;	Reg HL holds operand
+;
+StCode:
+	call	StByte		; Put code
+;
+; Insert operand
+; ENTRY	Reg HL holds operand
+;
+StWrd:
+	ld	a,l		; Put LO
+	call	StByte
+	ld	a,h		; .. and HI
+;
+; Insert byte
+; ENTRY	Accu holds byte
+;
+StByte:
+	push	bc
+	ld	b,a		; Unpack byte
+	ld	a,(CmpTyp)	; Test mode
+	or	a
+	jr	nz,St..noSt	; .. not compile to memory
+	StPC			; .. else store byte
+St..noSt:
+	IncPC			; Bump PC
+	or	a
+	jr	z,St..skp	; .. end on compile to memory
+	push	hl		; Save regs
+	push	de
+	dec	a
+	jr	z,St..St	; .. compile to file
+	CopyPC	de
+	dec	de
+	ld	hl,(Curr.PC)	; Get current address
+	or	a
+	sbc	hl,de
+	call	ErrZ		; RT error found if same
+	db	_FndRTerr
+	jr	St..pop
+St..St:
+	call	StToFile	; Store byte to file
+St..pop:
+	pop	de		; Get back regs
+	pop	hl
+St..skp:
+	pop	bc		; Get back byte
+;
+; Check compiler or memory overflow
+;
+ChkOvfl:
+	push	hl
+	push	de
+	CopyPC	de
+	ld	a,(CmpTyp)	; Test mode
+	or	a
+	jr	z,ChkOv.mem	; .. compile to memory
+	ld	de,(Mem$Top)
+	dec	a
+	jr	nz,ChkOv.mem	; .. skip search error
+	ld	de,(COM$Top)
+	ld	a,(IncFlg)	; Test INCLUDE
+	or	a
+	jr	z,ChkOv.mem	; .. nope
+	ld	de,(INC$Top)
+ChkOv.mem:
+	ld	hl,(LabPtr)	; Get label pointer
+	scf
+	sbc	hl,de
+	call	ErrCY		; Compiler overflow on carry
+	db	_CompOverflow
+	CopyPC	de
+	ld	hl,(DataBeg)	; Get start of data
+	dec	h
+	dec	h
+	sbc	hl,de
+	call	ErrCY		; Memory overflow on carry
+	db	_MemOverflow
+	pop	de
+	pop	hl
+	ret
+;
+; Store byte to file
+; ENTRY	Reg B holds byte to be stored
+;
+StToFile:
+	ld	hl,RRN.stat
+	set	_WR,(hl)	; Set write bit
+	bit	_RD,(hl)	; Test previous read
+	jr	z,SkpRdRRN	; .. nope
+	res	_RD,(hl)	; .. clear
+	push	bc
+	call	RdRRN		; Bring back record
+	pop	bc
+SkpRdRRN:
+	ld	a,(RecPtr)	; Get record pointer
+	ld	e,a
+	ld	d,0
+	ld	hl,TmpBuff	; Get base
+	add	hl,de		; .. point to buffer
+	ld	(hl),b		; Store byte
+	inc	a		; Bump pointer
+	jp	p,StToF..ex	; .. still room
+	call	WrRRN		; Write record
+	ld	hl,(FFCB+_rrn)
+	inc	hl		; Bump record number
+	ld	(FFCB+_rrn),hl
+	xor	a
+StToF..ex:
+	ld	(RecPtr),a	; Set new pointer
+	ret
+;
+; Allocate variable space
+; ENTRY	Reg DE holds length of space to be allocated
+; EXIT	Reg HL holds new start of data
+;
+VarAlloc:
+	ld	hl,(DataBeg)	; Get start of data
+	or	a
+	sbc	hl,de
+	call	ErrCY		; Memory overflow on carry
+	db	_MemOverflow
+	ld	(DataBeg),hl	; Set new start
+	jr	ChkOvfl		; Test overflow
+;
+; Resolve backup fix for current PC
+; ENTRY	Reg HL holds PC
+;
+StBackPC:
+	CopyPC	de		; Get PC
+;
+; Resolve backup fix
+; ENTRY	Reg HL holds PC
+;	Reg DE holds data to be fixed
+;
+StBack:
+	ld	a,(CmpTyp)	; Test mode
+	dec	a
+	jr	z,StBackMem	; .. compiling to memory
+	PushPC
+	SetPC			; Get old
+	call	StOP		; Save value
+	PopPC
+	ret
+StBackMem:
+	push	bc
+	push	de
+	push	hl
+	ld	hl,(Mem$Top)	; Get top memory address
+	ld	a,(BackLevel)	; Get back fix level
+	ld	b,a		; .. as counter
+	inc	b
+l6c5e:
+	dec	b
+	jr	z,l6c84		; .. level done
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	(sp),hl
+	or	a
+	sbc	hl,de
+	add	hl,de
+	ex	(sp),hl
+	jr	c,l6c71
+	inc	hl
+	inc	hl
+	inc	hl
+	jr	l6c5e
+l6c71:
+	dec	hl
+	ex	de,hl
+	ld	l,b
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	ld	b,h
+	ld	c,l
+	add	hl,de
+	ld	d,h
+	ld	e,l
+	dec	hl
+	inc	de
+	inc	de
+	inc	de
+	lddr
+	inc	hl
+l6c84:
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	bc
+	ld	hl,BackLevel
+	inc	(hl)		; Bump level
+	ret	nz		; .. no wrap
+	xor	a		; Set 256
+	jr	ForceBack
+;
+; Fix back level
+;
+FixBack:
+	ld	a,(BackLevel)	; Test back level
+	or	a
+	ret	z		; .. nope
+ForceBack:
+	push	bc		; Save entry
+	push	de
+	PushPC			; Save PC
+	ld	b,a		; Get level count
+	ld	hl,(Mem$Top)	; Get top memory address
+Back.Loop:
+	push	bc		; Save loop
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl		; .. save
+	ex	de,hl
+	call	ChkChn		; Check chaining
+	pop	hl
+	ld	b,(hl)		; Get byte
+	inc	hl
+	push	hl
+	call	StToFile	; Store to file
+	pop	hl
+	ld	b,(hl)		; .. get next
+	inc	hl
+	push	hl
+	call	StToFile	; .. to file
+	pop	hl
+	pop	bc
+	djnz	Back.Loop
+	pop	hl
+	pop	de
+	pop	bc
+;
+; Check chaining
+;
+ChkChn:
+	SetPC			; Set PC
+	ld	a,(CmpTyp)	; Get mode
+	dec	a
+	ret	nz		; .. not compiling to file
+	push	de
+	push	bc
+	ld	de,(CodePC)	; Get current code pointer
+	or	a
+	sbc	hl,de		; Get gap
+	ld	a,l
+	and	NoMSB		; Get modulo
+	ld	(RecPtr),a	; .. for pointer
+	add	hl,hl		; * 2
+	ld	l,h		; .. for / 128
+	rla
+	and	1
+	ld	h,a		; Get for requested record
+	ld	de,(RRN.off)
+	add	hl,de		; Add base
+	ld	de,(FFCB+_rrn)
+	or	a
+	sbc	hl,de
+	add	hl,de		; Test same record number
+	jr	z,Chk.sameRRN	; .. yeap
+	push	hl
+	call	WrRRN		; Write current record
+	pop	hl
+	ld	(FFCB+_rrn),hl	; Set new record number
+Chk.sameRRN:
+	pop	bc
+	pop	de
+	ret
+;
+; Read random record from file
+;
+RdRRN:
+	ld	c,.RdRnd	; .. load read function
+	jr	??RRN		; .. fall in read
+;
+; Write random record to file
+;
+WrRRN:
+	ld	hl,RRN.stat
+	set	_RD,(hl)	; Set read
+	bit	_WR,(hl)	; Test previous write
+	ret	z		; .. nope
+	res	_WR,(hl)	; .. clear
+	ld	c,.WrRnd	; .. fall in write
+??RRN:
+	push	bc
+	ld	de,TmpBuff
+	ld	c,.SetDMA
+	call	.BDOS		; Set disk buffer
+	pop	bc
+	ld	de,FFCB
+	call	.BDOS		; Do random I/O
+	or	a
+	ret	z
+	dec	a
+	ret	z
+	cp	3
+	ret	z
+	call	ERROR		; Write error
+	db	_DskFull
+;
+; Save environment to stack
+;
+SavEnv2:
+	exx
+	ld	de,Envir2	; Load source
+	jr	SavEnv?
+;
+; Save environment to stack
+;
+SavEnv1:
+	exx
+	ld	de,Envir1	; Load source
+SavEnv?:
+	pop	hl		; Get caller
+	ld	(Env.PC),hl	; .. save
+	ld	hl,-_ENVlen
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ex	de,hl		; .. get source
+	ld	bc,_ENVlen
+	ldir			; Save onto stack
+BackEnv.PC:
+	ld	hl,(Env.PC)	; Get back caller
+	push	hl
+	exx
+	ret
+;
+; Restore environment from stack, clean stack
+;
+RestEnv2:
+	exx
+	ld	de,Envir2	; Get destination
+	jr	RestEnv?
+;
+; Restore environment from stack, clean stack
+;
+RestEnv1:
+	exx
+	ld	de,Envir1	; Get destination
+RestEnv?:
+	pop	hl		; .. get caller
+	ld	(Env.PC),hl
+	ld	hl,0		; Copy stack
+	add	hl,sp
+	ld	bc,_ENVlen
+	ldir			; Get from stack
+	ld	sp,hl
+	jr	BackEnv.PC	; .. get back PC
+;
+; Restore environment from stack, leave stack intact
+;
+CpyEnv2:
+	exx
+	ld	de,Envir2	; Get destination
+	jr	CpyEnv?
+;
+; Restore environment from stack, leave stack intact
+;
+CpyEnv1:
+	exx
+	ld	de,Envir1	; Get destination
+CpyEnv?:
+	ld	hl,2
+	add	hl,sp		; Copy stack to caller level
+	ld	bc,_ENVlen
+	ldir			; Get from stack
+	exx
+	ret
+;
+; Store current PC into label table
+;
+StLabPC:
+	CopyPC	de		; .. copy PC
+;
+; Store value into label table
+; ENTRY	Reg DE holds value
+;
+StLabWrd:
+	ld	a,d		; Get HI
+	call	StLabByte	; .. store into table
+	ld	a,e		; .. then LO
+;
+; Store value into label table
+; ENTRY	Accu holds value
+;
+StLabByte:
+	push	hl
+	ld	hl,(LabPtr)	; Get label pointer
+	ld	(hl),a		; Store character
+	dec	hl		; Fix pointer
+	ld	(LabPtr),hl
+	pop	hl
+	jp	ChkOvfl		; Test overflow
+;
+; Sample label
+;
+GetLabel:
+	LdSRC	a		; Get 1st character
+	call	IsItLab		; Test label
+SampLabel:
+	call	ErrCY		; Invalid character if not
+	db	_InvChar
+	call	DoubleLabel	; Verify no double label
+l6d94:
+	call	Reserved	; Verify no reserved word
+	LdSRC	a
+l6d9a:
+
+	call	DoUPCASE	; Get UPPER case
+
+;;	cp	'a'
+;;	jr	c,l6da4
+;;	cp	'z'+1
+;;	jr	nc,l6da4
+;;	sub	'a'-'A'
+;;l6da4:
+
+	call	StLabByte	; Store into table
+
+	call	Inc.Ld
+
+;;	IncSRC
+;;	LdSRC	a
+
+	call	IsItValid	; Test valid character
+	jr	nc,l6d9a	; .. yeap
+	ld	hl,(LabPtr)	; Get label pointer
+	inc	hl
+	set	_MB,(hl)	; Set end of label
+	jp	GetLine
+;
+;
+;
+l6dba:
+	LdSRC	a		; Get 1st character
+	call	IsItLab		; Test label
+	call	ErrCY		; Invalid character if not
+	db	_InvChar
+	jr	l6d94
+;
+; Set label pointer
+;
+SetLabPtr:
+	ld	hl,(PrevLabPtr)	; Get previous pointer
+	ld	de,(LabPtr)	; Get label pointer
+	or	a
+	sbc	hl,de
+	ex	de,hl
+	call	StLabWrd	; Save allocation length
+	ld	hl,(LabPtr)	; Unpack pointer
+	ld	(PrevLabPtr),hl
+	ret
+;
+;
+;
+l6ddb:
+	ld	hl,(CurLab)	; Get current label pointer
+	jr	l6de3
+;
+; Find label from table
+; ENTRY	Reg B holds selected TYPE
+;	Reg C holds item flag
+;		 0 if 1st item in line
+;		-1 if not 1st one
+; EXIT	Zero set if label found
+;;
+;; l7bc1 = 00, A = -1, NZ ---->>> Not found
+;; l7bc1 = type, NZ       ---->>> Not same type as B
+;;                Z       ---->>> Same type
+;;		HL, DE hold pointers
+;
+FndItem:
+	ld	hl,(l7b77)
+l6de3:
+	ld	(l7b7d),hl
+	ld	a,(FirstVAR)	; Get item flag
+	cp	c		; .. test same
+	jr	z,l6e48		; .. yeap
+	ld	a,c
+	ld	(FirstVAR),a	; Change flag
+	ld	hl,(PrevLabPtr)	; Get previous pointer
+l6df3:
+	ld	de,(l7b7d)
+	xor	a
+	sbc	hl,de		; Test pointer reached
+	add	hl,de
+	jr	nz,l6e03
+	xor	a
+	ld	(l7bc1),a
+	dec	a
+	ret
+l6e03:
+	inc	hl
+	ld	e,(hl)		; Get length of entry ?????????
+	inc	hl
+	ld	d,(hl)
+	add	hl,de		; Point to end
+	ld	a,(hl)		; Test more
+	or	a
+	jr	z,l6df3		; .. end of table ??????????????
+	dec	hl
+	ld	a,(hl)		; Get type
+	inc	hl
+	cp	c
+	jr	nz,l6df3	; .. not what we expect
+	CopySRC	de		; Copy pointer
+	push	bc
+	push	hl
+	dec	hl		; Fix to lable
+	dec	hl
+l6e19:
+	ld	b,(hl)		; Get characters
+	ld	a,(de)
+	dec	hl
+	inc	de
+	ld	c,b		; Save label
+	res	_MB,b		; Clear MSB
+	cp	'a'		; Check a..z
+	jr	c,l6e2a
+	cp	'z'+1
+	jr	nc,l6e2a
+	sub	'a'-'A'		; .. map to a..z
+l6e2a:
+	cp	b		; Compare
+	jr	nz,l6e37
+	bit	_MB,c		; Test last character
+	jr	z,l6e19		; .. nope
+	ld	a,(de)		; Verify end of label
+	call	IsItValid
+	jr	c,l6e3b		; .. yeap
+l6e37:
+	pop	hl
+	pop	bc
+	jr	l6df3
+l6e3b:
+	ld	(l7bc2),hl	; Save pointers
+	ld	(l7bc4),de
+	pop	hl
+	pop	bc
+	ld	a,(hl)		; Save type
+	ld	(l7bc1),a
+l6e48:
+	ld	hl,(l7bc2)
+	ld	de,(l7bc4)
+	ld	a,(l7bc1)
+	cp	b		; Fix result
+	ret
+;
+; Get TYPE from table
+; ENTRY	Reg B holds TYPE searched for
+;	Reg C holds flag ???????
+; EXIT	Zero set if TYPE found
+;	Reg HL points to TYPE
+;
+FndLABEL:
+	call	FndItem		; Find it
+	ret	nz		; .. nope
+	jr	SetLine		; .. set source pointer
+;
+; Find string
+; ENTRY	<SP> points to length of code
+;	followed by address of string
+; EXIT	Zero flag set indicates found
+;
+FndTabStr:
+	ex	(sp),hl		; Get pointer
+	ld	c,(hl)		; Fetch type
+	inc	hl
+	ld	e,(hl)		; .. and table address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl		; Bring back pointer
+	ex	de,hl
+FndDirStr:
+	call	FndStr		; Find string
+	ret	z		; .. got it
+	dec	hl
+FTS.fix:
+	bit	_MB,(hl)	; Test MSB set
+	inc	hl
+	jr	z,FTS.fix	; .. find it
+	ld	b,0
+	add	hl,bc		; Point behind code
+	ld	a,(hl)
+	or	a		; .. test more
+	jr	nz,FndDirStr
+	dec	a		; .. nope, set end
+	ret
+;
+; Find constant string
+; ENTRY	<SP> points to address of string
+; EXIT	Zero flag set indicates found
+;
+FindStr:
+	ex	(sp),hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl
+	ex	de,hl
+FndStr:
+	CopySRC	de		; Copy pointer
+	ld	a,(hl)		; Get character
+	call	IsItLab		; Test label
+	jr	c,l6e92		; .. nope
+	call	l6e9c
+	ret	nz
+	ld	a,(de)
+	call	IsItValid	; Test valid character
+	jr	c,SetLine	; .. nope
+	or	a
+	ret
+l6e92:
+	call	l6e9c
+	ret	nz
+SetLine:
+	SetSRC	de		; Copy back pointer
+	jp	GetLine		; Get ext line
+;
+;
+;
+l6e9c:
+	push	bc
+l6e9d:
+	ld	b,(hl)
+	ld	a,(de)
+	inc	hl
+	inc	de
+	ld	c,b
+	res	_MB,b
+	cp	'a'
+	jr	c,l6eae
+	cp	'z'+1
+	jr	nc,l6eae
+	sub	'a'-'A'
+l6eae:
+	cp	b
+	jr	nz,l6eb6
+	bit	_MB,c
+	jr	z,l6e9d
+	xor	a
+l6eb6:
+	pop	bc
+	ret
+;
+; Verify no reserved word
+;
+Reserved:
+	ld	hl,$RESERVED
+NxtResWrd:
+	ld	c,(hl)		; Get type
+	inc	c
+	ret	z		; .. nope
+	dec	c
+	inc	hl
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	ex	de,hl
+	call	FndDirStr	; Search string
+	pop	hl
+	jr	nz,NxtResWrd	; .. not found
+	call	ERROR		; Reserved word
+	db	_ResWrd
+;
+; Verify no double label
+;
+DoubleLabel:
+	ld	a,(l7b91)
+	ld	c,a
+	call	l6ddb
+	ld	a,(l7bc1)
+	or	a
+	ret	z
+	call	ERROR		; Double label
+	db	_DoubleLab
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+; && Character or sequence test routines &&
+; && EXIT Zero set if found              &&
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+;
+IsOpen:
+	ld	a,'['
+	call	IsAny		; Test [
+	ret	z		; .. yeap
+	LdSRC	a
+	cp	'('		; .. or (.
+	ret	nz		; .. nope
+	NxtSRC
+	cp	'.'
+	ret	nz
+l6ef2:
+	IncSRC
+	jp	NewLine		; Get new line
+IsClose:
+	ld	a,']'
+	call	IsAny		; Test ]
+	ret	z		; .. yeap
+	LdSRC	a
+	cp	'.'		; .. or .)
+	ret	nz		; .. nope
+	NxtSRC
+	cp	')'
+	ret	nz
+	jr	l6ef2
+IsColon:
+	ld	a,':'
+	jr	IsAny
+IsSemiColon:
+	ld	a,';'
+	jr	IsAny
+IsComma:
+	ld	a,','
+	jr	IsAny
+IsDot:
+	ld	a,'.'
+	jr	IsAny
+IsLeftParen:
+	ld	a,'('
+	jr	IsAny
+IsRightParen:
+	ld	a,')'
+	jr	IsAny
+IsEqual:
+	ld	a,'='
+	jr	IsAny
+IsPtr:
+	ld	a,'^'
+IsAny:
+	CmpSRC			; Compare
+	ret	nz		; .. nope
+	jp	NewLine		; Get new line
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+; && Character or sequence verification routines &&
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+;
+MustOpen:
+	call	IsOpen
+	ret	z
+	call	ERROR		; '[' expected
+	db	_LftBrack
+MustClose:
+	call	IsClose
+	ret	z
+	call	ERROR		; ']' expected
+	db	_RgtBrack
+MustColon:
+	call	IsColon
+	ret	z
+	call	ERROR		; ':' expected
+	db	_SemiExp
+MustSemiColon:
+	call	IsSemiColon
+	ret	z
+l6f4c:
+	call	ERROR		; ';' expected
+	db	_ColExp
+l6f50:
+	call	IsSemiColon	; Test ;
+	ret	z		; .. yeap
+	ld	a,(BlockCheck)	; Test start of new line
+	or	a
+	jr	z,l6f4c		; .. yeap
+	call	ERROR		; Syntax error
+	db	_Undef
+MustComma:
+	call	IsComma
+	ret	z
+	call	ERROR		; ',' expected
+	db	_CommaExp
+MustLeftParen:
+	call	IsLeftParen
+	ret	z
+	call	ERROR		; '(' expected
+	db	_LftPar
+MustRightParen:
+	call	IsRightParen
+	ret	z
+	call	ERROR		; ')' expected
+	db	_Rgtpar
+MustEqual:
+	call	IsEqual
+	ret	z
+	call	ERROR		; '=' expected
+	db	_EquExp
+MustAss:
+	call	FindStr		; Verify ':='
+	dw	$ass
+	ret	z
+	call	ERROR		; ':=' expected
+	db	_AssExp
+MustOF:
+	call	FindStr		; Verify OF
+	dw	$OF
+	ret	z
+	call	ERROR		; OF expected
+	db	_OFexp
+; 
+; Get character from source
+; EXIT	Accu holds character
+;
+Inc.Ld:
+	IncSRC			; Bump source
+	LdSRC	a		; .. get character
+	ret
+

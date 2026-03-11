@@ -1,0 +1,263 @@
+;
+; This file implements the interface between the CP/M CCP
+; and the compiler
+;
+; Entered here thru cold start (RTL resides before)
+;
+l20e2:
+	call	l20e5		; Set up environment
+	call	l215e
+	ld	hl,STDFCB+Fdrv+Fname
+	ld	a,(hl)		; Test extension
+	cp	' '
+	call	z,DefPAS	; Set default .PAS
+	ld	de,l44f9
+	ld	hl,STDFCB+Fdrv
+	ld	a,(hl)
+	cp	' '		; Test input
+	jr	z,NoCCP		; Should be	
+	dec	hl
+	ld	bc,Fdrv+Fname+Fext
+	ldir			; Unpack main file
+	ld	hl,CCP
+	ld	b,h
+	ld	c,(hl)
+	inc	hl
+	call	ScanCCP		; Scan line for options
+	call	l2da4		; Read message file if found
+	call	l2827		; Compile
+	jp	OS
+NoCCP:
+	call	l0200		; Tell no input
+	db	'Command version of TURBO Pascal v3.0'
+	db	cr,lf,lf
+	db	'Call it:'
+	db	cr,lf,lf
+	db	tab,'TURBOCOM SOURCE_file{.PAS} {/Sstr_addr} {/Eend_addr} {/H}}'
+	db	null
+	jp	OS
+;
+; init a bit
+;
+l215e:
+	ld	hl,(TPAtop)	; Fetch top of memory
+	ld	bc,-MEMGAP
+	add	hl,bc
+	ld	(l44f6),hl	; Set for available memory
+	call	l2d8f		; Init session
+	ret
+;
+; Set up environment
+;
+l20e5:
+	ld	hl,(TPAtop)	; Get top of memory
+	pop	bc
+	ld	sp,hl		; Set for stack
+	push	bc
+	ld	de,-StkSpc
+	add	hl,de		; Allow some space
+	ld	(l4548),hl	; Set top of memory
+	ld	hl,l7ad7	; Get top of used memory
+	ld	bc,256*0+0	; No break, no interrupt
+	call	l0364		; Init pointers
+	ret
+;
+; Set default .PAS
+;
+DefPAS:
+	ld	(hl),'P'	; Simple one
+	inc	hl
+	ld	(hl),'A'
+	inc	hl
+	ld	(hl),'S'
+	ret
+;
+; Scan line for options
+;
+; On entry ^HL points to command line and reg BC holds length of it
+;
+ScanCCP:
+	ld	a,'/'
+	cpir			; Find delimiter
+	ret	nz		; None
+	ld	a,(hl)		; Get character
+	cp	'H'		; Test chain
+	jr	nz,isEnd	; Nope try next
+;
+; Option /H : Set .CHN instead of .COM file
+;
+	ld	(l44f3),a	; Set chain
+	inc	hl		; Skip option
+	dec	c		; Test more
+	jr	nz,ScanCCP
+	ret
+isEnd:
+	cp	'E'		; Test end address
+	jr	nz,isStrt	; Nope try next
+;
+; Option /Eaaaa : Define end address
+;
+	inc	hl		; Skip option
+	dec	c		; Test count
+	jr	z,OptErr
+	call	hexin		; Get address
+	ld	(l44f6),de	; Set end address
+	call	CheckRTLaddr	; Check address
+	jr	nz,ScanCCP
+	ret
+isStrt:
+	cp	'S'		; Test start address
+	jr	nz,OptErr
+;
+; Option /Saaaa : Define start address
+;
+	inc	hl		; Skip option
+	dec	c		; Test count
+	jr	z,OptErr
+	call	hexin		; Get address
+	ld	(l44f4),de	; Set end address
+	call	CheckRTLaddr	; Check address
+	jr	nz,ScanCCP
+	ret
+OptErr:
+	call	l0200		; Tell no input
+	db	'Invalid option found.'
+	db	cr,lf
+	db	'Supports /H for chain file, /Saaaa for start and /Eaaaa for end address'
+	db	null
+	jp	OS
+;
+; Check address in reg DE against Run Time Library address
+;
+CheckRTLaddr:
+	ex	af,af'
+	push	de
+	push	hl
+	ex	de,hl
+	ld	de,l20e2
+	or	a
+	sbc	hl,de		; Verify above RTL
+	pop	hl
+	pop	de
+	jr	c,IllAddr	; Bad one
+	ex	af,af'
+	ret
+IllAddr:
+	call	l0200
+	db	'/'
+$IllAddr:
+	db	'xaddress must not be below hex '
+	db	null
+	ld	hl,l20e2
+	call	l04af		; Print hex
+	jp	OS
+;
+; Get hex address from ^HL to DE, remaining length in reg BC
+;
+; Zero flag set of no more characters in line
+;
+hexin:
+	ld	($IllAddr),a	; Save in case of error
+	ex	de,hl		; Unpack pointers
+	ld	b,c		; Get length
+	call	.hexin
+	ld	c,b		; Get remaining length
+	ld	b,0
+	ex	de,hl		; Get result
+	inc	c
+	dec	c
+	ret
+;
+.hexin:
+	ld	hl,0		; Init value
+	inc	b
+	dec	b
+	ret	z
+EndHex:
+	call	ASCII2Bin	; Get binary
+	ret	nc
+	add	hl,hl		; Shift four places
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	or	l		; Insert digit
+	ld	l,a
+	djnz	EndHex
+	ret
+;
+; Convert ASCII to nibble - C set if range ok
+;
+ASCII2Bin:
+	ld	a,(de)		; Get character
+	inc	de
+	sub	'0'		; Strip off ASCII
+	cp	9+1		; Test decimal
+	ret	c		; Yeap
+	sub	'A'-'0'-10	; Fix for hex
+	cp	15+1		; Verify correct range
+	ret
+;
+; Indicate error line
+;
+PrSrcline::
+	ld	a,(l79d7)	; Test any in line
+	or	a
+	ret	z		; Nope, ignore this routine
+	call	l0200		; Close line
+	db	cr,lf,lf
+	db	'Source line: '
+	db	cr,lf,lf,null
+	ld	hl,l79d7	; Get start of source line
+..prc:
+	ld	a,(hl)
+	or	a
+	jr	z,end.pre
+	call	l03c9		; Print it
+	inc	hl
+	jr	..prc
+end.pre:
+	call	l0200		; Close line
+	db	cr,lf,null
+	ld	a,(errpos)	; Get error position
+	or	a
+	ret	z		; It is at the beginning
+	ld	b,a
+pr.errind:
+	ld	a,'-'
+	call	l03c9
+	djnz	pr.errind
+	call	l0200		; Indicate position
+	db	'^',cr,lf,null
+	ret
+;
+errpos:
+	ds	2
+;
+; Read error message file
+; 
+l2da4:
+	ld	hl,(l429e)	; Get base of message file
+	ld	(l4544),hl	; Set as start of text
+	ld	hl,l217d	; Point to filename
+	ld	bc,Fdrv+Fname+Fext
+	ld	de,l005c
+	ldir			; Unpack .MSG file
+	ld	c,.open
+	call	l26d3		; Open file
+	add	a,1
+	sbc	a,a		; Indicate file ok
+	xor	11111111b	; Toggle bits
+	ld	(l4541),a	; Set error message file read
+	jr	z,l2dcf		; Not found
+	ld	de,l005c
+	call	l2518		; Load text file
+l2dcf:
+	ld	hl,(l4546)	; Get end of text
+	ld	(hl),eof
+	inc	hl
+	ld	(l4544),hl	; Set start of text
+	ret
+;
+l217d:
+	db	0,'TURBO   MSG'
+

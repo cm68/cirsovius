@@ -1,0 +1,607 @@
+	title	DASM - Main management loop
+	name	('DASMKRN')
+
+	entry	hsym,nwln0,cout,dcrlf,pstg,phex,pdec,symsch
+	entry	bldsym,pstrng,pashex,prH,prnt,AddA,semi,.tab
+	entry	xcsw,rplptr,pc,biased,opctp,build,fget
+
+	ext	dasm,prntde,prID,MType,pdertn,tpasm
+
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% +++++ MAIN DASM loop +++++ %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Print rest of signon message on cold start
+;
+.signon:
+	call	IniTables	;Cleanup initialization
+signon:
+	call	prID		;Print initial info
+	call	pstrng
+	db	cr,lf,lf
+	db	'Type H for Help, ? for Stats',lf,null
+;
+; Main command processing loop
+;
+getcmd.NL:
+	call	crlf		;Close line before
+getcmd:
+	call	resCON		;Reset console device
+	ld	(xcptr),a
+	ld	(xcptr+1),a
+	ld	sp,DASM.stack	;Reset stack
+;
+; Input command line and CAPITALIZE
+;
+	call	prompt		;Input command line via bdos
+;
+; Process command line
+;
+prcede:
+	ld	a,(inbuf.1)	;Pt to first char of command line
+	ld	hl,cmdtabl+tl-1	;Pt to command table
+	ld	bc,tl		;Get length of commands
+	cpdr			;Find command
+	jr	nz,what		;Tell user that command was invalid
+	ld	hl,cmdexe	;Pt to command execution table
+	add	hl,bc		;Position pointer
+	add	hl,bc
+	ld	e,(hl)		;Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		;Go
+;
+; Check space or comma
+;
+chk.delim:
+	cp	' '		;Char after address = <sp>?
+	ret	z		;Cont if so
+	cp	','		;Char after address = ','?
+	ret	z		;Error if not ',' or <sp>
+;
+; General error
+;
+what:
+	call	resCON		; Reset console device
+	call	pstrng
+	db	cr,lf,'** Command Error **',null
+	jr	getcmd.NL
+;
+; Memory error
+;
+nomem:
+	call	resCON		; Reset console device
+	call	pstrng
+	db	cr,lf,'** No Memory **',null
+	jr	getcmd.NL
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command table -- Contains command letter followed %%
+; %% by address of routine and ends in 0 as the next   %%
+; %% command letter                                    %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+cmdtabl:
+	db	' '		;Empty starting line
+	db	cr		;Empty line
+	db	';'		;comments
+	db	'A'		;Build ascii
+	db	'B'		;Build labels
+	db	'C'		;Control table
+	db	'D'		;Memory dump
+	db	'E'		;Enter symbol
+	db	'F'		;Find label
+	db	'H'		;Help
+	db	'I'		;Increment symbol values
+	db	'K'		;Kill symbol
+	db	'L'		;List code
+	db	'P'		;Generate prolog
+	db	'Q'		;Quiet mode
+	db	'R'		;Read files
+	db	'S'		;Save files
+	db	'V'		;Virtual load address
+	db	'X'		;Purge symbols and control
+	db	'Z'		;Close mac file
+	db	'?'		;Statistics display
+	db	'#'		;Exit dasm
+tl	equ	$-cmdtabl
+;
+cmdexe:
+	dw	getcmd
+	dw	getcmd
+	dw	cmnt
+	dw	ascasm
+	dw	bldasm
+	dw	ctl
+	dw	dump
+	dw	enter
+	dw	find
+	dw	help
+	dw	incmnt
+	dw	kill
+	dw	list
+	dw	prolog
+	dw	quiet
+	dw	read
+	dw	save
+	dw	virtadr
+	dw	purge
+	dw	close
+	dw	stat
+	dw	exit
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  V        %%
+; %% Setup load address %%
+; %%%%%%%%%%%%%%%%%%%%%%%%
+;
+virtadr::
+	call	get.buf		;Test display only
+	jr	z,disp.virt
+	call	cnvrt		;Get it in de
+	ld	(LoadAdr),de	;Set load address
+disp.virt:
+	call	pstrng
+	db	cr,lf,'Load Address = ',null
+	ld	hl,(LoadAdr)
+	call	pval.NL		;Print value
+	jp	getcmd
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  H            %%
+; %% Print help information %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+help::
+	ld	hl,$HELP
+	call	hstrng		;Just one big print
+	jp	getcmd
+;
+; Print help text - may be interrupted by any key
+;
+hstrng:
+	ld	a,(hl)		;Test end
+	or	a
+	ret	z		;.. yeap
+	call	cout		;Print it
+	ld	a,(hl)
+	inc	hl
+	cp	lf		;Test new line
+	call	z,hlp.brk?	;Test break if so
+	jr	hstrng
+hlp.brk?:
+	push	hl
+	call	conclr		;Test key pressed
+	pop	hl
+	ret	z		;..nope
+	jp	getcmd		;..leave
+;
+$HELP:
+;Line  1
+	db	cr,lf,tab,tab,'     HELP on DASM -- Command Summary'
+;Line  2
+	db	cr,lf,';addr,comment',tab,'Enter Comment at addr',tab
+	db	';addr',tab,tab,'List Comment at addr'
+;Line  3
+	db	cr,lf,';',tab,tab,'List Comments Table',tab
+	db	';addr',tab,tab,'Delete Comment'
+;Line  4
+	db	cr,lf,';ON',tab,tab,'Symbol Comments ON',tab
+	db	';OFF',tab,tab,'Symbol Comments OFF'
+;Line  5
+	db	cr,lf,'A (see L)',tab,'Attempt to find DB''s',tab
+	db	'B (see L)',tab,'Build Symbol Table'
+;Line  6
+	db	cr,lf,'C',tab,tab,'Dump Control Table',tab
+	db	'Cnnnn',tab,tab,'Dump Ctrl Table at nnnn'
+;Line  7
+	db	cr,lf,'Cnnnn,x',tab,tab,'Set Ctrl (x=BEHISW)',tab
+	db	'Dnnnn',tab,tab,'Dump from nnnn on'
+;Line  8
+	db	cr,lf,'Daaaa,bbbb',tab,'Dump over range',tab,tab
+	db	'D,bbbb',tab,tab,'Dump thru bbbb'
+;Line  9
+	db	cr,lf,'D',tab,tab,'Dump 80H more',tab,tab
+	db	'D=nn',tab,tab,'Set Dump Size Default'
+;Line 10
+	db	cr,lf,'DS',tab,tab,'Dump the Symbol Table',tab
+	db	'DS.symbol',tab,'Dump starting at symbol'
+;Line 11
+	db	cr,lf,'Ennnn,.symbol',tab,'Enter symbol into table',tab
+	db	'Fnnnn,ssss',tab,'Find nnnn after ssss'
+;Line 12
+	db	cr,lf,'F or Fnnnn',tab,'Cont Find or Find nnnn',tab
+	db	'Issss,oooo',tab,'Inc addrs>=ssss by oooo'
+;Line 13
+	db	cr,lf,'K.symbol',tab,'Kill symbol from table',tab
+	db	'L',tab,tab,'List next '
+	db	(initlcnt/10)+'0',(initlcnt mod 10)+'0'
+	db	' lines'
+;Line 14
+	db	cr,lf,'Lssss,eeee',tab,'List over range',tab,tab
+	db	'L,eeee',tab,tab,'List to eeee'
+;Line 15
+	db	cr,lf,'Lssss',tab,tab,'List '
+	db	(initlcnt/10)+'0',(initlcnt mod 10)+'0'
+	db	' lines from ssss',tab
+	db	'L=nn[,others]',tab,'Set list default'
+;Line 16
+	db	cr,lf,'Pssss,eeee',tab,'Generate program prolog',tab
+	db	'Q',tab,tab,'Quiet prefix'
+;Line 17
+	db	cr,lf,'Rfilename.COM',tab,'Read file @ offset+100H',tab
+	db	'Rfilename.CTL',tab,'Read Control Table'
+;Line 18
+	db	cr,lf,'Rfilename.SMB',tab,'Read Symbol Table',tab
+	db	'Rfilename.CMT',tab,'Read Comments Table'
+;Line 19
+	db	cr,lf,'Rfilename.ALL',tab,'Read CTL, SMB, CMT, COM',tab
+	db	'Sfilename.',etx,tab,'Save ',etx,' File'
+;Line 20
+	db	cr,lf,'Sfilename.CTL',tab,'Save CTL File',tab,tab
+	db	'Sfilename.SMB',tab,'Save SMB File'
+;Line 21
+	db	cr,lf,'Sfilename.CMT',tab,'Save CMT File',tab,tab
+	db	'Sfilename.ALL',tab,'CTL, SMB, CMT, ',etx
+;Line 22
+	db	cr,lf,'( filename may be wildcard "*" if legal'
+	db	' filename was defined previously )'
+;Line 23
+	db	cr,lf,'Vaaaa',tab,tab,'Set load address',tab
+	db	'V',tab,tab,'Display load address',etx
+;Line 24
+	db	cr,lf,'X',tab,tab,'Restart DASM',tab,tab
+	db	'Z',tab,tab,'Write EOF to ',etx,' File'
+;Line 25
+	db	cr,lf,'?',tab,tab,'Print Statistics',tab
+	db	'#      ',tab,tab,'Exit DASM'
+	db	cr,lf,null
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  P                                 %%
+; %% Enter prolog into assembly language program %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+prolog::
+	call	get.buf		;Get pointer
+	jp	z,what		;Error if CR
+	call	cnvrt		;Convert address value to binary in de
+	call	chk.delim	;Check legal delimiter
+	inc	hl		;Pt to 2nd address
+	push	de		;Save first address on stack
+	push	hl		;Save ptr to 2nd address
+	ld	a,TRUE		;Turn on disk output
+	ld	(wrtenab),a
+	ld	a,(MType)	;Get maschine type
+	or	a
+	jr	z,Skp8080	;No prefix on 8080
+	call	pstg		;Print new org
+	db	tab,'.Z80',cr,lf
+	db	tab,'ASEG',cr,lf,null
+Skp8080:
+	call	pstg		;Print new org
+	db	tab,'ORG',tab,null
+	pop	hl
+	pop	de
+	ld	a,d		;Org at first address
+	call	pashex		;Print as 'nnh'
+	ld	a,e
+	call	phex
+	call	prH
+	call	crlf
+	push	de		;Save first address
+	call	cnvrt		;Get 2nd address in de
+	cp	cr		;Error if <cr>
+	jp	nz,what
+	pop	bc		;Bc=start address, de=end address
+	ld	hl,(sym.root)	;Pt to symbol table
+prlg1:
+	inc	hl		;Skip over symbol address
+	inc	hl
+	ld	a,(hl)		;Get 1st char of symbol
+	or	a		;End of symbol table? (char count = 0)
+	jp	z,getcmd	;Done if so
+	dec	hl		;Pt to symbol address
+	dec	hl
+	ld	a,(hl)		;Compare symbol address to current address
+	sub	c		;... in bc
+	inc	hl
+	ld	a,(hl)
+	sbc	a,b
+	jr	c,genequ	;Generate equ if symbol < start address
+	dec	hl		;Pt to symbol low-order address again
+	ld	a,(hl)		;Compare symbol address to end address
+	sub	e
+	inc	hl
+	ld	a,(hl)
+	sbc	a,d
+	jp	c,within	;Process normally if start <= symbol <= end
+;
+; Symbol is not in range of:
+; Start address <= symbol <= end address
+; Generate EQUate for it
+;
+genequ:
+	push	hl		;Save ptr to symbol
+	push	bc		;Save start address
+	inc	hl		;Pt to symbol char count
+	ld	b,(hl)		;B=char count
+	push	hl		;Save ptr to char count
+	inc	hl		;Pt to first letter of symbol
+	ld	a,(hl)		;Get it
+	dec	hl		;Pt back to char count
+	cp	'A'		;If first letter is less than a, don't generate 'equ'
+	jr	c,prlg3
+;
+; Scan symbol for '+' or '-' and don't
+; generate 'EQU' if it contains one
+;
+prlg2:
+	inc	hl		;Pt to next char
+	call	IsOff?		;Check offset
+	jr	z,prlg3
+	djnz	prlg2		;Loop
+	pop	hl		;Get ptr to symbol char count
+	ld	b,(hl)		;B=char count
+	ld	a,TRUE		;Enable disk output
+	ld	(wrtenab),a
+;
+; Print symbol equate; HL pts to byte before symbol
+; and B=number of chars
+;
+loopb:
+	inc	hl		;Pt to next char
+	call	prnt		;Print it
+	call	pstg
+	db	tab,'EQU',tab,null
+	pop	bc		;Get start adr
+	pop	hl		;Pt to char count of current symbol
+	ld	a,(hl)		;Check for high-order value
+	or	a		;Don't print significant zero
+	push	af
+	call	nz,pashex
+	dec	hl		;Pt to low-order value
+	pop	af
+	ld	a,(hl)		;Get it
+	push	af
+	call	nz,phex		;Print it
+	pop	af
+	call	z,pashex
+	call	prH		;Following 'h' for 'nnh' and new line
+	call	crlf
+	xor	a		;Disable write to disk
+	ld	(wrtenab),a
+	inc	hl		;Pt to high-order value of symbol
+;
+; Symbol is within the desired range
+; (Start <= symbol <= end)
+;
+within:
+	inc	hl		;Pt to char count of symbol
+	ld	a,(hl)		;Get it
+	call	AddA		;Skip to next symbol
+	inc	hl		;Pt to its address
+	call	brkchk		;Check for break
+	jp	prlg1		;Continue generating prolog
+;
+; Skip current symbol for one reason or another
+;
+prlg3:
+	pop	hl		;Restore regs and continue
+	pop	bc
+	pop	hl
+	jr	within
+;
+; Test current character '+' or '-'
+;
+IsOff?:
+	ld	a,(hl)		;Get it
+	cp	'+'		;Check
+	ret	z
+	cp	'-'		;Check
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  Q prefix                    %%
+; %% Execute the command in the quiet mode %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+quiet::
+	ld	a,TRUE		;Turn on quiet mode
+	ld	(hush),a
+	ld	de,inbuf.1	;Copy command line left 1 character
+	ld	hl,inbuf.2
+shftbf:
+	ld	a,(hl)		;Copy in order to continue processing
+	ldi
+	cp	cr
+	jr	nz,shftbf
+	jp	prcede		;Return to main command processor
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  D                    %%
+; %% Dump the memory, symbol table  %%
+; %% or set the default dump length %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+dump::
+	ld	de,(dmpstrt)	;Get ptr to starting adr for dump
+	ld	hl,(dmplen)	;Get default length of dump
+	add	hl,de		;Calculate end address of dump
+	ld	(dmpend),hl	;Save it
+	call	get.buf		;Get pointer
+	jp	z,dmphdr	;If <cr>, then dump from dmpstrt to dmpend
+	cp	'S'		;If s, then dump the symbol table
+	jp	z,dmpsym
+	cp	'='		;If =, then set the default dump length
+	jr	z,dump5
+	cp	','		;If ',', then dump from current to end spec
+	jr	nz,dump0
+	jr	dump1
+;
+; Set the default number of bytes to dump
+;
+dump5:
+	inc	hl		;Pt to value
+	call	cnvrt		;Return value in de
+	inc	hl
+	dec	de
+	ld	(dmplen),de	;Save value
+	cp	cr
+	jp	z,getcmd
+	call	chk.delim	;Test legal delimiter
+;
+; Number should follow the D -- process it
+;
+dump0:
+	call	cnvrt		;Get value
+	push	hl		;Save it
+	ld	hl,(dmplen)	;Get default length
+	add	hl,de		;Compute end of dump
+	ld	(dmpend),hl	;Save it
+	pop	hl		;Get start address of dump
+	cp	cr		;If <cr>, dump for the default length
+	jr	z,dump3
+;
+; Check for delimiter after first number
+;
+dump1:
+	call	chk.delim
+;
+; Extract 2nd number from dump command
+;
+dump2:
+	inc	hl		;Pt to number
+	push	de
+	call	cnvrt		;Return it in de
+	ld	(dmpend),de	;Set end address of dump
+	pop	de		;Get start address of dump in de
+;
+; Add offset to beginning and ending dump addresses
+; on input, DE=start of dump address
+;
+dump3:
+	ld	(dmpstrt),de	;Set ptr
+	cp	cr		;Make sure <cr> after dump command
+	jp	nz,what		;Error if not
+;
+; Print header for dump and then perform dump
+;
+dmphdr:
+	call	pstrng		;Print a header for the dump
+	db	'Addr  +0   +2    +4   +6     +8   +A    +C'
+	db	'   +E      ASCII',cr,lf,null
+;
+; Main dump loop
+;
+cntdmp:
+	ld	hl,(dmpstrt)	;Get start address of dump
+dump4:
+	call	brkchk		;Check for break
+	push	hl		;Save ptr to next byte
+	call	pvalue		;... by subtracting offset; then print it
+	pop	hl		;Get ptr
+	push	hl		;Save ptr
+	call	space		;Print a space
+	ld	a,l
+	and	LoMask		;Test boundary
+	call	nz,fixbln	;Fix if not
+;
+; Dump as hex
+;
+dmpln:
+	call	fget		;Get byte
+	call	phex		;Print as hex
+	inc	hl		;Pt to next
+	ld	a,l		;Print one space for every 2 values
+	and	001b
+	call	z,space
+	ld	a,l		;Print two spaces every 4
+	and	011b
+	call	z,space
+	ld	a,l		;Print three spaces every 8
+	and	111b
+	call	z,space
+	ld	a,l		;Check for end of dump line (every 16)
+	and	LoMask
+	jr	nz,dmpln
+	ld	a,'!'		;Print beginning '!'
+	call	cout
+	pop	hl		;Get ptr to first byte
+	ld	a,l
+	and	LoMask		;Test boundary
+	push	af		;Save count for later
+	call	nz,doblnk	;Fix if not
+	pop	af		;Get count
+	cp	8		;Test extra space
+	call	nc,space	;Do it
+;
+; Dump as ASCII
+;
+dmpasc:
+	call	fget		;Get char
+	cp	' '		;Print . if less than <sp>
+	jr	c,period
+	cp	'~'+1		;Print . if greater than <del>
+	jr	c,chrctr
+;
+; Print '.'
+;
+period:
+	ld	a,'.'
+;
+; Print char in A and advance for up to 16 chars
+;
+chrctr:
+	call	cout		;Print char
+	inc	hl		;Pt to next
+	ld	a,l		;End of line?
+	and	LoMask		;Every 16
+	jr	z,lcmplt	;Done if so
+	and	111b		;Extra space for every 8
+	call	z,space
+	jr	dmpasc		;Continue ascii dump
+;
+; Tidy up the line
+;
+lcmplt:
+	ld	a,'!'		;Print ending '!'
+	call	cout
+	call	crlf		;New line
+	ld	(dmpstrt),hl	;Compare current start address to end address
+	ld	a,(dmpend)
+	sub	l
+	ld	a,(dmpend+1)
+	sbc	a,h
+	jr	nc,dump4	;Continue if current start <= end
+	jp	getcmd		;Return to command processing otherwise
+;
+; Set blanks as ptefic if dump does not start at boundary
+; ENTRY	: Accu holds position
+;
+fixbln:
+	push	hl
+	push	bc
+	ld	hl,blntbl-1
+	ld	b,0
+	ld	c,a
+	add	hl,bc		;Get pointer	
+	ld	a,(hl)		;Get count
+	pop	bc
+	pop	hl
+doblnk:
+	push	af
+	call	space		;Blank
+	pop	af
+	dec	a
+	jr	nz,doblnk
+	ret
+;
+; Correction table
+;
+blntbl:
+	db	2,5,7,11,13,16,18,23,25,28,30,34,36,39,41
+
+

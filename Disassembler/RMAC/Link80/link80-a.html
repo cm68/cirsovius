@@ -1,0 +1,711 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-a.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>Appendix A</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center><a NAME="A"></a><b><u><font size=+2>APPENDIX A</font></u></b>
+<p><b>LISTING OF "<a href="plidio-asm.txt">PLIDIO</a>"</b>
+<br><b>DIRECT CP/M CALL ENTRY POINTS</b></center>
+
+<br>
+<br>
+<pre>
+CP/M RMAC ASSEM 1.0     #001    DIRECT CP/M CALLS FROM PL/I-80
+
+                        name    'DIOMOD'
+                        title   'Direct CP/M Calls From PL/I-80'
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;*      cp/m calls from pl/i for direct i/o                *
+                ;*                                                         *
+                ;***********************************************************
+                        public  memptr  ;return pointer to base of free mem
+                        public  memsiz  ;return size of memory in bytes
+                        public  memwds  ;return size of memory in words
+                        public  dfcb0   ;return address of default fcb 0
+                        public  dfcb1   ;return address of default fcb 1
+                        public  dbuff   ;return address of default buffer
+                        public  reboot  ;system reboot (#0)
+                        public  rdcon   ;read console character (#1)
+                        public  wrcon   ;write console character(#2)
+                        public  rdrdr   ;read reader character (#3)
+                        public  wrpun   ;write punch character (#4)
+                        public  wrlst   ;write list character (#5)
+                        public  coninp  ;direct console input (#6a)
+                        public  conout  ;direct console output (#6b)
+                        public  rdstat  ;read console status (#6c)
+                        public  getio   ;get io byte (#8)
+                        public  setio   ;set i/o byte (#9)
+                        public  wrstr   ;write string (#10)
+                        public  rdbuf   ;read console buffer (#10)
+                        public  break   ;get console status (#11)
+                        public  vers    ;get version number (#12)
+                        public  reset   ;reset disk system (#13)
+                        public  select  ;select disk (#14)
+                        public  open    ;open file (#15)
+                        public  close   ;close file (#16)
+                        public  sear    ;search for file (#17)
+                        public  searn   ;search for next (#18)
+                        public  delete  ;delete file (#19)
+                        public  rdseq   ;read file sequential mode (#20)
+                        public  wrseq   ;write file sequential mode (#21)
+                        public  make    ;create file (#22)
+                        public  rename  ;rename file (#23)
+                        public  logvec  ;return login vector (#24)
+                        public  curdsk  ;return current disk number (#25)
+                        public  setdma  ;set DMA address (#26)
+                        public  allvec  ;return address of alloc vector (#27)
+                        public  wpdisk  ;write protect disk (#28)
+                        public  rovec   ;return read/only vector (#29)
+                        public  filatt  ;set file attributes (#30)
+                        public  getdpb  ;get base of disk parm block (#31)
+                        public  getusr  ;get user code (#32a)
+                        public  setusr  ;set user code (#32b)
+                        public  rdran   ;read random (#33)
+                        public  wrran   ;write random (#34)
+                        public  filsiz  ;random file size (#35)
+                        public  setrec  ;set random record pos (#36)
+                        public  resdrv  ;reset drive (#37)
+                        public  wrranz  ;write random, zero fill (#40)
+
+CP/M RMAC ASSEM 1.0     #002    DIRECT CP/M CALLS FROM PL/I-80
+
+                ;
+                ;
+                        extrn   ?begin  ;beginning of free list
+                        extrn   ?boot   ;system reboot entry point
+                        extrn   ?bdos   ;bdos entry point
+                        extrn   ?dfcb0  ;default fcb 0
+                        extrn   ?dfcb1  ;default fcb 1
+                        extrn   ?dbuff  ;default buffer
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;*        equates for interface to cp/m bdos               *
+                ;*                                                         *
+                ;***********************************************************
+ 000D =         cr      equ     0dh     ;carriage return
+ 000A =         lf      equ     0ah     ;line feed
+ 001A =         eof     equ     1ah     ;end of file
+                ;
+ 0001 =         readc   equ     1       ;read character from console
+ 0002 =         writc   equ     2       ;write console character
+ 0003 =         rdrf    equ     3       ;reader input
+ 0004 =         punf    equ     4       ;punch output
+ 0005 =         listf   equ     5       ;list output function
+ 0006 =         diof    equ     6       ;direct i/o, version 2.0
+ 0007 =         getiof  equ     7       ;get i/o byte
+ 0008 =         setiof  equ     8       ;set i/o byte
+ 0009 =         printf  equ     9       ;print string function
+ 000A =         rdconf  equ     10      ;read console buffer
+ 000B =         statf   equ     11      ;return console status
+ 000C =         versf   equ     12      ;get version number
+ 000D =         resetf  equ     13      ;system reset
+ 000E =         seldf   equ     14      ;select disk function
+ 000F =         openf   equ     15      ;open file function
+ 0010 =         closef  equ     16      ;close file
+ 0011 =         serchf  equ     17      ;search for file
+ 0012 =         serchn  equ     18      ;search next
+ 0013 =         deletf  equ     19      ;delete file
+ 0014 =         readf   equ     20      ;read next record
+ 0015 =         writf   equ     21      ;write next record
+ 0016 =         makef   equ     22      ;make file
+ 0017 =         renamf  equ     23      ;rename file
+ 0018 =         loginf  equ     24      ;get login vector
+ 0019 =         cdiskf  equ     25      ;get current disk number
+ 001A =         setdmf  equ     26      ;set dma function
+ 001B =         getalf  equ     27      ;get allocation base
+ 001C =         wrprof  equ     28      ;write protect disk
+ 001D =         getrof  equ     29      ;get r/o vector
+ 001E =         setatf  equ     30      ;set file attributes
+ 001F =         getdpf  equ     31      ;get disk parameter block
+ 0020 =         userf   equ     32      ;set/get user code
+ 0021 =         rdranf  equ     33      ;read random
+ 0022 =         wrranf  equ     34      ;write random
+ 0023 =         filszf  equ     35      ;compute file size
+ 0024 =         setrcf  equ     36      ;set random record position
+ 0025 =         rsdrvf  equ     37      ;reset drive function
+ 0028 =         wrrnzf  equ     40      ;write random zero fill
+
+CP/M RMAC ASSEM 1.0     #003    DIRECT CP/M CALLS FROM PL/I-80
+
+                ;
+                ;       utility functions
+                ;***********************************************************
+                ;*                                                         *
+                ;*       general purpose routines used upon entry          *
+                ;*                                                         *
+                ;***********************************************************
+                ;
+                getp1:  ;get single byte parameter to register e
+ 0000 5E                mov     e,m             ;low (addr)
+ 0001 23                inx     h
+ 0002 56                mov     d,m             ;high(addr)
+ 0003 EB                xchg                    ;hl = .char
+ 0004 5E                mov     e,m             ;to register e
+ 0005 C9                ret
+                ;
+                getp2:  ;get single word value to DE
+                getp2i: ;(equivalent to getp2)
+ 0006 CD0000            call    getp1
+ 0009 23                inx     h
+ 000A 56                mov     d,m             ;get high byte as well
+ 000B C9                ret
+                ;
+                getver: ;get cp/m or mp/m version number
+ 000C E5                push    h               ;save possible data adr
+ 000D 0E0C              mvi     c,versf
+ 000F CD0000            call    ?bdos
+ 0012 E1                pop     h               ;recall data addr
+ 0013 C9                ret
+                ;
+                chkv20: ;check for version 2.0 or greater
+ 0014 CD0C00            call    getver
+ 0017 FE14              cpi     20
+ 0019 D0                rnc                     ;return if > 2.0
+                ;       error message and stop
+ 001A C32300            jmp     vererr          ;version error
+                ;
+                chkv22: ;check for version 2.2 or greater
+ 001D CD0C00            call    getver
+ 0020 FE22              cpi     22h
+ 0022 D0                rnc                     ;return if >= 2.2
+                vererr:
+                        ;version error, report and terminate
+ 0023 112E00            lxi     d,vermsg
+ 0026 0E09              mvi     c,printf
+ 0028 CD0000            call    ?bdos           ;write message
+ 002B C30000            jmp     ?boot           ;and reboot
+ 002E 0D0A4C6174vermsg: db      cr,lf,'Later CP/M or MP/M Version Required$'
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                memptr: ;return pointer to base of free storage
+ 0054 2A0000            lhld    ?begin
+ 0057 C9                ret
+                ;
+
+CP/M RMAC ASSEM 1.0     #004    DIRECT CP/M CALLS FROM PL/I-80
+
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                memsiz: ;return size of free memory in bytes
+ 0058 2A0100            lhld    ?bdos+1         ;base of bdos
+ 005B EB                xchg                    ;de = .bdos
+ 005C 2A0000            lhld    ?begin          ;beginning of free storage
+ 005F 7B                mov     a,e             ;low(.bdos)
+ 0060 95                sub     l               ;-low(begin)
+ 0061 6F                mov     l,a             ;back to l
+ 0062 7A                mov     a,d             ;high(.bdos)
+ 0063 9C                sbb     h
+ 0064 67                mov     h,a             ;hl = mem size remaining
+ 0065 C9                ret
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                memwds: ;return size of free memory in words
+ 0066 CD5800            call    memsiz          ;hl = size in bytes
+ 0069 7C                mov     a,h             ;high(size)
+ 006A B7                ora     a               ;cy = 0
+ 006B 1F                rar                     ;cy = ls bit
+ 006C 67                mov     h,a             ;back to h
+ 006D 7D                mov     a,l             ;low(size)
+ 006E 1F                rar                     ;include ls bit
+ 006F 6F                mov     l,a             ;back to l
+ 0070 C9                ret                     ;with wds in hl
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                dfcb0:  ;return address of default fcb 0
+ 0071 210000            lxi     h,?dfcb0
+ 0074 C9                ret
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                dfcb1:  ;return address of default fcb 1
+ 0075 210000            lxi     h,?dfcb1
+ 0078 C9                ret
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                dbuff:  ;return address of default buffer
+ 0079 210000            lxi     h,?dbuff
+ 007C C9                ret
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                reboot: ;system reboot (#0)
+ 007D C30000            jmp     ?boot
+                ;
+
+CP/M RMAC ASSEM 1.0     #005    DIRECT CP/M CALLS FROM PL/I-80
+
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rdcon:  ;read console character (#1)
+                        ;return character value to stack
+ 0080 0E01              mvi     c,readc
+ 0082 C38C00            jmp     chrin           ;common code to read char
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrcon:  ;write console character(#2)
+                        ;1->char(1)
+ 0085 0E02              mvi     c,writc         ;console write function
+ 0087 C39C00            jmp     chrout          ;to write the character
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rdrdr:  ;read reader character (#3)
+ 008A 0E03              mvi     c,rdrf          ;reader function
+                chrin:
+                        ;common code for character input
+ 008C CD0000            call    ?bdos           ;value returned to A
+ 008F E1                pop     h               ;return address
+ 0090 F5                push    psw             ;character to stack
+ 0091 33                inx     sp              ;delete flags
+ 0092 3E01              mvi     a,1             ;character length is 1
+ 0094 E9                pchl                    ;back to calling routine
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrpun:  ;write punch character (#4)
+                        ;1->char(1)
+ 0095 0E04              mvi     c,punf          ;punch output function
+ 0097 C39C00            jmp     chrout          ;common code to write chr
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrlst:  ;write list character (#5)
+                        ;1->char(1)
+ 009A 0E05              mvi     c,listf         ;list output function
+                chrout:
+                        ;common code to write character
+                        ;1-> character to write
+ 009C CD0000            call    getp1           ;output char to register e
+ 009F C30000            jmp     ?bdos           ;to write and return
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                coninp: ;perform console input, char returned in stack
+ 00A2 21AE00            lxi     h,chrstr        ;return address
+ 00A5 E5                push    h               ;to stack for return
+
+CP/M RMAC ASSEM 1.0     #006    DIRECT CP/M CALLS FROM PL/I-80
+
+ 00A6 2A0100            lhld    ?boot+1         ;base of bios jmp vector
+ 00A9 110600            lxi     d,2*3           ;offset to jmp conin
+ 00AC 19                dad     d
+ 00AD E9                pchl                    ;return to chrstr
+                ;
+                chrstr: ;create character string, length 1
+ 00AE E1                pop     h               ;recall return address
+ 00AF F5                push    psw             ;save character
+ 00B0 33                inx     sp              ;delete psw
+ 00B1 E9                pchl                    ;return to caller
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                conout: ;direct console output
+                        ;1->char(1)
+ 00B2 CD0000            call    getp1           ;get parameter
+ 00B5 4B                mov     c,e             ;character to c
+ 00B6 2A0100            lhld    ?boot+1         ;base of bios jmp
+ 00B9 110900            lxi     d,3*3           ;console output offset
+ 00BC 19                dad     d               ;hl = .jmp conout
+ 00BD E9                pchl                    ;return through handler
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rdstat: ;direct console status read
+ 00BE 21EC00            lxi     h,rdsret        ;read status return
+ 00C1 E5                push    h               ;return to rdsret
+ 00C2 2A0100            lhld    ?boot+1         ;base of jmp vector
+ 00C5 110300            lxi     d,1*3           ;offset to .jmp const
+ 00C8 19                dad     d               ;hl = .jmp const
+ 00C9 E9                pchl
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                getio:  ;get io byte (#8)
+ 00CA 0E07              mvi     c,getiof
+ 00CC C30000            jmp     ?bdos           ;value returned to A
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                setio:  ;set i/o byte (#9)
+                        ;1->i/o byte
+ 00CF CD0000            call    getp1           ;new i/o byte to E
+ 00D2 0E08              mvi     c,setiof
+ 00D4 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrstr:  ;write string (#10)
+                        ;1->addr(string)
+ 00D7 CD0600            call    getp2           ;get parameter value to DE
+
+CP/M RMAC ASSEM 1.0     #007    DIRECT CP/M CALLS FROM PL/I-80
+
+ 00DA 0E09              mvi     c,printf        ;print string function
+ 00DC C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rdbuf:  ;read console buffer (#10)
+                        ;1->addr(buff)
+ 00DF CD0600            call    getp2i          ;DE = .buff
+ 00E2 0E0A              mvi     c,rdconf        ;read console function
+ 00E4 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                break:  ;get console status (#11)
+ 00E7 0E0B              mvi     c,statf
+ 00E9 CD0000            call    ?bdos           ;return through bdos
+                ;
+                rdsret: ;return clean true value
+ 00EC B7                ora     a               ;zero?
+ 00ED C8                rz                      ;return if so
+ 00EE 3EFF              mvi     a,0ffh          ;clean true value
+ 00F0 C9                ret
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                vers:   ;get version number (#12)
+ 00F1 0E0C              mvi     c,versf
+ 00F3 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                reset:  ;reset disk system (#13)
+ 00F6 0E0D              mvi     c,resetf
+ 00F8 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                select: ;select disk (#14)
+                        ;1->fixed(7) drive number
+ 00FB CD0000            call    getp1           ;disk number to E
+ 00FE 0E0E              mvi     c,seldf
+ 0100 C30000            jmp     ?bdos           ;return through bdos
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                open:   ;open file (#15)
+                        ;1-> addr(fcb)
+ 0103 CD0600            call    getp2i          ;fcb address to de
+ 0106 0E0F              mvi     c,openf
+ 0108 C30000            jmp     ?bdos           ;return through bdos
+                ;
+
+CP/M RMAC ASSEM 1.0     #008    DIRECT CP/M CALLS FROM PL/I-80
+
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                close:  ;close file (#16)
+                        ;1-> addr(fcb)
+ 010B CD0600            call    getp2i          ;.fcb to DE
+ 010E 0E10              mvi     c,closef
+ 0110 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                sear:   ;search for file (#17)
+                        ;1-> addr(fcb)
+ 0113 CD0600            call    getp2i          ;.fcb to DE
+ 0116 0E11              mvi     c,serchf
+ 0118 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                searn:  ;search for next (#18)
+ 011B 0E12              mvi     c,serchn        ;search next function
+ 011D C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                delete: ;delete file (#19)
+                        ;1-> addr(fcb)
+ 0120 CD0600            call    getp2i          ;.fcb to DE
+ 0123 0E13              mvi     c,deletf
+ 0125 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rdseq:  ;read file sequential mode (#20)
+                        ;1-> addr(fcb)
+ 0128 CD0600            call    getp2i          ;.fcb to DE
+ 012B 0E14              mvi     c,readf
+ 012D C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrseq:  ;write file sequential mode (#21)
+                        ;1-> addr(fcb)
+ 0130 CD0600            call    getp2i          ;.fcb to DE
+ 0133 0E15              mvi     c,writf
+ 0135 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                make:   ;create file (#22)
+
+CP/M RMAC ASSEM 1.0     #009    DIRECT CP/M CALLS FROM PL/I-80
+
+                        ;1-> addr(fcb)
+ 0138 CD0600            call    getp2i          ;.fcb to DE
+ 013B 0E16              mvi     c,makef
+ 013D C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rename: ;rename file (#23)
+                        ;1-> addr(fcb)
+ 0140 CD0600            call    getp2i          ;.fcb to DE
+ 0143 0E17              mvi     c,renamf
+ 0145 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                logvec: ;return login vector (#24)
+ 0148 0E18              mvi     c,loginf
+ 014A C30000            jmp     ?bdos           ;return through BDOS
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                curdsk: ;return current disk number (#25)
+ 014D 0E19              mvi     c,cdiskf
+ 014F C30000            jmp     ?bdos           ;return value in A
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                setdma: ;set DMA address (#26)
+                        ;1-> pointer (dma address)
+ 0152 CD0600            call    getp2           ;dma address to DE
+ 0155 0E1A              mvi     c,setdmf
+ 0157 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                allvec: ;return address of allocation vector (#27)
+ 015A 0E1B              mvi     c,getalf
+ 015C C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wpdisk: ;write protect disk (#28)
+ 015F CD1400            call    chkv20          ;must be 2.0 or greater
+ 0162 0E1C              mvi     c,wrprof
+ 0164 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rovec:  ;return read/only vector (#29)
+
+CP/M RMAC ASSEM 1.0     #010    DIRECT CP/M CALLS FROM PL/I-80
+
+ 0167 CD1400            call    chkv20          ;must be 2.0 or greater
+ 016A 0E1D              mvi     c,getrof
+ 016C C30000            jmp     ?bdos           ;value returned in HL
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                filatt: ;set file attributes (#30)
+                        ;1-> addr(fcb)
+ 016F CD1400            call    chkv20          ;must be 2.0 or greater
+ 0172 CD0600            call    getp2i          ;.fcb to DE
+ 0175 0E1E              mvi     c,setatf
+ 0177 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                getdpb: ;get base of current disk parm block (#31)
+ 017A CD1400            call    chkv20          ;check for 2.0 or greater
+ 017D 0E1F              mvi     c,getdpf
+ 017F C30000            jmp     ?bdos           ;addr returned in HL
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                getusr: ;get user code to register A
+ 0182 CD1400            call    chkv20          ;check for 2.0 or greater
+ 0185 1EFF              mvi     e,0ffh          ;to get user code
+ 0187 0E20              mvi     c,userf
+ 0189 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                setusr: ;set user code
+ 018C CD1400            call    chkv20          ;check for 2.0 or greater
+ 018F CD0000            call    getp1           ;code to E
+ 0192 0E20              mvi     c,userf
+ 0194 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                rdran:  ;read random (#33)
+                        ;1-> addr(fcb)
+ 0197 CD1400            call    chkv20          ;check for 2.0 or greater
+ 019A CD0600            call    getp2i          ;.fcb to DE
+ 019D 0E21              mvi     c,rdranf
+ 019F C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrran:  ;write random (#34)
+                        ;1-> addr(fcb)
+ 01A2 CD1400            call    chkv20          ;check for 2.0 or greater
+
+CP/M RMAC ASSEM 1.0     #011    DIRECT CP/M CALLS FROM PL/I-80
+
+ 01A5 CD0600            call    getp2i          ;.fcb to DE
+ 01A8 0E22              mvi     c,wrranf
+ 01AA C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                filsiz: ;compute file size (#35)
+ 01AD CD1400            call    chkv20          ;must be 2.0 or greater
+ 01B0 CD0600            call    getp2           ;.fcb to DE
+ 01B3 0E23              mvi     c,filszf
+ 01B5 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                setrec: ;set random record position (#36)
+ 01B8 CD1400            call    chkv20          ;must be 2.0 or greater
+ 01BB CD0600            call    getp2           ;.fcb to DE
+ 01BE 0E24              mvi     c,setrcf
+ 01C0 C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                resdrv: ;reset drive function (#37)
+                        ;1->drive vector - bit(16)
+ 01C3 CD1D00            call    chkv22          ;must be 2.2 or greater
+ 01C6 CD0600            call    getp2           ;drive reset vector to DE
+ 01C9 0E25              mvi     c,rsdrvf
+ 01CB C30000            jmp     ?bdos           ;return through bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+                wrranz: ;write random, zero fill function
+                        ;1-> addr(fcb)
+ 01CE CD1D00            call    chkv22  ;must be 2.2 or greater
+ 01D1 CD0600            call    getp2i          ;.fcb to DE
+ 01D4 0E28              mvi     c,wrrnzf
+ 01D6 C30000            jmp     ?bdos
+                ;
+                ;***********************************************************
+                ;*                                                         *
+                ;***********************************************************
+ 01D9                   end
+
+CP/M RMAC ASSEM 1.0     #012    DIRECT CP/M CALLS FROM PL/I-80
+
+015A ALLVEC     00E7 BREAK      0019 CDISKF     0014 CHKV20     001D CHKV22
+008C CHRIN      009C CHROUT     00AE CHRSTR     010B CLOSE      0010 CLOSEF
+00A2 CONINP     00B2 CONOUT     000D CR         014D CURDSK     0079 DBUFF
+0120 DELETE     0013 DELETF     0071 DFCB0      0075 DFCB1      0006 DIOF
+001A EOF        016F FILATT     01AD FILSIZ     0023 FILSZF     001B GETALF
+017A GETDPB     001F GETDPF     00CA GETIO      0007 GETIOF     0000 GETP1
+0006 GETP2      0006 GETP2I     001D GETROF     0182 GETUSR     000C GETVER
+000A LF         0005 LISTF      0018 LOGINF     0148 LOGVEC     0138 MAKE
+0016 MAKEF      0054 MEMPTR     0058 MEMSIZ     0066 MEMWDS     0103 OPEN
+000F OPENF      0009 PRINTF     0004 PUNF       00DF RDBUF      0080 RDCON
+000A RDCONF     0197 RDRAN      0021 RDRANF     008A RDRDR      0003 RDRF
+0128 RDSEQ      00EC RDSRET     00BE RDSTAT     0001 READC      0014 READF
+007D REBOOT     0140 RENAME     0017 RENAMF     01C3 RESDRV     00F6 RESET
+000D RESETF     0167 ROVEC      0025 RSDRVF     0113 SEAR       011B SEARN
+000E SELDF      00FB SELECT     0011 SERCHF     0012 SERCHN     001E SETATF
+0152 SETDMA     001A SETDMF     00CF SETIO      0008 SETIOF     0024 SETRCF
+01B8 SETREC     018C SETUSR     000B STATF      0020 USERF      0023 VERERR
+002E VERMSG     00F1 VERS       000C VERSF      015F WPDISK     0085 WRCON
+0002 WRITC      0015 WRITF      009A WRLST      001C WRPROF     0095 WRPUN
+01A2 WRRAN      0022 WRRANF     01CE WRRANZ     0028 WRRNZF     0130 WRSEQ
+00D7 WRSTR      0000 ?BDOS      0000 ?BEGIN     0000 ?BOOT      0000 ?DBUFF
+0000 ?DFCB0     0000 ?DFCB1
+</pre>
+<br>
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-b.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-5.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-b.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-5.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-a.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+</html>

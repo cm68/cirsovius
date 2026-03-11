@@ -1,0 +1,1597 @@
+	title	TURBO Pascal statistic
+	name	('TPANAL')
+	maclib	base80
+
+; Output statistic of TURBO Pascal COM file
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel.: +49/040/4223247
+
+;		Version 1.5 April 2008
+
+; Call it:	TPANAL file
+
+$PRG$	macro
+	db	'TPANAL'
+	endm
+
+_YES	equ	'Y'
+_NO	equ	'N'
+
+ptr	equ	2
+
+NIL	equ	0
+;
+; List item definition
+;
+base	equ	0		; Pointer to address
+current equ	base+ptr	; Reference count
+recnxt	equ	current+ptr	; Pointer to next linkage
+reclen	equ	recnxt+ptr	; Length of list item
+;
+; Lib item definition
+;
+lib.nxt	equ	base+ptr	; Pointer to next lib item
+rec$	equ	lib.nxt+ptr	; Pointer to lib definition
+				; Definition string starts here
+				; (Closed by $)
+
+_JP	equ	0c3h		; Jump code
+
+_LDA	equ	03ah		; LD A,(adr)
+_STA	equ	032h		; LD (adr),A
+_LHLD	equ	02ah		; LD HL,(adr)
+_SHLD	equ	022h		; LD (adr),HL
+_CCF	equ	03fh		; First one byte code - CCF
+_POP.BC	equ	0c1h		; Last  one byte code - POP BC
+_BIT	equ	0cbh		; Bit prefix
+_DD	equ	0ddh		; Special prefixes
+_ED	equ	0edh
+_FD	equ	0fdh
+_LD.IXo	equ	036h		; LD (I?+offs),d8
+_LD.IXi	equ	021h		; LD I?,d16
+_LD.a.I	equ	022h		; LD (adr),I?
+_LD.I.a	equ	02ah		; LD I?,(adr)
+
+	extrn	wcard,string,crlf,open,filsiz,rdbfp,getver
+	extrn	rndred,dskred,dskget,indexa,hexout,sgnout
+	extrn	uppcon,emplin,delete,creatd,wrfcb,wrbuf
+	extrn	closef,combrk,conino
+	extrn	@crlf,decout,filnam,defio,@leng
+	extrn	rdbuf,setdma,fillin,hexin
+
+	entry	$memry
+
+;
+; #################################
+; ### Immediate end after start ###
+; ###   Print message at ^DE    ###
+; #################################
+;
+ErrEnd:
+	ld	c,.string	; Give a bit of text
+	call	BDOS
+	jp	OS
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% START OF ANALYZER %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%
+;
+TPANAL:
+	sub	a		; Verify right machine
+	ld	de,$ILL.CPU
+	jp	pe,ErrEnd
+	call	getver		; .. and OS
+	ld	de,$ILL.OS
+	jr	c,ErrEnd
+	ld	a,(CCPbuf)	; Test any in buffer
+	or	a
+	ld	de,$HELP
+	jr	z,ErrEnd	; .. nope
+	ld	sp,LocStk	; Get my stack
+	ld	hl,($memry)
+	ld	(Heap),hl	; Init top
+	ld	de,FCB
+	call	wcard		; Verify no wildcard
+	ld	de,$ILL.WILD
+	jp	z,comer
+	ld	hl,$COM
+	ld	de,FCBext
+	call	setdef.ext	; Set default extension
+	ld	de,FCB
+	call	open		; Find file
+	call	nc,filsiz	; And it's size
+	ld	de,$NO.FILE
+	jp	c,comer		; Cannot open
+	ld	(PrgRec),hl	; Save it
+	ld	a,l
+	or	h		; Verify correct file
+	ld	hl,$EMP.FILE
+	call	z,setErrx	; Set error if not
+	jp	z,comer		; Tell error
+	call	ReadSymbols	; Get symbols
+	ld	hl,TPA
+	call	fseek		; Position to start address
+	call	fgetc		; Get first byte
+	cp	_JP		; Verify legal start of file
+	ld	hl,$NO.JP
+	call	nz,setErrx	; Set error if not
+	jp	nz,comer	; .. should be
+	call	fgetw		; Get word follows
+	ld	(TBoffs),hl	; .. for offset address
+	push	hl
+	push	hl
+	call	ChkHead		; Check valid header
+	pop	hl
+	call	PutToList?	; Put into list if new one
+	pop	de
+	ld	hl,(TBbeg)
+	add	hl,de
+	ld	(TBbeg),hl	; Fix adress for top
+	call	fseek		; Position file
+	ld	de,(FCBrnd)	; Check legal range
+	ld	hl,(PrgRec)
+	or	a
+	sbc	hl,de		; Test legal size of file
+	ld	hl,$ILL.LEN
+	call	c,setErrx
+	jp	c,comer
+	call	fgetw		; Get end
+	ld	(TBstop),hl	; .. for top
+	ld	de,$HEAD.3
+	ld	bc,1
+	call	xtoa		; Get start of data
+	ld	de,$HEAD.4
+	ld	bc,0
+	call	xtoa		; Get end of data
+	ld	de,$HEAD.1
+	ld	hl,(TBoffs)
+	push	hl
+	call	hexout		; Get start of program
+	ld	de,$HEAD.2
+	ld	hl,(TBstop)
+	dec	hl
+	call	hexout		; Get end of program
+	pop	de
+	ld	hl,(TBbegp)
+	add	hl,de
+	ld	(TBbegp),hl
+	ld	(PC),hl		; Get TURBO start
+	push	hl
+	ld	hl,(TBsym1)
+	call	putw		; Put addresses to list
+	ld	hl,(TBsym2)
+	call	putw
+	pop	hl		; Get back start address
+	call	fseek		; .. position file
+	ld	de,$ASK.FILE
+	call	Request		; Ask for file statistic
+	sub	_YES
+	ld	(stdout),a	; File is zero
+	ld	(Console),a
+	jr	nz,InitAnalyzer	; .. skip ref question
+	ld	de,$LIB.ONLY
+	call	Request		; Ask for reference only
+	sub	_YES
+	ld	(Lib?),a	; .. zero means lib only
+	jr	nz,ConsAsk	; .. nope
+	ld	a,TRUE
+	ld	(stdout),a	; Set console
+ConsAsk:
+	ld	de,$CONS.TOO
+	call	Request		; Ask for console too
+	sub	_NO
+	ld	(Console),a	; Zero is not
+InitAnalyzer:
+	call	InitFileIO	; Init statistic file
+	ld	a,(defio)
+	push	af		; Save I/O vector
+	ld	a,1000b
+	ld	(defio),a	; Set memory
+	ld	de,FCB+.fdrv
+	ld	hl,$HEAD.FN
+	call	filnam		; Get file name
+	ld	(hl),eot	; .. close
+	pop	af
+	ld	(defio),a	; Reset I/O vector
+	ld	de,$HEAD.FILE
+	call	puts		; Give file info
+	ld	de,$HEAD
+	call	puts		; Print header
+	call	AnalyzeTB	; Process TURBO program
+	push	de
+	call	PrintList	; Do the dynamic things
+	pop	de
+comer:
+	call	string		; Tell anything
+	call	crlf
+	ld	de,(ErrExtend)	; Test extended error
+	ld	a,e
+	or	d
+	call	nz,string	; Yeap, do it
+	call	DeInitFiles	; De-init statistic file
+	jp	OS
+;
+; Set default extension
+; ENTRY	Reg DE points to extension of FCB
+;	Reg HL points to extension to be set
+;
+setdef.ext:
+	ld	a,(de)		; Get extension
+	cp	' '		; Test defined
+	ret	nz		; .. yeap
+	ld	bc,.fext
+	ldir			; Set default
+	ret
+;
+; Check valid header beginning at address in ^HL
+;
+ChkHead::
+	call	fseek		; Position file
+	ld	ix,$$HEAD	; Init pointers
+	ld	iy,HeadExe
+ChkHdLoop:
+	ld	l,(iy+0)
+	ld	h,(iy+1)
+	ld	a,l
+	or	h		; Test end of list
+	ret	z		; Yeap
+	call	j.r		; Execute it
+	inc	iy
+	inc	iy
+	jr	ChkHdLoop
+;
+; Following byte must match
+;
+tstbyte:
+	call	fgetc		; Get it
+	cp	(ix)		; Verify it
+	ld	hl,$ILL.HD
+	call	nz,setErrx	; Set error if not
+	jp	nz,comer	; Tell error
+	inc	ix
+	ret
+;
+; Skip following word
+;
+dummy:
+	call	fgetw		; Get it
+	inc	ix		; And forget it
+	inc	ix
+	ret
+;
+j.r:
+	jp	(hl)
+;
+; Process the file
+;
+AnalyzeTB:
+	ld	(StkSav),sp	; Save stack
+TBloop:
+	ld	de,$PRG.CHR
+	call	con.puts	; Tell mode
+	call	isBreak?	; Test BREAK
+	call	DecodeOPC	; Decode the OPCode
+	ld	(PClen),bc	; Save length of instruction
+	ld	hl,OPC.Table	; Point to base table
+	ld	a,e
+	call	indexa		; Get jump vector
+	ld	hl,RetDecode
+	push	hl		; Set return address
+	push	de		; Set execution address
+	ret			; GO
+RetDecode:
+	ld	de,(PC)		; Fetch PC
+	ld	hl,(PClen)
+	add	hl,de		; Add length of code
+	ld	(PC),hl
+	ld	de,(TBstop)
+	or	a
+	sbc	hl,de		; Test end
+	jr	nz,TBloop	; .. nope, get next
+	ld	de,$DONE
+	ret
+;
+; Get byte from file, check error
+; EXIT	Accu holds byte read
+;
+fgetc::
+	call	dskget		; Load a byte
+	ret	nc		; .. ok
+geterr:
+	ld	sp,(StkSav)
+	ld	hl,$RD.ERR
+setErrx:
+	ld	(ErrExtend),hl	; Save extended error address
+	ld	de,$ERR.FILE
+	ret			; .. NOT ok
+;
+; Get word from file
+; EXIT	Reg HL holds word read
+;
+fgetw::
+	call	fgetc		; Load LO byte
+	ld	l,a
+	call	fgetc		; .. and HI byte
+	ld	h,a
+	ret
+;
+; Decode an OPCode
+;
+; Reg E returns	0 - Instruction without operand
+;		1 - Accu direct load  instruction
+;		2 - Accu direct store instruction
+;		3 - Register load  instruction
+;		4 - Register store instruction
+;		5 - Immediate word load
+;		6 - Jump instruction
+;		7 - Relative jump instruction
+;		8 - Call instruction
+;		9 - Indexed instruction
+;
+; Reg BC returns length of code
+;
+DecodeOPC:
+	call	fgetc		; Get OPcode
+	ld	bc,2		; Preset length
+	ld	e,0		; .. and type
+	cp	_BIT		; Check bit manipulating
+TwoBytes:
+	push	af
+	call	z,fgetc		; .. skip next on two byte code
+	pop	af
+	ret	z		; .. exit on match
+	dec	bc		; Set to length of one
+	cp	_CCF		; Test one byte possible
+	jr	c,NotOneByte	; .. nope
+	cp	_POP.BC+1	; .. verify
+	ret	c		; .. ok, got it
+NotOneByte:
+	ld	hl,OneByteCodes
+	ld	bc,OB.Len
+	cpir			; Find one byte codes
+	ld	bc,1
+	ret	z		; .. got it
+	ld	hl,TwoByteCodes
+	ld	bc,TB.Len
+	cpir			; Find two byte code
+	ld	bc,2
+	jr	z,TwoBytes	; .. got it
+	ld	hl,JRcodes
+	ld	bc,JR.Len
+	cpir			; Test relative jump
+	jr	nz,NotJR	; .. nope
+	ld	bc,2		; Set length
+	ld	e,7		; .. and type
+	call	fgetc		; Get relative offset
+	ld	(JR.offs),a	; .. save
+	ret
+NotJR:
+	ld	hl,JPcodes
+	ld	bc,JP.Len
+	cpir			; Find JP codes
+	ld	e,6
+WordCode:
+	ld	bc,3
+	jr	nz,NotJP	; .. not jump/call
+XFER.adr:
+	call	fgetw		; Get address
+	ld	(XFER.PC),hl	; .. save
+	ret
+NotJP:
+	ld	hl,CALLcodes
+	ld	bc,CAL.Len
+	cpir
+	ld	e,8
+	jr	z,WordCode	; .. got call
+	ld	hl,D16codes
+	ld	bc,D16.Len
+	cpir
+	ld	e,5
+	jr	z,WordCode	; Got immediate load
+	ld	e,1
+	cp	_LDA		; Test accu load
+	jr	z,WordCode
+	inc	e
+	cp	_STA		; Test accu save
+	jr	z,WordCode
+	inc	e
+	cp	_LHLD		; Test HL load
+	jr	z,WordCode
+	inc	e
+	cp	_SHLD		; Test HL save
+	jr	z,WordCode
+	ld	e,0
+	ld	bc,1
+	cp	_DD		; Test prefix
+	jr	z,DD.FD.code
+	cp	_FD
+	jr	z,DD.FD.code
+	cp	_ED
+	ret	nz
+	call	fgetc		; Get opcode
+	ld	e,3
+	ld	hl,ED.code1
+	ld	bc,ED.Len1
+	cpir			; Test load
+	ld	bc,4
+	jr	z,XFER.adr	; .. get address
+	inc	e
+	ld	hl,ED.code2
+	ld	bc,ED.Len2
+	cpir
+	ld	bc,4
+	jr	z,XFER.adr	; .. dtto.
+	ld	bc,2
+	ld	e,0		; .. no operand
+	ret
+DD.FD.code:
+	call	fgetc		; Get opcode
+	cp	_BIT		; Test bit manipulation
+IDX.wrd.offs:
+	ld	bc,4
+	jr	nz,More.DD.FD	; .. try other code
+	call	fgetw		; Get next two values
+	ld	a,l		; .. get low
+IDX.offs:
+	ld	(I?.offs),a	; Save offset
+	ld	e,9
+	ret
+More.DD.FD:
+	ld	hl,FD.code
+	ld	bc,FD.Len
+	cpir			; Test bit manipulation
+	jr	nz,LD.?D?
+	call	fgetc		; Get offset
+	jr	IDX.offs	; .. save
+LD.?D?:
+	cp	_LD.IXo		; Test very special
+	jr	z,IDX.wrd.offs
+	ld	e,5
+	ld	bc,4
+	cp	_LD.IXi		; Test load
+	jp	z,XFER.adr	; .. yeap, get address
+	dec	e
+	cp	_LD.a.I
+	jp	z,XFER.adr
+	dec	e
+	cp	_LD.I.a
+	jp	z,XFER.adr
+	ld	bc,2
+	ld	e,0		; .. none
+	ret
+;
+; The execution routines
+;
+; --> Instruction without (important) argument
+;
+NoOper:
+	ret			; Do nothing
+;
+; --> Load accu direct
+;
+LD.A_:
+	ld	de,$LOAD.ACCU
+	jr	put.d16
+;
+; --> Store accu direct
+;
+LD._A:
+	ld	de,$STORE.ACCU
+	jr	put.d16
+;
+; --> Load HL direct
+;
+LD.HL.adr:
+	ld	de,$LOAD.REG
+	jr	put.d16
+;
+; --> Store HL direct
+;
+LD.adr.HL:
+	ld	de,$STORE.REG
+	jr	put.d16
+;
+; --> Load register immediate
+;
+LD.rp.d16:
+	ld	de,$LOAD.D16
+put.d16:
+	push	de		; Save message
+	call	put.PC		; Tell PC
+	pop	de
+	call	puts		; Tell mode
+	ld	hl,(XFER.PC)
+	call	PutToList?	; Put into list if new one
+	ld	hl,(XFER.PC)
+	ld	de,$BUFF
+	call	put.hex		; Put hex
+	ret
+;
+; --> Jump instruction
+;
+JMP:
+	ld	de,$JUMP
+	call	put.d16		; Print address
+	ret
+;
+; --> Jump relative instruction
+;
+JR.rel:
+	call	put.PC		; Print PC
+	ld	de,$JR
+	call	puts		; Tell relative jump
+	ld	a,(JR.offs)
+	call	OffsToAdr	; Expand offset
+	ret
+;
+; --> Call instruction
+;
+CAL:
+	ld	de,$CALL
+	call	put.d16		; Print address
+	call	isLibPC?	; Get PC, check LIB
+	ret	nc		; .. not in lib
+;
+; Find lib address with immediate parameters following
+; Format:
+;	CALL	LIB
+;	DB	N
+;	DB	B1,B2,...,BN
+;
+	ex	de,hl
+	ld	ix,specLIB+1	; Init address array
+	ld	b,(ix-1)	; Get length of check table
+callop:
+	ld	l,(ix+0)	; Fetch special address
+	ld	h,(ix+1)
+	or	a
+	sbc	hl,de
+	jr	z,spcfnd	; .. match
+	inc	ix
+	inc	ix
+	djnz	callop
+	ret
+spcfnd:
+	call	fgetc		; Fetch length
+	ld	c,a
+	ld	b,0
+	ld	hl,(PClen)
+	add	hl,bc
+	inc	hl
+	ld	(PClen),hl	; Fix PC length
+	ld	b,c
+	or	a		; Test zero
+	ret	z		; .. ignore
+spclop:
+	call	fgetc		; Skip string
+	djnz	spclop
+	ret
+;
+; --> Indexed instruction
+;
+R.IX_IY:
+	call	put.PC		; Print PC
+	ld	de,$IX.IY
+	call	puts		; Tell index instruction
+	ld	a,(I?.offs)
+	call	OffsToAdr	; Expand offset
+	ret
+;
+; Print an 8 bit signed offset as 16 bit
+; ENTRY	Accu holds offset
+;
+OffsToAdr:
+	ld	l,a		; Expand
+	add	a,a		; Test -jump
+	sbc	a,a
+	ld	h,a		; Set 00 or FF
+	ld	de,$DBUFF
+	push	de
+	ld	b,eot
+	call	sgnout		; Convert to decimal
+	pop	de
+	call	puts		; Print offset
+	call	NL		; .. close line
+	ret
+;
+; Get PC from JP/CALL
+; Test if address library related
+; EXIT	Reg HL holds address
+;	Carry set if lib access
+;
+isLibPC?:
+	ld	de,(TBlib)
+	ld	hl,(XFER.PC)	; Find PC
+	or	a
+	sbc	hl,de		; Check in LIB
+	ld	hl,(XFER.PC)	; .. get back PC
+	ret
+;
+; Print current PC
+;
+put.PC:
+	ld	hl,(PC)		; Get PC
+	ld	de,$PC.BUFF
+put.hex:
+	push	de
+	call	hexout		; Get hex
+	pop	de
+	call	puts		; Print PC
+	ret
+;
+; Position file to record and read it
+; ENTRY	Reg HL holds PC
+;
+fseek:
+	dec	h		; Base is 0100h
+	ld	a,l
+	and	01111111b	; Get record pointer
+	ld	(rdbfp),a	; .. set for reading
+	ld	a,l		; Divide address by 128
+	ld	l,h
+	ld	h,0
+	add	a,a
+	adc	hl,hl
+	ld	(FCBrnd),hl	; Set as start
+	xor	a
+	ld	(FCBrnd+2),a
+	ld	de,FCB
+	call	rndred		; Position record
+	call	dskred		; And read it
+	ret	nc
+	jp	geterr		; Error
+;
+; Put system call into list
+; ENTRY	Reg HL holds relative offset
+;
+putw:
+	ld	de,(TBoffs)
+	add	hl,de		; Make address real
+	call	fseek		; .. position file
+	call	fgetw		; Get word
+	call	PutToList?	; Into list if new one
+	ret
+;
+; Get word, convert to ASCII hex
+; Sequence xx LO HI
+; ENTRY	Reg DE holds buffer
+;	Reg BC holds inc/decrement
+;
+xtoa:
+	push	bc
+	call	fgetc		; Skip byte
+	call	fgetw		; Get word
+	pop	bc
+	add	hl,bc		; Fix address
+	call	hexout		; Convert to hex
+	ret
+;
+; Test break
+;
+isBreak?:
+	call	combrk		; Test any key
+	ret	nc		; No
+	cp	CtrlC		; Test CTRL-C
+	ret	nz
+	ld	de,$BREAK	; Tell break
+	call	string
+	ld	a,(stdout)	; Test from file
+	or	a
+	jp	nz,DelStat	; Delete any if not
+	ld	de,$SAVE.PART	; Test saving
+	call	Request		; Test real break
+	cp	_NO
+	jp	z,DelStat
+	call	DeInitFiles	; Save partial
+	jp	OS
+;
+; ==>> I/O routing <<==
+;
+; Give new line
+;
+NL:
+	push	de
+	ld	de,@crlf
+	call	puts		; Print new line
+	pop	de
+	ret
+;
+; Print string at ^DE
+;
+puts:
+	ld	a,(stdout)	; Test file
+	or	a
+	jr	z,fputs		; .. yeap
+	ld	a,(Lib?)	; Test lib only
+	or	a
+	jr	z,put.cons?	; .. yeap, test console
+	call	string		; .. console
+	ret
+fputs:
+	push	de
+	push	bc
+	ld	b,eot
+	call	emplin		; .. file
+	pop	bc
+	pop	de
+	jp	c,wrterr
+put.cons?:
+	ld	a,(Console)	; Test console, too
+	or	a
+	call	nz,string	; .. yeap
+	ret
+;
+; Init I/O
+;
+InitFileIO:
+	ld	a,(stdout)	; Test file
+	or	a
+	jr	z,DoInit	; .. yeap
+	ld	a,(Lib?)	; .. or LIB
+	or	a
+	ret	nz		; .. not only
+DoInit:
+	ld	hl,FCB
+	ld	de,StatFCB
+	ld	bc,.fdrv+.fname
+	ldir			; Set file name
+	ld	hl,$STA
+	ld	a,(Lib?)	; Test LIB only
+	or	a
+	jr	nz,SetSTEX	; .. nope
+	ld	hl,$LRQ
+SetSTEX:
+	ld	bc,.fext
+	ldir			; And extension
+	ld	de,StatFCB
+	call	creatd		; Make new file
+	jp	c,wrterr
+	ld	hl,StatFCB
+	ld	(wrfcb),hl	; Set pointers
+	ld	hl,StatDMA
+	ld	(wrbuf),hl
+	ret
+;
+; De-init I/O
+;
+DeInitFiles:
+	ld	a,(stdout)
+	or	a		; Test file
+	ret	nz		; .. nope
+	call	closef		; Close file
+	jr	c,wrterr
+	ld	de,$STAT.RES	; Tell statistic file
+	call	string
+	ld	de,StatFCB+.fdrv
+	call	filnam		; .. and name of file
+	call	crlf
+	ret
+wrterr:
+	ld	de,$WRT.ERR
+	call	string		; Tell error
+DelStat:
+	ld	de,StatFCB
+	call	delete		; Delete file
+	jp	OS
+;
+; Get answer Yes or No
+; ENTRY	Reg DE holds initial message
+; EXIT	Accu holds Y or N
+;
+Request:
+	call	string		; Tell request for
+	ld	de,$YN?
+	call	string		; .. give selection info
+wtfil:
+	call	conino		; Get answer
+	call	uppcon
+	ld	($YN),a		; .. save
+	cp	CtrlC		; Mabe abort
+	jp	z,OS
+	cp	_YES		; Test answer
+	jr	z,tlYN
+	cp	_NO
+	jr	nz,wtfil
+tlYN:
+	ld	de,$YN
+	call	string		; Echo answer
+	ld	a,($YN)		; .. return it
+	ret
+;
+; Echo string on console if file I/O requested
+; ENTRY	Reg DE points to string
+;
+con.puts:
+	ld	a,(stdout)	; Test file output
+	or	a
+	jr	nz,con.lib?	; .. nope
+con.cons?:
+	ld	a,(Console)	; Test console
+	or	a
+	call	z,string	; .. nope
+	ret
+con.lib?:
+	ld	a,(Lib?)	; Test lib to file
+	or	a
+	jr	z,con.cons?	; .. yeap
+	ret
+;
+; The dynamic output handler
+;
+PrintList:
+	call	NL.dyn		; Close line
+	call	NL
+	ld	hl,(Root)	; Get start pointer
+	ld	a,(Lib?)	; Test LIB on
+	or	a
+	jr	nz,ListLoop	; .. nope
+	ld	(stdout),a	; Force file
+ListLoop:
+	ld	de,$DYN.CHR
+	call	con.puts	; Tell mode
+	call	isBreak?	; Test break
+	ld	a,h		; Test NIL
+	or	l
+	jr	z,NL.dyn	; .. yeap, exit
+	push	hl		; Save it
+	call	ld.de.hl	; Get address
+	push	hl
+	ex	de,hl
+	push	hl
+	call	AdrPrefix	; Print range prefix
+	pop	hl
+	push	hl
+	ld	de,$ADR.ADR
+	call	hexout		; Get hex address
+	pop	de
+	pop	hl
+	push	de
+	call	ld.de.hl	; Load reference count
+	ex	de,hl
+	ld	de,$ADR
+	call	puts		; Tell what we found
+	ld	de,$TIMES
+	call	cnv.dec		; Get times
+	pop	hl
+	call	PrSymbol	; Print symbol
+	call	NL		; Close line
+	pop	hl
+	call	NxtListPtr	; Fix for next ointer
+	jr	ListLoop
+NL.dyn:
+	ld	de,@crlf
+	call	con.puts	; Give new line
+	ret
+;
+; Convert integer to number, right justified
+; ENTRY	Reg HL holds number
+;	Reg DE points to ASCII buffer
+;
+cnv.dec:
+	push	de		; Save buffer
+	ld	b,null
+	call	decout		; Get ASCII value
+	ex	(sp),hl		; Get buffer back
+	call	@leng		; .. get character count
+	ex	(sp),hl
+	ld	(hl),eot	; .. close number for printing
+	ld	a,6
+	sub	b		; Calculate prefix digit count
+	ld	hl,$BLANK
+	push	hl
+_cnv.dec:
+	ld	(hl),' '	; Fill buffer with blanks
+	inc	hl
+	dec	a
+	jr	nz,_cnv.dec
+	ld	(hl),eot
+	pop	de
+	call	puts		; Print blanks
+	pop	de
+	call	puts		; .. give number
+	ret
+;
+; Get value from list
+; ENTRY	Reg DE points to current element
+; EXIT	Reg HL holds element from list
+;
+ld.de.hl:
+	ld	e,(hl)		; Load it
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ret
+;
+; Print address range
+; ENTRY	Reg HL holds address
+;
+AdrPrefix:
+	call	_AdrPrefix	; Map to string
+	call	puts		; .. print
+	ret
+;
+; Get address range prefix
+; ENTRY	Reg HL holds address
+; EXIT	REg DE points to string prefix
+;
+_AdrPrefix:
+	ld	a,FALSE
+	ld	(LIBacc),a	; Clear lib access
+	ld	de,$PAGE0
+	inc	h		; Test any less TPA
+	dec	h
+	ret	z		; .. got it
+	push	hl
+	ex	de,hl
+	inc	de
+	ld	a,d		; Test special data
+	or	e
+	jr	nz,RngLib
+	pop	hl
+	jr	RngDat
+RngLib:
+	ld	hl,(TBlib)
+	or	a
+	sbc	hl,de		; Test LIB
+	pop	hl
+	jr	nc,.RngLib	; .. yeap
+	ex	de,hl
+	ld	hl,(TBstop)
+	or	a
+	sbc	hl,de		; Test program
+	ld	de,$CODE
+	ret	nc		; .. yeap
+RngDat:
+	ld	de,$DATA	; .. data
+	ret
+.RngLib:
+	ld	de,$LIB
+	ld	a,TRUE
+	ld	(LIBacc),a	; Set LIB access
+	ret
+;
+; Put address to list if new one
+; ENTRY	Reg HL points to item to be searched for
+; 
+PutToList?:
+	push	hl
+	call	InList?		; Test item already knon
+	pop	hl
+	call	nz,InsertList	; Insert if unkown
+	ret
+; 
+; Fetch next pointer from current one
+; ENTRY	Reg HL holds base of pointer
+; EXIT	Reg HL holds base of next pointer
+; 
+NxtListPtr:
+	push	de
+	ld	de,recnxt
+	add	hl,de		; Bump to linkage
+	ld	e,(hl)		; .. get it
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	pop	de
+	ret
+;
+; Put new value into list, sort it
+; ENTRY	Reg HL holds value to be inserted
+; 
+InsertList:
+	ld	(ListVal),hl	; Save value
+	ex	de,hl		; .. unpack
+	ld	hl,(Heap)	; Get top of pointers
+	ld	(NewPtr),hl	; .. for new one
+	ld	(hl),e		; Store value
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),1		; Init ref counter (low part)
+	ld	b,ptr+1
+IniItem:
+	inc	hl
+	ld	(hl),0		; Clear remainder
+	djnz	IniItem
+	ld	hl,(Root)	; Get base of chain
+	ld	a,h
+	or	l		; Test NIL
+	jr	nz,noNIL
+HookRoot:
+	ld	hl,(NewPtr)
+	ld	(Root),hl	; Set first hook
+	jr	malloc		; .. and fix memory
+noNIL:
+	ld	(LnkPtr1),hl	; Set rrot as reference pointer
+	ld	(LnkPtr2),hl
+	call	CmpItem		; Test current < new value
+	jr	c,InstLink	; .. yeap
+	ld	de,(LnkPtr1)
+	ld	hl,(NewPtr)
+	call	SetLink		; Change start pointer
+	jr	HookRoot
+InstLink:
+	ld	hl,(LnkPtr1)
+..InstLink:
+	call	GetLink		; Test NIL
+	jr	z,DiffPtr	; .. yeap, install link
+	ld	de,(LnkPtr1)
+	ld	hl,(LnkPtr2)	; Test same pointers
+	or	a
+	sbc	hl,de
+	jr	nz,DiffPtr	; .. nope, set link at end
+	ex	de,hl		; .. get 'real' pointer
+	call	GetLink		; Get pointer
+	ld	(LnkPtr1),hl	; .. save it
+	call	CmpItem		; Test new value less current
+	jr	c,SetSamePtr	; .. nope
+	ld	de,(NewPtr)
+	push	de
+	ld	hl,(LnkPtr2)
+	call	SetLink		; If so, chnange chain
+	ld	de,(LnkPtr1)
+	pop	hl		; Get new pointer
+	call	SetLink
+	jr	InstLink
+SetSamePtr:
+	ld	hl,(LnkPtr1)	; Unpack pointers
+	ld	(LnkPtr2),hl
+	jr	..InstLink
+DiffPtr:
+	ld	hl,(LnkPtr1)
+	call	CmpItem		; Test range
+	jr	nc,malloc	; .. current > new value
+	ld	hl,(NewPtr)
+	push	hl
+	ld	de,NIL
+	call	SetLink		; Set pointers
+	pop	de
+	ld	hl,(LnkPtr1)	; Set address of new pointer
+	call	SetLink
+; 
+; Allocate memory for dynamic record
+; 
+malloc:
+	ld	hl,(Heap)	; Get current top pointer
+	ld	bc,reclen
+	add	hl,bc		; .. new top
+	ld	(Heap),hl
+	ld	a,h
+	ld	hl,(TPAtop)	; Get TPA top
+	dec	h
+	cp	h		; Check room
+	ret	c		; .. ok
+	ld	de,$NO.MEM
+	call	string		; *** BAD ERROR
+	jp	OS
+; 
+; Compare two elements
+; ENTRY	Reg HL points to dynamic value
+; EXIT	Carry set IF (^HL < element), ELSE (^HL > =element)
+; 
+CmpItem:
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ld	hl,(ListVal)	; Get value looking for
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Test new value less 1st
+	ret
+; 
+; Get next pointer
+; ENTRY	Reg HL points to base
+; EXIT	Reg HL points to next
+;	Zero set if next pointer NIL
+; 
+GetLink:
+	push	de
+	ld	de,recnxt
+	add	hl,de		; Set pointer
+	ld	e,(hl)		; .. get linkage
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	pop	de
+	ld	a,l		; Test NIL
+	or	h
+	ret
+; 
+; Set new next pointer
+; ENTRY	Reg HL points to base
+;	Reg DE holds new pointer
+; 
+SetLink:
+	push	de
+	ld	de,recnxt
+	add	hl,de		; Get pointer
+	pop	de
+	ld	(hl),e		; Set new linkage
+	inc	hl
+	ld	(hl),d
+	ret
+; 
+; Find item
+; ENTRY	Reg HL points to item to be searched for
+; EXIT	Zero flag if item found
+; 
+InList?:
+	ex	de,hl		; Swap entry
+	ld	hl,(Root)	; .. set root pointer
+srclop:
+	ld	a,l
+	or	h		; Check NIL
+	jr	z,NILfnd	; .. yeap, no match
+	call	SamePtr?	; Test value in list
+	jr	z,ListFound	; .. yeap
+	call	NxtListPtr	; Fix for next pointer
+	jr	srclop
+ListFound:
+	ld	de,current
+	add	hl,de		; Point to ref count
+	ld	e,(hl)		; .. fetch it
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Bump count
+	ld	(hl),d		; .. bring it back
+	dec	hl
+	ld	(hl),e
+	xor	a		; Set zero
+	ret
+NILfnd:
+	xor	a
+	inc	a		; Set NONE zero
+	ret
+; 
+; Compare elements
+; ENTRY	Reg HL points to 1st element
+;	Reg DE holds     2nd element
+; 
+SamePtr?:
+	push	hl
+	ld	a,(hl)		; Get element
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	or	a
+	sbc	hl,de		; Compare
+	pop	hl
+	ret
+;
+; Read in an ASCII coded symbol file of format
+;     HEX_ADDRESS:SYMBOL_NAME{;Optional_Comment}
+;
+; Build chain elements of format
+;     Hex_address,chain_pointer,ASCIIputs (closed by $)
+;
+; Chain_pointer points to next item or zero on last one
+;
+ReadSymbols:
+	ld	de,SymFCB
+	call	open		; Find file
+	ld	de,$NO.SYM
+	jp	c,String	; .. no file here
+	ld	de,$LD.SYM
+	call	String		; Tell loading
+	ld	hl,rdbuf
+	ld	de,SavPB
+	ld	bc,5
+	ldir			; Save current entries
+	ld	hl,SymPB
+	ld	de,rdbuf
+	ld	bc,5
+	ldir			; Set new ones
+	call	..ReadSymbols	; Load symbols
+	ld	hl,SavPB
+	ld	de,rdbuf
+	ld	bc,5
+	ldir			; Restore conditions
+	ld	de,(SavPB)
+	call	setdma		; .. disk buffer, too
+	ret
+;
+; -->> Do the load task
+;
+..ReadSymbols:
+	ld	de,SymLine
+	ld	b,null
+	call	fillin		; Get line from file
+	ret	c		; .. that's all
+	inc	de		; Point to 'real' data
+	ld	a,(de)
+	cp	';'		; Check comment at start
+	jr	z,..ReadSymbols	; .. ignore remainder
+	ld	b,':'
+	call	hexin		; Get hex value
+	jr	c,..ReadSymbols	; .. ignore error
+	ld	ix,(Heap)	; Get symbol base
+	ld	(ix+base),l	; Store address
+	ld	(ix+base+1),h
+	xor	a
+	ld	(ix+lib.nxt),a	; Clear linkage to next item
+	ld	(ix+lib.nxt+1),a
+	ld	hl,(Heap)	; Get heap again
+	ld	bc, rec$
+	add	hl,bc		; .. skip header
+GetSymbol:
+	inc	de
+	ld	a,(de)
+	cp	';'		; Test comment
+	jr	z,EndSymbol	; .. that's all
+	cp	tab		; Skip TAB
+	jr	z,GetSymbol
+	cp	' '
+	jr	z,GetSymbol	; .. and space
+	jr	c,EndSymbol	; Take note of other control
+	ld	(hl),a		; .. else unpack
+	inc	hl
+	jr	GetSymbol	; .. loop
+EndSymbol:
+	ld	(hl),eot	; Close string
+	inc	hl
+	ld	(Heap),hl	; New top
+	push	ix
+	pop	bc		; .. ole top
+	ld	de,(PrevPtr)	; Test any to save
+	ld	a,e
+	or	d
+	jr	z,NoChain	; .. still waiting
+	ex	de,hl
+	ld	(hl),c		; Set linkage
+	inc	hl
+	ld	(hl),b
+NoChain:
+	inc	bc
+	inc	bc
+	ld	(PrevPtr),bc	; Set previous
+	ld	a,TRUE
+	ld	(Symbol?),a	; Set at least one symbol
+	jr	..ReadSymbols	; .. get next
+;
+; Get and print symbol
+; ENTRY	REG HL holds hex address
+;
+PrSymbol:
+	ld	a,(Symbol?)	; Check any symbol
+	cp	FALSE
+	ret	z		; .. no
+	ld	ix,($memry)	; Init base of lib
+_PrSymbol:
+	ld	a,l
+	cp	(ix+base)	; Find what we are looking for
+	jr	nz,NxtLibSym	; .. nope
+	ld	a,h
+	cp	(ix+base+1)
+	jr	nz,NxtLibSym
+	ld	bc,rec$
+	add	ix,bc		; Bump to definition string
+	push	ix		; .. save pointer
+	ld	de,$LABEL
+	call	puts		; Tell label prefix
+	pop	de
+	call	puts		; .. and real name
+	ret
+NxtLibSym:
+	ld	c,(ix+lib.nxt)	; Load chain
+	ld	b,(ix++lib.nxt+1)
+	ld	a,c
+	or	b		; Check more
+	ret	z		; .. nope, that's all
+	push	bc
+	pop	ix
+	jr	_PrSymbol
+
+	dseg
+
+;
+; Head of TURBO program
+;
+$$HEAD:
+	LD	SP,$-$		; Load stack
+	LD	HL,$-$		; Set top memory
+	LD	BC,$-$		; Set mode
+	CALL	0364h
+	LD	HL,$-$		; Set 1st free address
+	LD	DE,$-$		; Set last free address
+	LD	BC,$-$		; Set top of memory
+	LD	A,1		; Set run mode
+	CALL	04d4h
+HeadExe:
+	dw	tstbyte,dummy
+	dw	tstbyte,dummy
+	dw	tstbyte,dummy
+	dw	tstbyte,tstbyte,tstbyte
+	dw	tstbyte,dummy
+	dw	tstbyte,dummy
+	dw	tstbyte,dummy
+	dw	tstbyte,tstbyte
+	dw	tstbyte,tstbyte,tstbyte
+	dw	0
+;
+OPC.Table:
+	dw	NoOper,LD.A_,LD._A,LD.HL.adr,LD.adr.HL
+	dw	LD.rp.d16,JMP,JR.rel,CAL,R.IX_IY
+ErrExtend:
+	dw	0
+$HELP:
+	db	'Output statistic of TURBO Pascal COM file'
+	db	cr,lf
+	db	'Call it:',tab
+	$PRG$
+	db	' file',cr,lf,eot
+$ILL.CPU:
+	db	'Requires Z80 CPU',cr,lf,eot
+$ILL.OS:
+	db	'Requires CP/M 3.x',cr,lf,eot
+$NO.SYM:
+	db	'[Cannot load symbols]',cr,lf,eot
+$LD.SYM:
+	db	'... loading symbols',cr,lf,eot
+$ILL.WILD:
+	db	'Wildcard not allowed in file name',eot
+$NO.FILE:
+	db	'Cannot open file',eot
+$ERR.FILE:
+	db	'File is not TURBO COM file',eot
+$RD.ERR:
+	db	'(File read error)',cr,lf,eot
+$NO.JP:
+	db	'(Missing JP)',cr,lf,eot
+$ILL.LEN:
+	db	'(Invalid length)',cr,lf,eot
+$EMP.FILE:
+	db	'(Zero length)',cr,lf,eot
+$ILL.HD:
+	db	'(Invalid header)',cr,lf,eot
+$DONE:
+	db	'File decoding done',eot
+$ASK.FILE:
+	db	'  Statistic to file',eot
+$CONS.TOO:
+	db	'Statistic to screen',eot
+$LIB.ONLY:
+	db	'  LIB requests only',eot
+$YN:
+	db	'x',cr,lf,eot
+$WRT.ERR:
+	db	'Statistic file write error',cr,lf,eot
+$BREAK:
+	db	cr,lf,'*** USER BREAK ***',cr,lf,eot
+$SAVE.PART:
+	db	'Save partial statistic',eot
+$YN?:
+	db	' [Y/N] ',eot
+$STAT.RES:
+	db	'Written to statistic file >> ',eot
+
+$LOAD.ACCU:
+	db	'Loading accu from ',eot
+$STORE.ACCU:
+	db	'Storing accu into ',eot
+$LOAD.REG:
+	db	' Loading reg from ',eot
+$STORE.REG:
+	db	' Storing reg into ',eot
+$LOAD.D16:
+	db	'Loading immediate ',eot
+$JUMP:
+	db	'       Jumping to ',eot
+$CALL:
+	db	'          Calling ',eot
+$JR:
+	db	'    Relative jump ',eot
+$IX.IY:
+	db	'            Index ',eot
+
+$HEAD.FILE:
+	db	'TURBO file analyzed : '
+$HEAD.FN:
+	db	'12345678.123',eot
+
+$HEAD:
+	db	cr,lf,'Program '
+$HEAD.1:
+	db	'xxxx - '
+$HEAD.2:
+	db	'xxxx, Data '
+$HEAD.3:
+	db	'xxxx - '
+$HEAD.4:
+	db	'xxxx',cr,lf,lf,eot
+$ADR:
+	db	'Adress '
+$ADR.ADR:
+	db	'xxxx found times ',eot
+
+$TIMES:
+	db	'65535',null
+$BLANK:
+	db	'123456',eot
+
+$PAGE0:
+	db	'********* ',eot
+$LIB:
+	db	'** LIB ** ',eot
+$CODE:
+	db	'** PRG ** ',eot
+$DATA:
+	db	'** DAT ** ',eot
+
+$PRG.CHR:
+	db	'.',eot
+$DYN.CHR:
+	db	'+',eot
+
+$COM:
+	db	'COM'
+$STA:
+	db	'STA'
+$LRQ:
+	db	'LRQ'
+
+TBbeg:
+	dw	000dh		; Address of end of TURBO
+TBbegp:
+	dw	001ah		; TURBO Pascal 3.0 start
+TBsym1:
+	dw	000ah		; TURBO lib call
+TBsym2:
+	dw	0018h		; dto.
+TBlib:
+	dw	20e2h		; End of TURBO lib
+;
+specLIB:
+	db	special		; Special calls
+@TBsp:	dw	054dh
+	dw	17bah		; >> Immediate string output
+special equ	($-@TBsp) / 2
+;
+TBstop:
+	ds	2		; TURBO Pascal 3.0 stop
+TBoffs:
+	ds	2		; TURBO Pascal real start
+;
+; One byte instructions
+;
+OneByteCodes:
+	db	000h,002h,003h,004h,005h,007h,008h,009h
+	db	00ah,00bh,00ch,00dh,00fh,012h,013h,014h
+	db	015h,017h,019h,01ah,01bh,01ch,01dh,01fh
+	db	023h,024h,025h,027h,029h,02bh,02ch,02dh
+	db	02fh,033h,034h,035h,037h,039h,03bh,03ch
+	db	03dh,0c5h,0c7h,0c8h,0c9h,0cfh,0d0h,0d1h
+	db	0d5h,0d7h,0d8h,0d9h,0dfh,0e0h,0e1h,0e3h
+	db	0e5h,0e7h,0e8h,0e9h,0ebh,0efh,0f0h,0f1h
+	db	0f3h,0f5h,0f7h,0f8h,0f9h,0fbh,0ffh
+OB.Len	equ	$-OneByteCodes
+;
+; Two byte instructions
+;
+TwoByteCodes:
+	db	006h,00eh,016h,01eh,026h,02eh,036h,03eh
+	db	0c6h,0ceh,0d6h,0deh,0e6h,0eeh,0f6h,0feh
+	db	0d3h,0dbh
+TB.Len	equ	$-TwoByteCodes
+;
+; Relative jump instructions
+;
+JRcodes:
+	db	010h,018h,020h,028h,030h,038h
+JR.Len	equ	$-JRcodes
+;
+; Jump instructions
+;
+JPcodes:
+	db	0c2h,0c3h,0cah,0d2h,0dah,0e2h,0eah,0f2h
+	db	0fah
+JP.Len	equ	$-JPcodes
+;
+; Call instructions
+;
+CALLcodes:
+	db	0c4h,0cch,0cdh,0d4h,0dch,0e4h,0ech,0f4h
+	db	0fch
+CAL.Len	equ	$-CALLcodes
+;
+; Immediate load instructions
+;
+D16codes:
+	db	001h,011h,021h,031h
+D16.Len	equ	$-D16codes
+;
+; Special prefixed (ED) load instructions
+;
+ED.code1:
+	db	04bh,05bh,07bh
+ED.Len1	equ	$-ED.code1
+;
+ED.code2:
+	db	043h,053h,073h
+ED.Len2	equ	$-ED.code2
+
+; Special prefixed (DD-FD) bit instructions
+
+FD.code:
+	db	034h,035h,046h,04eh,056h,05eh,066h,06eh
+	db	070h,071h,072h,073h,074h,075h,077h,07eh
+	db	086h,08eh,096h,09eh,0a6h,0aeh,0b6h,0beh
+FD.Len	equ	$-FD.code
+
+$PC.BUFF:
+	db	'xxxx >> ',eot
+$BUFF:
+	db	'xxxx',cr,lf,eot
+$DBUFF:
+	db	'-32768',eot
+StkSav:
+	ds	2
+PClen:
+	ds	2
+PC:
+	ds	2
+JR.offs:
+	ds	1
+I?.offs:
+	ds	1
+XFER.PC:
+	ds	2
+PrgRec:
+	ds	2
+stdout:
+	db	TRUE
+Lib?:
+	db	TRUE
+Console:
+	ds	1
+StatFCB:
+	ds	FCBlen
+StatDMA:
+	ds	reclng
+LIBacc:
+	ds	1
+$memry:
+	ds	2
+Root:
+	dw	NIL
+$NO.MEM:
+	db	cr,lf,'*** ERROR ***',cr,lf
+	db	'--> No more room for dynamic variables'
+	db	cr,lf,eot
+Heap:
+	ds	2
+NewPtr:
+	ds	ptr
+LnkPtr1:
+	ds	ptr
+LnkPtr2:
+	ds	ptr
+ListVal:
+	ds	2
+$LABEL:
+	db	' ; Label >> ',eot
+SymFCB:
+	db	0,'TPANAL  DEF'
+	ds	FCBlen-12
+PrevPtr:
+	dw	NIL
+Symbol?:
+	db	FALSE
+SymLine:
+	db	80
+	ds	80+1
+SavPB:
+	ds	5
+SymPB:
+	dw	symdma
+	db	reclng
+	dw	SymFCB
+symdma:
+	ds	reclng
+;
+	ds	2*32
+LocStk:
+	end	TPANAL
+

@@ -1,0 +1,2169 @@
+	title	INTEL to ZILOG converter
+	name	('XIZ')
+
+; DASMed version of XIZ v2 07 May 86
+; By W.Cirsovius
+
+; Comments:
+; (1)	If the source line exceeds LinLen the remainder of the line
+;	will not be written into the destination
+; (2)	Output of translated mnemonics is always in UPPER case.
+;	With an optional flag case may be selectable
+
+	aseg
+	org	100h
+
+FALSE	equ	0
+TRUE	equ	1
+
+OS	equ	0000h
+BDOS	equ	0005h
+FCB	equ	005ch
+
+_drv	equ	 1
+_nam	equ	 8
+_ext	equ	 3
+_F2	equ	16
+
+.conin	equ	 1
+.conout	equ	 2
+.consta	equ	11
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.retdsk	equ	25
+.setdma	equ	26
+
+OSerr	equ	255
+
+RecLng	equ	  128
+InLen	equ	16384
+OutLen	equ	16384
+LinLen	equ	   80
+CmntPos	equ	   41
+LabLen	equ	    7
+
+null	equ	00h
+CtrlC	equ	'C'-'@'
+delim	equ	04h
+bel	equ	07h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+
+NoMSB	equ	01111111b
+UPPER	equ	01011111b
+ColMask	equ	11111000b
+Col	equ	9
+
+	jp	XIZ
+Ext:
+	db	0ffh		; 00 .Z80
+				; FF .MAC
+M80:
+	db	0		; 00 For non M80
+				; FF M80
+Z.DB:
+	db	0ffh		; 00 DEFB, DEFS, DEFW
+				; FF DB, DS, DW
+message:
+	db	'XIZ v2 07 May 86 - an 8080 to Z80 translator.'
+	db	'  Work done by Irv Hoff, heavily based on a '
+	db	'previous program by Frank Zerilli in 1984 '
+	db	'which was based on XLATE2.  '
+	db	null
+;
+; %%%%%%%%%%%%
+; %%% MAIN %%%
+; %%%%%%%%%%%%
+;
+XIZ:
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	(LocStk),hl	; .. save it
+	ld	sp,LocStk
+	ld	de,$HEAD
+	call	String		; Tell what we are
+	ld	a,(FCB+_drv)
+	cp	' '		; Test name defined
+	jp	z,NoARG		; .. nope
+	cp	'?'		; Test help request
+	jp	nz,GetARG
+	ld	a,(FCB+_drv+1)
+	cp	' '		; .. verify it
+	jp	nz,GetARG
+NoARG:
+	ld	de,$HELP.1
+	call	String		; Give help
+	ld	b,3
+	call	WriteLn		; Give empty lines
+	ld	de,$MORE
+	call	String		; .. tell what to do
+	ld	c,.conin
+	call	BDOS		; Get key
+	ld	de,$HELP.2
+	call	String		; .. tell 2nd part
+	ld	b,14
+	call	WriteLn		; .. scroll a bit
+	jp	EXIT.XIZ	; .. exit
+GetARG:
+	call	IniXIZ
+XIZ.loop:
+	call	ReadLine	; Get INTEL line
+	call	CnvLine		; Convert to ZILOG
+	jp	XIZ.loop
+;
+; Initialize XIZ
+;
+IniXIZ:
+	ld	c,.retdsk
+	call	BDOS		; Get logged disk
+	inc	a		; .. map 1 relative
+	ld	(CurDisk),a	; .. save
+	call	PrepFiles	; Set up files
+	call	Reset		; Open source
+	call	Rewrite		; .. and destination
+	ld	a,(M80)		; Test M80 prolog
+	or	a
+	ret	z		; ..nope
+	ld	hl,$M80.PROLOG
+	call	Fputs		; .. put to file
+	ret
+;
+; Read line from source
+;
+ReadLine::
+	call	Display		; Give a sign
+	call	Constat		; Get state
+	cp	CtrlC		; Test abort
+	jp	z,Cancel	; .. yeap
+	xor	a		; Clear
+	ld	(StrgFlg),a	; .. string flag
+	ld	(CmntFlag),a	; .. comment flag
+	ld	hl,SrcLine	; Init line
+	ld	b,LinLen	; .. and length
+RLin.Loop:
+	ex	de,hl
+	ld	hl,(InPtr)	; Get file pointer
+	ex	de,hl
+	ld	a,d		; Test buffer scanned
+	cp	HIGH _Heap
+	jp	nz,RdFromBuff	; .. nope
+	ld	a,e
+	cp	LOW _Heap
+	jp	nz,RdFromBuff
+	push	hl
+	push	bc
+	ld	de,InBuff	; Init disk buffer
+RdRec.Loop:
+	ld	c,.setdma
+	push	de
+	call	BDOS		; Set buffer
+	pop	de
+	ex	de,hl
+	ld	de,FIN
+	ld	c,.rdseq
+	push	hl
+	call	BDOS		; Read record
+	pop	hl
+	dec	a		; Test end of file
+	jp	nz,RdRec.noEOF
+	ld	a,eof
+	ld	(hl),a		; .. mark it
+RdRec.noEOF:
+	ld	de,RecLng
+	add	hl,de		; Bump to next
+	ex	de,hl
+	ld	a,d		; Test buffer filled
+	cp	HIGH _Heap
+	jp	nz,RdRec.Loop
+	ld	a,e
+	cp	LOW _Heap
+	jp	nz,RdRec.Loop
+	pop	bc
+	pop	hl
+	ld	de,InBuff	; Init buffer
+RdFromBuff:
+	ld	a,(de)		; Get character
+	and	NoMSB		; .. without MSB
+	inc	de
+	ex	de,hl
+	ld	(InPtr),hl	; .. store pointer
+	ex	de,hl
+	ld	(hl),a		; Save character
+	cp	''''		; Test string
+	jp	nz,RLin.noStrg	; .. nope
+	ld	a,(StrgFlg)
+	cpl			; Toggle string flag
+	ld	(StrgFlg),a
+RLin.noStrg:
+	ld	a,(hl)		; Get character
+	call	SwapMultiple	; Swap multiple line separator
+	ld	(hl),a
+	ld	a,(StrgFlg)	; Test string in progress
+	or	a
+	jp	nz,RLin.skpCmnt	; .. yeap
+	ld	a,(hl)
+	cp	';'		; Test comment
+	jp	z,RLin.setCmnt	; .. yeap
+	cp	delim		; .. or delimiter
+	jp	nz,RLin.skpCmnt	; .. nope
+	xor	a		; Clear flag
+RLin.setCmnt:
+	ld	(CmntFlag),a	; (Re)Set comment flag
+RLin.skpCmnt:
+	ld	a,(StrgFlg)	; Test string in progress
+	or	a
+	jp	nz,RLin.noUpCase
+	ld	a,(CmntFlag)	; Test comment in progress
+	or	a
+	jp	nz,RLin.noUpCase
+	ld	a,(hl)		; Get character
+	cp	'a'		; Test case
+	jp	c,RLin.noUpCase
+	cp	'z'+1
+	jp	nc,RLin.noUpCase
+	and	UPPER		; .. CHANGE TO UPPER
+	ld	(hl),a
+RLin.noUpCase:
+	ld	a,(hl)		; Get character, test ..
+	cp	cr
+	jp	z,RdEOL		; .. cr
+	cp	tab
+	jp	z,RdChar	; .. tab
+	cp	eof
+	jp	z,End.XIZ	; .. end of file
+	cp	delim
+	jp	z,RdChar	; .. delimiter
+	cp	' '		; Test other control
+	jp	c,RLin.Loop	; .. skip
+	ld	a,b
+	cp	LinLen		; Test length reached
+	jp	nz,RdChar	; .. nope
+	ld	a,(hl)		; Test special
+	cp	'*'
+	jp	nz,RdChar	; .. nope
+	ld	(hl),';'	; .. change comment
+	ld	(CmntFlag),a	; Set comment flag
+RdChar:
+	dec	b		; Count down
+	inc	hl
+	jp	nz,RLin.Loop	; .. loop
+	inc	b		; Fix if overflow
+	dec	hl
+	jp	RLin.Loop
+RdEOL:
+	inc	hl
+	ld	(hl),lf		; Set LF
+	inc	hl
+	ld	(hl),null	; .. close line
+	push	hl
+	ld	hl,(Lines)
+	inc	hl		; Bump line count
+	ld	(Lines),hl
+	ld	hl,(InPtr)
+	ex	de,hl
+	pop	hl
+	ret
+;
+; Test multi-line separator
+; ENTRY	Accu holds character
+; EXIT	Accu changed if special character
+;
+SwapMultiple:
+	cp	'!'		; Test character
+	ret	nz		; .. nope
+	ld	a,(CmntFlag)	; Test comment in progress
+	or	a
+	ld	a,'!'
+	ret	nz		; .. yeap, let unchanged
+	ld	a,(StrgFlg)	; Test string in progress
+	or	a
+	ld	a,'!'
+	ret	nz		; .. yeap, let unchanged
+	ld	a,delim		; Change against special one
+	ret
+;
+; Process end of file
+;
+End.XIZ:
+	call	CloseFile	; Close destination file
+	ld	de,$OPERANDS
+	call	String		; Give possible error
+	ld	de,$ENDIF
+	call	String
+	ld	de,$ICL
+	call	String
+	ld	de,$LST
+	call	String
+	call	NL
+	ld	hl,(Lines)	; Get lines
+	ld	c,0
+	call	PrDec
+	ld	de,$LINES
+	call	String		; Tell line count
+	jp	OS
+;
+; Give error message and exit
+; ENTRY	Reg DE points to zero closed string
+;
+ExitStrg:
+	call	NL.String	; Give string
+	jp	EXIT.XIZ	; .. exit
+;
+; Print new line and string on console
+; ENTRY	Reg DE points to zero closed string
+;
+NL.String:
+	push	de
+	ld	de,$NL
+	call	String		; Get new line
+	pop	de
+	jp	String		; .. and string
+;
+; Process job cancelling
+;
+Cancel:
+	ld	de,$CANCEL
+	call	String		; Give message
+	jp	End.XIZ		; .. process end
+;
+; Convert 8080 code to Z80
+;
+CnvLine:
+	ld	hl,SrcLine	; Init line
+CnvLoop:
+	call	ProcLab		; Process label
+	jp	z,CnvEOL?	; .. end of line
+	ld	hl,$CCALL
+	ld	bc,OPClen
+	call	FndOpc		; Find conditional calls
+	jp	z,CCall
+	ld	hl,$CRET
+	ld	bc,OPClen
+	call	FndOpc		; Find conditional ret and jp
+	call	z,MapCC
+	ld	hl,$IFs
+	ld	bc,2*OPClen+2
+	call	FndOpc		; Find IF ..
+	jp	z,OpcJmp
+	ld	hl,$ADD.SUB
+	ld	bc,2*OPClen
+	call	FndOpc		; Find immediate math
+	jp	z,ImMtch
+	ld	hl,$CJP
+	ld	bc,OPClen
+	call	FndOpc		; Find conditional jp
+	jp	z,CJp
+	ld	hl,$SWAP.OPC
+	ld	bc,2*OPClen+2
+	call	FndOpc		; Find several op codes
+	jp	z,OpcJmp
+	ld	hl,$CHNG.OPC
+	ld	bc,2*OPClen
+	call	FndOpc		; Find special swap code
+	jp	z,DirSwp
+	ld	hl,$LOGICAL
+	ld	bc,2*OPClen
+	call	FndOpc		; Find logicals and mvi
+	jp	z,LogMV
+	ld	hl,$RETC
+	ld	bc,OPClen
+	call	FndOpc		; Find conditional rets
+	jp	z,RetC
+	ld	hl,$SINGLE
+	ld	bc,2*OPClen
+	call	FndOpc		; Find direct swap codes
+	jp	z,FDirSwp
+	ld	hl,$RP
+	ld	bc,2*OPClen
+	call	FndOpc		; Find reg pair codes
+	jp	z,RPcode
+	ld	a,(Z.DB)	; Test DEFx or Dx
+	ld	hl,$DEF
+	or	a
+	jp	z,CnvDEF	; .. DEFx
+	ld	hl,$DF
+CnvDEF:
+	ld	bc,2*OPClen
+	call	FndOpc		; Find DB, DS, DW
+	jp	z,DirSwp
+	ld	hl,(StrtPtr)	; Get back pointer if none found so far
+	jp	CnvSP
+CnvEP:
+	ld	hl,(EndPtr)	; Get back pointer
+CnvSP:
+	ld	c,FALSE		; Clear string flag
+CnvGCH:
+	ld	a,(hl)		; Get character, test ..
+	cp	' '		; .. blank
+	jp	z,CnvDelim
+	cp	tab		; .. tab
+	jp	z,CnvDelim
+	cp	cr		; .. end of line
+	jp	z,Fputs
+	cp	';'		; .. comment
+	jp	z,CnvCmnt
+	cp	delim		; .. multi line
+	jp	z,CnvMulLin
+	cp	''''		; .. string
+	jp	nz,CnvStrg
+	dec	c		; Test string defined
+	jp	z,CnvStrg
+	ld	c,TRUE		; Set flag
+CnvStrg:
+	call	Fput		; Put to file
+	inc	hl		; .. bump
+	jp	CnvGCH		; Get next
+CnvMulLin:
+	call	SkpSpace	; Skip spaces
+	inc	hl
+nxtPart:
+	ld	a,(hl)		; Get character
+	cp	';'		; Test comment
+	jp	z,CnvPutRem
+	ld	a,(hl)
+	cp	' '		; Test blank
+	jp	nz,noTabset
+	ld	(hl),tab	; .. set tab for it
+noTabset:
+	call	FNL		; Close line
+	jp	CnvLoop		; .. and restart
+CnvDelim:
+	push	hl
+	call	SkpSpace	; Skip spaces
+	cp	cr		; .. test end of line
+	jp	z,CnvExit	; .. yeap
+	pop	hl
+	cp	delim		; Test delimiter
+	jp	z,CnvMulLin	; .. do multi line
+	cp	';'		; Test comment
+	ld	a,(hl)
+	jp	z,CnvCmnt
+	call	SwapTabSpc	; Map tab to blank
+	jp	CnvGCH		; .. loop on
+CnvCmnt:
+	dec	c		; Test string in progress
+	inc	c
+	jp	nz,CnvStrg	; .. yeap
+	call	SkpSpace	; Skip spaces
+CnvPutRem:
+	ld	b,CmntPos	; Set position
+CnvPutCol:
+	ld	a,(CurCol)	; Get position
+	cp	b		; Test reached
+	jp	nc,CnvSkpCol	; .. yeap
+	dec	a
+	and	ColMask		; Mask
+	add	a,Col		; .. and bump
+	cp	b
+	jp	z,CnvSkpCol	; .. same
+	jp	c,CnvPutTab	; .. less
+	ld	a,' '
+	jp	CnvPutBlnk	; Give blank
+CnvPutTab:
+	ld	a,tab		; .. give tab
+CnvPutBlnk:
+	call	Fput		; Put to file
+	jp	CnvPutCol
+CnvSkpCol:
+	ld	a,(ChrPut)	; Get last character put
+	cp	' '		; Test blank
+	jp	z,CnvSkpSpc
+	cp	tab		; .. or tab
+	jp	z,CnvSkpSpc
+	ld	a,' '		; Give blank if neither
+	call	Fput
+CnvSkpSpc:
+	ld	a,(hl)		; Get current
+	cp	';'		; Test comment
+	jp	nz,CnvEOL?	; .. nope
+	call	Fput		; .. put to file
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Next a blank
+	jp	z,CnvEOL?	; .. yeap, end
+	ld	a,' '
+	call	Fput		; .. give blank
+	ld	a,(hl)
+	cp	'a'		; Test case follows
+	jp	c,CnvEOL?
+	cp	'z'+1
+	jp	nc,CnvEOL?
+	and	UPPER		; Convert to UPPER
+	jp	CnvPutChr
+CnvEOL?:
+	ld	a,(hl)		; Get character
+CnvPutChr:
+	inc	hl
+	cp	delim		; Test delimiter
+	jp	z,nxtPart	; .. yeap get next part
+	or	a		; Test end of line
+	ret	z		; .. yeap
+	call	Fput		; Put to file
+	jp	CnvEOL?
+CnvExit:
+	ex	(sp),hl		; .. fix pointer
+	pop	hl		; .. get back
+	jp	Fputs		; Put to file
+;
+; Process label
+; ENTRY	Reg HL points to line
+; EXIT	Zero set if end of line found
+;
+ProcLab:
+	ld	a,(hl)		; Get character
+	cp	' '		; Test blank
+	jp	z,PrLabSpc
+	cp	tab		; .. or tab
+	jp	z,PrLabSpc
+	cp	cr		; Test new line
+	ret	z
+	cp	delim		; .. or delimiter
+	ret	z
+	cp	';'		; .. or comment
+	ret	z
+LabReset:
+	ld	c,0		; Clear counter
+LabCount:
+	ld	a,(hl)		; Get character
+	cp	':'		; Test label delimiter
+	jp	z,LabTwice
+	cp	tab		; Test operand delimiter
+	jp	z,LabNotfound
+	cp	cr		; .. end of line
+	jp	z,LabNotfound
+	cp	';'		; .. comment
+	jp	z,LabNotfound
+	cp	' '		; .. blank
+	jp	z,LabNotfound
+	cp	delim
+	ret	z		; End on delimiter
+	call	Fput		; .. put to file
+	inc	hl
+	inc	c		; .. bump count
+	jp	LabCount
+PrLabSpc:
+	call	SkpSpace	; Skip spaces
+	push	hl
+	call	SkpOper		; .. skip label
+	cp	':'		; Test label found
+	pop	hl
+	jp	z,LabReset	; Restart counting if so
+	jp	l05a0
+LabTwice:
+	inc	hl
+	ld	a,(hl)
+	cp	':'		; Test second colon
+	jp	nz,l0543
+	call	Fput		; Put to file
+	inc	c
+	jp	l0559
+l0543:
+	dec	hl
+	call	IsEQU		; Test EQU
+	jp	z,EMDlab
+	call	IsMACRO		; .. or MACRO
+	jp	z,EMDlab
+	call	IsSET		; .. or SET
+	jp	nz,l0559
+EMDlab:
+	jp	l057a
+l0559:
+	ld	a,':'
+	inc	hl
+	call	Fput
+	ld	a,(hl)
+	cp	cr
+	jp	z,l05a5
+	jp	l058d
+LabNotfound:
+	call	IsEQU		; Test EQU
+	jp	z,l057a
+	call	IsMACRO		; .. or MACRO
+	jp	z,l057a
+	call	IsSET		; .. or SET
+	jp	nz,l0588
+l057a:
+	ld	a,c
+	cp	LabLen		; Test length
+	jp	c,l05a0
+	ld	a,' '
+	call	Fput		; .. blank
+	jp	l05a5
+l0588:
+	ld	a,':'
+	call	Fput
+l058d:
+	ld	a,c
+	cp	LabLen		; Test length
+	jp	c,l05a0
+	jp	z,l05a5
+	ld	a,cr		; Give new line
+	call	Fput
+	ld	a,lf
+	call	Fput
+l05a0:
+	ld	a,tab		; .. tabulate
+	call	Fput
+l05a5:
+	call	SkpSpace	; Skip spaces
+	ld	a,(hl)
+	cp	cr
+	ret	z
+	cp	';'		; Test comment
+	jp	nz,l05ba
+	call	CnvPutRem	; Put remainder if so
+	ld	sp,LocStk
+	jp	XIZ.loop	; .. re-enter
+l05ba:
+	ld	(StrtPtr),hl	; Save start pointer
+	ld	b,OPClen
+	ld	de,MnBuf
+	call	GetOper		; Get operand
+	call	SkpSpace	; Skip spaces
+	ld	(EndPtr),hl	; .. save pointer
+	sub	a
+	inc	a		; .. set non-zero
+	ret
+;;l05ce:
+	ex	(sp),hl
+	pop	hl
+	ret
+;
+; Test EQU
+; EXIT	Zero set if so
+;
+IsEQU:
+	push	hl
+	inc	hl
+	call	SkpSpace	; Skip spaces
+	ld	a,(hl)		; .. test EQU
+	cp	'E'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'Q'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'U'
+	pop	hl
+	ret
+noEMS:
+	pop	hl
+	ret
+;
+; Test MACRO
+; EXIT	Zero set if so
+;
+IsMACRO:
+	push	hl
+	inc	hl
+	call	SkpSpace	; Skip spaces
+	ld	a,(hl)		; .. test MACRO
+	cp	'M'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'A'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'C'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'R'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'O'
+	pop	hl
+	ret
+;
+; Test SET
+; EXIT	Zero set if so
+;
+IsSET:
+	push	hl
+	inc	hl
+	call	SkpSpace	; Skip spaces
+	ld	a,(hl)		; .. test SET
+	cp	'S'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'E'
+	jp	nz,noEMS
+	inc	hl
+	ld	a,(hl)
+	cp	'T'
+	pop	hl
+	ret
+;
+; Mnemoic tables
+;
+$CCALL:
+	db	'CC   '
+OPClen	equ	$-$CCALL
+	db	'CNC  ','CZ   ','CNZ  ','CP   ','CM   ','CPE  ','CPO  '
+	db	null
+$CRET:
+	db	'REQ  ','RNE  ','RLT  ','RGE  '
+	db	'CEQ  ','CNE  ','CLT  ','CGE  '
+	db	'JEQ  ','JNE  ','JLT  ','JGE  '
+	db	null
+$IFs:
+	db	'ELSE ','ELSE '
+	dw	BlnkNewCode
+	db	'ENDIF','ENDIF'
+	dw	BlnkNewCode
+	db	'ENDM ','ENDM '
+	dw	BlnkNewCode
+	db	'IF   ','IF   '
+	dw	BlnkSameCode
+	db	'IFC  ','IF   '
+	dw	ENDenable
+	db	'ICL  ','*INCL'
+	dw	ICLenable
+	db	'LST  ','LIST '
+	dw	LSTenable
+	db	'MACRO','MACRO'
+	dw	BlnkSameCode
+	db	null
+$ADD.SUB:
+	db	'ACI  ','ADC  '
+	db	'ADI  ','ADD  '
+	db	'SBI  ','SBC  '
+	db	null
+$CJP:
+	db	'JC   ','JNC  ','JZ   ','JNZ  ','JP   ','JM   ','JPE  ','JPO  '
+	db	null
+$SWAP.OPC:
+	db	'ADC  ','ADC  '
+	dw	MathAcc
+	db	'ADD  ','ADD  '
+	dw	MathAcc
+	db	'DAD  ','ADD  '
+	dw	HL.code
+	db	'IN   ','IN   '
+	dw	IndAcc
+	db	'LDA  ','LD   '
+	dw	IndAcc
+	db	'LDAX',' LD   '
+	dw	RP.ld
+	db	'LHLD ','LD   '
+	dw	HL.ld
+	db	'MOV  ','LD   '
+	dw	MovCod
+	db	'OUT  ','OUT  '
+	dw	Outcod
+	db	'RST  ','RST  '
+	dw	RSTcod
+	db	'SBB  ','SBC  '
+	dw	MathAcc
+	db	'SHLD ','LD   '
+	dw	SHLDcod
+	db	'SPHL ','LD   '
+	dw	SPHLcod
+	db	'STA  ','LD   '
+	dw	Outcod
+	db	'STAX ','LD   '
+	dw	STAXcod
+	db	'XCHG',' EX   '
+	dw	XCHGcod
+	db	'XTHL ','EX   '
+	dw	XTHLcod
+	db	'PCHL ','JP   '
+	dw	JpHL
+	db	null
+$CHNG.OPC:
+	db	'ANI  ','AND  '
+	db	'CALL ','CALL '
+	db	'CPI  ','CP   '
+	db	'JMP  ','JP   '
+	db	'ORG  ','ORG  '
+	db	'ORI  ','OR   '
+	db	'SUI  ','SUB  '
+	db	'XRI  ','XOR  '
+	db	null
+$LOGICAL:
+	db	'ANA  ','AND  '
+	db	'CMP  ','CP   '
+	db	'DCR  ','DEC  '
+	db	'INR  ','INC  '
+	db	'MVI  ','LD   '
+	db	'ORA  ','OR   '
+	db	'SUB  ','SUB  '
+	db	'XRA  ','XOR  '
+	db	null
+$RETC:
+	db	'RC   ','RNC  ','RZ   ','RNZ  ','RP   ','RM   ','RPE  ','RPO  '
+	db	null
+$SINGLE:
+	db	'RET  ','RET  '
+	db	'CMA  ','CPL  '
+	db	'CMC  ','CCF  '
+	db	'HLT  ','HALT '
+	db	'RAL  ','RLA  '
+	db	'RAR  ','RRA  '
+	db	'RLC  ','RLCA '
+	db	'RRC  ','RRCA '
+	db	'STC  ','SCF  '
+	db	'DAA  ','DAA  '
+	db	'NOP  ','NOP  '
+	db	'DI   ','DI   '
+	db	'EI   ','EI   '
+	db	null
+$RP:
+	db	'DCX  ','DEC  '
+	db	'INX  ','INC  '
+	db	'LXI  ','LD   '
+	db	'POP  ','POP  '
+	db	'PUSH ','PUSH '
+	db	null
+$DEF:
+	db	'DB   ','DEFB '
+	db	'DS   ','DEFS '
+	db	'DW   ','DEFW '
+	db	'EQU  ','EQU  '
+	db	'SET  ','DEFL '
+	db	null
+$DF:
+	db	'DB   ','DB   '
+	db	'DS   ','DS   '
+	db	'DW   ','DW   '
+	db	'EQU  ','EQU  '
+	db	'SET  ','DEFL '
+	db	null
+;;l09f8:
+	db	'ENT  ','ENTRY'
+	db	'NAM  ','NAME '
+	db	'RAM  ','DATA '
+	db	'ROG  ','REL  '
+	db	null
+;
+; Find INTEL mnemonic
+; ENTRY	Reg HL points to mmemonic array
+;	Reg BC holds length of single item in array
+; EXIT	Zero set if mnemonic found
+;
+FndOpc:
+	ld	a,(hl)		; Get character
+	and	a		; Test end
+	jp	z,FndNoOpc	; .. yeap
+	push	bc
+	ld	b,OPClen	; Set length
+	ld	de,MnBuf
+	call	CmpStrg		; .. compare
+	pop	bc
+	ret	z		; .. match
+	add	hl,bc
+	jp	FndOpc
+FndNoOpc:
+	inc	a		; Set no success
+	ret
+;
+; Find macros and swap op codes
+;
+OpcJmp:
+	push	hl
+	ld	bc,2*OPClen
+	add	hl,bc		; Skip over ASCII
+	ld	c,(hl)		; Fetch address
+	inc	hl
+	ld	b,(hl)
+	pop	hl
+	push	bc		; .. set PC
+	ret			; .. go
+;
+; Put new code from table, give tab
+;
+PutSwpTab:
+	call	PutSwap		; Output new code
+	ld	a,tab
+	jp	Fput		; .. then tab
+;
+; Output code from table
+; ENTRY	Reg HL points to old code follwed by new one
+;
+PutSwap:
+	ld	bc,OPClen
+	add	hl,bc		; Point to new code
+	ld	b,c		; .. set length
+PutCode:
+	ld	a,(hl)		; Get code
+	cp	' '		; .. end on blank
+	ret	z
+	cp	tab
+	ret	z		; .. or tab
+	ld	a,(hl)
+	call	Fput		; Put to destination
+	inc	hl
+	dec	b
+	jp	nz,PutCode
+	ret
+;
+; Put string to file
+; ENTRY	Reg HL points to string closed by zero
+;
+Fputc:
+	ld	a,(hl)		; Get character
+	or	a		; .. test end
+	ret	z		; .. yeap
+	call	Fput		; Put to file
+	inc	hl
+	jp	Fputc
+;
+; Skip over operand
+; EXIT	Accu holds delimiter
+;
+SkpOper:
+	push	bc
+	call	IsDelim		; Find delimiter
+	pop	bc
+	ret	z		; .. yeap
+	inc	hl		; .. skip
+	jp	SkpOper
+;
+; Get operand
+; ENTRY	Reg HL points to source
+;	Reg DE points to buffer
+;	Reg B  holds length of buffer
+;
+GetOper:
+	ld	c,b
+	ld	b,0
+	push	bc
+	push	de
+	push	hl
+	call	SetBlank	; Blank buffer
+	pop	hl
+	pop	de
+	pop	bc
+SampleOper:
+	push	bc
+	call	IsDelim		; Test delimiter
+	pop	bc
+	ret	z		; .. yeap
+	ld	a,(hl)
+	ld	(de),a		; .. unpack
+	inc	de
+	inc	hl
+	dec	bc		; Bump down
+	ld	a,b
+	or	c
+	jp	z,IsDelim	; .. fix for delimiter on end
+	jp	SampleOper
+;
+; Skip label
+; ENTRY	Reg HL points to buffer
+; EXIT	Reg HL positioned to non blank or delimiter
+;
+SkpSpace:
+	ld	a,(hl)
+	cp	' '		; Test blank
+	jp	z,WhiteSpace
+	cp	tab		; .. tab
+	jp	z,WhiteSpace
+	cp	':'		; .. delimiter
+	ret	nz
+WhiteSpace:
+	inc	hl
+	jp	SkpSpace
+;
+; Test character a delimiter
+; EXIT	Zero set if so
+;
+IsDelim:
+	ld	a,(hl)		; Get character
+	cp	tab		; .. test several things
+	ret	z
+	cp	' '
+	ret	z
+	cp	','
+	ret	z
+	cp	';'
+	ret	z
+	cp	cr
+	ret	z
+	cp	':'
+	ret	z
+	cp	'+'
+	ret	z
+	cp	'-'
+	ret	z
+	cp	'/'
+	ret	z
+	cp	'*'
+	ret	z
+	cp	')'
+	ret	z
+	cp	delim
+	ret
+;
+; Compare strings
+; ENTRY	Reg HL points to 1st string
+;	Reg DE points to 2nd string
+;	Reg B  holds length of string
+; EXIT	Zero set on same strings
+;
+CmpStrg:
+	push	hl
+	push	de
+	push	bc
+CmpNext:
+	ld	a,(de)		; Get from line
+	cp	'a'		; Test case
+	jp	c,CmpUPPER
+	and	UPPER
+CmpUPPER:
+	cp	(hl)		; Compare
+	jp	nz,CmpExit	; .. no match
+	inc	hl
+	inc	de
+	dec	b		; Count down
+	jp	nz,CmpNext
+CmpExit:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Blank line
+; ENTRY	Reg DE points to line
+;	Reg BC holds length
+;
+SetBlank:
+	ld	a,' '		; Blank 1st character
+	ld	(de),a
+	ld	h,d
+	ld	l,e
+	inc	de		; .. fix a bit for LDIR
+	dec	bc
+;
+; Perform LDIR on 8080
+; ENTRY	Reg HL holds source
+;	Reg DE holds destination
+;	Reg BC holds length
+;
+.LDIR:
+	ld	a,(hl)		; Get it
+	ld	(de),a		; .. into destination
+	inc	hl
+	inc	de
+	dec	bc		; Count down
+	ld	a,b
+	or	c		; .. test more
+	jp	nz,.LDIR
+	ret
+;
+; Find swap code and DB, DW, DS
+;
+DirSwp:
+	call	PutSwpTab	; Put code and tab
+	jp	CnvEP
+;
+; Find direct swap code
+;
+FDirSwp:
+	call	PutSwap		; Put new code
+	jp	CnvEP
+;
+; Found logicals and MVI
+;
+LogMV:
+	call	PutSwpTab	; Put code and tab
+l0b04:
+	ld	hl,(EndPtr)	; Get back pointer
+l0b07:
+	ld	a,(hl)
+	cp	'M'		; Test M.emory
+	jp	z,l0b12
+	cp	'm'
+	jp	nz,CnvSP
+l0b12:
+	inc	hl		; Skip a bit
+	push	hl
+	ld	hl,$$..HL..
+	call	Fputs		; .. give (HL)
+	pop	hl
+	jp	CnvSP
+;
+; Find reg pair codes
+;
+RPcode:
+	call	PutSwpTab	; Put new code
+l0b21:
+	ld	hl,(EndPtr)	; Get back pointer
+	call	GetRP		; Get reg pair
+	jp	nz,CnvEP	; .. nope
+	ex	de,hl
+	call	Fputc		; Put pair to file
+	ex	de,hl
+	jp	CnvSP
+;
+; Get reg pair string
+; ENTRY	Reg HL points to source line
+; EXIT	Zero flag set if pair found
+;	Reg DE holds pair string
+;
+GetRP:
+	ld	a,(hl)
+	and	UPPER
+	cp	'B'		; Test BC
+	jp	z,Got.BC
+	cp	'D'		; .. DE
+	jp	z,Got.DE
+	cp	'H'		; .. HL
+	jp	z,Got.HL
+	cp	'P'		; .. PSW
+	jp	z,IsPSW
+	ret
+Got.BC:
+	ld	de,$$BC		; .. get map code
+	inc	hl		; .. skip character
+	ret
+Got.DE:
+	ld	de,$$DE
+	inc	hl
+	ret
+Got.HL:
+	ld	de,$$HL
+	inc	hl
+	ret
+IsPSW:
+	inc	hl
+	ld	a,(hl)
+	and	UPPER
+	cp	'S'
+	jp	nz,l0b71
+	inc	hl
+	ld	a,(hl)
+	and	UPPER
+	cp	'W'
+	jp	nz,l0b70
+	ld	de,$$AF
+	inc	hl
+	ret
+l0b70:
+	dec	hl
+l0b71:
+	dec	hl
+	ret
+;
+; Got INTEL conditionals - map to ZILOGs
+;
+MapCC:
+	ld	a,(MnBuf+1)
+	ld	hl,$$Z
+	cp	'E'
+	jp	z,Map..		; .. map EQ ->> Z
+	ld	hl,$$NZ
+	cp	'N'
+	jp	z,Map..		; .. map NE ->> NZ
+	ld	hl,$$C
+	cp	'L'
+	jp	z,Map..		; .. map LT ->> C
+	ld	hl,$$NC
+	cp	'G'
+	jp	z,Map..		; .. map GE ->> NC
+	ld	hl,$$.z
+	cp	'e'		; .. same for eq
+	jp	z,Map..
+	ld	hl,$$.nz
+	cp	'n'		; .. ne
+	jp	z,Map..
+	ld	hl,$$.c
+	cp	'l'		; .. lt
+	jp	z,Map..
+	ld	hl,$$.nc	; .. ge
+Map..:
+	ld	a,(hl)
+	ld	(MnBuf+1),a	; Unpack new code
+	inc	hl
+	ld	a,(hl)
+	ld	(MnBuf+2),a
+	ret
+;
+; Find conditional RET
+;
+RetC:
+	ld	hl,$$RET-OPClen
+	call	PrCC		; Give code
+	jp	CnvEP
+;
+; Got condition CALL
+;
+CCall:
+	ld	hl,$$CALL-OPClen
+	jp	l0bcd
+;
+; Find conditional JP
+;
+CJp:
+	ld	hl,$$JP-OPClen
+l0bcd:
+	call	PrCC		; Print code
+	ld	a,','
+	call	Fput		; .. and comma
+	jp	CnvEP
+;
+; Print new mnemonic follwed by condition code
+; ENTRY	Reg HL points to new code
+;
+PrCC:
+	call	PutSwpTab	; Give new code
+	ld	a,(MnBuf+1)	; Get condition code
+	call	Fput
+	ld	a,(MnBuf+2)	; .. part 2
+	cp	' '
+	ret	z
+	jp	Fput		; If not a blank
+;
+; Process math with accu involved
+;
+MathAcc:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$AF.	; .. A,
+	call	Fputs
+	jp	l0b04		; .. check (HL)
+;
+; Found DAD --> ADD HL,
+;
+HL.code:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$HL.	; .. HL,
+	call	Fputs
+	jp	l0b21
+;
+; Find immediate math
+;
+ImMtch:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$AF.	; .. A,
+	jp	PutXCode
+;
+; Got indirect accu access
+;
+IndAcc:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$A..	; .. A,(
+	jp	l0c3c
+;
+; Found reg pair load
+;
+RP.ld:
+	call	PutSwpTab	; Give new code
+	ld	hl,(EndPtr)	; Get back pointer
+	ld	a,(hl)		; Get character
+	and	UPPER
+	cp	'B'		; Test BC
+	jp	z,l0c2a
+	cp	'D'		; .. or DE
+	jp	z,l0c30
+	jp	CnvSP
+l0c2a:
+	ld	hl,$$A.BC	; Put A,(BC)
+	jp	l0ce1
+l0c30:
+	ld	hl,$$A.DE	; Put A,(DE)
+	jp	l0ce1
+;
+; Got load via HL
+;
+HL.ld:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$HL..	; Put HL,(
+l0c3c:
+	call	Fputs		; .. give string
+	call	PrcOperPt	; Process operand
+	ld	a,')'		; Test closing parenthesis
+	call	Fput		; Close access
+	jp	CnvSP
+;
+; Got a MOV
+;
+MovCod:
+	call	PutSwpTab	; Give new code
+	ld	hl,(EndPtr)	; Get back pointer
+	ld	a,(hl)		; Test (HL)
+	cp	'M'
+	jp	z,l0c5b
+	cp	'm'
+	jp	nz,l0c6c
+l0c5b:
+	push	hl
+	ld	hl,$$..HL..
+	call	Fputs		; Put (HL)
+	pop	hl
+l0c63:
+	inc	hl
+	ld	a,(hl)
+	call	Fput		; Put next
+	inc	hl
+	jp	l0b07
+l0c6c:
+	call	Fput		; Put code
+	jp	l0c63
+;
+;
+;
+;;l0c72:
+	call	PutSwpTab	; Give new code
+	call	PrcOperPt	; Process operand
+	push	hl
+	ld	hl,$$_A		; ,A
+	jp	l0cbb
+;
+; Got JP (HL)
+;
+JpHL:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$..HL..
+	jp	PutXCode	; Put (HL)
+;
+; Got RST
+;
+RSTcod:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$.8		; .. *8
+	jp	PutXCode
+;
+; Got SHLD
+;
+SHLDcod::
+	call	PutSwpTab	; Give new code
+	ld	a,'('		; Set indirect
+	call	Fput
+	call	PrcOperPt	; Process operand
+	push	hl
+	ld	hl,$$..HL
+	jp	l0cbb		; Put ),HL
+;
+; Got SPHL
+;
+SPHLcod:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$SP.HL	; SP,HL
+	jp	PutXCode
+;
+; Got OUT and STA
+;
+Outcod:
+	call	PutSwpTab	; Give new code
+	ld	a,'('
+	call	Fput		; Indicate indirect
+	call	PrcOperPt	; .. process operand
+	push	hl
+	ld	hl,$$..A	; Put ),A
+l0cbb:
+	call	Fputs
+	pop	hl
+	jp	CnvSP
+;
+; Got STAX
+;
+STAXcod:
+	call	PutSwpTab	; Give new code
+	ld	hl,(EndPtr)	; Get back pointer
+	ld	a,(hl)
+	and	UPPER
+	cp	'B'		; Test BC
+	jp	z,l0cd8
+	cp	'D'		; .. or DE
+	jp	z,l0cde
+	jp	CnvSP
+l0cd8:
+	ld	hl,$$BC.A	; .. (BC),A
+	jp	l0ce1
+l0cde:
+	ld	hl,$$DE.A	; .. (DE),A
+l0ce1:
+	call	Fputc		; Put to file
+	ld	hl,(EndPtr)	; Get back pointer
+	inc	hl
+	jp	CnvSP
+;
+; Got XCHG
+;
+XCHGcod:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$DE.HL	; DE,HL
+	jp	PutXCode
+;
+; Got XTHL
+;
+XTHLcod:
+	call	PutSwpTab	; Give new code
+	ld	hl,$$_SP.HL	; (SP),HL
+PutXCode:
+	call	Fputs
+	jp	CnvEP
+;
+; Process operand
+; Position pointer to first non-blank character after operand
+;
+PrcOperPt:
+	ld	hl,(EndPtr)	; Get back pointer
+PrcOper:
+	ld	a,(hl)
+	cp	';'		; Find commnent
+	jp	z,endOper
+	cp	cr		; .. end of line
+	jp	z,endOper
+	cp	delim		; .. multi line
+	jp	z,endOper
+	inc	hl		; .. bump
+	jp	PrcOper
+endOper:
+	dec	hl		; .. get back
+	ld	a,(hl)
+	cp	' '		; .. for blank
+	jp	z,endOper
+	cp	tab		; .. and tab
+	jp	z,endOper
+	inc	hl		; .. fix
+	ex	de,hl		; .. and save
+	ld	hl,(EndPtr)	; Get back pointer
+PutOLoop:
+	ld	a,d
+	cp	h		; Test pointer match
+	jp	nz,PutOper	; .. not yet
+	ld	a,e
+	cp	l
+	ret	z
+PutOper:
+	ld	a,(hl)
+	call	Fput		; Put to file if not
+	inc	hl
+	jp	PutOLoop
+;
+; Indicate possible ENDIF incompatibilities
+;
+ENDenable:
+	ld	a,tab
+	ld	($ENDIF),a	; Enable error
+	jp	ExErr		; Exchange undefined code and enable error display
+;
+; Indicate possible INCLUDE incompatibilities
+;
+ICLenable:
+	ld	a,tab
+	ld	($ICL),a
+	jp	ExErr		; Exchange undefined code and enable error display
+;
+; Indicate possible LIST incompatibilities
+;
+LSTenable:
+	ld	a,tab
+	ld	($LST),a
+	jp	ExErr		; Exchange undefined code and enable error display
+;
+; Found ELSE, ENDIF, ENDM
+; Give blank and new code
+;
+BlnkNewCode:
+	ld	a,' '
+	call	Fput		; Give blank
+	jp	FDirSwp		; .. then swap code
+;
+; Give blank and same code
+;
+BlnkSameCode:
+	ld	a,' '
+	call	Fput		; Give blank
+	call	PutSwpTab	; Give new code
+	jp	CnvEP		; Convert next
+;
+; Exchange undefined code and enable error display
+;
+ExErr:
+	call	PutSwpTab	; Give code
+	ld	a,cr
+	ld	($OPERANDS),a	; Set error
+	jp	CnvEP
+;
+; Prepare source and destination file
+;
+PrepFiles:
+	ld	hl,FCB
+	ld	de,FIN
+	ld	bc,_drv+_nam
+	call	.LDIR		; Copy FCB to source file
+	ld	a,(hl)
+	cp	' '		; Test extension
+	jp	z,PF.Inam	; .. nope
+	cp	'?'
+	jp	z,PF.Inam	; Disable wildcard
+	ld	bc,_ext
+	call	.LDIR		; .. copy extension
+PF.Inam:
+	ld	hl,FCB
+	ld	de,FOUT
+	ld	bc,_drv+_nam
+	call	.LDIR		; Copy to destination
+	ld	a,(FCB+_F2)
+	or	a		; Test drive
+	jp	z,PF.drv
+	ld	(FOUT),a	; .. set it
+PF.drv:
+	ld	a,(FCB+_F2+_drv)
+	cp	' '		; Test name given
+	jp	z,PF.Onam
+	ld	bc,_nam
+	ld	de,FOUT+_drv
+	ld	hl,FCB+_F2+_drv
+	call	.LDIR		; .. copy name
+PF.Onam:
+	ld	a,(Ext)		; Test what we want
+	or	a
+	jp	z,PF.Oext	; .. default
+	ld	a,'M'		; .. .MAC
+	ld	(FOUT+_drv+_nam),a
+	ld	a,'A'
+	ld	(FOUT+_drv+_nam+1),a
+	ld	a,'C'
+	ld	(FOUT+_drv+_nam+2),a
+PF.Oext:
+	ld	a,(FCB+_F2+_drv+_nam)
+	cp	' '		; Test extension given
+	jp	z,PF.namOk	; .. nope
+	ld	bc,_ext
+	ld	de,FOUT+_drv+_nam
+	ld	hl,FCB+_F2+_drv+_nam
+	call	.LDIR		; .. copy to destination
+PF.namOk:
+	ld	de,$SRC
+	call	String		; Give a bit statistic
+	ld	hl,FIN
+	call	PrFN
+	ld	de,$DST
+	call	String
+	ld	hl,FOUT
+	call	PrFN
+	ld	de,$NL
+	call	String
+	ret
+;
+; Print name of file
+; ENTRY	Reg HL points to FCB
+;
+PrFN:
+	ld	a,(hl)		; Get drive
+	or	a		; .. test default
+	jp	nz,PrFNDsk
+	ld	a,(CurDisk)	; .. fetch logged if so
+PrFNDsk:
+	add	a,'A'-1
+	call	Conout		; .. print
+	ld	a,':'
+	call	Conout
+	inc	hl
+	ld	b,_nam		; Give name
+	call	PrFNfcb
+	ld	a,'.'
+	call	Conout
+	ld	b,_ext		; .. and extension
+PrFNfcb:
+	ld	a,(hl)
+	inc	hl
+	cp	' '
+	call	nz,Conout
+	dec	b
+	jp	nz,PrFNfcb
+	ret
+;
+; Open source file
+;
+Reset:
+	ld	de,FIN
+	ld	c,.open
+	call	BDOS		; Open file
+	cp	OSerr		; Test success
+	jp	z,OpenErr	; .. error
+	ld	a,RecLng	; Get length	WHY ??????
+	ld	hl,_Heap
+	ld	(InPtr),hl	; Set buffer
+	ret
+OpenErr:
+	ld	de,$NO.SRC
+	jp	ExitStrg	; Give message and exit
+FIN:
+	ds	_drv+_nam
+	db	'ASM'
+	ds	21
+;
+; Open destination file
+;
+Rewrite:
+	ld	de,FOUT
+	ld	c,.open
+	call	BDOS		; Test file on board
+	cp	OSerr
+	jp	nz,OvrWrt?	; .. yeap, ask for overwrite
+DoRewrite:
+	ld	de,FOUT
+	ld	c,.make
+	call	BDOS		; Create file
+	cp	OSerr		; Test success
+	jp	z,CreateErr	; .. nope
+	ld	de,FOUT
+	ld	c,.open
+	call	BDOS		; Open file	WHY ??????
+	ld	a,RecLng
+	ld	(OutRec),a	; Init count
+	ld	hl,OutBuff
+	ld	(OutPtr),hl	; ..and buffer
+	ret
+CreateErr:
+	ld	de,$NO.SPC
+	jp	ExitStrg	; Give message and exit
+FOUT:
+	ds	_drv+_nam
+	db	'Z80'
+	ds	21
+OvrWrt?:
+	ld	de,$OVR.WRT
+	call	String		; Tell file exist
+	call	YesNo		; Get response
+	jp	nz,AbortPrg	; .. N.ot overwrite
+	ld	de,FOUT
+	ld	c,.delete
+	call	BDOS		; Delete file
+	jp	DoRewrite	; .. retry
+AbortPrg:
+	ld	de,$ABORT
+	call	String		; Tell aborting to CP/M
+;
+; Exit to OS
+;
+EXIT.XIZ:
+	ld	hl,(LocStk)	; .. simple recover stack
+	ld	sp,hl
+	ret
+;
+; Put string to destination file
+; ENTRY	Reg HL points to string closed by zero
+;
+Fputs:
+	ld	a,(hl)		; Get character
+	and	a		; Test end
+	ret	z		; .. yeap
+	call	Fput		; .. put to file
+	inc	hl
+	jp	Fputs
+;
+; Map tab to blank
+;
+SwapTabSpc:
+	ld	a,(hl)		; Get character
+	cp	' '		; .. test blank
+	jp	z,GoSwap	; .. put
+	cp	tab		; Test tab
+	ret	nz		; .. nope
+	ld	a,' '		; .. put as blank
+GoSwap:
+	call	Fput
+	inc	hl
+	jp	SwapTabSpc
+;
+; Close disk line
+;
+FNL:
+	ld	a,cr
+	call	Fput
+	ld	a,lf
+	jp	Fput
+;
+; Put character to file
+; ENTRY	Accu holds character
+;
+Fput:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	(ChrPut),a	; Save character
+	ld	hl,(OutPtr)
+	cp	delim		; Test special
+	jp	nz,FPdelim
+	ld	a,'!'		; .. map
+FPdelim:
+	ld	(hl),a
+	cp	cr		; Test end of line
+	jp	z,FPnewline
+	cp	lf		; .. or new line
+	jp	z,FPnewline
+	cp	tab		; Test tab
+	jp	nz,FPchar
+	ld	a,(CurCol)	; Get current position
+	dec	a
+	and	ColMask		; .. mask
+	add	a,Col		; .. and bump
+	jp	FPcol
+FPnewline:
+	ld	a,1		; Init column
+	jp	FPcol
+FPchar:
+	ld	a,(CurCol)	; Get current column
+	inc	a		; .. bump
+FPcol:
+	ld	(CurCol),a	; .. save column
+	inc	hl
+	ld	a,(OutRec)
+	dec	a
+	jp	nz,FPrecset
+	ld	a,RecLng
+FPrecset:
+	ld	(OutRec),a
+	ld	a,h		; Test buffer filled
+	cp	HIGH (OutBuff+OutLen)
+	jp	nz,FPexit
+	ld	a,l
+	cp	LOW (OutBuff+OutLen)
+	jp	nz,FPexit
+	ld	de,OutBuff
+FPbuffer:
+	ld	c,.setdma
+	push	de
+	call	BDOS		; Set buffer
+	pop	de
+	ex	de,hl
+	ld	de,FOUT
+	call	PutRec		; Put record to disk
+	ld	de,RecLng
+	add	hl,de		; .. next address
+	ex	de,hl
+	ld	a,d		; Test done
+	cp	HIGH (OutBuff+OutLen)
+	jp	nz,FPbuffer
+	ld	a,e
+	cp	LOW (OutBuff+OutLen)
+	jp	nz,FPbuffer
+	ld	hl,OutBuff	; Init buffer
+FPexit:
+	ld	(OutPtr),hl
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Put record to disk
+;
+PutRec:
+	ld	c,.wrseq
+	push	hl
+	call	BDOS		; .. write
+	pop	hl
+	and	a
+	ret	z		; Verify ok
+	ld	de,$WR.ERR
+	jp	ExitStrg	; Tell error and exit
+;
+; Close destination file
+;
+CloseFile:
+	ld	a,eof
+	call	Fput		; Give eof
+	ld	a,(OutRec)
+	cp	RecLng
+	jp	nz,CloseFile	; .. till buffer filled
+	ld	de,OutBuff
+	ld	hl,(OutPtr)
+	ld	a,h
+	cp	d		; Test remining data
+	jp	nz,WriteRec
+	ld	a,l
+	cp	e
+	jp	nz,WriteRec
+DoClose:
+	ld	de,FOUT
+	ld	c,.close
+	jp	BDOS		; Close file
+WriteRec:
+	ld	c,.setdma
+	push	de
+	call	BDOS		; Set buffer
+	pop	de
+	ex	de,hl
+	ld	de,FOUT
+	call	PutRec		; Put record to disk
+	ld	de,RecLng
+	add	hl,de
+	ex	de,hl
+	ld	a,(OutPtr+1)
+	cp	d		; Test done
+	jp	nz,WriteRec
+	ld	a,(OutPtr)
+	cp	e
+	jp	nz,WriteRec
+	jp	DoClose		; .. go to end processing
+;
+; Print decimal number
+; ENTRY	Reg HL holds number
+;	Reg C  indicates leading zeroes
+;
+PrDec:
+	ld	de,10000
+	call	PrDig		; Get ten thousands
+	ld	de,1000
+	call	PrDig		; .. thousands
+	ld	de,100
+	call	PrDig		; .. hundreds
+	ld	de,10
+	call	PrDig		; .. tens
+	ld	a,l
+	add	a,'0'		; Make units ASCII
+	jp	Conout		; .. print
+;
+; Print digit from number
+; ENTRY	Reg HL holds number
+;	Reg DE holds divisor
+;	Reg C  holds leading zero flag
+; EXIT	Reg HL holds remainder
+;	Reg C  attached if non-zero printed
+;
+PrDig:
+	ld	b,'0'-1		; Init digit
+DivDig:
+	inc	b		; Bump it
+	or	a
+	call	SubHL.DE	; Subtract
+	jp	nc,DivDig	; .. till <0
+	add	hl,de		; Make =>0
+	ld	a,b
+	cp	'0'		; Test zero result
+	jp	nz,PutZero
+	cp	c		; .. test zero
+	ret	nz
+PutZero:
+	ld	c,'0'		; Set flag
+	jp	Conout		; .. print
+;
+; Print string closed by zero
+; ENTRY	Reg DE points to string
+;
+String:
+	ld	a,(de)		; Get it
+	and	a		; Test end
+	ret	z		; .. yeap
+	call	Conout		; .. print
+	inc	de
+	jp	String
+;
+; Subtract numbers HL:=HL-DE
+; EXIT	Flags set corresponding to result of subtraction
+;
+SubHL.DE:
+	ld	a,l
+	sub	e		; .. subtract
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ld	h,a
+	ret
+;
+; Print character on console
+; ENTRY	Accu holds character
+;
+Conout:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; .. print
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Get answer Yes or NO
+; EXIT	Zero flag set if Yes
+;
+YesNo:
+	ld	c,.conin
+	call	BDOS		; Get character
+	push	af
+	call	NL		; Give new line
+	pop	af
+	and	UPPER		; .. get UPPER case
+	cp	'Y'		; .. look for YES
+	ret
+;
+; Get state of console
+; EXIT	Accu holds zero if no key available
+;	Otherwise the character available
+;
+Constat:
+	ld	c,.consta
+	call	BDOS		; Get state
+	or	a		; Test any here
+	ret	z		; .. nope
+	ld	c,.conin
+	call	BDOS		; .. get it
+	ret
+;
+; Put new line to console
+;
+NL:
+	ld	de,$NL
+	jp	String		; .. put
+;
+; Give empty lines to console
+; ENTRY	Reg B holds number of lines
+;
+WriteLn:
+	call	NL		; Give new line
+	dec	b
+	jp	nz,WriteLn	; .. as defined
+	ret
+;
+; Convert character to upper case
+;
+; **** NEVER CALLED ****
+;
+toUPPER:
+	cp	'a'
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	UPPER
+	ret
+;
+; Give dot every 100 lines
+;
+Display:
+	ld	a,(DotLine)	; Test 100 lines read
+	dec	a
+	ld	(DotLine),a
+	ret	nz		; .. nope
+	ld	a,'.'
+	call	Conout		; Display dot
+	ld	a,100
+	ld	(DotLine),a	; Re-init count
+	ld	a,(BlkCnt)	; Test block counted
+	dec	a
+	ld	(BlkCnt),a
+	jp	nz,DspDot	; .. nope
+	ld	a,' '
+	call	Conout		; Give delimiter
+	ld	a,10
+	ld	(BlkCnt),a
+DspDot:
+	ld	a,(DotCnt)	; Test line filled
+	dec	a
+	ld	(DotCnt),a
+	ret	nz		; .. nope
+	call	NL		; Give new line
+	ld	a,50
+	ld	(DotCnt),a
+	ret
+;
+; >>>> DATA <<<<
+;
+$HELP.1:
+	db	cr,lf,cr,lf
+	db	'XIZ translates Intel 8080 assembly language source'
+	db	cr,lf
+	db	'code into Zilog Z80 assembly language source code.'
+	db	cr,lf
+	db	'It is invoked by a command of the form:'
+	db	cr,lf,cr,lf
+	db	'    XIZ B:8080FILE.TYP B:Z80FILE.TYP'
+	db	cr,lf,cr,lf
+	db	'All parameters are optional - if omitted, the'
+	db	cr,lf
+	db	'following values are assumed:'
+	db	cr,lf,cr,lf
+	db	'    8080 source filetype    - ASM'
+	db	cr,lf
+	db	'    Z80  output filetype    - Z80'
+	db	cr,lf
+	db	'    Z80  output file name   - same as source file-name'
+	db	cr,lf
+	db	'    Drive                   - current drive'
+	db	cr,lf,cr,lf,cr,lf
+	db	'    Byte 0103H  - 00 defaults to .Z80 extent, FF to .MAC'
+	db	cr,lf
+	db	'    Byte 0104h  - 00 does not print .Z80 and ASEG for MAC'
+	db	cr,lf
+	db	'    Byte 0105H  - 00 normal Zilog DEFB, etc., FF to DB, etc.'
+	db	null
+$MORE:
+	db	'[more]',null
+$HELP.2:
+	db	cr,lf,cr,lf
+	db	'Examples:'
+	db	cr,lf,cr,lf
+	db	'XIZ PRGM1                 (translates PRGM1.ASM to PRGM1.Z80)'
+	db	cr,lf
+	db	'XIZ PRGM1 PRGM2           (translates PRGM1.ASM to PRGM2.Z80)'
+	db	cr,lf
+	db	'XIZ PRGM1.TXT PRGM2.MAC   (translates PRGM1.TXT to PRGM2.MAC)'
+	db	cr,lf,cr,lf
+	db	'XIZ also has the following feature:'
+	db	cr,lf,cr,lf
+	db	'  A dot ''.'' is displayed for each 100 lines processed.'
+	db	null
+$ABORT:
+	db	cr,lf,'++ Aborting to CP/M ++',cr,lf,bel,null
+$CANCEL:
+	db	cr,lf,'*** Job cancelled ***',cr,lf,null
+$LINES:
+	db	' lines processed',cr,lf,null
+$M80.PROLOG:
+	db	cr,lf,cr,lf,tab
+	db	'.Z80'
+	db	cr,lf,tab
+	db	'ASEG'
+	db	cr,lf,cr,lf,null
+$NO.SPC:
+	db	'No directory space'
+	db	cr,lf,bel,null
+$NO.SRC:
+	db	'No source file found'
+	db	cr,lf,bel,null
+$OVR.WRT:
+	db	'Output file exists, delete it and continue? (Y/N) '
+	db	bel,null
+$WR.ERR:
+	db	'Output file write error'
+	db	cr,lf,bel,null
+$SRC:
+	db	cr,lf,'8080 source file:  '
+	db	null
+$DST:
+	db	'    Z80 output file:  '
+	db	null
+$HEAD:
+	db	cr,lf
+	db	'XIZ v2 - translates 8080 to Z80 source code'
+	db	cr,lf,null
+$OPERANDS:
+	db	null
+	db	lf,'The following operands have been used in your source and have not'
+	db	cr,lf
+	db	'been fully translated.  You must complete the translation using an editor.'
+	db	cr,lf,tab
+	db	'original:'
+	db	tab,tab
+	db	'must be translated to:'
+	db	cr,lf,null
+$$Z:
+	db	'Z '
+$$NZ:
+	db	'NZ'
+$$C:
+	db	'C '
+$$NC:
+	db	'NC'
+$$.z:
+	db	'z '
+$$.nz:
+	db	'nz'
+$$.c:
+	db	'c '
+$$.nc:
+	db	'nc'
+CurCol:
+	db	1
+$NL:
+	db	cr,lf,null
+CmntFlag:
+	db	0
+BlkCnt:
+	db	10
+$ENDIF:
+	db	null
+	db	'#ENDIF',tab,tab,tab,'ENDIF'
+	db	cr,lf,null
+$ICL:
+	db	null
+	db	'ICL',tab,tab,tab,'*INCLUDE'
+	db	cr,lf,null
+Lines:
+	dw	0
+DotLine:
+	db	100
+$LST:
+	db	null
+	db	'LST  <operands>',tab,tab,'LIST  <valid ASMB operands>'
+	db	cr,lf,null
+DotCnt:
+	db	50
+$$CALL:
+	db	'CALL ',null
+$$JP:
+	db	'JP   ',null
+$$RET:
+	db	'RET  ',null
+$$A..:
+	db	'A,(',null
+$$..A:
+	db	'),A',null
+$$..HL:
+	db	'),HL',null
+$$DE.HL:
+	db	'DE,HL',null
+$$_SP.HL:
+	db	'(SP),HL',null
+$$HL..:
+	db	'HL,(',null
+$$A.BC:
+	db	'A,(BC)',null
+$$A.DE:
+	db	'A,(DE)',null
+$$.8:
+	db	'8*',null
+$$AF.:
+	db	'A,',null
+$$AF:
+	db	'AF',null
+$$BC:
+	db	'BC',null
+$$_A:
+	db	',A',null
+$$DE:
+	db	'DE',null
+$$HL:
+	db	'HL',null
+$$HL.:
+	db	'HL,',null
+$$..HL..:
+	db	'(HL)',null
+$$SP.HL:
+	db	'SP,HL',null
+$$BC.A:
+	db	'(BC),A',null
+$$DE.A:
+	db	'(DE),A',null
+StrgFlg:
+	db	0
+ChrPut:
+	db	null
+CurDisk:
+
+LocStk	equ	CurDisk+1+2*25
+StrtPtr	equ	LocStk+2
+MnBuf	equ	StrtPtr+2
+EndPtr	equ	MnBuf+OPClen
+OutPtr	equ	EndPtr+2
+OutRec	equ	OutPtr+2
+OutBuff	equ	OutRec+1
+SrcLine	equ	OutBuff+OutLen
+InPtr	equ	SrcLine+3+LinLen
+InBuff	equ	InPtr+2
+_Heap	equ	InBuff+InLen
+
+	end
+

@@ -1,0 +1,968 @@
+	title	Z80 ASM Command Parser
+	name	('M80CMD')
+	maclib	m80
+
+; File : M80CMD.MAC
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Z80 Assembler Project - M80 compatible
+;
+; Initial routines for the Z80 assembler
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; ===== To the kernel =====
+
+	entry	iniM80
+
+; ===== From the kernel =====
+
+	ext	M80go,$head1,UpCase
+
+; ===== From the time routines =====
+
+	ext	getclk
+
+; ===== From the I/O module =====
+
+	ext	iniMAC,iniPRN,iniREL,iniERR
+	ext	Bopt,Copt,Dopt,Eopt,Gopt,Hopt,Iopt,Lopt
+	ext	Mopt,Oopt,Popt,Qopt,Ropt,Sopt,Uopt,Vopt
+	ext	Wopt,Xopt,Yopt,LYopt,LnkFlg,Ywrt,Eflag
+	ext	consta,conin,conout,String,crlf,FOpen
+	ext	LinDat,TopPtr,Heap,LinPtr
+	ext	relFCB,prnFCB,macFCB,errFCB
+	ext	FPB,parse,$$DRV,$$EXT,$$FN
+	ext	$$MAC,$$$FCB,ERRdev,$CMDCH
+	ext	REL.PB,PRN.PB,INC.PB,ERR.PB,MAC.PB
+	ext	GetLin,UnpFCB,ExitM80
+	
+; ===== Begin of temporary code =====
+
+EndM80	equ	$
+
+No_B.opt:
+	db	FALSE
+EndPtr:
+	dw	EndM80
+REflag:
+	db	FALSE
+Rflag:
+	db	FALSE
+Pflag:
+	db	FALSE
+FF.ext:
+	ds	1
+oldptr:
+	dw	0
+m80stack:
+	dw	0
+FCBext.flag:
+	db	FALSE
+$$ASM:
+	db	'ASM'		; Source alternative
+$$REL:
+	db	'REL'		; LINK-80 destination
+$$PRN:
+	db	'PRN'		; List destination
+$$CRF:
+	db	'CRF'		; CREF80 destination
+$cmd.ERR:
+	db	'?Command error',null
+;
+; Message on command error
+;
+cmd.ERR:
+	ld	hl,$cmd.ERR
+	call	String		; Give error message
+	call	crlf
+	ld	hl,(ExitM80)
+	jp	(hl)		; .. re-do or exit
+;
+; Set source file name for .REL or .PRN/.CRF if none given
+; ENTRY	Reg HL points to destination FCB
+; EXIT	Reg AF unchanged
+;
+set.name:	
+	push	af		; Save flags
+set..name:
+	ld	de,$$DRV
+	ld	c,FCBnam+1
+	ld	a,(hl)		; Test drive given
+	or	a
+	jr	nz,set.drv.skp	; .. skip if so
+	ld	a,(de)
+	or	a
+	jp	m,set.drv.skp	; Same for device
+set..n.loop:
+	ld	a,(de)		; Unpack name
+	ld	(hl),a
+	inc	hl
+	inc	de
+	dec	c
+	jr	nz,set..n.loop
+	pop	af
+	ret
+set.drv.skp:
+	dec	c		; Fix drive skip
+	inc	hl
+	inc	de
+	jr	set..n.loop
+;
+; Unpack file FCB
+; ENTRY	Reg DE points to destination FCB
+;
+unp.FCB:
+	push	bc
+	push	hl
+	ld	hl,$$DRV	; Get source
+	ld	bc,FCB..
+	ldir			; .. unpack
+	pop	hl
+	pop	bc
+	ret
+;
+; Set default extension of FCB
+; ENTRY	Reg DE points to default extension
+; EXIT	Carry set if wildcard found in file name
+;
+default.ext:
+	push	bc
+	push	hl
+	ld	a,(FCBext.flag)	; Test extension set
+	or	a
+	jr	z,no.def.ext	; .. yes, so exit
+	ld	hl,$$EXT	; Test extension defined
+	ld	a,(hl)
+	cp	' '
+	jr	nz,no.def.ext	; .. yes, so exit
+	ld	b,FCBext
+def..ext:
+	ld	a,(de)		; Unpack default extension
+	ld	(hl),a
+	inc	hl
+	inc	de
+	djnz	def..ext
+no.def.ext:
+	ld	hl,$$FN
+	ld	bc,FCBlen
+	ld	a,'?'
+	cpir			; Test wild card
+	pop	hl
+	pop	bc
+	scf
+	ret	z
+	or	a
+	ret
+;
+; Get File Control Block from name
+; EXIT	If carry reset:
+;		Accu and reg C hold actual character
+;		from name string
+;		Reg HL adjusted
+;		<$$DRV> holds actual device AD
+;		Zero flag set indicates end of line
+;	Carry set indicates error
+;
+get..file:
+	ld	(FPB),hl	; Save pointer
+get.file:
+	ld	a,TRUE
+	ld	(FCBext.flag),a	; Set NO extension
+	ld	hl,(FPB)
+	ld	(oldptr),hl	; Set old pointer
+	call	parse		; Parse file name
+	ret	c		; .. error
+	ld	a,(hl)
+	ld	c,a		; Copy character
+	jr	nz,check..any
+	ld	a,cr
+	ld	c,a
+	ld	hl,(TopPtr)	; Get top on end
+	dec	hl		; Get previous
+	ld	a,(hl)
+	inc	hl
+	sub	'.'		; Maybe dot
+	jr	nz,no.dot
+	ld	(FCBext.flag),a	; .. set flag
+no.dot:
+	ld	a,c		; Get CR
+	or	a
+	ret
+check..any:
+	ld	(LinPtr),hl	; Set current
+	ld	a,(hl)
+	cp	':'		; Test character device
+	jr	z,dev.get
+	call	ext.fix		; Look for extension set
+	or	a
+	ret
+dev.get:
+	call	get.dev		; Load device
+	ret
+;
+; Check file input for extension delimiter
+;
+ext.fix:
+	push	bc
+	push	de
+	push	hl
+	ld	de,(oldptr)
+	or	a
+	sbc	hl,de		; Get length
+	jr	z,no.ext.fix	; .. none
+	ld	c,l		; Get difference
+	ld	b,h
+	ex	de,hl
+	ld	a,'.'
+	cpir			; Find delimiter
+	jr	nz,no.ext.fix
+	xor	a
+	ld	(FCBext.flag),a	; .. set flag
+no.ext.fix:
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Load character device from table
+;
+get.dev:
+	inc	hl		; Skip delimiter
+	push	hl
+	ld	hl,dev.tab
+	ld	de,$$FN		; Point to device name
+	ld	b,total		; Get total count
+gtf.loop.1:
+	ld	c,b
+	ld	b,item-1	; Set item length
+	push	de
+	push	hl
+gtf.loop.2:
+	ld	a,(de)
+	cp	(hl)		; .. compare
+	jr	nz,gtf.next
+	inc	de
+	inc	hl
+	djnz	gtf.loop.2
+	ld	a,(hl)		; .. found, so get code
+	pop	hl
+	pop	de
+	dec	de
+	ld	(de),a		; Save code
+	pop	hl
+	ld	a,(hl)		; Get character
+	ld	c,a
+	or	a		; Reset carry
+	ret
+gtf.next:
+	pop	hl
+	ld	de,item
+	add	hl,de		; Point to next
+	pop	de
+	ld	b,c
+	djnz	gtf.loop.1
+	pop	hl
+	scf			; .. error
+	ret
+;
+; Character device table
+; ----------------------
+;
+dev.tab:
+	db	'CON',-1
+item	equ	$-dev.tab
+	db	'LST',-2
+	db	'AUX',-2
+total	equ	($-dev.tab) / item
+;
+; Get character, skip space
+; ENTRY	Reg HL points to buffer
+; EXIT	Accu holds character
+;	Zero set on EOL
+;
+char.buff:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Skip blanks
+	jr	z,char.buff
+	cp	lf		; .. and LF
+	jr	z,char.buff
+	cp	cr
+	ret
+;
+; Scan for options in command line
+; EXIT	Carry set on error
+;
+scan.opt:
+	ld	hl,(LinPtr)	; Get line pointer
+	call	char.buff	; Get character from buffer
+	ret	z		; .. end
+	ld	e,l		; Else copy buffer
+	ld	d,h
+src.opt:
+	ld	a,(hl)
+	inc	hl
+	cp	'/'		; Test option requested
+	jr	z,get.opt	; .. yeap
+	ld	(de),a		; .. unpack
+	inc	de
+	cp	cr
+	jr	nz,src.opt
+	ret			; End on CR
+get.opt:
+	ld	a,cr
+	ld	(de),a		; Force close
+get.opt.loop:
+	call	char.buff	; Get character
+	scf
+	ret	z		; Error on CR
+	push	hl
+	call	Exec		; Execute option
+	pop	hl
+	ret	c		; .. error
+	call	char.buff	; Get next character
+	ret	z		; .. end on EOL
+	cp	'/'		; Test option requested
+	jr	z,get.opt.loop
+	scf
+	ret			; .. should be
+;
+B.ex:
+	ld	a,(No_B.opt)	; Test option allowed
+	cp	TRUE
+	jp	z,cmd.ERR	; .. nope
+	ld	a,TRUE
+	ld	(Bopt),a	; Set Build flag
+	ret
+C.ex:
+	ld	(Copt),a	; Set cross-referrence file
+	ld	(Lopt),a	; .. force list, too
+	ret
+D.ex:
+	ld	(Dopt),a	; Set date option
+	ret
+E.ex:
+	ld	(Eopt),a	; Test ERROR log option
+	ld	a,FALSE
+	ld	(Wopt),a	; No warning only
+	ret
+G.ex:
+	ld	a,Glbl
+	ld	(Gopt),a	; Set global label option
+	ret
+H.ex:
+	ld	(Hopt),a	; Set hex listing
+	ret
+I.ex:
+	ld	(Iopt),a	; Set Intel 8080 code
+	ret
+L.ex:
+	ld	(Lopt),a	; Set List file forcing
+	ret
+M.ex:
+	ld	(Mopt),a	; Set Memory initialization
+	ret
+O.ex:
+	ld	(Oopt),a	; Set Octal listing
+	ret
+P.ex:
+	ld	a,(Popt)
+	inc	a		; Bump more 256 bytes
+	ld	(Popt),a
+	ret
+Q.ex:
+	ld	(Qopt),a	; Set quiet on .PRINTX
+	ret
+R.ex:
+	ld	(Ropt),a	; Set Relocatable file force
+	ret
+S.ex:
+	ld	(Sopt),a	; Set Strange code option
+	ret
+U.ex:
+	ld	(Uopt),a	; Set force to unknown option
+	ret
+V.ex:
+	ld	(Vopt),a	; Set Verbose on file opening
+	ret
+W.ex:
+	ld	(Eopt),a	; .. set error
+	ld	(Wopt),a	; .. and warning
+	ret
+X.ex:
+	ld	a,TRUE
+	ld	(Xopt),a	; Set X-suppressing false conds.
+	ret
+Y.ex:
+	ld	(Yopt),a	; Set symbols only for .SYM file
+	ret
+Z.ex:
+	ld	a,FALSE
+	ld	(Iopt),a	; Set Zilog Z80 code
+	ret
+;
+; Execute option
+; ENTRY	Accu holds option character
+; EXIT	Carry flag indicates error
+;
+Exec:
+	ld	hl,CmdTab-2	; Point to table
+	call	UpCase		; .. get UPPER case
+	ld	c,a
+Exec.loop:
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Test end
+	or	a
+	scf
+	ret	z		; .. yeap, error
+	cp	c		; Compare
+	inc	hl
+	jr	nz,Exec.loop
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,TRUE
+	push	hl
+	ld	hl,Exec.Ret
+	ex	(sp),hl
+	jp	(hl)		; Go
+Exec.Ret:
+	or	a		; Clear error
+	ret			; .. nope
+;
+; Command table
+;
+CmdTab:
+;;	db	'A'
+;;	dw	A.ex
+	db	'B'
+	dw	B.ex
+	db	'C'
+	dw	C.ex
+	db	'D'
+	dw	D.ex
+	db	'E'
+	dw	E.ex
+;;	db	'F'
+;;	dw	F.ex
+	db	'G'
+	dw	G.ex
+	db	'H'
+	dw	H.ex
+	db	'I'
+	dw	I.ex
+;;	db	'J'
+;;	dw	J.ex
+;;	db	'K'
+;;	dw	K.ex
+	db	'L'
+	dw	L.ex
+	db	'M'
+	dw	M.ex
+;;	db	'N'
+;;	dw	N.ex
+	db	'O'
+	dw	O.ex
+	db	'P'
+	dw	P.ex
+	db	'Q'
+	dw	Q.ex
+	db	'R'
+	dw	R.ex
+	db	'S'
+	dw	S.ex
+;;	db	'T'
+;;	dw	T.ex
+	db	'U'
+	dw	U.ex
+	db	'V'
+	dw	V.ex
+	db	'W'
+	dw	W.ex
+	db	'X'
+	dw	X.ex
+	db	'Y'
+	dw	Y.ex
+	db	'Z'
+	dw	Z.ex
+;
+	db	0
+;
+; Build .REL file from command line
+; EXIT	Carry set on error
+;
+GetREL::
+	call	get.file	; Get .REL file
+	ret	c		; .. error
+	ld	de,$$REL
+	call	default.ext	; Set default .REL
+	ret	c
+	ld	de,relFCB
+	call	unp.FCB		; Build .REL FCB
+	ld	a,($$FN)	; Test file name given
+	cp	' '
+	jr	nz,REL.present	; .. ok
+	ld	a,c
+	cp	','		; Test delimiter
+	jr	z,REL.empty	; .. empty
+	ld	a,TRUE
+	ld	(REflag),a	; Set empty but request
+	dec	hl
+REL.empty:
+	inc	hl
+	or	a
+	ret
+REL.present:
+	ld	a,TRUE
+	ld	(Rflag),a	; Set empty but request
+	ld	a,' '
+	ld	($$FN),a	; Clear .PRN file
+	ld	($$EXT),a
+	xor	a
+	ld	($$DRV),a
+	ld	a,c
+	cp	','		; Test delimiter
+	jr	z,REL.empty
+	or	a
+	ret
+;
+; Build .PRN file from command line
+; EXIT	Carry set on error
+;
+GetPRN::
+	call	get..file	; .. get it
+	ret	c
+	ld	de,$$PRN
+	ld	a,(Copt)	; Cross-reference ..
+	or	a
+	jr	z,CRF.not.req
+	ld	de,$$CRF
+CRF.not.req:
+	call	default.ext	; Set .PRN or .CRF
+	ret	c
+	ld	de,prnFCB
+	call	unp.FCB		; Build .PRN FCB
+	ld	a,($$FN)
+	cp	' '
+	jr	z,no.PRN.CRF	; Test file name
+	ld	a,TRUE
+	ld	(Pflag),a	; Set flag
+no.PRN.CRF:
+	ld	a,c		; Verify assignment
+	cp	'='
+	scf
+	ret	nz
+	or	a
+	ret
+;
+; Build .MAC file from command line
+; EXIT	Carry set on error
+;
+GetMAC:
+	inc	hl
+	call	get..file	; Get source file
+	ret	c
+	cp	cr		; Verify end
+	scf
+	ret	nz
+	ld	a,($$EXT)
+	ld	(FF.ext),a	; Save extension
+	ld	de,$$MAC
+	call	default.ext	; Set default .MAC
+	ret	c		; .. invalid
+	ld	de,$$$FCB
+	ld	a,(de)
+	or	a
+	jp	m,Skp.Find	; Skip character device
+	call	FOpen		; Find file
+	jr	nz,Skp.Find
+	ld	a,(FF.ext)
+	ld	($$EXT),a	; Restore extension
+	ld	de,$$ASM
+	call	default.ext	; Set .ASM
+	ret	c		; .. error
+	ld	de,$$$FCB
+	call	FOpen		; Find .ASM file
+	jr	nz,Skp.Find	; .. ok
+	ld	a,(FF.ext)
+	ld	($$EXT),a	; Restore extension
+	ld	de,$$MAC
+	call	default.ext	; Reset .MAC
+Skp.Find:
+	ld	de,macFCB
+	call	unp.FCB		; Build .MAC FCB
+	ld	de,$$DRV
+	ld	a,(de)
+	inc	de
+	or	a
+	jp	m,MAC.ok	; Test AUX: or CON:
+	ld	a,(de)		; Verify file name if not
+	cp	' '
+	scf
+	ret	z
+MAC.ok:
+	or	a
+	ret
+;
+; Generate LOG file on request
+;
+GetLOG:
+	push	hl
+	ld	a,(Eopt)	; Test ERR log
+	or	a
+	jr	z,no.LOG
+	ld	hl,macFCB
+	ld	a,(hl)
+	or	a		; Test device
+	jp	m,no..LOG	; .. get default log file
+	ld	de,errFCB
+	ld	bc,1+FCBnam
+	ldir			; Unpack name
+no..LOG:
+	ld	a,(Wopt)	; Test warning
+	or	a
+	jr	z,no.LOG
+	ld	a,-1
+	ld	(ERRdev),a	; Set NULL device
+no.LOG:
+	pop	hl
+	ret
+;
+; Build files from source name
+;
+BldFiles::
+	ld	a,(Rflag)	; Test .REL file to be given
+	cp	TRUE
+	jr	z,NoGetREL	; .. nope
+	ld	a,(REflag)
+	ld	b,a
+	ld	a,(Ropt)
+	or	b
+	cp	TRUE
+	ld	hl,relFCB
+	call	z,set.name	; .. no, set source
+NoGetREL:
+	ld	a,(Copt)	; Test cross-reference
+	or	a
+	jr	z,XRF.not.req	; .. no, skip
+	ld	de,prnFCB+FCBnam+1
+	ld	hl,$$CRF	; Set new extension
+	ld	bc,FCBext
+	ldir			; Unpack .CRF extension
+XRF.not.req:
+	ld	a,(Pflag)	; Test file name given
+	cp	TRUE
+	jr	z,NoGetPRN
+	ld	a,(LYopt)
+	cp	TRUE
+	ld	hl,prnFCB
+	call	z,set.name
+NoGetPRN:
+	ld	a,(LYopt)
+	ld	b,a
+	ld	a,(Pflag)
+	or	b
+	ld	(LYopt),a	; Force flag
+	ld	a,(Rflag)
+	ld	b,a
+	ld	a,(REflag)
+	or	b
+	ld	b,a
+	ld	a,(Ropt)
+	or	b		; Build .REL file request
+	ld	(Ropt),a
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% WARM ENTRY OF ASSEMBLER - PARSE A BIT %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+MoreM80:
+	ld	hl,(BDOS+1)	; .. load stack
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	sp,hl
+	ld	(m80stack),hl	; .. save
+	call	ResOpt		; Reset options
+	call	crlf		; Clear line
+	ld	a,(CPMbuff)	; Get current length
+	or	a
+	ld	a,'*'
+	call	z,conout	; Indicate input request
+	call	GetLin		; Get line
+	ld	hl,(LinPtr)
+	ld	a,(hl)
+	cp	cr		; Test empty command line
+	jp	z,OS		; .. skip
+	ld	bc,cmd.ERR	; Set error return
+	push	bc
+	call	scan.opt	; Scan options
+	ret	c
+	ld	a,(Lopt)
+	ld	b,a
+	ld	a,(Yopt)
+	or	b
+	ld	(LYopt),a	; Set .PRN output
+	call	GetREL		; Get .REL file
+	ret	c
+	call	GetPRN		; Get .PRN file
+	ret	c
+	call	GetMAC		; Get .MAC file
+	ret	c
+	call	GetLOG		; Make error log file
+	call	BldFiles	; Build default files
+;;	ld	c,.curdsk
+;;	call	BDOS		; Get current logged disk
+;;	push	af
+;;	ld	c,.retdsk
+;;	call	BDOS		; Reset disk system
+;;	pop	af
+;;	ld	e,a
+;;	ld	c,.seldsk	; Select prevous as logged disk
+;;	call	BDOS
+	call	iniMAC		; Init four required files
+	call	iniPRN
+	call	iniREL
+	call	iniERR
+	call	getclk		; Set clock
+	pop	hl		; Clear stack
+	ld	hl,(m80stack)
+	inc	hl		; Get back stack info
+	inc	hl
+	xor	a
+	ld	(CPMbuff),a	; Set empty line
+	ld	a,(Popt)	; Get pages
+	jp	M80go		; .. start
+;
+; Reset options to their initial state
+;
+ResOpt:
+	ld	a,FALSE
+	ld	(Bopt),a
+	ld	(Copt),a
+	ld	(Dopt),a
+	ld	(Eopt),a
+	ld	(Hopt),a
+	ld	(Iopt),a	; Same as Zopt
+	ld	(Lopt),a
+	ld	(Mopt),a
+	ld	(Oopt),a
+	ld	(Qopt),a
+	ld	(Ropt),a
+	ld	(Sopt),a
+	ld	(Uopt),a
+	ld	(Vopt),a
+	ld	(Wopt),a
+	ld	(Xopt),a
+	ld	(Yopt),a
+	ld	(LYopt),a
+	ld	(Ywrt),a
+	ld	(Eflag),a
+	ld	a,NoGlbl
+	ld	(Gopt),a
+	ld	a,1		; Default 256 bytes stack space
+	ld	(Popt),a
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% COLD ENTRY OF ASSEMBLER - INIT A BIT %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+iniM80:
+	sub	a		; Test correct CPU
+	ld	hl,$ill.cpu
+	jp	pe,ill.ver	; .. nope
+	ld	a,(CPMbuff)
+	or	a		; Test help
+	jp	z,..help
+	ld	c,.vers		; Get version
+	call	BDOS
+	cp	CPMPLUS		; Check it
+	ld	hl,$ill.ver
+	jp	c,ill.ver
+	ld	hl,$head1	; .. type message
+	call	String
+	call	crlf		; Close message
+	call	IsOpt.M		; Test option -M
+	jr	nz,NoOpt.M	; .. nope
+	ld	hl,iniM80
+	ld	(EndPtr),hl	; .. change buffers a bit
+	ld	hl,MoreM80
+	ld	(ExitM80),hl
+	ld	a,TRUE
+	ld	(No_B.opt),a	; .. disable /B
+NoOpt.M:
+	push	af
+	call	IniBuff		; Init buffers
+	pop	af
+	call	nz,FndLNK	; Find a linker
+	jp	MoreM80		; .. do the parse job
+;
+; Init assembler buffers
+;
+IniBuff:
+	ld	hl,(EndPtr)	; .. init buffers
+	ld	(MAC.PB+dmaLO),hl
+	ld	bc,MACt
+	add	hl,bc
+	ld	(REL.PB+dmaLO),hl
+	ld	bc,RELt
+	add	hl,bc
+	ld	(PRN.PB+dmaLO),hl
+	ld	bc,PRNt
+	add	hl,bc
+	ld	(INC.PB+dmaLO),hl
+	ld	bc,INCt
+	add	hl,bc
+	ld	(ERR.PB+dmaLO),hl
+	ld	bc,ERRt
+	add	hl,bc
+	ld	(Heap),hl	; Set top pointer
+	ret
+;
+; Give a little help
+;
+..help:
+	ld	hl,$help1
+	call	String		; Give 1st part
+wt.help:
+	call	consta
+	jr	nc,wt.help
+	call	conin
+	cp	ctrlC		; Test break
+	jp	z,OS		; .. yeap
+	ld	hl,$help2
+ill.ver:
+	call	String		; Give 2nd part
+	jp	OS
+;
+; Test option -M
+; EXIT	Zero set if found
+;
+IsOpt.M:
+	ld	hl,CPMbuff
+SkpBlnk..:
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Skip leading blanks
+	jr	z,SkpBlnk..
+	cp	'-'		; Test prefix
+	ret	nz		; .. nope
+	inc	hl
+	ld	a,(hl)
+	cp	'M'		; .. test right option
+	ret	nz		; .. nope
+	xor	a
+	ld	(CPMbuff),a	; Clear buffer
+	ret
+;
+; Find a linker
+;
+FndLNK:
+	ld	de,L80.FCB
+	call	FOpen		; Find L80
+	ld	a,1
+	jr	nz,L??Fnd
+	ld	de,LD80.FCB
+	call	FOpen		; Find LD80
+	ld	a,1
+	jr	nz,L??Fnd
+	ld	de,LINK.FCB
+	call	FOpen		; Find LINK
+	ret	z		; .. none
+	ld	a,2
+L??Fnd:
+	ld	(LnkFlg),a	; .. set flag
+	ld	hl,$CMDCH
+	call	UnpFCB		; .. unpack name
+	ld	(hl),' '	; .. force blank
+	ret
+$ill.ver:
+	db	'Illegal version of CP/M - '
+	db	'requires CP/M Plus',cr,lf,null
+$ill.cpu:
+	db	'M80 requires Z80 CPU',cr,lf,null
+$help1:
+	db	'Call it:',cr,lf,lf
+	db	'		M80 {-M | command_line}'
+	db	cr,lf,lf
+	db	'The command_line may be:'
+	db	cr,lf,lf
+	db	'1) obj,prn=src  Generating obj.REL and '
+	db	'prn.PRN (or prn.CRF) from src.MAC or src.ASM'
+	db	cr,lf,lf
+	db	'2)    obj,=src  Generating obj.REL only'
+	db	cr,lf,'          =src'
+	db	cr,lf,'       obj=src',cr,lf,lf
+	db	'3)    ,prn=src  Generating prn.PRN only'
+	db	cr,lf,lf
+	db	'4)       ,=src  Generating no file'
+	db	cr,lf,lf
+	db	'Any file name may be a standard CP/M device:'
+	db	cr,lf,lf
+	db	'CON: Input from console',cr,lf
+	db	'LST: Output to list device',cr,lf
+	db	'AUX: Input from auxiliary device',cr,lf
+	db	'(Such as paper tape reader)',cr,lf,lf
+	db	'<<<< MORE >>>>',null
+$help2:
+	db	cr
+	db	'The command line may my closed by "/" '
+	db	'followed by a legal option:'
+	db	cr,lf
+	db	'/O Octal listing',cr,lf
+	db	'/H Normal hex listing (DEFAULT)',cr,lf
+	db	'/R Force .REL file without regard to '
+	db	'command_line',cr,lf
+	db	'/L Force .PRN file without regard to '
+	db	'command_line',cr,lf
+	db	'/Y Build symbols only into .PRN file',cr,lf
+	db	'/C Output cross-reference prn.CRF file '
+	db	'instead of prn.PRN',cr,lf
+	db	'/Z Assemble ZILOG Z80 code (DEFAULT)',cr,lf
+	db	'/I Assemble INTEL 8080 code',cr,lf
+	db	'/P Allocate one extra stack page',cr,lf
+	db	'/M Initialize DS generated block data areas'
+	db	cr,lf
+	db	'/X Suppress listing of FALSE conditionals'
+	db	cr,lf
+	db	'/D Insert date and time on print file',cr,lf
+	db	'/E Error log to file src.ERR (or M80$$.ERR)'
+	db	cr,lf
+	db	'/W Give warning summary only',cr,lf
+	db	'/G Forces all labels to be set global',cr,lf
+	db	'/U Forces all unknown labels to be set '
+	db	'external',cr,lf
+	db	'/S Allow strange MICROSOFT LINK-80 code',cr,lf
+	db	'/B Build .COM file via LINK or L(D)80',cr,lf
+	db	'/V Be verbose on file opening',cr,lf
+	db	'/Q Be quiet on .PRINTX',cr,lf,lf
+	db	'The special option -M enters the command line'
+	db	' mode.',cr,lf
+	db	'M80 will display an asterisk (*) to indicate'
+	db	' that it is',cr,lf
+	db	'ready to accept a command line as described'
+	db	' above.',cr,lf
+	db	'An empty line exits M80.',cr,lf,lf
+	db	'Note that this options shortens '
+	db	'the available memory',cr,lf
+	db	'In this mode the option /B will be disabled'
+	db	cr,lf,null
+L80.FCB:
+	db	0,'L80     COM'
+	ds	FCB..-FCBlen-1
+LD80.FCB:
+	db	0,'LD80    COM'
+	ds	FCB..-FCBlen-1
+LINK.FCB:
+	db	0,'LINK    COM'
+	ds	FCB..-FCBlen-1
+
+LAST::
+	end
+

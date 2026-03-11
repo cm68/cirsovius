@@ -1,0 +1,6071 @@
+	title	PMARC archiver
+	name	('PMARC')
+
+; DASMed version of PMARC.COM
+; By W. Cirsovius
+
+; !!!!	l1d79		Invalid reset of _EX
+
+; The archive archiver PMARC
+
+; This utility creates LZH-like archives with the extension
+; .PMA. It compresses as effectively as the MSDOS utility LHA,
+; but is not completely compatible (you can read the directory
+; with LHA on an IBM-PC, but you can't extract files from the
+; archive). Just type PMARC at the CP/M prompt to see a list
+; of options.
+; ####################################################################
+; File structure
+; --------------
+; 
+; A PMA archive is a sequence of individually compressed member files.
+; No global header, no central directory, no gaps inbetween.
+; 
+; Each member file looks like this:
+; 
+; # type  content
+; --------------------------------------------------------------------
+; 1 byte  length of header (starting at the "method" field)
+; 1 byte  8 bit arithmetic checksum for header
+; 
+; 5 byte  method. "-pm0-" = stored, "-pm2-" = compressed
+; 1 long  compressed file size (= uncompressed file size if stored)
+; 1 long  uncompressed file size
+; 1 long  date/time, MSDOS-like
+; 1 byte  attributes, MSDOS-like: 20h= archive,
+;         02h= hidden (CP/M: system), 01h= read only
+; 1 byte  header level, always 0
+; 1 byte  length of file name
+; n byte  file name (CP/Ms attributes (7ths bits) are not cleared,
+;         but are not respected when unpacking the archive)
+; 1 word  CRC checksum of (compressed) file body
+; n byte  memo (length of memo results from length of header minus
+;         length of the other header fields)
+; 
+; n byte  (compressed) file body
+; ####################################################################
+;
+; File date, in 16-bit MS-DOS format:
+;
+;   1   1   1   1   1   1
+;   5   4   3   2   1   0   9   8   7   6   5   4   3   2   1   0
+; +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+; | y | y | y | y | y | y | y | m | m | m | m | d | d | d | d | d |
+; +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+; 
+; Bits 15:9 = year - 1980
+; Bits  8:5 = month of year
+; Bits  4:0 = day of month
+; (All zero means no date.)
+;
+; File time, in 16-bit MS-DOS format:
+;
+;   1   1   1   1   1   1
+;   5   4   3   2   1   0   9   8   7   6   5   4   3   2   1   0
+; +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+; | h | h | h | h | h | m | m | m | m | m | m | s | s | s | s | s |
+; +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+; 
+; Bits 15:11 = hour (24-hour clock)
+; Bits 10:5  = minute
+; Bits  4:0  = second/2
+;
+; ####################################################################
+
+	.z80
+	aseg
+	org	0100h
+
+false	equ	0
+true	equ	not false
+.true	equ	1
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+CCP	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.rdcon	equ	10
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.setdma	equ	26
+.rndrd	equ	33
+.rndwr	equ	34
+.filsiz	equ	35
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_SYS	equ	10
+_EX	equ	12
+_CR	equ	32
+_RRN	equ	33
+
+DIRlen	equ	16
+fcblng	equ	36
+
+reclng	equ	128
+
+max.dir	equ	3
+
+null	equ	00h
+bell	equ	07h
+bs	equ	08h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+MSB	equ	10000000b
+NoMSB	equ	01111111b
+LOMASK	equ	00001111b
+
+_opc	equ	00eh		; LD C,<byte>
+_ret	equ	0c9h		; RET
+
+la001	equ	0a001h		; 1010000000000001b
+
+ARCpag	equ	0a8h		; Required memory space
+
+MAXREC	equ	65535
+
+BASrec	equ	8
+
+InpRecs	equ	192		; Records for input file
+
+MEMOLEN	equ	74
+
+BCD.10	equ	10h
+
+YYbeg	equ	1980		; Base year of MS-DOS
+YYCbeg	equ	YYbeg-100*(YYbeg / 100)
+;
+; DYNAMIC AREA - WITHIN CODE
+;
+l0200	equ	0200h		; Dynamic areas
+l0400	equ	l0200+512
+l0500	equ	l0400+256	; FCB
+l0510	equ	l0500+16	; Filename
+l051b	equ	l0510+11	; File count
+l051c	equ	l051b+1		; Date and time - 6 bytes
+l0522	equ	l051c+6
+l0524	equ	l0522+2
+l0525	equ	l0524+1		; End of file
+l0526	equ	l0525+1
+l0527	equ	l0526+1
+l0528	equ	l0527+1
+l0529	equ	l0528+1
+l052d	equ	l0529+4		; Source file pointer
+l0531	equ	l052d+4
+l0535	equ	l0531+4		; Address of file buffer
+l0537	equ	l0535+2		; Save address of RRN
+l0539	equ	l0537+2		; Address of disk buffer
+l053b	equ	l0539+2
+l053c	equ	l053b+1
+l053d	equ	l053c+1
+l053e	equ	l053d+1
+l053f	equ	l053e+1
+;
+; #### DYNAMICALLY CLEARED ####
+;
+l0540	equ	l053f+1
+l0541	equ	l0540+1
+l0542	equ	l0541+1
+l0543	equ	l0542+1
+l0544	equ	l0543+1
+l0547	equ	l0544+3
+l054b	equ	l0547+4
+l054f	equ	l054b+4		; Temp file access
+l0550	equ	l054f+1
+l0551	equ	l0550+1
+l0552	equ	l0551+1
+l0554	equ	l0552+2
+l0556	equ	l0554+2
+l0558	equ	l0556+2
+l0559	equ	l0558+1		; Index
+l055a	equ	l0559+1		; End of file
+l055b	equ	l055a+1		; File bit state
+l055c	equ	l055b+1		; Current file byte
+l055d	equ	l055c+1
+l055e	equ	l055d+1
+;
+; #############################
+;
+l0560	equ	l055e+2
+l0561	equ	l0560+1
+l0580	equ	l0560+32
+l0581	equ	l0580+1
+l05a0	equ	l0580+32
+l05a8	equ	l05a0+8
+l05b0	equ	l05a8+8
+l05b4	equ	l05b0+4
+l05b8	equ	l05b4+4
+l05bc	equ	l05b8+4
+l05bd	equ	l05bc+1
+l0630	equ	l05bd+115
+l0634	equ	l0630+4
+l0638	equ	l0634+4
+l063c	equ	l0638+4
+l0640	equ	l063c+4
+l0644	equ	l0640+4
+l0648	equ	l0644+4
+l064c	equ	l0648+4
+l068c	equ	l064c+64
+l0690	equ	l068c+4
+l0694	equ	l0690+4
+l0698	equ	l0694+4
+l069c	equ	l0698+4
+l06a0	equ	l069c+4
+l06a4	equ	l06a0+4
+l06c4	equ	l06a4+8*4
+
+l2000	equ	2000h
+
+l0004	equ	04h
+l0006	equ	06h
+l0009	equ	09h
+l000c	equ	0ch
+l000f	equ	0fh
+l0016	equ	16h
+l0018	equ	18h
+l0021	equ	21h
+l0036	equ	36h
+
+_ARClen	equ	 5		; Header offset
+_ARCnam	equ	19
+
+MAXBCD	equ	9999h
+
+l1000	equ	1000h
+;
+; *************************************************************
+; ** NOTE THE FIRST TWO PAGES (0100H-01FFH) ARE SYSTEM PAGES **
+; ** WHOSE CONTENTS SHOULD BE CHANGED BY PMSET.COM ONLY      **
+; *************************************************************
+; ** THE FOLLOWING 512 BYTES (256 WORDS, 0200H-03FFH) WILL   **
+; ** BE OVERWRITTEN BY SET UP ROUTINE 'l06e8'                **
+; *************************************************************
+; ** THE MAIN LOOP REQUIRES CONTINUOUS LOCATIONS 0400H UP TO **
+; ** 06C4H+64 (0704H) FOR DYNAMIC STORAGE                    **
+; ** NOTE THAT LABEL 'l0707' IS ABOVE 0704H                  **
+; *************************************************************
+;
+	jr	l0180
+;
+	db	'PMarc Ver 2.00'
+;
+; Get time stamp from file
+; ENTRY	Reg DE points to file control block (FCB) of the file whose date we
+;	want to know. File was opened recently.
+;	Reg HL points to date/time in MSDOS-like format
+;	(2 words: time, date)
+;	Reg BC points to date/time in binary/BCD format
+;	(6 byte: year, month, day, hour, minute, second)
+; EXIT	Carry set on time fetched
+;
+l0110:
+	ret			; Get time
+				; Return C set if time got
+	ds	109
+l017e:				; Mode of time - last two bits:
+	db	00000000b	; Bit 0: whether date is binary (=1) or BCD (=0)
+				; Bit 1:    "    time is   "             "
+l017f:				; Display mode
+	db	0		; value 0: terminal supports backspace
+				;          display proceedings behind file name
+				; value 1: terminal does not support backspace, but carriage return
+				;          put display in a separate line after the file name
+				; else   : terminal does not support backspace or carriage return,
+				;          no display of the proceedings
+l0180:
+	jr	l01f0
+;
+; Time stamp definition
+;
+l0182:				; <-- Put here the name of the system
+	ds	14,eot		;     for which that does support the date
+;
+; List of extensions that say a file contains text.
+;
+l0190:
+	db	'DOC'
+	db	'TXT'
+	ds	8*.ext
+	db	-1
+l01af:
+	db	0		; Work drive [A: = 1, B: = 2 etc.]
+l01b0:
+	db	0		; Make memorandums
+l01b1:
+	db	0		; High-speed mode
+	db	0
+;
+; ######################
+; ->> CP/M Interface <<-
+; ######################
+;
+; Put character in reg E to console
+;
+l01b3:
+	ld	c,.conout
+	jp	BDOS
+;
+; Put string in ^DE on console
+;
+l01b8:
+	ld	c,.string
+	jp	BDOS
+;
+; Open file ^DE
+;
+l01bd:
+	ld	c,.open
+	jp	BDOS
+;
+; Close file ^DE
+;
+l01c2:
+	ld	c,.close
+	jp	BDOS
+;
+; Delete file ^DE
+;
+l01c7:
+	ld	c,.delete
+	jp	BDOS
+;
+; Read sequential record from file ^DE
+;
+l01cc:
+	ld	c,.rdseq
+	jp	BDOS
+;
+; Write sequential record to file ^DE
+;
+l01d1:
+	ld	c,.wrseq
+	jp	BDOS
+;
+; Create file ^DE
+;
+l01d6:
+	ld	c,.make
+	jp	BDOS
+;
+; Set disk buffer ^DE
+;
+l01db:
+	ld	c,.setdma
+	jp	BDOS
+;
+; Read random record from file ^DE
+;
+l01e0:
+	ld	de,FCB
+	ld	c,.rndrd
+	jp	BDOS
+;
+; Write random record to file ^DE
+;
+l01e8:
+	ld	de,FCB
+	ld	c,.rndwr
+	jp	BDOS
+;
+; %%%%%%%%%%%%%%%%%
+; %% Start PMARC %%
+; %%%%%%%%%%%%%%%%%
+;
+l01f0:
+	ld	de,l2877
+	call	l01b8		; Give copyright
+	ld	a,(l0182)	; Get time stamp
+	cp	eot		; Test defined
+	jr	z,l0209		; Nope
+	ld	de,l28c4
+	call	l01b8		; Tell timestamp definition
+	ld	de,l0182
+	call	l01b8
+l0209:
+	ld	de,l279d
+	call	l01b8		; Give new lines
+	ld	a,(TPATOP+1)	; Get top page
+	cp	ARCpag		; Test enough space
+	jp	nc,l0484	; Yeap
+	ld	de,l03d4
+	jp	l01b8		; Tell out of memory
+;
+; Process help
+;
+l021d:
+	ld	de,l0268
+	call	l01b8		; Tell usage
+	ld	a,(l01af)	; Get work drive
+	or	a		; Test current
+	ld	de,l02e8
+	jr	z,l0235		; Yeap
+	add	a,'A'-1		; make ASCII
+	ld	e,a
+	call	l01b3		; Print it
+	ld	de,l02f1
+l0235:
+	call	l01b8		; Tell status
+	ld	de,l02f9
+	call	l01b8
+	ld	a,(l01b1)	; Get high-speed mode
+	or	a		; Test enabled
+	ld	de,l0347
+	jr	z,l024a		; Yeap
+	ld	de,l0352
+l024a:
+	call	l01b8		; Tell state
+	ld	de,l0359
+	call	l01b8
+	ld	a,(l01b0)	; Get memorandum flag
+	or	a		; Test making of
+	ld	de,l0367
+	jr	z,l025f		; Nope
+	ld	de,l037e
+l025f:
+	call	l01b8		; Tell state
+	ld	de,l0395
+	jp	l01b8		; Give final message
+;
+l0268:
+	db	'Usage:'
+	db	cr,lf
+	db	' PMARC2 <archive>[=<base-archive>][/w:] [d:]<filename>[=<entryname>][/BDHMNT]'
+	db	cr,lf,cr,lf
+	db	'Options:'
+	db	cr,lf
+	db	' /w : Work drive(default is ',eot
+l02e8:
+	db	'current)',eot
+l02f1:
+	db	':)     ',eot
+l02f9:
+	db	'   /B : Binary file(ignore EOF)'
+	db	cr,lf
+	db	' /D : Delete members in archive        /H : ',eot
+l0347:
+	db	'High-speed',eot
+l0352:
+	db	'Normal',eot
+l0359:
+	db	' mode'
+	db	cr,lf
+	db	' /M : ',eot
+l0367:
+	db	'Make memorandums      ',eot
+l037e:
+	db	'Don''t make memorandums',eot
+l0395:
+	db	'           /N : No compression'
+	db	cr,lf
+	db	' /T : Text file(stop at EOF)'
+	db	cr,lf,eot
+l03d4:
+	db	bell,'Out of memory.'
+	db	cr,lf,eot
+l03e6:
+	db	'Copying: ',eot
+l03f0:
+	db	'SFX/EXE module'
+	db	cr,lf,eot
+l0401:
+	db	' Overwrite? (Y/N) ',eot
+l0414:
+	db	'Base archive = ',eot
+l0424:
+	db	'Archive file = ',eot
+l0434:
+	db	' (NEW)',cr,lf,eot
+l043d:
+	db	' (ADD)',cr,lf,eot
+;
+; Print name of FCB ^HL
+;
+l0446:
+	ld	a,(hl)		; Get drive
+	or	a		; Test default
+	jr	z,l0457		; Yeap, skip
+	push	hl
+	add	a,'A'-1		; Make ASCII
+	ld	e,a
+	call	l01b3		; Print it
+	ld	e,':'
+	call	l01b3		; Give delimiter
+	pop	hl
+l0457:
+	inc	hl
+	ld	b,.nam
+l045a:
+	ld	a,(hl)
+	cp	' '+1		; Test valid range
+	jr	c,l0467		; Skip if not
+	ld	e,a
+	push	bc
+	push	hl
+	call	l01b3		; Print name
+	pop	hl
+	pop	bc
+l0467:
+	inc	hl
+	djnz	l045a
+	push	hl
+	ld	e,'.'
+	call	l01b3		; Give delimiter
+	pop	hl
+	ld	b,.ext
+	call	l26e6		; Print extension
+	ret
+;
+; Set default extension 'PMA'
+; ENTRY	Reg HL points to extension field
+;
+l0477:
+	ld	a,(hl)
+	cp	' '		; Test extension
+	ret	nz		; Yeap
+	ld	(hl),'P'	; Set default
+	inc	hl
+	ld	(hl),'M'
+	inc	hl
+	ld	(hl),'A'
+	ret
+;
+; MAIN ENTRY
+; ++++++++++
+;
+; Continue PMARC
+;
+l0484:
+	ld	hl,CCP	; Poin to command line
+	ld	a,(hl)		; Get length
+	or	a		; Test any input
+	jp	z,l021d		; Nope, give help
+	inc	hl
+	ld	b,0
+	ld	c,a
+	add	hl,bc		; Point to end
+	ld	(hl),null	; Close line
+	ld	hl,FCB
+	call	l1d88		; Prepare archive file
+	ld	hl,l294b
+	call	l1d88		; Prepare base-archive file
+	ld	a,(l01af)	; Get work drive
+	ld	(l2903),a	; Store into PMATEMP1.$$$
+	ld	(l2927),a	; Store into PMATEMP2.$$$
+	ld	hl,CCP+1	; Point to command line
+l04ab:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Verify valid input
+	jp	c,l021d		; Nope, give help
+	jr	z,l04ab		; Skip blanks
+	dec	hl
+	ld	de,FCB
+	call	l1da1		; Get drive
+	inc	de
+	ld	b,.nam
+l04be:
+	call	l04dd		; Get name
+	jr	z,l04cc		; Found '.'
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l04be
+l04c7:
+	call	l04dd		; Skip long name
+	jr	nz,l04c7
+l04cc:
+	ld	de,FCB+.drv+.nam
+	ld	b,.ext
+l04d1:
+	call	l04dd		; Get extension
+	ld	(de),a		; Unpack it
+	inc	de
+	djnz	l04d1
+l04d8:
+	call	l04dd		; Skip long extension
+	jr	l04d8
+;
+; Copy from command line to FCB
+; ENTRY	Reg DE points to part of FCB
+;	Reg HL points to string
+;	Reg B  holds length
+; EXIT	Zero set on dot
+;
+l04dd:
+	pop	iy		; Get caller
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Verify valid input
+	jp	c,l021d		; Nope, give help
+	jr	z,ll054f	; Process blank
+	cp	'='		; Test assignment
+	jr	z,l04f5		; Get base-archive
+	cp	'/'		; Test option delimiter
+	jr	z,ll0531	; Yeap
+	cp	'.'		; Try dot
+	push	iy
+	ret
+l04f5:
+	ld	de,l294b
+	call	l1da1		; Get drive
+	inc	de
+	ld	b,.nam
+l04fe:
+	call	l051d		; Get name
+	jr	z,l050c		; Found '.'
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l04fe
+l0507:
+	call	l051d		; Skip long name
+	jr	nz,l0507
+l050c:
+	ld	de,l294b+.drv+.nam
+	ld	b,.ext
+l0511:
+	call	l051d		; Get extension
+	ld	(de),a		; Unpack it
+	inc	de
+	djnz	l0511
+ll0518:
+	call	l051d		; Skip long extension
+	jr	ll0518
+;
+; Copy from command line to FCB
+; ENTRY	Reg DE points to part of FCB
+;	Reg HL points to string
+;	Reg B  holds length
+; EXIT	Zero set on dot
+;
+l051d:
+	pop	iy		; Get caller
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Verify valid input
+	jp	c,l021d		; Nope, give help
+	jr	z,ll054f
+	cp	'/'		; Test option delimiter
+	jr	z,ll0531	; Yeap
+l052c:
+	cp	'.'		; Try dot
+	push	iy
+	ret
+;
+; Process work drive
+;
+ll0531:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'/'		; Test 2nd slash
+	jr	z,l052c		; Yeap
+	cp	'a'-1		; Test range
+	jr	c,ll053d
+	sub	'a'-'A'		; Convert to upper case
+ll053d:
+	cp	'A'		; Test valid drive range
+	jr	c,ll0518
+	cp	'P'+1
+	jr	nc,ll0518
+	sub	'@'		; Make binary
+	ld	(l2903),a	; Save drive into PMATEMP1.$$$
+	ld	(l2927),a	; Save drive into PMATEMP2.$$$
+	jr	ll0518
+;
+; Process list of member files
+;
+ll054f:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Verify valid input
+	jp	c,l021d		; Nope, give help
+	jr	z,ll054f	; Skip blanks
+	dec	hl
+	ld	(l296f),hl	; Save command pointer
+	ld	a,(FCB+.drv)
+	cp	' '		; Verify valid input
+	jp	z,l021d		; Nope, give help
+	call	l1d6a		; Delete PMATEMP1.$$$
+	call	l1d79		; Delete PMATEMP2.$$$
+	ld	hl,l294b+.drv+.nam
+	call	l0477		; Set default extension .PMA
+	ld	a,(l294b+.drv)
+	cp	' '		; Test filename given
+	jp	z,l0597		; Nope
+	ld	de,l0414
+	call	l01b8		; Tell base archive
+	ld	hl,l294b
+	call	l0446		; Tell filename
+	ld	de,l294b
+	call	l01bd		; Open base-archive file
+	inc	a		; Test success
+	ld	de,l2859
+	jp	z,l01b8		; Nope, tell not found and exit
+	ld	de,l279f
+	call	l01b8		; Give new line
+l0597:
+	ld	hl,FCB+.drv+.nam
+	call	l0477		; Set default extension .PMA
+	ld	de,l0424
+	call	l01b8		; Tell archive file
+	ld	hl,FCB
+	call	l0446		; Tell filename
+	ld	de,l3280
+	call	l01db		; Set disk buffer
+	ld	de,FCB
+	call	l01bd		; Open file
+	inc	a
+	jp	nz,l0601	; Ok, ot does exist
+	ld	de,l0434
+	call	l01b8		; Tell new file
+l05bf:
+	ld	de,FCB
+	call	l01d6		; Create file
+	inc	a		; Test success
+	jp	z,l26b8		; Disk full
+	xor	a
+	ld	(FCB+_RRN),a	; Init random record
+	ld	(FCB+_RRN+1),a
+	ld	(FCB+_RRN+2),a
+	ld	(l3280),a	; Clear disk buffer
+	ld	hl,l3280+1
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),eof
+	ld	bc,reclng-2
+	ldir			; Fill remainder with eof
+	call	l01e8		; Write random record
+	or	a
+	jp	nz,l26b8	; Disk full
+	ld	de,FCB
+	call	l01c2		; Close file
+	ld	hl,0
+	ld	(FCB+_EX),hl	; Reset a bit
+	ld	(FCB+_EX+2),hl
+	ld	de,FCB
+	call	l01bd		; Open file
+	jr	ll0630
+l0601:
+	ld	a,(l294b+.drv)
+	cp	' '		; Test filename
+	jr	z,l062a		; Nope
+	ld	de,l0401
+	call	l01b8		; Ask for overwrite
+	ld	c,.conin
+	call	BDOS
+	push	af
+	ld	de,l279f
+	call	l01b8		; Give new line
+	pop	af
+	cp	'Y'		; Test overwrite
+	jr	z,l0622
+	cp	'y'
+	ret	nz
+l0622:
+	ld	de,FCB
+	call	l01c7		; Delete file
+	jr	l05bf		; Then create new one
+l062a:
+	ld	de,l043d
+	call	l01b8		; Tell adding
+ll0630:
+	ld	de,l279f
+	call	l01b8		; Give new line
+	ld	sp,l28de	; Init local stack
+	ld	a,(l294b+.drv)
+	cp	' '		; Test name given
+	jp	z,l06e8		; Nope
+	ld	hl,0
+	ld	(l2979),hl	; Clear a bit
+	ld	(l2975),hl
+	ld	(l2975+2),hl
+l064d:
+	call	l25cb		; Read byte from base-archive file
+l0650:
+	or	a		; Test end of file
+	jp	z,l06cb		; Yeap
+	ld	(l068d),a	; Save length of header
+	ld	b,a
+	call	l25cb		; Read byte from base-archive file
+	ld	(l0693),a	; Save checksum
+	ld	c,a
+	ld	hl,l3600	; Init header
+	xor	a		; Clear checksum
+l0663:
+	ld	d,a
+	call	l25cb		; Read byte from base-archive file
+	ld	(hl),a		; Read header
+	inc	hl
+	add	a,d		; Build sum
+	djnz	l0663
+	cp	c		; Compare sum
+	jp	nz,l1605	; Invalid header
+	ld	de,l03e6
+	call	l01b8		; Tell copying
+	call	l09ac		; Test header -pms-
+	ld	de,l03f0	; Tell SFX/EXE module if so
+	jr	z,l0689
+	ld	hl,l3600+_ARCnam
+	ld	b,(hl)		; Get length
+	inc	hl
+	call	l26e6		; Print string
+	ld	de,l279f
+l0689:
+	call	l01b8		; Give new line
+l068d	equ	$+1
+	ld	a,$-$		; Load length of header
+	ld	b,a
+	call	l251a		; Put byte to file
+l0693	equ	$+1
+	ld	a,$-$		; Load checksum
+	call	l251a		; Put byte to file
+	ld	hl,l3600	; Point to header
+l069a:
+	ld	a,(hl)		; Get from header
+	call	l251a		; Put byte to file
+	inc	hl
+	djnz	l069a
+				; Remember length is a long integer
+				; (32 bits)
+	ld	de,(l3600+_ARClen)
+	ld	bc,(l3600+_ARClen+2)
+l06a9:
+	call	l25cb		; Read byte from base-archive file
+	call	l251a		; Put byte to file
+	ld	a,e
+	sub	1		; Count down
+	ld	e,a
+	jr	nc,l06c2
+	ld	a,d
+	sub	1
+	ld	d,a
+	jr	nc,l06c2
+	ld	a,c
+	sub	1
+	ld	c,a
+	jr	nc,l06c2
+	dec	b
+l06c2:
+	ld	a,b		; Test total end
+	or	c
+	or	d
+	or	e
+	jr	nz,l06a9	; Nope
+	jp	l064d
+l06cb:
+	xor	a
+	call	l251a		; Put end marker to file
+	ld	a,(l2975)	; Get write index
+	and	reclng-1	; Mask real index
+	jr	z,l06e2		; Record boundary
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate remaining length
+	ld	b,a
+l06db:
+	ld	a,eof
+	call	l251a		; Put end of file to file
+	djnz	l06db
+l06e2:
+	ld	de,l279f
+	call	l01b8		; Give new line
+;
+; Init array - overwrite existing code
+;
+l06e8:
+	ld	hl,l0200
+l06eb:
+	ld	d,0		; Init values
+	ld	e,l
+	ld	b,8
+l06f0:
+	srl	d		; Shift value
+	rr	e
+	jr	nc,l06fe	; No bit out
+	ld	a,LOW la001
+	xor	e		; Build value
+	ld	e,a
+	ld	a,HIGH la001
+	xor	d
+	ld	d,a
+l06fe:
+	djnz	l06f0
+	ld	(hl),d		; Save into array
+	inc	h
+	ld	(hl),e
+	dec	h
+	inc	l		; 256 Words to setup
+	jr	nz,l06eb
+;
+; ===>> END OF DYNAMIC STORAGE <<===
+;
+; Main processing loop
+;
+L0704::				;; Must start at or above 0704H
+;
+l0707:
+	ld	hl,l0500
+	call	l1d88		; Prepare file
+	xor	a
+	ld	(l0525),a	; Clear end of file	
+	ld	(l051b),a	; Clear file count
+	ld	(l0526),a	; Clear text file
+	ld	(l297e),a	; Enable compression
+	ld	a,true
+	ld	(l0527),a	; Set text file
+	ld	a,(l01b0)	; Get memorandum flag
+	ld	(l0528),a	; Unpack
+	ld	a,(l01b1)	; Get high-speed mode
+	ld	(l297d),a	; Set it
+	ld	hl,l0510	; Point to filename
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),'?'
+	ld	bc,.nam+.ext-1
+	ldir			; Fill with wildcard
+	ld	hl,(l296f)	; Get command pointer
+l073b:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end of line
+	jp	z,l2751		; Close file and exit
+	cp	' '+1
+	jr	c,l073b
+	dec	hl
+	ld	(l296f),hl	; Save command pointer
+	ld	de,l0500
+	call	l1da1		; Get drive
+	inc	de
+	ld	b,.nam
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	jp	z,l2751		; Close file and exit
+	cp	' '+1		; Test valid character
+	jr	c,l073b
+	cp	'.'		; Test extension follows
+	jr	z,l073b
+	cp	'*'		; Test wildcard
+	jr	z,l0776
+	ld	(de),a		; Unpack character
+	inc	de
+	dec	b
+l0767:
+	call	l07a7		; Process option
+	jr	z,l0781		; Found dot
+	cp	'*'		; Test wildcard
+	jr	z,l0776		; Process it
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l0767
+	jr	l077c
+l0776:
+	ld	a,'?'
+l0778:
+	ld	(de),a		; Fill wildcard
+	inc	de
+	djnz	l0778
+l077c:
+	call	l07a7		; Process option
+	jr	nz,l077c	; Skip name
+l0781:
+	ld	de,l0500+.drv+.nam
+	ld	b,.ext
+l0786:
+	call	l07a7		; Process option
+	cp	'*'		; Test wildcard
+	jr	z,l0793
+	ld	(de),a		; Unpack extension
+	inc	de
+	djnz	l0786
+	jr	l0799
+l0793:
+	ld	a,'?'
+l0795:
+	ld	(de),a		; Fill wildcard
+	inc	de
+	djnz	l0795
+l0799:
+	call	l07a7		; Process option
+	jr	l0799		; Loop endless
+
+;
+; Save current pointers and try next file
+;
+l079e:
+	ld	(l2971),hl	; Save current pointer
+	ld	(l2973),hl
+	jp	l09f9
+;
+; Get option or scan file
+; ENTRY	Reg HL points to command line
+; EXIT	Zero set on dot delimiter
+;	Accu holds character
+;
+l07a7:
+	pop	iy
+	ld	a,(hl)		; Get character
+	cp	' '+1		; Test control
+	jr	c,l079e		; Yeap
+	inc	hl
+	cp	'/'		; Test option
+	jr	z,l07bd		; Yeap
+	cp	'='		; Test assign
+	jp	z,l0845		; Yeap
+l07b8:
+	cp	'.'		; Look for delimter
+	push	iy
+	ret
+l07bd:
+	ld	a,(hl)		; Test next character
+	inc	hl
+	cp	'/'		; Test option
+	jr	z,l07b8		; Nope
+	dec	hl		; Fix pointer
+	dec	hl
+	ld	(l2971),hl	; Save pointer
+	inc	hl		; Fix for option character
+l07c9:
+	ld	a,(hl)
+	inc	hl
+l07cb:
+	cp	'a'-1		; Test lower case
+	jr	c,l07d1
+	sub	'a'-'A'		; Convert to UPPER case
+l07d1:
+	cp	'D'		; Test delete members
+	jp	z,l08aa
+	cp	'B'		; Test binary file
+	jr	z,l0812
+	cp	'O'
+	jr	z,l0812
+	cp	'T'		; Test text file
+	jr	z,l0818
+	cp	'M'		; Test make memorandum
+	jr	z,l081f
+	cp	'H'		; Test high speed mode
+	jr	z,l0829
+	cp	'N'		; Test no compression
+	jr	z,l0833
+	cp	' '+1		; Test control character
+	jp	c,l08a3
+l07f3:
+	push	af
+l07f4:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '+1		; Find control
+	jr	nc,l07f4
+	dec	hl
+	ld	(l2973),hl	; Save pointer
+	ld	de,l2809
+	call	l01b8		; Tell invalid option
+	pop	af		; Get back option
+	ld	e,a
+	call	l01b3		; Print it
+	ld	de,l279f
+	call	l01b8		; Give new line
+	jp	l0a1f
+;
+; Option /B or /O : Set binary file
+;
+l0812:
+	xor	a
+	ld	(l0527),a	; Set binary file
+	jr	l0838
+;
+; Option /T : Set text file
+;
+l0818:
+	ld	a,0fh
+	ld	(l0526),a	; Set text file
+	jr	l0838
+;
+; Option /M : Make memorandum
+;
+l081f:
+	ld	a,(l0528)	; Get memorandum option
+	xor	true		; Toggle it
+	ld	(l0528),a
+	jr	l0838
+;
+; Option /H : High speed mode
+;
+l0829:
+	ld	a,(l297d)	; Get high speed option
+	xor	true		; Toggle it
+	ld	(l297d),a
+	jr	l0838
+;
+; Option /N : No compression
+;
+l0833:
+	ld	a,true
+	ld	(l297e),a	; Disable compression
+l0838:
+	ld	a,(hl)
+	inc	hl
+	cp	'/'
+	jr	z,l0838
+	cp	' '+1
+	jr	nc,l07cb
+	jp	l08a3
+;
+; Found assignment (=)
+;
+l0845:
+	dec	hl
+	ld	(l2971),hl	; Save pointer
+	inc	hl
+	ld	de,l0510	; Point to filename
+	ld	b,.nam
+l084f:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '+1		; Test valid name
+	jr	c,l0867		; Fill with blanks if not
+	cp	'.'
+	jr	z,l0867
+	cp	'/'
+	jr	z,l0867
+	cp	'*'		; Test wildcard
+	jr	z,l086e
+	ld	(de),a		; Store character
+	inc	de
+	djnz	l084f
+	jr	l086e
+l0867:
+	ld	a,' '		; Map blank
+	dec	hl
+l086a:
+	ld	(de),a
+	inc	de
+	djnz	l086a
+l086e:
+	ld	de,l0510+.nam	; Point to extension
+	ld	b,.ext
+l0873:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '+1		; Test valid one
+	jr	c,l0891		; Fill with blanks if not
+	cp	'/'
+	jr	z,l0891
+	cp	'.'		; Find extension delimiter
+	jr	nz,l0873
+l0881:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '+1		; Test valid extension
+	jr	c,l0891		; Fill with blanks if not
+	cp	'*'		; Test wildcard
+	jr	z,l0898
+	ld	(de),a		; Store character
+	inc	de
+	djnz	l0881
+	jr	l0898
+l0891:
+	ld	a,' '		; Map blank
+l0893:
+	ld	(de),a
+	inc	de
+	djnz	l0893
+	dec	hl
+l0898:
+	ld	a,(hl)
+	inc	hl
+	cp	'/'		; Test more options
+	jp	z,l07c9
+	cp	' '+1
+	jr	nc,l0898	; Skip valid characters
+l08a3:
+	dec	hl
+	ld	(l2973),hl	; Save pointer
+	jp	l09f9		; Try next file
+l08aa:
+	ld	a,(hl)
+	cp	' '+1		; Test valid character
+	jp	nc,l07f3
+	ld	(l2973),hl	; Save pointer
+	ld	a,true
+	ld	(l0525),a	; Set end of file
+	ld	hl,0
+	ld	(l2975),hl	; Clear temp file pointer
+	ld	(l2975+2),hl
+	ld	hl,MAXREC	; Set max record
+	ld	(FCB+_RRN),hl
+	xor	a
+	ld	(FCB+_RRN+2),a
+;
+; MAIN ARCHIVER LOOP
+; ++++++++++++++++++
+;
+l08cb:
+	call	l24db		; Get length byte from member
+	or	a
+	jr	nz,l08db	; Ok
+	ld	a,(l051b)	; Get file count
+	or	a		; Test first file
+	jp	z,l26bf		; Yeap, unknown
+	jp	l0a1f		; Try next
+l08db:
+	ld	b,a		; Save length
+	ld	hl,(l2975)	; Save pointer
+	ld	(l0529),hl
+	ld	hl,(l2975+2)
+	ld	(l0529+2),hl
+	call	l2551		; Increment pointer by 1
+	call	l24db		; Get byte from member
+	call	l2551		; Increment pointer by 1
+	ld	c,a
+	ld	hl,l3600	; Point to header
+	xor	a		; Init checksum
+l08f6:
+	ld	d,a
+	call	l24db		; Get byte from member
+	call	l2551		; Increment pointer by 1
+	ld	(hl),a		; Save byte
+	add	a,d		; Update checksum
+	inc	hl
+	djnz	l08f6
+	cp	c		; Verify correct sim
+	jp	nz,l1605	; Invalid header
+	call	l1689		; Add length to file position
+	call	l09ac		; Test header -pms-
+	jp	z,l08cb		; Got it
+	ld	hl,l28f4+.drv
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),' '
+	ld	bc,.nam+.ext
+	ldir			; Init name
+	ld	de,l28f4+.drv
+	ld	hl,l3600+_ARCnam
+	ld	a,(hl)		; Get length of name
+	inc	hl
+	ld	c,a
+	ld	b,.nam
+l0927:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'.'		; Test delimiter
+	jr	z,l0935
+	ld	(de),a		; Unpack name
+	inc	de
+	dec	c
+	jr	z,l0946
+	djnz	l0927
+	inc	hl
+l0935:
+	dec	c
+	jr	z,l0946
+	ld	de,l28f4+.drv+.nam
+	ld	b,.ext
+l093d:
+	ld	a,(hl)
+	inc	hl
+	ld	(de),a		; Unpack extension
+	inc	de
+	dec	c
+	jr	z,l0946
+	djnz	l093d
+l0946:
+	ld	hl,l28f4+.drv
+	ld	de,l0500+.drv
+	ld	b,.nam+.ext
+l094e:
+	ld	a,(de)
+	cp	'?'		; Test wildcard
+	jr	z,l0957
+	cp	(hl)		; Compare name
+	jp	nz,l08cb	; New file
+l0957:
+	inc	hl
+	inc	de
+	djnz	l094e
+	ld	a,(l051b)	; Get file count
+	inc	a		; Advance it
+	ld	(l051b),a
+	ld	de,l27db
+	call	l01b8		; Tell deleting
+	ld	hl,l3600+_ARCnam
+	ld	a,(hl)
+	ld	b,a		; Get length
+	inc	hl
+	call	l26e6		; Print string
+	ld	hl,(l2975)	; Get file pointer
+	ld	(l052d),hl	; Save it
+	ld	a,(l2975+2)
+	ld	(l052d+2),a
+	ld	a,(l0529)
+	ld	(l2975),a	; Reset pointer
+	ld	hl,(l0529+1)
+	ld	(l2975+1),hl
+	rla			; Divide by 128
+	rl	l		; For record number
+	rl	h
+	ld	(FCB+_RRN),hl
+	ld	de,l3280
+	call	l01db		; Set disk buffer
+	call	l01e0		; Read random record
+	call	l1c91
+	ld	a,(l0529)	; Reset pointer
+	ld	(l2975),a
+	ld	hl,(l0529+1)
+	ld	(l2975+1),hl
+	jp	l08cb		; Try next
+;
+; Test .PMA module
+; EXIT	Zero set indicates 'pms' found
+;
+l09ac:
+	ld	hl,l3600	; Point to header
+	ld	b,(hl)		; Get '-'
+	inc	hl
+	ld	a,(hl)
+	cp	'p'		; Test '-pms-'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	'm'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	's'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	'-'
+	ret	nz
+	ld	a,b
+	cp	'-'
+	ret	z
+	cp	1
+	ret
+;
+; Test standard extension
+; ENTRY	Reg HL points to extension
+; EXIT	Zero set on .ARC, .ARK, .LZH, .LZS or .PMA
+;
+l09cb:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'L'		; Filter first character
+	jr	z,l09e1
+	cp	'A'
+	jr	z,l09ed
+	cp	'P'
+	ret	nz
+;
+; Test PMA
+;
+	ld	a,(hl)
+	cp	'M'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	'A'
+	ret
+;
+; Test LZH/LZS
+;
+l09e1:
+	ld	a,(hl)
+	cp	'Z'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	'H'
+	ret	z
+	cp	'S'
+	ret
+;
+; Test ARC/ARK
+;
+l09ed:
+	ld	a,(hl)
+	cp	'R'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	'C'
+	ret	z
+	cp	'K'
+	ret
+;
+; Search next file
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; This procedure takes care of the fact, no disk actions are
+; allowed between search functions. It simply processes a file
+; by skipping previous processed files
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+l09f9:
+	ld	de,l2e00
+	call	l01db		; Set search buffer
+	ld	de,l0500
+	ld	c,.srcfrs
+	call	BDOS		; Search for file
+	cp	max.dir+1
+	jp	nc,l26bf	; None there
+	ld	e,a		; Save index
+	ld	a,(l051b)	; Get file count
+	or	a
+	jr	z,l0a2e		; It's the first one
+	ld	b,a		; Save position
+	ld	c,.srcnxt
+l0a16:
+	push	bc
+	call	BDOS
+	pop	bc		; Find next file
+	cp	max.dir+1	; Test more
+	jr	c,l0a28		; Yeap
+l0a1f:
+	ld	hl,(l2973)	; Get pointer
+	ld	(l296f),hl	; Save command pointer
+	jp	l0707		; Process this file
+l0a28:
+	ld	e,a
+	djnz	l0a16
+	ld	a,(l051b)	; Get file count
+l0a2e:
+	inc	a		; Advance it
+	ld	(l051b),a	; Save count
+	ld	a,e
+	add	a,a		; Index *32
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	ld	d,0
+	ld	e,a
+	ld	hl,l2e00
+	add	hl,de		; Bump to file
+	ld	de,l294b	; Point to base-archive file
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack name
+	ex	de,hl
+	call	l1d96		; Init file
+	ld	a,(l0500)
+	ld	(l294b),a	; Set drive for base-archive file
+	ld	a,00100000b	; Init flag
+	ld	hl,l294b+_SYS
+	bit	7,(hl)		; Test system bit
+	jr	z,l0a5e		; Not set
+	set	1,a		; Set flag bit
+	res	7,(hl)		; Rset file bit
+l0a5e:
+	dec	hl
+	bit	7,(hl)		; Test R/O
+	jr	z,l0a67		; Nope
+	set	0,a		; Set flag bit
+	res	7,(hl)		; Reset file bit
+l0a67:
+	ld	(l28f1),a	; Save attribute
+	call	l09cb		; Test standard extension
+	jr	nz,l0a78	; Nope
+	ld	hl,l0500+.drv+.nam
+	call	l09cb		; Test standard extension again
+	jp	nz,l09f9	; Nope, try next file
+l0a78:
+	ld	hl,l294b	; Point to base-archive file
+	ld	de,FCB
+	ld	b,.drv+.nam+.ext
+l0a80:
+	ld	a,(de)
+	cp	(hl)		; Compare names
+	jr	nz,l0a8b	; No match
+	inc	de
+	inc	hl
+	djnz	l0a80
+	jp	l09f9		; Try next file if same
+l0a8b:
+	ld	a,(l294b)	; Get frive from base-archive file
+	or	a		; Test default drive
+	jr	z,l0a9b
+	add	a,'A'-1		; Make ASCII
+	ld	e,a
+	call	l01b3		; Print it
+	ld	e,':'
+	jr	l0aa2
+l0a9b:
+	ld	e,' '
+	call	l01b3
+	ld	e,' '
+l0aa2:
+	call	l01b3
+	ld	hl,l294b+.drv
+	ld	b,.nam
+	call	l26e6		; Print name
+	ld	e,'.'
+	call	l01b3		; Give delimiter
+	ld	hl,l294b+.drv+.nam
+	ld	b,.ext
+	call	l26e6		; Print extension
+	ld	ix,l0510	; Point to filename
+	ld	hl,l294b+.drv
+	ld	de,l28f4
+	ld	c,1		; Init counts
+	ld	b,.nam
+l0ac8:
+	ld	a,(ix+0)	; Get name
+	cp	' '+1		; Test valid character
+	jr	c,l0adb		; Nope
+	cp	'?'		; Test wildcard
+	jr	nz,l0ad8	; Nope
+	ld	a,(hl)
+	cp	' '+1		; Verify valid name
+	jr	c,l0adb		; Nope
+l0ad8:
+	ld	(de),a		; Unpack name
+	inc	c
+	inc	de
+l0adb:
+	inc	hl
+	inc	ix
+	djnz	l0ac8
+	ld	a,'.'		; Set delimiter
+	ld	(de),a
+	inc	de
+	push	de
+	ld	b,.ext
+l0ae7:
+	ld	a,(ix+0)	; Same check for extension
+	cp	' '+1
+	jr	c,l0afa
+	cp	'?'
+	jr	nz,l0af7
+	ld	a,(hl)
+	cp	' '+1
+	jr	c,l0afa
+l0af7:
+	ld	(de),a		; Unpack extension
+	inc	c
+	inc	de
+l0afa:
+	inc	hl
+	inc	ix
+	djnz	l0ae7
+	ld	a,c
+	ld	(l28f3),a	; Save length of name
+	ld	a,' '
+	ld	(de),a		; Clear next fields
+	inc	de
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	pop	ix
+	ld	b,0		; Clear bit
+	ld	de,l0190	; Point to extension
+l0b11:
+	ld	a,(de)		; Test end
+	cp	-1
+	jr	z,l0b2c
+	xor	(ix+0)		; Compare
+	ld	c,a
+	inc	de
+	ld	a,(de)
+	xor	(ix+1)
+	or	c
+	ld	c,a
+	inc	de
+	ld	a,(de)
+	xor	(ix+2)
+	or	c
+	inc	de
+	jr	nz,l0b11
+	ld	b,MSB		; Indicate extension found
+l0b2c:
+	ld	a,(l0526)	; Get text file flag (0 is not text)
+	and	LOMASK		; Strip off type
+	or	b		; Insert new bit
+	ld	(l0526),a
+	xor	a
+	ld	hl,l2994
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),a
+	ld	bc,l2aa8-l2994-1
+	ldir			; Clear memory
+	ld	hl,l0540
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),a
+	ld	bc,l0560-l0540-1
+	ldir
+	ld	hl,l3600+255
+	ld	de,l3700+1
+	xor	a
+l0b55:
+	ld	(hl),a		; Set ascending bytes
+	inc	l
+	ld	(de),a
+	inc	e
+	inc	a
+	jp	nz,l0b55
+;
+; Preset spme values
+;
+	ld	(l3600+127),a	; 00H
+	dec	a
+	ld	(l3700+32),a	; FFH
+	ld	a,020h
+	ld	(l053f),a
+	ld	(l3600+255),a	; 20H
+	dec	a
+	ld	(l3700+160),a	; 1FH
+	ld	a,080h
+	ld	(l3600+223),a	; 80H
+	dec	a
+	ld	(l3700),a	; 7FH
+	ld	a,0a0h
+	ld	(l3600+31),a	; A0H
+	dec	a
+	ld	(l3700+224),a	; 9FH
+	ld	a,0e0h
+	ld	(l3600+159),a	; E0H
+	dec	a
+	ld	(l3700+128),a	; DFH
+;
+	ld	hl,0
+	ld	(l2979),hl	; Clear current pointer
+	ld	hl,l2994
+	ld	(l2985),hl
+	ld	hl,l2b00
+	ld	(l0539),hl	; Init disk buffer
+	ld	de,l0400
+	call	l01db		; Set disk buffer
+	ld	de,l294b
+	call	l01bd		; Open base-archive file
+	ld	hl,l28ed
+	ld	bc,l051c
+	ld	de,l294b	; Point to base-archive file
+	or	a
+	call	l0110		; Get time
+	jr	nc,l0c2e	; Got none
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!! Time stamp enabled !!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	a,(l017e)	; Get mode of time
+	and	00000010b	; Test BCD
+	ld	a,_opc
+	jr	z,l0bc3		; Yeap
+	ld	a,_ret
+l0bc3:
+	ld	(l233f),a	; Enable or disable BCD
+	ld	a,(l051c+5)	; Get seconds
+	call	l233f
+	srl	a		; Divide by 2
+	ld	e,a
+	ld	a,(l051c+4)	; Get minutes
+	call	l233f
+	rrca			; Shift in lower bits
+	rrca
+	rrca
+	ld	d,a
+	and	11100000b	; Mask
+	or	e
+	ld	(l28ed),a	; Save it
+	ld	a,d
+	and	7
+	ld	d,a
+	ld	a,(l051c+3)	; Get hours
+	call	l233f
+	sla	a
+	sla	a
+	sla	a
+	or	d
+	ld	(l28ed+1),a
+	ld	a,(l017e)	; Get mode of date
+	and	00000001b	; Test BCD
+	ld	a,_opc
+	jr	z,l0bfe		; Yeap
+	ld	a,_ret
+l0bfe:
+	ld	(l233f),a	; Disable or enable conversion
+	ld	a,(l051c+2)
+	call	l233f
+	ld	e,a
+	ld	a,(l051c+1)
+	call	l233f
+	rrca
+	rrca
+	rrca
+	ld	d,a
+	and	11100000b
+	or	e
+	ld	(l28ed+2),a
+	ld	a,d
+	and	00000001b
+	ld	d,a
+	ld	a,(l051c)
+	call	l233f
+	sub	YYCbeg		; Fix for reference
+	jr	nc,l0c28
+	add	a,100		; Make greater 0
+l0c28:
+	sla	a
+	or	d
+	ld	(l28ed+3),a
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+l0c2e:
+	ld	de,l294b
+	ld	c,.filsiz
+	call	BDOS		; Get size of base-archive file
+	ld	hl,(l294b+_RRN)
+	ld	a,h		; Test any record there
+	or	l
+	jp	z,l26dd		; Empty file
+	push	hl
+	ld	a,l
+	srl	h		; Size * 2
+	rr	l
+	srl	h		; * 4
+	rr	l
+	srl	h		; * 8
+	rr	l
+	and	00000111b	; Modulo
+	cp	1
+	ccf
+	ld	a,l
+	adc	a,0
+	cp	5		; Test size
+	jr	c,l0c68
+	ld	l,a
+	ld	a,(l297d)	; Get high speed mode
+	or	a
+	ld	a,4
+	jr	nz,l0c68
+	ld	a,l
+	cp	9
+	jr	c,l0c68
+	ld	a,8
+l0c68:
+	ld	(l297f),a	; Save ????
+	ld	de,l27af
+	ld	a,(l297e)	; Test compression
+	or	a
+	jr	z,l0c77		; It's enabled
+	ld	de,l27a4
+l0c77:
+	call	l01b8		; Tell compressing or reading
+	ld	a,(l017f)	; Get display mode
+	cp	1		; Test support backspace
+	ld	de,l27c0	; Point to record count
+	ld	hl,l27c6	; Point to backspaces
+	jr	c,l0c92		; Yeap
+	ld	de,l27be	; Point to new record count
+	ld	hl,l27a2	; Point to return
+	jr	z,l0c92
+	pop	de
+	jr	l0ca4
+l0c92:
+	push	hl
+	call	l01b8		; Give message
+	pop	hl
+	pop	de
+	ld	a,d
+	call	l26f4		; Put hex to console
+	ld	a,e
+	call	l26f4
+	ex	de,hl
+	call	l01b8
+l0ca4:
+	xor	a
+	ld	(l294b+_CR),a
+	ld	a,(l297e)	; Get compression
+	or	a
+	jr	z,l0ccf		; Compress it
+l0cae:
+	ld	a,(l055a)	; Get end of file
+	cp	.true
+	jr	nc,l0cbf	; Yeap
+	call	l2353		; Read from base-archive file
+	jr	c,l0cbf		; End of file
+	call	l2332
+	jr	l0cae
+l0cbf:
+	ld	a,(l0543)
+	or	a
+	call	nz,l271f	; Display record number
+	ld	de,l054b+2
+	ld	hl,l0547+2
+	jp	l119c
+l0ccf:
+	ld	de,l0400
+	ld	b,0
+l0cd4:
+	ld	a,(l055a)	; Get end of file
+	cp	.true
+	jr	nc,l0ce6
+	call	l2353		; Read from base-archive file
+	jr	c,l0ce6		; End of file
+	ld	(de),a		; Unpack
+	inc	de
+	djnz	l0cd4
+	jr	l0ceb
+l0ce6:
+	ld	a,true
+	ld	(l055a),a	; Force end of file
+l0ceb:
+	ld	hl,l2903+_EX
+	call	l1d96		; Init file
+	ld	de,l3200
+	call	l01db		; Set disk buffer
+	ld	de,l2903
+	call	l01d6		; Create PMATEMP1.$$$
+	inc	a
+	jp	z,l26b8		; Disk full
+	xor	a
+	ld	(l297b),a
+	ld	l,a
+	ld	a,(l297f)
+	add	a,a
+	add	a,a
+	ld	(l297c),a
+	ld	e,a
+	add	a,HIGH l3800	; Add top
+	ld	h,a
+	ld	(l2980),hl	; Save address
+	ld	(l0522),hl
+	add	a,e		; Build highest address
+	add	a,e
+	ld	h,a
+	ld	(l2982),hl
+	ld	a,(TPATOP+1)	; Get top of memory
+	sub	h		; Calculate gap
+	ld	b,a
+	srl	a
+	srl	a
+	push	af
+	dec	b
+	ld	c,-1
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),l
+	ldir			; Clear memory
+	pop	de
+	ld	b,64
+	ld	c,0
+	ld	hl,l06c4
+l0d39:
+	ld	a,c
+l0d3a:
+	cp	d
+	jr	c,l0d40
+	sub	d
+	jr	l0d3a
+l0d40:
+	ld	(hl),a		; Set up memory
+	inc	hl
+	inc	c
+	djnz	l0d39
+	ld	hl,l06c4
+	ld	a,(l0400)
+	and	00111111b
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	a,(hl)
+	add	a,a
+	add	a,a
+	ld	h,a
+	ld	l,0
+	ld	de,(l2982)
+	add	hl,de
+	ld	a,-1
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	jp	l108c
+l0d64:
+	xor	a
+	ld	(l055d),a
+	ld	a,(l0559)	; Get index
+	ld	h,HIGH l0400
+	ld	l,a
+	ld	a,(l0558)
+	dec	a
+	cp	l
+	jp	z,l108c
+	ld	a,(hl)		; Get value
+	ld	b,a
+	ld	(l0e4f),a	; Save
+	ld	d,0
+	ld	c,-1
+l0d7f:
+	inc	c
+	ld	a,c
+	cp	-1
+	jr	z,l0d93
+	ld	a,(l0558)
+	dec	a
+	cp	l
+	jr	z,l0d93
+	inc	l
+	ld	a,(hl)
+	cp	b
+	jr	z,l0d7f
+	ld	d,1
+l0d93:
+	ld	a,c
+	ld	(l0e0b),a	; Save
+	ld	a,(hl)
+	ld	(l0ea0),a
+	ld	a,(l0540)
+	cp	b
+	jr	z,l0daf
+	ld	a,d
+	or	a
+	jr	nz,l0dbe
+	ld	a,c
+	sub	1
+	jr	c,l0dbe
+	ld	(l0e0b),a	; Save
+	jr	l0dbe
+l0daf:
+	ld	a,c
+	ld	(l055d),a
+	ld	hl,(l0552)
+	ld	(l055e),hl
+	ld	a,d
+	or	a
+	jp	z,l0f71
+l0dbe:
+	ld	a,(l0559)	; Get index
+	inc	a
+	ld	h,HIGH l0400
+	ld	l,a
+	ld	a,(hl)		; Fetch byte
+	ld	(l0e06),a	; Save
+	ld	hl,l06c4
+	and	00111111b
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	a,(hl)
+	ld	h,a
+	ld	l,b
+	add	hl,hl
+	add	hl,hl
+	ld	bc,(l2982)
+	add	hl,bc
+	ld	b,(hl)
+	inc	hl
+	ld	c,(hl)
+	ld	a,b
+	or	c
+	jp	z,l108c
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	ld	hl,(l0552)
+	ld	(l0f13),hl
+	dec	hl
+	ld	a,h
+	inc	a
+	jr	nz,l0df7
+	ld	hl,(l297b)
+	dec	hl
+l0df7:
+	ld	(l0e79),hl
+	ld	a,(l0e0b)	; Get value
+	ld	(l0e34),a
+l0e00:
+	ld	hl,l3800	; Get buffer base
+	add	hl,de		; Calculate address
+	ld	a,(hl)		; Get byte
+l0e06	equ	$+1
+	cp	$-$		; Compare
+	jp	nz,l0f60	; No match
+l0e0b	equ	$+1
+	ld	a,$-$
+	cp	2
+	jp	c,l0ef8
+	ld	l,a
+	ld	a,(l055d)
+	cp	l
+	jr	nc,l0e6d
+	ld	h,0
+	ld	l,a
+	or	a
+	sbc	hl,bc
+	jp	nc,l0f71
+	dec	de
+	ld	a,d
+	inc	a
+	jr	nz,l0e2b
+	ld	de,(l297b)
+	dec	de
+l0e2b:
+	ld	hl,l3800	; Get buffer base
+	add	hl,de		; Calculate address
+	xor	a
+	ex	af,af'
+l0e31:
+	ex	af,af'
+	inc	a
+l0e34	equ	$+1
+	cp	$-$
+	jp	z,l0ec2
+	ex	af,af'
+	dec	bc
+	dec	de
+	dec	hl
+	ld	a,d
+	inc	a
+	jr	nz,l0e49
+	ld	hl,(l2980)
+	dec	hl
+	ld	de,(l297b)
+	dec	de
+l0e49:
+	ld	a,b
+	or	c
+	jr	z,l0e52
+	ld	a,(hl)
+l0e4f	equ	$+1
+	cp	$-$
+	jr	z,l0e31
+l0e52:
+	inc	bc
+	push	bc
+	ex	af,af'
+	ld	c,a
+	inc	de
+	call	l0e5d
+	jp	l0f51
+;
+;
+;
+l0e5d:
+	inc	de
+	ld	a,(l297c)
+	ld	l,a
+	ld	a,d
+	cp	l
+	ret	c
+	ld	hl,(l297b)
+	ex	de,hl
+	sbc	hl,de
+	ex	de,hl
+	ret
+;
+;
+;
+l0e6d:
+	ld	h,0
+	dec	l
+	ld	a,l
+	or	a
+	sbc	hl,bc
+	jp	nc,l0f71
+	ex	af,af'
+l0e79	equ	$+1
+	ld	hl,$-$
+	or	a
+	sbc	hl,de
+	jp	z,l0f60
+	ld	hl,l3800+1
+	add	hl,de
+	inc	de
+	ld	a,(l297c)
+	cp	d
+	dec	de
+	jr	nz,l0e90
+	ld	hl,l3800	; Load buffer address
+l0e90:
+	dec	de
+	ld	a,d
+	inc	a
+	jr	nz,l0e9a
+	ld	de,(l297b)
+	dec	de
+l0e9a:
+	ld	a,(hl)
+	ld	hl,l3800	; Load buffer address
+	add	hl,de
+l0ea0	equ	$+1
+	cp	$-$
+	jp	nz,l0ed8
+	ex	af,af'
+l0ea5:
+	ex	af,af'
+	dec	bc
+	dec	de
+	ld	a,d
+	inc	a
+	ld	a,(hl)
+	dec	hl
+	jr	nz,l0eb7
+	ld	hl,(l2980)
+	dec	hl
+	ld	de,(l297b)
+	dec	de
+l0eb7:
+	cp	(hl)
+	jr	nz,l0ef1
+	ex	af,af'
+	dec	a
+	jr	nz,l0ea5
+	ld	a,(l0e0b)
+	inc	a
+l0ec2:
+	push	bc
+	push	af
+	call	l0e5d
+	pop	af
+	push	de
+	dec	a
+	ld	c,a
+	ld	h,0
+	ld	l,a
+	add	hl,de
+	ex	de,hl
+	ld	a,(l0559)	; Get index
+	add	a,c
+	inc	a
+	ld	b,a
+	jr	l0f01
+l0ed8:
+	dec	bc
+	ld	a,b
+	or	c
+	jp	z,l0f71
+	dec	de
+	ld	a,d
+	inc	a
+	ld	a,(hl)
+	dec	hl
+	jr	nz,l0eee
+	ld	hl,(l2980)
+	dec	hl
+	ld	de,(l297b)
+	dec	de
+l0eee:
+	cp	(hl)
+	jr	z,l0ed8
+l0ef1:
+	inc	de
+	call	l0e5d
+	jp	l0f61
+l0ef8:
+	push	bc
+	push	de
+	ld	a,(l0559)	; Get index
+	ld	b,a
+	inc	b
+	ld	c,0
+l0f01:
+	call	l0e5d
+	inc	c
+	inc	b
+	ld	a,c
+	cp	-1
+	jp	z,l0f45
+	ld	a,(l0558)
+	cp	b
+	jr	z,l0f45
+l0f13	equ	$+1
+	ld	hl,$-$
+	or	a
+	sbc	hl,de
+	jr	z,l0f27
+	ld	hl,l3800	; Load buffer address
+	add	hl,de
+	ld	a,(hl)
+	ld	h,HIGH l0400
+	ld	l,b
+	cp	(hl)
+	jr	z,l0f01
+	jr	l0f50
+l0f27:
+	ld	a,(l0559)	; Get index
+	ld	d,HIGH l0400
+	ld	e,a
+	ld	h,d
+	ld	l,b
+l0f2f:
+	ld	a,(de)
+	cp	(hl)
+	jp	nz,l0f50
+	inc	l
+	inc	e
+	inc	c
+	inc	b
+	ld	a,c
+	cp	-1
+	jp	z,l0f45
+	ld	a,(l0558)
+	cp	b
+	jp	nz,l0f2f
+l0f45:
+	pop	de
+	pop	af
+	ld	a,c
+	cp	1
+	jp	nc,l0f7e
+	jp	l108c
+l0f50:
+	pop	de
+l0f51:
+	ld	a,(l055d)
+	cp	c
+	jr	nc,l0f5f
+	ld	a,c
+	ld	(l055d),a
+	ld	(l055e),de
+l0f5f:
+	pop	bc
+l0f60:
+	dec	bc
+l0f61:
+	ld	a,b
+	or	c
+	jp	z,l0f71
+	ld	hl,(l2980)
+	add	hl,de
+	add	hl,de
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	jp	l0e00
+l0f71:
+	ld	a,(l055d)
+	cp	1
+	jp	c,l108c
+	ld	c,a
+	ld	de,(l055e)
+l0f7e:
+	ld	hl,(l0552)
+	or	a
+	sbc	hl,de
+	jp	nc,l0f8c
+	ld	de,(l297b)
+	add	hl,de
+l0f8c:
+	ld	d,h
+	ld	e,l
+	ld	a,c
+	cp	1
+	jp	nz,l0fb3
+	ld	a,d
+	or	a
+	jp	nz,l108c
+	ld	a,e
+	cp	40h
+	jp	nc,l108c
+	ld	a,-1
+	call	l23f6		; Put to temp file
+	ld	a,' '
+	call	l23f6
+	ld	a,e
+	call	l23f6		; Put to temp file
+	ld	hl,l29fa
+	jp	l1064
+l0fb3:
+	ld	a,-1
+	call	l23f6		; Put to temp file
+	ld	a,c
+	cp	7
+	jp	nc,l0fcc
+	rrca
+	rrca
+	rrca
+	or	d
+	call	l23f6
+	ld	a,e
+	call	l23f6
+	jp	l0fda
+l0fcc:
+	ld	a,11100000b
+	or	d
+	call	l23f6		; Put to temp file
+	ld	a,e
+	call	l23f6
+	ld	a,c
+	call	l23f6
+l0fda:
+	ld	a,c
+	cp	10h
+	jr	c,l1016
+	cp	18h
+	jr	c,l0ffd
+	cp	' '
+	jr	c,l1002
+	cp	40h
+	jr	c,l1007
+	cp	80h
+	jr	c,l100c
+	cp	-1
+	jr	c,l1011
+	ld	a,d
+	or	e
+	jr	nz,l1011
+	ld	hl,l2a36
+	jp	l1064
+l0ffd:
+	ld	hl,l2a27
+	jr	l1023
+l1002:
+	ld	hl,l2a2a
+	jr	l1023
+l1007:
+	ld	hl,l2a2d
+	jr	l1023
+l100c:
+	ld	hl,l2a30
+	jr	l1023
+l1011:
+	ld	hl,l2a33
+	jr	l1023
+l1016:
+	add	a,7
+	push	de
+	ld	d,0
+	ld	e,a
+	ld	hl,l29e2
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	pop	de
+l1023:
+	inc	(hl)
+	jp	nz,l102e
+	inc	hl
+	inc	(hl)
+	jp	nz,l102e
+	inc	hl
+	inc	(hl)
+l102e:
+	ld	a,d
+	cp	1
+	jr	nc,l1044
+	ld	a,e
+	ld	e,0
+	cp	40h
+	jr	c,l105e
+	ld	e,3
+	cp	80h
+	jr	c,l105e
+	ld	e,6
+	jr	l105e
+l1044:
+	jr	nz,l104a
+	ld	e,9
+	jr	l105e
+l104a:
+	ld	e,0ch
+	cp	4
+	jr	c,l105e
+	ld	e,0fh
+	cp	8
+	jr	c,l105e
+	ld	e,12h
+	cp	10h
+	jr	c,l105e
+	ld	e,15h
+l105e:
+	ld	d,0
+	ld	hl,(l2985)
+	add	hl,de
+l1064:
+	inc	(hl)
+	jp	nz,l106f
+	inc	hl
+	inc	(hl)
+	jp	nz,l106f
+	inc	hl
+	inc	(hl)
+l106f:
+	ld	de,(l0552)
+	ld	iy,l3800	; Load buffer address
+	add	iy,de
+	ld	ix,(l0522)
+	inc	c
+l107e:
+	call	l1db6
+	dec	c
+	jp	nz,l107e
+	ld	(l0522),ix
+	jp	l10e3
+l108c:
+	ld	a,(l0559)	; Get index
+	ld	h,HIGH l0400
+	ld	l,a
+	ld	d,0
+	ld	e,(hl)
+	ld	a,(l053f)
+	ld	h,HIGH l3600
+	jp	l10a0
+l109d:
+	ld	l,a
+	ld	a,(hl)
+	inc	d
+l10a0:
+	cp	e
+	jp	nz,l109d
+	ld	a,d
+	call	l23f6		; Put to temp file
+	cp	-1
+	jp	nz,l10b1
+	xor	a
+	call	l23f6
+l10b1:
+	ld	a,d		; Get byte
+	rrca			; Shift it
+	rrca
+	rrca
+	and	00011111b	; Mask
+	ld	d,0
+	ld	e,a		; For index
+	ld	hl,l2758
+	add	hl,de		; Point to table
+	ld	e,(hl)		; Fetch new index
+	ld	hl,l29e2
+	add	hl,de		; Build address
+	inc	(hl)		; Bump count
+	jp	nz,l10ce
+	inc	hl		; Remember carry
+	inc	(hl)
+	jp	nz,l10ce
+	inc	hl
+	inc	(hl)
+l10ce:
+	ld	de,(l0552)
+	ld	iy,l3800	; Load buffer base address
+	add	iy,de
+	ld	ix,(l0522)
+	call	l1db6
+	ld	(l0522),ix
+l10e3:
+	ld	a,(l055a)	; Get end of file
+	cp	true
+	jp	nz,l0d64
+	ld	a,(l0558)
+	ld	b,a
+	ld	a,(l0559)	; Get index
+	cp	b
+	jp	nz,l0d64
+	ld	a,(l0543)
+	or	a
+	call	nz,l271f	; Display record number
+	ld	hl,(l0556)	; Get pointer
+	ld	a,h
+	or	l
+	jr	z,l1129		; Skip if empty
+	ld	de,l3200
+l1107:
+	push	hl
+	push	de
+	call	l01db		; Set disk buffer
+	ld	de,l2903
+	call	l01d1		; Write sequential record to PMATEMP1.$$$
+	pop	de
+	pop	bc
+	or	a
+	jp	nz,l26b8	; Disk full
+	ld	hl,reclng
+	add	hl,de
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	bc,reclng
+	or	a
+	sbc	hl,bc
+	jr	z,l1129
+	jr	nc,l1107
+l1129:
+	ld	de,l2903
+	call	l01c2		; Close PMATEMP1.$$$
+	call	l20e9
+	ld	de,(l054b)
+	ld	bc,(l054b+2)
+	ld	a,e
+	srl	b
+	rr	c
+	rr	d
+	rr	e
+	srl	b
+	rr	c
+	rr	d
+	rr	e
+	srl	b
+	rr	c
+	rr	d
+	rr	e
+	and	7
+	jr	z,l115d
+	inc	de
+	ld	a,d
+	or	e
+	jr	nz,l115d
+	inc	bc
+l115d:
+	ld	(l054b),de
+	ld	(l054b+2),bc
+	ld	a,(l054f)	; Test temp file access
+	or	a
+	jp	z,l118a		; Nope
+	ld	hl,(l0539)	; Get disk buffer
+	ld	de,l2b00	; Get base
+	or	a
+	sbc	hl,de		; Calculate length
+	call	nz,l2645	; Write buffer to temp file
+	ld	de,l2927
+	call	l01c2		; Close PMATEMP2.$$$
+	ld	hl,l2927+_EX
+	call	l1d96		; Init file
+	ld	de,l2927
+	call	l01bd		; Open PMATEMP2.$$$
+l118a:
+	ld	de,l054b
+	ld	hl,l0547
+	ld	a,(de)
+	sub	(hl)		; Compare three bytes
+	inc	de
+	inc	hl
+	ld	a,(de)
+	sbc	a,(hl)
+	inc	de
+	inc	hl
+	ld	a,(de)
+	sbc	a,(hl)
+	jr	c,l11a5
+l119c:
+	ld	bc,3
+	lddr			; Unpack
+	ld	a,'0'
+	jr	l11b2		; Change type to -pm0-
+l11a5:
+	ld	hl,l2903	; Point to PMATEMP1.$$$
+	ld	de,l294b	; Point to base-archive file
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack filename
+	ld	a,'2'		; Set type -pm2-
+l11b2:
+	ld	(l28e0+3),a
+	xor	a
+	ld	hl,l294b+_EX
+	ld	(hl),a		; Clear extent etc.
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	ld	(l294b+_CR),a
+	ld	h,a
+	ld	l,a
+	ld	(l2979),hl	; Clear pointers
+	ld	(l0554),hl
+	ld	de,l2e00
+	call	l01db		; Set disk buffer
+	ld	de,l294b
+	call	l01bd		; Open base-archive file
+	ld	a,(l017f)	; Get display mode
+	cp	2		; Test support of backspace
+	jr	z,l11f4		; Nope
+	ld	e,'/'
+	call	l01b3		; Print it
+	ld	a,(l0544+1)
+	call	l26f4		; Put hex record # to console
+	ld	a,(l0544)
+	call	l26f4
+	ld	e,' '
+	call	l01b3		; Give blank
+l11f4:
+	ld	de,(l054b)
+	ld	a,(l054b+2)
+	ld	c,a
+	ld	b,0
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	push	bc
+	push	de
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	push	bc
+	ld	h,d
+	ld	l,e
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	ld	ix,l0547
+	ld	hl,MAXBCD	; Init BCD number
+l1249:
+	ld	a,h
+	add	a,1		; Increment BCD
+	daa
+	ld	h,a
+	ld	a,l
+	adc	a,0
+	daa
+	ld	l,a
+	ld	a,e
+	sub	(ix+0)
+	ld	e,a
+	ld	a,d
+	sbc	a,(ix+1)
+	ld	d,a
+	ld	a,c
+	sbc	a,(ix+2)
+	ld	c,a
+	ld	a,b
+	sbc	a,0
+	ld	b,a
+	jr	nc,l1249
+	ld	a,e
+	add	a,(ix+0)
+	ld	e,a
+	ld	a,d
+	adc	a,(ix+1)
+	ld	d,a
+	ld	a,c
+	adc	a,(ix+2)
+	ld	c,a
+	ld	a,b
+	adc	a,0
+	ld	b,a
+	push	de
+	push	bc
+	ld	a,l
+	or	a
+	jr	z,l128a
+	ld	de,l27cc
+	call	l01b8		; Tell percentage of 100%
+	jp	l1597
+l128a:
+	push	hl
+	ld	e,' '
+	call	l01b3		; Print it
+	pop	hl
+	ld	a,h
+	rlca
+	rlca
+	rlca
+	rlca
+	and	LOMASK
+	ld	e,' '
+	jr	z,l129f
+	add	a,'0'
+	ld	e,a
+l129f:
+	push	hl
+	call	l01b3		; Print it
+	pop	hl
+	ld	a,h
+	and	LOMASK
+	add	a,'0'
+	ld	e,a
+	call	l01b3		; Print it
+	ld	e,'.'
+	call	l01b3		; Print it
+	pop	bc
+	pop	de
+	sla	e		; Calculate percentage
+	rl	d
+	rl	c
+	rl	b
+	push	bc
+	ld	h,d
+	ld	l,e
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	sla	e
+	rl	d
+	rl	c
+	rl	b
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	ld	h,-1
+l12d8:
+	inc	h
+	ld	a,e
+	sub	(ix+0)
+	ld	e,a
+	ld	a,d
+	sbc	a,(ix+1)
+	ld	d,a
+	ld	a,c
+	sbc	a,(ix+2)
+	ld	c,a
+	ld	a,b
+	sbc	a,0
+	ld	b,a
+	jr	nc,l12d8
+	ld	a,h
+	and	LOMASK
+	add	a,'0'
+	ld	e,a
+	call	l01b3		; Print it
+	ld	e,'%'
+	call	l01b3		; Print it
+	jp	l1597
+;
+;
+;
+l12ff:
+	ld	(l053b),a	; Save entry
+	ld	bc,0		; Init value
+l1305:
+	ld	a,(ix+0)	; Test zero
+	or	(ix+1)
+	or	(ix+2)
+	jp	z,l1375		; Yeap
+	ld	h,0
+	ld	l,c		; Get index
+	add	hl,hl		; *2
+	add	hl,hl		; *4
+	ex	de,hl
+	ld	iy,l05bc
+	add	iy,de		; Add to address
+	push	bc
+l131e:
+	ld	a,c
+	or	a		; Test zero
+	jp	z,l1359
+	dec	c
+	srl	c
+	ld	h,0
+	ld	l,c		; Get index
+	add	hl,hl
+	add	hl,hl
+	ld	de,l05bd
+	add	hl,de		; Get address
+	ld	a,(ix+0)
+	sub	(hl)		; Compare
+	inc	hl
+	ld	a,(ix+1)
+	sbc	a,(hl)
+	inc	hl
+	ld	a,(ix+2)
+	sbc	a,(hl)
+	jp	nc,l1359
+	ld	a,(hl)		; Unpack
+	ld	(iy+3),a
+	dec	hl
+	ld	a,(hl)
+	ld	(iy+2),a
+	dec	hl
+	ld	a,(hl)
+	ld	(iy+1),a
+	dec	hl
+	ld	a,(hl)
+	ld	(iy+0),a
+	push	hl
+	pop	iy
+	jp	l131e
+l1359:
+	pop	bc
+	ld	a,b
+	ld	(iy+0),a
+	inc	a
+	ld	(l2984),a
+	ld	a,(ix+0)	; Unpack
+	ld	(iy+1),a
+	ld	a,(ix+1)
+	ld	(iy+2),a
+	ld	a,(ix+2)
+	ld	(iy+3),a
+	inc	c
+l1375:
+	inc	ix		; Fix for next
+	inc	ix
+	inc	ix
+	inc	b		; Count up
+	ld	a,(l053b)
+	cp	b		; Test end reached
+	jp	nz,l1305	; Nope
+	ld	a,c		; Get index
+	ld	(l053c),a	; Save
+	ret
+;
+;
+;
+l1388:
+	ld	a,(l053c)	; Get index
+	dec	a		; Bump down
+	ld	(l053c),a
+	ret	z		; End reached
+	ld	hl,l05bc
+	ld	a,(hl)		; Fetch words
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	push	af
+	push	bc
+	push	de
+	ld	a,(l053c)
+	ld	h,0
+	ld	l,a
+	add	hl,hl
+	add	hl,hl
+	ld	de,l05bc
+	add	hl,de
+	ldi			; Unpack four bytes
+	ldi
+	ldi
+	ldi
+	call	l13ce
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l13b8:
+	ld	hl,l05bc	; Point to array
+	ld	a,(hl)
+	push	af		; Save byte
+	inc	hl
+	ld	a,(hl)
+	add	a,e		; Add to next
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	adc	a,d
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	adc	a,c
+	ld	(hl),a
+	call	l13ce
+	pop	af
+	ret
+;
+;
+;
+l13ce:
+	ld	c,0
+	ld	ix,l05bc
+l13d4:
+	sla	c
+	ret	c
+	inc	c
+	ld	a,(l053c)
+	dec	a
+	cp	c
+	ret	c
+	push	af
+	ld	h,0
+	ld	l,c
+	add	hl,hl
+	add	hl,hl
+	ex	de,hl
+	ld	iy,l05bc
+	add	iy,de
+	pop	af
+	jp	z,l140a
+	ld	a,(iy+1)
+	sub	(iy+5)
+	ld	a,(iy+2)
+	sbc	a,(iy+6)
+	ld	a,(iy+3)
+	sbc	a,(iy+7)
+	jp	c,l140a
+	ld	de,l0004
+	add	iy,de
+	inc	c
+l140a:
+	ld	e,(ix+1)
+	ld	d,(ix+2)
+	ld	b,(ix+3)
+	ld	a,(iy+1)
+	sub	e
+	ld	a,(iy+2)
+	sbc	a,d
+	ld	a,(iy+3)
+	sbc	a,b
+	ret	nc
+	ld	a,(iy+1)
+	ld	(ix+1),a
+	ld	(iy+1),e
+	ld	a,(iy+2)
+	ld	(ix+2),a
+	ld	(iy+2),d
+	ld	a,(iy+3)
+	ld	(ix+3),a
+	ld	(iy+3),b
+	ld	b,(ix+0)
+	ld	a,(iy+0)
+	ld	(ix+0),a
+	ld	(iy+0),b
+	push	iy
+	pop	ix
+	jp	l13d4
+;
+;
+;
+l144e:
+	ld	(l298a),hl	; Save entry
+	ld	a,(l053b)	; Get length
+	ld	b,a
+	xor	a		; Init value
+	ld	c,a
+l1457:
+	ld	(hl),a		; Preset memory
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	c
+	djnz	l1457
+	ld	a,(l053c)
+	cp	1
+	ret	c
+	jr	nz,l1484
+	ld	a,(l2984)
+	dec	a
+	ld	h,0
+	ld	l,a
+	add	hl,hl
+	add	hl,hl
+	ld	de,(l298a)
+	add	hl,de
+	ld	(hl),-1
+l1478:
+	xor	a
+	ld	(l2987),a
+	inc	a
+	ld	(l2988),a
+	ld	(l2989),a
+	ret
+l1484:
+	call	l1388
+	jr	nz,l148f
+	call	l154c
+	jp	l14dc
+l148f:
+	ld	(l053d),a
+	call	l13b8
+	ld	(l053e),a
+	ld	de,(l298a)
+l149c:
+	ld	h,0
+	ld	l,a
+	ld	c,a
+	add	hl,hl
+	add	hl,hl
+	add	hl,de
+	inc	(hl)
+	inc	hl
+	ld	a,(hl)
+	cp	c
+	jp	nz,l149c
+	ld	a,(l053d)
+	ld	(hl),a
+l14ae:
+	ld	h,0
+	ld	l,a
+	ld	c,a
+	add	hl,hl
+	add	hl,hl
+	add	hl,de
+	inc	(hl)
+	inc	hl
+	ld	a,(hl)
+	cp	c
+	jp	nz,l14ae
+	jp	l1484
+l14bf:
+	ld	(l298a),hl
+	ld	(l053b),a
+	ld	b,a
+	ld	c,0
+l14c8:
+	ld	a,(hl)
+	cp	-1
+	jp	z,l1478
+	or	c
+	ld	c,a
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	djnz	l14c8
+	ld	a,c
+	or	a
+	ret	z
+	call	l154c
+l14dc:
+	ld	iy,l298c-1
+	xor	a
+	ld	(iy+1),a
+	ld	(iy+2),a
+	ld	(iy+3),a
+	ld	b,1
+	push	de
+l14ed:
+	rrc	b
+	jp	nc,l14f4
+	inc	iy
+l14f4:
+	dec	d
+	jp	nz,l14ed
+	pop	de
+l14f9:
+	ld	hl,(l298a)
+	ld	e,0
+l14fe:
+	ld	a,(hl)
+	inc	hl
+	cp	d
+	jp	nz,l1531
+	push	hl
+	push	de
+	push	bc
+	ex	de,hl
+	ld	hl,l298c
+	ldi
+	ldi
+	ldi
+	pop	bc
+	push	iy
+	pop	hl
+	ld	c,b
+l1516:
+	ld	d,(hl)
+	ld	a,d
+	and	c
+	jp	nz,l1522
+	ld	a,d
+	or	c
+	ld	(hl),a
+	jp	l152f
+l1522:
+	ld	a,c
+	cpl
+	and	d
+	ld	(hl),a
+	rlc	c
+	jp	nc,l1516
+	dec	hl
+	jp	l1516
+l152f:
+	pop	de
+	pop	hl
+l1531:
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	e
+	ld	a,(l053b)
+	cp	e
+	jp	nz,l14fe
+	rrc	b
+	jp	nc,l1543
+	inc	iy
+l1543:
+	inc	d
+	ld	a,(l2988)
+	cp	d
+	jp	nc,l14f9
+	ret
+l154c:
+	ld	hl,(l298a)
+	ld	d,0ffh
+	ld	e,0
+	ld	a,(l053b)
+	ld	b,a
+l1557:
+	ld	a,(hl)
+	or	a
+	jp	z,l1566
+	cp	d
+	jp	nc,l1561
+	ld	d,a
+l1561:
+	cp	e
+	jp	c,l1566
+	ld	e,a
+l1566:
+	xor	a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	djnz	l1557
+	ld	a,d
+	ld	(l2987),a
+	ld	a,e
+	ld	(l2988),a
+	ld	c,1
+	sub	d
+	jr	z,l1592
+	inc	c
+	cp	3
+	jr	c,l1592
+	inc	c
+	cp	7
+	jr	c,l1592
+	inc	c
+	cp	0fh
+	jr	c,l1592
+	inc	c
+	cp	1fh
+	jr	c,l1592
+	inc	c
+l1592:
+	ld	a,c
+	ld	(l2989),a
+	ret
+;
+;
+;
+l1597:
+	xor	a
+	ld	(l0400+1),a
+	ld	a,(l0528)	; Test memorandum
+	or	a
+	jr	z,l15b8		; Nope
+	ld	de,l27d3
+	call	l01b8		; Indicate request
+	ld	a,MEMOLEN
+	ld	de,l0400	; Set length of input
+	ld	(de),a
+	ld	c,.rdcon
+	call	BDOS		; Read line
+	ld	de,l279f
+	call	l01b8		; Give new line
+l15b8:
+	ld	hl,0
+	ld	(l2975),hl	; Clear temp file pointer
+	ld	(l2975+2),hl
+	ld	hl,MAXREC
+	ld	(FCB+_RRN),hl	; Set max record
+	xor	a
+	ld	(FCB+_RRN+2),a
+	ld	(l0524),a
+l15ce:
+	call	l24db		; Get byte from member
+	or	a		; Test more
+	jp	z,l1829		; Nope
+	ld	(l1635),a
+	ld	b,a		; Set for length
+	ld	hl,(l2975)	; Get pointer
+	ld	(l0529),hl	; Save
+	ld	hl,(l2975+2)
+	ld	(l0529+2),hl
+	call	l2551		; Increment pointer by 1
+	call	l24db		; Get checksum
+	call	l2551		; Increment pointer by 1
+	ld	c,a
+	ld	hl,l3600	; Point to header
+	xor	a
+l15f3:
+	ld	d,a
+	call	l24db		; Load header
+	call	l2551		; Increment pointer by 1
+	ld	(hl),a
+	add	a,d		; Build chaksum
+	inc	hl
+	djnz	l15f3
+	cp	c		; Compare
+	jr	z,l160e
+l1602:
+	call	l1d6a		; Delete PMATEMP1.$$$
+l1605:
+	ld	de,l281b
+	call	l01b8		; Tell invalid header
+	jp	l2751		; Close file and exit
+l160e:
+	ld	a,(l28f3)	; Get length of name
+	ld	b,a
+	ld	a,(l3600+_ARCnam)
+	cp	b		; Test same length
+	jr	nz,l1683	; Nope
+	ld	hl,l28f4
+	ld	de,l3600+_ARCnam+1
+l161e:
+	ld	a,(de)
+	cp	(hl)		; Compare file name
+	jp	nz,l1683
+	inc	hl
+	inc	de
+	djnz	l161e
+	ld	de,l27ef
+	call	l01b8		; Tell updating
+	call	l180a
+	ld	de,(l3600+_ARClen)
+l1635	equ	$+1
+	ld	a,$-$
+	add	a,e		; Add to length
+	ld	e,a
+	ld	a,0
+	adc	a,d
+	ld	d,a
+	ld	a,(l3600+_ARClen+2)
+	adc	a,0
+	ld	c,a
+	ld	hl,(l054b)
+	ld	a,(l0400+1)
+	ld	b,a
+	ld	a,(l28f3)	; Get length of name
+	add	a,l0016		; Add a bit
+	add	a,b
+	add	a,l
+	ld	l,a
+	ld	a,0
+	adc	a,h
+	ld	h,a
+	ld	a,(l054b+2)
+	adc	a,0
+	or	a
+	sbc	hl,de
+	sbc	a,c
+	ld	b,a
+	push	hl
+	push	af
+	ld	hl,l2975	; Get pointer
+	ld	de,(l3600+_ARClen)
+	ld	a,(hl)
+	add	a,e		; Add to length
+	ld	e,a
+	inc	hl
+	ld	a,(hl)
+	adc	a,d
+	ld	d,a
+	inc	hl
+	ld	a,(l3600+_ARClen+2)
+	adc	a,(hl)
+	ld	c,a
+	pop	af
+	pop	hl
+	jp	c,l16c6
+	ld	a,b
+	or	h
+	or	l
+	jp	nz,l16f3
+	jp	l16a4
+l1683:
+	call	l1689		; Add length to file position
+	jp	l15ce
+;
+; Add member length to archive length
+;
+l1689:
+	ld	de,(l3600+_ARClen)
+	ld	bc,(l3600+_ARClen+2)
+	ld	hl,l2975
+	ld	a,(hl)
+	add	a,e		; Add four bytes of member length
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	adc	a,d
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	adc	a,c
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	adc	a,b
+	ld	(hl),a
+	ret
+;
+;
+;
+l16a4:
+	ld	(l2975),de	; Save pointer
+	ld	a,c
+	ld	(l2975+2),a
+	ld	hl,l3700	; Init buffer
+	ld	a,e
+	and	reclng-1	; Get remainder
+	ld	b,a
+	ld	a,reclng
+	sub	b
+	ld	b,a
+l16b7:
+	call	l24db		; Get byte from member
+	ld	(hl),a
+	call	l2551		; Increment pointer by 1
+	inc	hl
+	djnz	l16b7
+	ld	a,1
+	jp	l16d0
+l16c6:
+	ld	(l052d),de	; Save source file pointer
+	ld	a,c
+	ld	(l052d+2),a
+	ld	a,2
+l16d0:
+	ld	(l0524),a
+	ld	a,(l0529)
+	ld	(l2975),a	; Reset pointer
+	ld	hl,(l0529+1)
+	ld	(l2975+1),hl
+	rla
+	rl	l
+	rl	h
+	ld	(FCB+_RRN),hl
+	ld	de,l3280
+	call	l01db		; Set disk buffer
+	call	l01e0		; Read random record
+	jp	l1832
+l16f3:
+	ld	(l2975),de
+	ld	(l052d),de	; Save cource file pointer
+	ld	a,c
+	ld	(l2975+2),a
+	ld	(l052d+2),a
+	ld	(l0531),hl
+	ld	a,b
+	ld	(l0531+2),a
+l1709:
+	call	l24db		; Get length from member
+	or	a
+	jp	z,l1738		; That's all
+	ld	b,a
+	ld	(l0524),a
+	call	l2551		; Increment pointer by 1
+	call	l24db		; Get checksum
+	call	l2551		; Increment pointer by 1
+	ld	c,a
+	ld	hl,l3600	; Point to header
+	xor	a
+l1722:
+	ld	d,a
+	call	l24db		; Get header
+	call	l2551		; Increment pointer by 1
+	ld	(hl),a
+	add	a,d
+	inc	hl
+	djnz	l1722
+	cp	c
+	jp	nz,l1602
+	call	l1689		; Add length to file position
+	jp	l1709
+l1738:
+	ld	a,(l0524)
+	or	a
+	jp	z,l16d0
+	ld	de,(l0531)
+	ld	a,(l0531+2)
+	ld	c,a
+	ld	hl,l2975
+	ld	a,(hl)		; Get temp file pointer
+	ld	(l0531),a
+	add	a,e
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	ld	(l0531+1),a
+	adc	a,d
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	ld	(l0531+2),a
+	adc	a,c
+	ld	(hl),a
+	ld	a,(l052d)	; Get source file pointer
+	ld	hl,(l052d+1)
+	rla			; Divide by 128 for record number
+	rl	l
+	rl	h
+	ld	(l178d),hl
+	ld	a,(l0531)
+	ld	hl,(l0531+1)
+	rla
+	rl	l
+	rl	h
+l1777:
+	ld	(FCB+_RRN),hl
+	ld	c,0		; Clear record count
+	ld	de,l9780
+l177f:
+	ld	(l0535),de	; Save buffer address
+	push	bc
+	call	l01db		; Set disk buffer
+	call	l01e0		; Read random record
+	pop	bc
+	inc	c		; Advance record count
+l178d	equ	$+1
+	ld	hl,$-$
+	ld	de,(FCB+_RRN)
+	ld	a,(l052d)	; Get source file pointer
+	and	NoMSB
+	sbc	hl,de
+	jr	z,l17af
+	dec	de
+	ld	(FCB+_RRN),de
+	ld	hl,(l0535)	; Get buffer address
+	ld	de,-reclng
+	add	hl,de		; Get previous
+	ex	de,hl
+	ld	a,InpRecs
+	cp	c		; Rest all read
+	jr	nz,l177f
+	xor	a
+l17af:
+	ld	(l17db),a
+	ld	hl,(FCB+_RRN)	; Get current record number
+	ld	(l0537),hl	; Save it
+	ld	a,(l2975)
+	ld	hl,(l2975+1)
+	rla
+	rl	l
+	rl	h
+	ld	(FCB+_RRN),hl
+	ld	a,(l0531)
+	and	reclng-1
+	ld	d,0
+	ld	e,a
+	ld	hl,l9780
+	add	hl,de
+	ld	b,e
+	inc	b
+l17d4:
+	ld	a,c
+	cp	1
+	jr	nz,l17dd
+	ld	a,b
+l17db	equ	$+1
+	sub	$-$
+	ld	b,a
+l17dd:
+	ld	a,(hl)
+	call	l2567		; Put byte to temporary file
+	dec	hl
+	djnz	l17dd
+	ld	b,80h
+	dec	c
+	jp	nz,l17d4
+	ld	de,(l052d)	; Get source file pointer
+	ld	hl,(l0531)
+	or	a
+	sbc	hl,de
+	ld	a,(l052d+2)
+	ld	c,a
+	ld	a,(l0531+2)
+	sbc	a,c
+	jp	c,l1805
+	ld	hl,(l0537)	; Get last record number
+	jp	l1777		; Set it for next read
+l1805:
+	ld	a,3
+	jp	l16d0
+l180a:
+	ld	hl,l0500++DIRlen; Point to filename
+	ld	b,.nam+.ext
+	ld	a,'?'
+l1811:
+	cp	(hl)		; Find wildcard
+	jr	nz,l1818	; Nope
+	inc	hl
+	djnz	l1811
+	ret
+l1818:
+	ld	de,l27fa
+	call	l01b8		; Give message
+	ld	hl,l28f4
+	ld	a,(l28f3)	; Get length of name
+	ld	b,a		; Set length
+	call	l26e6		; Print string
+	ret
+l1829:
+	ld	de,l27e6
+	call	l01b8		; Tell adding
+	call	l180a
+l1832:
+	ld	hl,(l054b)
+	ld	(l28e5),hl
+	ld	a,(l054b+2)
+	ld	(l28e5+2),a
+	ld	hl,(l0547)
+	ld	(l28e9),hl
+	ld	a,(l0547+2)
+	ld	(l28e9+2),a
+	ld	a,(l0400+1)
+	ld	b,a
+	ld	a,(l28f3)	; Get length of name
+	add	a,l0016
+	add	a,b
+	call	l251a		; Put byte to file
+	ld	hl,l28e0
+	ld	a,(l28f3)	; Get length of name
+	add	a,14h
+	ld	b,a
+	ld	d,a
+	ld	a,(l0541)
+	ld	c,a
+	ld	a,(l0542)
+	add	a,c
+l1869:
+	add	a,(hl)
+	inc	hl
+	djnz	l1869
+	ld	hl,l0400+1
+	ld	b,(hl)
+	inc	b
+	jr	l1876
+l1874:
+	inc	hl
+	add	a,(hl)
+l1876:
+	djnz	l1874
+	call	l251a		; Put byte to file
+	ld	hl,l28e0
+	ld	b,d
+l187f:
+	ld	a,(hl)
+	call	l251a		; Put byte to file
+	inc	hl
+	djnz	l187f
+	ld	a,(l0541)
+	call	l251a		; Put byte to file
+	ld	a,(l0542)
+	call	l251a		; Put byte to file
+	ld	hl,l0400+1
+	ld	b,(hl)
+	inc	b
+	jr	l189e
+l1899:
+	inc	hl
+	ld	a,(hl)
+	call	l251a		; Put byte to file
+l189e:
+	djnz	l1899
+	ld	a,(l28e0+3)
+	cp	'2'		; Test -pm2-
+	jp	c,l1c43		; Must be earlier version
+	ld	hl,l2aa8
+	ld	(l2985),hl
+	ld	hl,0
+	ld	(l0550),hl
+	ld	hl,l2e00-1
+	ld	(l0539),hl	; Set disk buffer
+	ld	a,10000000b
+	ld	(l055b),a	; Init bit state
+	xor	a
+	ld	(l055c),a	; Init current byte
+	call	l2663		; Get byte from temp file
+	call	l1b7a
+	ld	a,(l2984)
+	cp	0ah
+	jr	c,l18e2
+	cp	1dh
+	jr	nz,l18da
+	ld	a,(l2987)
+	or	a
+	jr	z,l18e2
+l18da:
+	ld	de,l2aa8
+	ld	b,5
+	call	l1bfd
+l18e2:
+	call	l25cb		; Read byte from base-archive file
+	cp	-1		; Test special
+	jp	nz,l1a17	; Nope
+	call	l25cb		; Read byte from base-archive file
+	or	a
+	jp	z,l1a15
+	ld	c,a
+	and	1fh
+	ld	d,a
+	ld	a,c
+	rlca
+	rlca
+	rlca
+	and	7
+	ld	c,a
+	call	l25cb		; Read byte from base-archive file
+	ld	e,a
+	ld	a,c
+	cp	7
+	jr	nz,l1909
+	call	l25cb		; Read byte from base-archive file
+	ld	c,a
+l1909:
+	cp	1
+	jp	nz,l191b
+	ld	hl,l0650
+	call	l1c11
+	ld	a,e
+	call	l2470		; Put bits to file
+	jp	l1aab
+l191b:
+	cp	10h
+	jr	c,l1986
+	cp	18h
+	jr	c,l194e
+	cp	20h
+	jr	c,l195c
+	cp	40h
+	jr	c,l196a
+	cp	80h
+	jr	c,l1978
+	cp	-1
+	jr	c,l1940
+	ld	a,d
+	or	e
+	jr	nz,l1940
+	ld	hl,l06a0
+	call	l1c11
+	jp	l1aab
+l1940:
+	ld	hl,l069c
+	call	l1c11
+	ld	a,c
+	sub	80h
+	call	l245a		; Put bits to file
+	jr	l198e
+l194e:
+	ld	hl,l068c
+	call	l1c11
+	ld	a,c
+	sub	10h
+	call	l24a6		; Put bits to file
+	jr	l198e
+l195c:
+	ld	hl,l0690
+	call	l1c11
+	ld	a,c
+	sub	18h
+	call	l24a6		; Put bits to file
+	jr	l198e
+l196a:
+	ld	hl,l0694
+	call	l1c11
+	ld	a,c
+	sub	20h
+	call	l2484		; Put bits to file
+	jr	l198e
+l1978:
+	ld	hl,l0698
+	call	l1c11
+	ld	a,c
+	sub	40h
+	call	l2470		; Put bits to file
+	jr	l198e
+l1986:
+	add	a,7
+	ld	hl,l0630
+	call	l1c08
+l198e:
+	ld	hl,(l2985)
+	ld	a,d
+	cp	1
+	jp	nc,l19c7
+	ld	a,e
+	cp	40h
+	jr	c,l19ae
+	cp	80h
+	jr	c,l19b9
+	ld	a,2
+	call	l1c08
+	ld	a,e
+	sub	80h
+	call	l245a		; Put bits to file
+	jp	l1aab
+l19ae:
+	xor	a
+	call	l1c08
+	ld	a,e
+	call	l2470		; Put bits to file
+	jp	l1aab
+l19b9:
+	ld	a,1
+	call	l1c08
+	ld	a,e
+	sub	40h
+	call	l2470		; Put bits to file
+	jp	l1aab
+l19c7:
+	jr	nz,l19d0
+	ld	a,3
+	call	l1c08
+	jr	l1a0e
+l19d0:
+	cp	04h
+	jr	c,l19e9
+	cp	08h
+	jr	c,l19f6
+	cp	10h
+	jr	c,l1a03
+	ld	a,7
+	call	l1c08
+	ld	a,d
+	sub	10h
+	call	l2496		; Put bits to file
+	jr	l1a0e
+l19e9:
+	ld	a,4
+	call	l1c08
+	ld	a,d
+	sub	2
+	call	l24ba		; Put bit to file
+	jr	l1a0e
+l19f6:
+	ld	a,5
+	call	l1c08
+	ld	a,d
+	sub	4
+	call	l24b2		; Put bits to file
+	jr	l1a0e
+l1a03:
+	ld	a,6
+	call	l1c08
+	ld	a,d
+	sub	8
+	call	l24a6		; Put bits to file
+l1a0e:
+	ld	a,e
+	call	l2442		; Put bits to file
+	jp	l1aab
+l1a15:
+	ld	a,-1
+l1a17:
+	ld	c,a
+	cp	40h
+	jr	nc,l1a64
+	cp	08h
+	jr	c,l1a37
+	cp	10h
+	jr	c,l1a46
+	cp	20h
+	jr	c,l1a55
+	ld	hl,l063c
+	call	l1c11
+	ld	a,c
+	and	00011111b
+	call	l2484		; Put bits to file
+	jp	l1aa9
+l1a37:
+	ld	hl,l0630
+	call	l1c11
+	ld	a,c
+	and	00000111b
+	call	l24a6		; Put bits to file
+	jp	l1aa9
+l1a46:
+	ld	hl,l0634
+	call	l1c11
+	ld	a,c
+	and	00000111b
+	call	l24a6		; Put bits to file
+	jp	l1aa9
+l1a55:
+	ld	hl,l0638
+	call	l1c11
+	ld	a,c
+	and	00001111b
+	call	l2496		; Put bits to file
+	jp	l1aa9
+l1a64:
+	cp	60h
+	jr	c,l1a7f
+	cp	80h
+	jr	c,l1a8e
+	cp	0c0h
+	jr	c,l1a9d
+	ld	hl,l064c
+	call	l1c11
+	ld	a,c
+	and	00111111b
+	call	l2470		; Put bits to file
+	jp	l1aa9
+l1a7f:
+	ld	hl,l0640
+	call	l1c11
+	ld	a,c
+	and	00011111b
+	call	l2484		; Put bits to file
+	jp	l1aa9
+l1a8e:
+	ld	hl,l0644
+	call	l1c11
+	ld	a,c
+	and	00011111b
+	call	l2484		; Put bits to file
+	jp	l1aa9
+l1a9d:
+	ld	hl,l0648
+	call	l1c11
+	ld	a,c
+	and	00111111b
+	call	l2470		; Put bits to file
+l1aa9:
+	ld	c,0
+l1aab:
+	ld	b,0
+	inc	bc
+	ld	hl,(l0550)
+	ld	d,h
+	add	hl,bc
+	ld	(l0550),hl
+	ld	a,h
+	cp	d
+	jp	z,l1b4a
+	cp	20h
+	jr	z,l1af2
+	cp	10h
+	jr	z,l1b20
+	ld	hl,l2ad4
+	ld	b,7
+	cp	8
+	jr	z,l1ad5
+	cp	4
+	jp	nz,l1b4a
+	ld	hl,l2abc
+	dec	b
+l1ad5:
+	ld	(l2985),hl
+	ex	de,hl
+	ld	a,(l2984)
+	cp	0ah
+	jp	c,l1b4a
+	cp	1dh
+	jr	nz,l1aec
+	ld	a,(l2987)
+	or	a
+	jp	z,l1b4a
+l1aec:
+	call	l1bfd
+	jp	l1b4a
+l1af2:
+	ld	de,-l1000
+	add	hl,de
+	ld	(l0550),hl
+	call	l2663		; Get from temp file
+	or	a
+	jr	nz,l1b05
+	call	l24ba		; Put zero bit to file
+	jp	l1b4a
+l1b05:
+	push	bc
+	call	l1b7a
+	ld	a,(l2984)
+	cp	0ah
+	jr	c,l1b1d
+	cp	1dh
+	jr	nz,l1b1a
+	ld	a,(l2987)
+	or	a
+	jr	z,l1b1d
+l1b1a:
+	call	l1be1
+l1b1d:
+	pop	bc
+	jr	l1b4a
+l1b20:
+	ld	hl,l06a4
+	ld	(l2985),hl
+	push	bc
+	call	l2663		; Get byte from temp file
+	or	a
+	jr	nz,l1b32
+	call	l24ba		; Put zero bit to file
+	jr	l1b35
+l1b32:
+	call	l1b7a
+l1b35:
+	ld	a,(l2984)
+	cp	0ah
+	jr	c,l1b49
+	cp	1dh
+	jr	nz,l1b46
+	ld	a,(l2987)
+	or	a
+	jr	z,l1b49
+l1b46:
+	call	l1be1
+l1b49:
+	pop	bc
+l1b4a:
+	dec	c
+	ld	b,0
+	inc	bc
+	ld	hl,l0547
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,e
+	sub	c
+	ld	e,a
+	ld	a,d
+	sbc	a,b
+	ld	d,a
+	jp	nc,l1b5f
+	dec	(hl)
+l1b5f:
+	ld	a,(hl)
+	dec	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	or	d
+	or	e
+	jp	nz,l18e2
+	ld	a,(l055b)	; Get bit state
+	cp	10000000b	; Test it
+	jp	z,l1c69		; Empty
+	ld	a,(l055c)	; Get byte
+	call	l251a		; Put to file
+	jp	l1c69
+l1b7a:
+	ld	(l2984),a
+	ld	de,l0630
+	ld	b,1dh
+l1b82:
+	call	l2663		; Get byte from temp file
+	ld	(de),a
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	djnz	l1b82
+	ld	hl,l0630
+	ld	a,1dh
+	call	l14bf
+	ld	a,1
+	call	l24ba		; Put bit to file
+	ld	a,(l2984)
+	push	af
+	call	l2484		; Put bits to file
+	pop	af
+	cp	1
+	ret	z
+	ld	a,(l2987)
+	push	af
+	call	l24a6		; Put bits to file
+	pop	af
+	or	a
+	ret	z
+	ld	a,(l2989)
+	push	af
+	call	l24a6		; Put bits to file
+	pop	af
+	add	a,a
+	ld	d,0
+	ld	e,a
+	ld	hl,l1c33
+	add	hl,de		; Point to table
+	ld	e,(hl)		; Fetch bit address
+	inc	hl
+	ld	d,(hl)
+	ld	(l1bd8),de	; Save
+	ld	a,(l2984)
+	ld	b,a
+	ld	a,(l2987)
+	ld	c,a
+	ld	de,l0630
+l1bd0:
+	ld	a,(de)
+	or	a
+	jr	z,l1bd7
+	ld	a,(de)
+	sub	c
+	inc	a
+l1bd7:
+l1bd8	equ	$+1
+	call	l2496		; Put bits to file
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	djnz	l1bd0
+	ret
+l1be1:
+	ld	de,l06a4
+	ld	b,8
+l1be6:
+	call	l2663		; Get byte from temp file
+	ld	(de),a
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	djnz	l1be6
+	ld	hl,l06a4
+	ld	a,8
+	call	l14bf
+	ld	de,l06a4
+	ld	b,8
+l1bfd:
+	ld	a,(de)
+	call	l24a6		; Put bits to file
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	djnz	l1bfd
+	ret
+;
+;
+;
+l1c08:
+	push	de
+	ld	d,0
+	ld	e,a
+	ex	de,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,de
+	pop	de
+l1c11:
+	ld	a,(hl)
+	or	a
+	ret	z
+	cp	-1
+	ret	z
+	push	bc
+	ld	b,a
+	inc	hl
+	ld	c,10000000b
+l1c1c:
+	ld	a,(hl)
+	and	c
+	ld	a,1
+	jp	nz,l1c24
+	xor	a
+l1c24:
+	push	hl
+	call	l24ba		; Put bit to file
+	pop	hl
+	rrc	c
+	jp	nc,l1c2f
+	inc	hl
+l1c2f:
+	djnz	l1c1c
+	pop	bc
+	ret
+;
+; Bit depending write table
+;
+l1c33:
+	dw	l24da
+	dw	l24ba
+	dw	l24b2
+	dw	l24a6
+	dw	l2496
+	dw	l2484
+	dw	l2470
+	dw	l245a
+;
+;
+;
+l1c43:
+	call	l25cb		; Read byte from base-archive file
+	call	l251a		; Put byte to file
+	ld	hl,l054b	; Point to length
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,e
+	sub	1		; Count down
+	ld	e,a
+	jp	nc,l1c5f
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l1c5f
+	dec	(hl)
+l1c5f:
+	ld	a,(hl)
+	dec	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	or	d
+	or	e
+	jp	nz,l1c43
+l1c69:
+	ld	a,(l0524)
+	or	a
+	jp	z,l1d3c
+	cp	2
+	jr	z,l1c91
+	jp	nc,l1d1f
+	ld	a,(l2975)	; Get pointer
+	and	reclng-1
+	jp	z,l1d52
+	ld	b,a
+	ld	a,reclng
+	sub	b
+	ld	b,a
+	ld	hl,l3700
+l1c87:
+	ld	a,(hl)
+	call	l251a		; Put byte to file
+	inc	hl
+	djnz	l1c87
+	jp	l1d52
+;
+;
+;
+l1c91:
+	ld	a,(l052d)	; Get source file pointer
+	ld	de,(l052d+1)
+	rla			; Divide by 128 for record
+	rl	e
+	rl	d
+l1c9d:
+	ld	(FCB+_RRN),de	; Set record
+	ld	c,0		; Clear record count
+	ld	de,l3800
+l1ca6:
+	ld	(l0535),de	; Save current buffer
+	push	bc
+	call	l01db		; Set disk buffer
+	call	l01e0		; Read random record
+	pop	bc
+	or	a		; Test end of file
+	jr	nz,l1ccb	; Yeap
+	ld	hl,(FCB+_RRN)
+	inc	hl		; Advance record number
+	ld	(FCB+_RRN),hl
+	ld	hl,(l0535)	; Get buffer address
+	ld	de,reclng
+	add	hl,de		; Advance it
+	ex	de,hl
+	inc	c		; Advance record count
+	ld	a,InpRecs
+	cp	c		; Test all read
+	jp	nz,l1ca6	; Nope, loop on
+l1ccb:
+	ld	hl,(FCB+_RRN)	; Get current record number
+	ld	(l0537),hl	; Save it
+	ld	a,(l2975)	; Get destination file pointer
+	ld	hl,(l2975+1)
+	rla			; Divide by 128 for record
+	rl	l
+	rl	h
+	ld	(FCB+_RRN),hl	; Set record
+	ld	a,c		; Get records read
+	or	a		; Test more
+	jp	z,l1d0c		; Nope, end of file
+	ld	a,(l052d)	; Get source file pointer
+	and	reclng-1	; Get index
+	ld	d,0
+	ld	e,a
+	ld	hl,l3800
+	add	hl,de		; Position in buffer
+	ld	a,reclng
+	sub	e		; Calculate remainder in buffer
+	ld	b,a
+l1cf4:
+	ld	a,(hl)
+	call	l251a		; Put byte to file
+	inc	hl
+	djnz	l1cf4
+	ld	b,reclng
+	dec	c		; Test one record read
+	jp	nz,l1cf4
+	xor	a
+	ld	(l052d),a	; Clear source file pointer
+	ld	de,(l0537)	; Get last record number
+	jp	l1c9d		; Set it for next read
+l1d0c:
+	ld	a,(l2975)	; Get pointer
+	and	reclng-1
+	jr	z,l1d52		; Skip on record boundary
+	ld	de,l3280
+	call	l01db		; Set disk buffer
+	call	l01e8		; Write random record
+	jp	l1d52
+l1d1f:
+	ld	a,(l2975)	; Get pointer
+	and	reclng-1
+	jp	z,l1d52		; Skip on record boundary
+	ld	hl,l3200
+	ld	d,0
+	ld	e,a
+	add	hl,de		; Position in buffer
+	ld	a,reclng
+	sub	e		; Calculate remainder in buffer
+	ld	b,a
+l1d32:
+	ld	a,(hl)
+	call	l251a		; Put byte to file
+	inc	hl
+	djnz	l1d32
+	jp	l1d52
+l1d3c:
+	call	l251a		; Put byte to file
+	ld	a,(l2975)
+	and	reclng-1
+	jr	z,l1d52		; Skip on record boundary
+	ld	c,a
+	ld	a,reclng
+	sub	c		; Calculate remainder in buffer
+	ld	b,a
+l1d4b:
+	ld	a,eof
+	call	l251a		; Fill with end of  file
+	djnz	l1d4b
+l1d52:
+	ld	de,l27ff
+	call	l01b8		; Tell done
+	ld	a,(l0525)	; Get end of file
+	or	a
+	ret	nz		; It's the end
+	call	l1d6a		; Delete PMATEMP1.$$$
+	ld	a,(l054f)	; Test temp file access
+	or	a
+	call	nz,l1d79	; Delete PMATEMP2.$$$ if so
+	jp	l09f9
+;
+; Delete PMATEMP1.$$$
+;
+l1d6a:
+	ld	hl,0
+	ld	(l2903+_EX),hl	; Init FCB entry
+	ld	(l2903+_EX+2),hl
+	ld	de,l2903
+	jp	l01c7		; Delete PMATEMP1.$$$
+;
+; Delete PMATEMP2.$$$
+;
+l1d79:
+	ld	hl,0
+	ld	(l2927+_EX),hl
+	ld	(l2927+_EX),hl	; *** MISSING +2
+	ld	de,l2927
+	jp	l01c7		; Delete PMATEMP2.$$$
+;
+; Prepare file ^HL
+;
+l1d88:
+	ld	(hl),0		; Set default drive
+	inc	hl
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),' '
+	ld	bc,.nam+.ext-1
+	ldir			; Blank filename
+	inc	hl
+;
+; Init file ^HL
+;
+l1d96:
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),0
+	ld	bc,fcblng-_EX-1
+	ldir			; Clear remainder
+	ret
+;
+; Initialize drive
+; ENTRY	Reg HL points to string
+;	Reg DE points to FCB
+;
+l1da1:
+	ld	a,(hl)		; Get character
+	cp	'A'		; Test range
+	ret	c
+	cp	'P'+1
+	ret	nc
+	ld	b,a		; Save drive
+	inc	hl
+	ld	a,(hl)		; Get next
+	dec	hl
+	cp	':'		; Should be drive delimiter
+	ret	nz		; Nope
+	ld	a,b		; Get drive
+	sub	'A'-1		; Make binary
+	ld	(de),a		; Store
+	inc	hl
+	inc	hl
+	ret
+;
+;
+;
+l1db6:
+	ld	hl,(l0550)
+	inc	hl
+	ld	(l0550),hl
+	ld	a,h
+	cp	20h
+	ld	a,l
+	jp	nc,l1e06
+	or	a
+	jp	nz,l2261
+	ld	a,h
+	cp	10h
+	jp	z,l1df2
+	cp	08h
+	jp	z,l1de5
+	cp	04h
+	jp	nz,l2261
+	ld	de,l2aa8
+	ld	a,5
+	call	l1e18
+	ld	hl,l29a3
+	jr	l1e00
+l1de5:
+	ld	de,l2abc
+	ld	a,6
+	call	l1e18
+	ld	hl,l29b5
+	jr	l1e00
+l1df2:
+	ld	de,l2ad4
+	ld	a,7
+	call	l1e18
+	call	l1e4a
+	ld	hl,l29ca
+l1e00:
+	ld	(l2985),hl
+	jp	l2261
+l1e06:
+	or	a
+	jp	nz,l226e
+	ld	a,h
+	cp	30h
+	jp	z,l2215
+	cp	20h
+	jp	z,l21d8
+	jp	l226e
+;
+;
+;
+l1e18:
+	push	bc
+	push	ix
+	push	iy
+	push	af
+	push	de
+	push	de
+	ld	ix,(l2985)
+	call	l12ff
+	pop	hl
+	call	l144e
+	ld	de,(l054b)
+	ld	bc,(l054b+2)
+	ld	iy,(l2985)
+	pop	hl
+	pop	af
+	call	l20af
+	ld	(l054b),de
+	ld	(l054b+2),bc
+	pop	iy
+	pop	ix
+	pop	bc
+	ret
+;
+;
+;
+l1e4a:
+	ld	hl,l29e2
+	ld	de,l2a51
+	ld	b,ll2a39
+l1e52:
+	ld	a,(hl)		; Get current
+	ld	(de),a		; Unpack
+	ld	(hl),0		; Clear current
+	inc	hl
+	inc	de
+	djnz	l1e52
+l1e5a:
+	ld	hl,l29ca
+	ld	de,l2a39
+	ld	b,ll29e2
+l1e62:
+	ld	a,(hl)		; Once more
+	ld	(de),a
+	ld	(hl),0
+	inc	hl
+	inc	de
+	djnz	l1e62
+	ret
+;
+; Add triplets
+; ENTRY	Regs HL and DE point to arrays
+;	Reg B holds number of triplets
+;
+; Results in: ^HL:=^HL+^DE
+;
+l1e6b:
+	ld	a,(de)
+	add	a,(hl)		; Simple add
+	ld	(hl),a
+	inc	hl
+	inc	de
+	ld	a,(de)
+	adc	a,(hl)
+	ld	(hl),a
+	inc	hl
+	inc	de
+	ld	a,(de)
+	adc	a,(hl)
+	ld	(hl),a
+	inc	hl
+	inc	de
+	djnz	l1e6b
+	ret
+;
+;
+;
+l1e7d:
+	ld	ix,l29e2
+	call	l1f78
+	ld	(l05b4),de
+	ld	(l05b4+2),bc
+	ld	de,l0560
+	call	l1f55
+	ld	ix,l2a51
+	call	l1f78
+	ld	(l05b0),de
+	ld	(l05b0+2),bc
+	ld	hl,(l05b4)
+	add	hl,de
+	ld	(l05b4),hl
+	ld	hl,(l05b4+2)
+	adc	hl,bc
+	ld	(l05b4+2),hl
+	call	l1f52
+	ld	hl,l2a51
+	ld	de,l29e2
+	ld	b,ll2a39 / 3
+	call	l1e6b		; Add triplets
+	ld	ix,l2a51
+	call	l1f78
+	ld	hl,1
+	add	hl,de		; Increment 32 bit
+	ex	de,hl
+	ld	hl,0
+	adc	hl,bc
+	ld	(l05b8),de
+	ld	(l05b8+2),hl
+	ld	a,(l2984)
+	ld	(l2992),a
+	ld	a,(l2987)
+	ld	(l2993),a
+	ret
+;
+;
+;
+l1ee3:
+	ld	ix,l29ca
+	ld	hl,l0560
+	call	l1fbb
+	ld	hl,(l05b4)
+	add	hl,de
+	ld	(l05b4),hl
+	ld	hl,(l05b4+2)
+	adc	hl,bc
+	ld	(l05b4+2),hl
+	ld	de,l05a0
+	call	l1f69
+	ld	ix,l2a39
+	ld	hl,l0580
+	call	l1fbb
+	ld	hl,(l05b0)
+	add	hl,de
+	ld	(l05b0),hl
+	ld	hl,(l05b0+2)
+	adc	hl,bc
+	ld	(l05b0+2),hl
+	ld	hl,(l05b4)
+	add	hl,de
+	ld	(l05b4),hl
+	ld	hl,(l05b4+2)
+	adc	hl,bc
+	ld	(l05b4+2),hl
+	call	l1f66
+	ld	hl,l2a39
+	ld	de,l29ca
+	ld	b,ll29e2 / 3
+	call	l1e6b		; Add triplets
+	ld	ix,l2a39
+	ld	hl,l2992
+	call	l1fbb
+	ld	hl,(l05b8)
+	add	hl,de
+	ld	(l05b8),hl
+	ld	hl,(l05b8+2)
+	adc	hl,bc
+	ld	(l05b8+2),hl
+	ret
+;
+;
+;
+l1f52:
+	ld	de,l0580
+l1f55:
+	ld	a,(l2984)
+	ld	(de),a
+	inc	de
+	ld	a,(l2987)
+	ld	(de),a
+	inc	de
+	ld	hl,l0630
+	ld	b,ll2a39 / 3
+	jr	l1f6e
+;
+;
+;
+l1f66:
+	ld	de,l05a8
+l1f69:
+	ld	hl,l06a4
+	ld	b,ll29e2 / 3
+l1f6e:
+	ld	a,(hl)
+	ld	(de),a
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	de
+	djnz	l1f6e
+	ret
+;
+;
+;
+l1f78:
+	push	ix
+	ld	a,1dh
+	call	l12ff
+	ld	hl,l0630
+	call	l144e
+	ld	hl,l0006
+	ld	a,(l2984)
+	cp	1
+	jr	z,l1fa8
+	ld	hl,l0009
+	ld	a,(l2987)
+	or	a
+	jr	z,l1fa8
+	ld	hl,l000c
+	ld	a,(l2989)
+	ld	d,0
+	ld	e,a
+	ld	a,(l2984)
+	ld	b,a
+l1fa5:
+	add	hl,de
+	djnz	l1fa5
+l1fa8:
+	ex	de,hl
+	ld	bc,0
+	pop	iy
+	ld	hl,l0630
+	ld	ix,l2778
+	ld	a,29
+	call	l20b3
+	ret
+;
+;
+;
+l1fbb:
+	ld	a,(hl)
+	cp	0ah
+	ret	c
+	cp	1dh
+	jr	nz,l1fc7
+	inc	hl
+	ld	a,(hl)
+	or	a
+	ret	z
+l1fc7:
+	push	ix
+	ld	a,8
+	call	l12ff
+	ld	hl,l06a4
+	call	l144e
+	ld	de,l0018
+	ld	bc,0
+	pop	iy
+	ld	hl,l06a4
+	ld	a,8
+	call	l20af
+	ret
+;
+;
+;
+l1fe5:
+	or	a
+	ld	hl,(l05b8)
+	ld	de,(l05b4)
+	sbc	hl,de		; Compare low
+	ld	hl,(l05b8+2)
+	ld	de,(l05b4+2)
+	sbc	hl,de		; Compare high
+	ret
+;
+;
+;
+l1ff9:
+	ld	de,l0560
+	jr	l2001
+;
+;
+;
+l1ffe:
+	ld	de,l0580
+l2001:
+	ld	a,(de)
+	call	l260f		; Put byte to temp file
+	inc	de
+	inc	de
+	ld	b,1dh
+	jr	l2033
+;
+;
+;
+l200b:
+	ld	a,(l0560)
+	cp	0ah
+	ret	c
+	ld	de,l05a0
+	cp	1dh
+	jr	nz,l2031
+	ld	a,(l0561)
+	or	a
+	jr	nz,l2031
+	ret
+;
+;
+;
+l201f:
+	ld	a,(l0580)
+	cp	0ah
+	ret	c
+	ld	de,l05a8
+	cp	1dh
+	jr	nz,l2031
+	ld	a,(l0581)
+	or	a
+	ret	z
+l2031:
+	ld	b,8
+l2033:
+	ld	a,(de)
+	call	l260f		; Put byte to temp file
+	inc	de
+	djnz	l2033
+	ret
+;
+;
+;
+l203b:
+	ld	de,(l2990)
+	ld	a,d
+	or	e
+	ret	z
+l2042:
+	xor	a
+	call	l260f		; Put byte to temp file
+	dec	de
+	ld	a,d
+	or	e
+	jr	nz,l2042
+	ld	(l2990),de
+	ret
+;
+;
+;
+l2050:
+	ld	a,(l298f)
+	or	a
+	ret	z
+	xor	a
+	ld	(l298f),a
+	ld	hl,(l2990)
+	dec	hl
+	ld	(l2990),hl
+	xor	a
+	call	l260f		; Put byte to temp file
+;
+;
+;
+l2064:
+	ld	a,(l0580)
+	cp	0ah
+	ret	c
+	ld	de,l0036
+	ld	bc,0
+	cp	1dh
+	jr	nz,l209f
+	ld	a,(l0581)
+	or	a
+	jr	nz,l209f
+	ret
+;
+;
+;
+l207b:
+	ld	de,(l05b0)
+	ld	bc,(l05b0+2)
+	jr	l209f
+;
+;
+;
+l2085:
+	ld	de,(l05b4)
+	ld	bc,(l05b4+2)
+	jr	l209f
+;
+;
+;
+l208f:
+	ld	de,(l05b8)
+	ld	bc,(l05b8+2)
+	jr	l209f
+;
+; Increment value by 1
+;
+l2099:
+	ld	de,1
+	ld	bc,0
+;
+; Add to current value
+; ENTRY	Regs BC,DE hold value to be added - HI..LO
+;
+l209f:
+	ld	hl,(l054b)	; Get value
+	add	hl,de		; Add low
+	ld	(l054b),hl
+	ld	hl,(l054b+2)
+	adc	hl,bc		; Add high
+	ld	(l054b+2),hl
+	ret
+;
+;
+;
+l20af:
+	ld	ix,l2795
+l20b3:
+	push	af
+	ld	a,(hl)
+	or	a
+	jr	z,l20d7
+	cp	-1
+	jr	nz,l20bd
+	xor	a
+l20bd:
+	add	a,(ix+0)
+	push	hl
+l20c1:
+	ld	l,(iy+0)
+	ld	h,(iy+1)
+	add	hl,de
+	ex	de,hl
+	ld	l,(iy+2)
+	ld	h,0
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	dec	a
+	jp	nz,l20c1
+	pop	hl
+l20d7:
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	iy
+	inc	iy
+	inc	iy
+	inc	ix
+	pop	af
+	dec	a
+	jp	nz,l20b3
+	ret
+;
+;
+;
+l20e9:
+	ld	a,(l0551)
+	cp	10h
+	jp	nc,l2140
+	ld	hl,l0036
+	ld	de,l2ad4
+	ld	b,7
+	cp	08h
+	jr	nc,l210f
+	ld	hl,l0021
+	ld	de,l2abc
+	dec	b
+	cp	04h
+	jr	nc,l210f
+	ld	hl,l000f
+	ld	de,l2aa8
+	dec	b
+l210f:
+	push	hl
+	ld	a,b
+	call	l1e18
+	ld	ix,l29e2
+	call	l1f78
+	pop	hl
+	ld	a,(l2984)
+	cp	0ah
+	jr	c,l2136
+	cp	1dh
+	jr	nz,l212d
+	ld	a,(l2987)
+	or	a
+	jr	z,l2136
+l212d:
+	add	hl,de
+	ex	de,hl
+	ld	hl,0
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+l2136:
+	call	l209f
+	call	l1f52
+	call	l1ffe
+	ret
+l2140:
+	cp	20h
+	jp	nc,l2191
+	call	l1e7d
+	call	l1fe5
+	jr	c,l216d
+	call	l1ffe
+	call	l2064
+	call	l2085
+	call	l1ff9
+	ld	ix,l29ca
+	ld	hl,l0560
+	call	l1fbb
+	call	l209f
+	call	l1f66
+	call	l201f
+	ret
+l216d:
+	call	l1f52
+	call	l1ffe
+	call	l2064
+	call	l208f
+	xor	a
+	call	l260f		; Put byte to temp file
+	ld	ix,l29ca
+	ld	hl,l2992
+	call	l1fbb
+	call	l209f
+	call	l1f66
+	call	l201f
+	ret
+l2191:
+	call	l1e7d
+	call	l1ee3
+	call	l1fe5
+	jr	c,l21b2
+	call	l1ffe
+	call	l2050
+	call	l201f
+	call	l203b
+	call	l2085
+	call	l1ff9
+	call	l200b
+	ret
+l21b2:
+	ld	a,(l2992)
+	ld	(l2984),a
+	ld	a,(l2993)
+	ld	(l2987),a
+	call	l1f52
+	call	l1ffe
+	call	l2050
+	call	l1f66
+	call	l201f
+	call	l203b
+	call	l208f
+	xor	a
+	call	l260f		; Put byte to temp file
+	ret
+l21d8:
+	push	bc
+	push	ix
+	push	iy
+	call	l1e7d
+	call	l1fe5
+	jr	c,l21f7
+	call	l1ffe
+	call	l2064
+	call	l207b
+	call	l1e4a
+	ld	hl,0
+	xor	a
+	jr	l220f
+l21f7:
+	ld	hl,l29e2	; Point to array
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),0
+	ld	bc,ll2a39-1
+	ldir			; Clear entire array
+	call	l1e5a
+	call	l2099		; Increment value by 1
+	ld	hl,1
+	ld	a,-1
+l220f:
+	ld	(l298f),a
+	jp	l2256
+l2215:
+	ld	hl,l2000
+	ld	(l0550),hl
+	push	bc
+	push	ix
+	push	iy
+	call	l1e7d
+	call	l1ee3
+	call	l1fe5
+	jr	c,l2242
+	call	l1ffe
+	call	l2050
+	call	l201f
+	call	l203b
+	call	l207b
+	call	l1e4a
+	ld	hl,0
+	jr	l2256
+l2242:
+	ld	hl,l29ca	; Init pointer
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),0
+	ld	bc,gl2a39-1
+	ldir			; Clear entire array
+	call	l2099		; Increment value by 1
+	ld	hl,(l2990)
+	inc	hl
+l2256:
+	ld	(l2990),hl
+	pop	iy
+	pop	ix
+	pop	bc
+	jp	l226e
+l2261:
+	ld	de,(l0550)
+	ld	hl,(l297b)
+	or	a
+	sbc	hl,de
+	jp	nc,l229b
+l226e:
+	ld	hl,(l0552)
+	inc	hl
+	ld	a,(l297c)
+	cp	h
+	ld	a,(iy+1)
+	jp	nz,l227f
+	ld	a,(l3800)	; Get from buffer
+l227f:
+	and	00111111b	; Mask byte
+	ld	hl,l06c4
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	a,(hl)
+	ld	h,a
+	ld	l,(iy+0)
+	add	hl,hl
+	add	hl,hl
+	ld	de,(l2982)
+	add	hl,de
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	dec	de
+	ld	(hl),e
+	dec	hl
+	ld	(hl),d
+l229b:
+	ld	a,(l0559)	; Get index
+	ld	h,HIGH l0400
+	ld	l,a
+	ld	d,0
+	ld	e,(hl)
+	inc	a
+	ld	(l0559),a	; Set index
+	ld	a,(l055a)	; Get end of file
+	or	a
+	jr	nz,l22b6	; Got end
+	call	l2353		; Read from base-archive file
+	jr	c,l22bb		; End of file
+	ld	(hl),a		; Unpack
+	jr	l22bb
+l22b6:
+	ld	a,true
+	ld	(l055a),a	; Set end of file
+l22bb:
+	ld	(iy+0),e
+	ld	a,(l053f)
+	cp	e
+	jr	z,l22e0
+	ld	h,HIGH l3700
+	ld	l,a
+	ld	a,(hl)
+	ld	(hl),e
+	ld	l,e
+	ld	d,(hl)
+	ld	(hl),a
+	ld	l,a
+	dec	h
+	ld	(hl),e
+	ld	l,e
+	ld	a,(hl)
+	ld	l,d
+	ld	(hl),a
+	ld	l,a
+	inc	h
+	ld	(hl),d
+	dec	h
+	ld	l,e
+	ld	a,(l053f)
+	ld	(hl),a
+	ld	a,e
+	ld	(l053f),a
+l22e0:
+	ld	a,(l0540)
+	push	af
+	ld	a,e
+	ld	(l0540),a
+	and	00111111b
+	ld	hl,l06c4
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	a,(hl)
+	ld	h,a
+	pop	af
+	ld	l,a
+	add	hl,hl
+	add	hl,hl
+	ld	de,(l2982)
+	add	hl,de
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	de
+	ld	(hl),e
+	dec	hl
+	ld	(hl),d
+	inc	hl
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	ld	(ix+0),d
+	ld	(ix+1),e
+	ld	de,(l0552)
+	ld	(hl),e
+	dec	hl
+	ld	(hl),d
+	inc	ix
+	inc	ix
+	inc	iy
+	inc	de
+	ld	a,(l297c)
+	cp	d
+	jp	nz,l232e
+	ld	iy,l3800	; Init buffer
+	ld	ix,(l2980)
+	ld	de,0
+l232e:
+	ld	(l0552),de
+;
+;
+;
+l2332:
+	ld	a,(l0543)
+	inc	a
+	and	NoMSB
+	ld	(l0543),a
+	ret	nz
+	jp	l271f		; Display record number
+;
+; Convert BCD to binary
+; ENTRY	Accu holds BCD
+; EXIT	Accu holds binary
+;
+l233f:
+	ld	c,0		; Init tens
+l2341:
+	sub	BCD.10		; Divide by 10
+	jr	c,l2348
+	inc	c		; Count tens
+	jr	l2341
+l2348:
+	add	a,BCD.10
+	ld	b,a		; Save units
+	ld	a,c		; Get tens
+	add	a,a		; *10
+	ld	c,a
+	add	a,a
+	add	a,a
+	add	a,c
+	add	a,b
+	ret
+;
+; Read byte from base-archive file
+; C set says end of file
+;
+l2353:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,(l0554)
+	ld	de,(l2979)	; Get current pointer
+	or	a
+	sbc	hl,de		; Test same
+	jp	nz,l23b1	; Nope
+	ld	a,d
+	or	e
+	jp	nz,l2399
+	push	iy
+	push	ix
+	ld	b,BASrec
+	ld	de,l2e00	; Init buffer
+l2371:
+	push	de
+	push	bc
+	call	l01db		; Set disk buffer
+	ld	de,l294b
+	call	l01cc		; Read sequential record from base-archive file
+	pop	bc
+	pop	de
+	or	a		; Test ok
+	jp	z,l23a3		; Yeap
+	pop	ix
+	pop	iy
+	ld	a,b
+	cp	BASrec		; Test anything read
+	jr	z,l2399		; Nope
+	ld	h,d
+	ld	l,e
+	ld	de,l2e00	; Get base
+	or	a
+	sbc	hl,de		; Calculate start of frame
+	ld	(l0554),hl	; Save it
+	jp	l23ae
+l2399:
+	ld	a,true
+	ld	(l055a),a	; Set end of file
+	pop	bc
+	pop	de
+	pop	hl
+	scf
+	ret
+l23a3:
+	ld	hl,reclng
+	add	hl,de		; Position in buffer
+	ex	de,hl
+	djnz	l2371
+	pop	ix
+	pop	iy
+l23ae:
+	ld	de,0
+l23b1:
+	ld	hl,l2e00
+	add	hl,de
+	inc	de
+	ld	a,d
+	and	HIGH l0400 - 1
+	ld	d,a
+	ld	(l2979),de	; Set current pointer
+	ld	a,(hl)
+	push	af
+	ld	hl,(l0541)
+	call	l269b
+	ld	(l0541),hl
+	ld	hl,l0547
+	inc	(hl)
+	jp	nz,l23d7
+	inc	hl
+	inc	(hl)
+	jp	nz,l23d7
+	inc	hl
+	inc	(hl)
+l23d7:
+	ld	hl,l0558
+	inc	(hl)
+	pop	af
+	cp	eof		; Test end of file
+	jr	nz,l23f1
+	ld	a,(l0527)	; Get file flag (0 is binary)
+	ld	l,a
+	ld	a,(l0526)
+	and	l		; Test binary
+	jr	z,l23ef		; Yeap
+	ld	a,.true
+	ld	(l055a),a	; Set end of file
+l23ef:
+	ld	a,eof		; Return end of file
+l23f1:
+	pop	bc
+	pop	de
+	pop	hl
+	or	a
+	ret
+;
+; Put byte to temporay file
+; ENTRY	Accu folds byte
+;
+l23f6:
+	push	hl
+	push	de
+	push	af
+	ld	hl,l3200	; Get buffer address
+	ld	de,(l0556)
+	add	hl,de
+	ld	(hl),a		; Store byte
+	inc	de
+	ld	a,d
+	and	HIGH l0400 - 1
+	ld	d,a
+	ld	(l0556),de
+	or	e		; Test buffer filled
+	jp	nz,l243e	; Nope
+	push	iy
+	push	ix
+	push	bc
+	ld	b,8
+	ld	de,l3200	; Load buffer address
+l2419:
+	push	de
+	push	bc
+	call	l01db		; Set disk buffer
+	ld	de,l2903
+	call	l01d1		; Write sequential record to PMATEMP1.$$$
+	pop	bc
+	pop	de
+	or	a		; Verify success
+	jp	z,l2432		; Yeap
+	pop	bc
+	pop	ix
+	pop	iy
+	jp	l26b8		; Disk full
+l2432:
+	ld	hl,reclng	; Bump to next address
+	add	hl,de
+	ex	de,hl
+	djnz	l2419
+	pop	bc
+	pop	ix
+	pop	iy
+l243e:
+	pop	af
+	pop	de
+	pop	hl
+	ret
+;
+; -> Put eight bits bbbbbbbb
+;
+l2442:
+	call	l24bb		; Output bit by bit
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	jp	l24bb
+;
+; -> Put seven bits xbbbbbbb
+;
+l245a:
+	rlca			; Shift into right place
+	call	l24bb		; Output bit by bit
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	jp	l24bb
+;
+; -> Put six bits xxbbbbbb
+;
+l2470:
+	rlca			; Shift into right place
+	rlca
+	call	l24bb		; Output bit by bit
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	jp	l24bb
+;
+; -> Put five bits xxxbbbbb
+;
+l2484:
+	rlca			; Shift into right place
+	rlca
+	rlca
+	call	l24bb		; Output bit by bit
+	call	l24bb
+	call	l24bb
+	call	l24bb
+	jp	l24bb
+;
+; -> Put four bits xxxxbbbbb
+;
+l2496:
+	rrca			; Shift into right place
+	rrca
+	rrca
+	rrca
+	call	l24bb		; Output bit by bit
+	call	l24bb
+	call	l24bb
+	jp	l24bb
+;
+; -> Put three bits xxxxxbbb
+;
+l24a6:
+	rrca			; Shift into right place
+	rrca
+	rrca
+	call	l24bb		; Output bit by bit
+	call	l24bb
+	jp	l24bb
+;
+; -> Put two bits xxxxxxbb
+;
+l24b2:
+	rrca			; Shift into right place
+	rrca
+	call	l24bb		; Output bit by bit
+	jp	l24bb
+;
+; -> Put one bit xxxxxxxb
+;
+l24ba:
+	rrca			; Shift into right place
+;
+; Put bit to file
+;
+l24bb:
+	sla	a		; Get MSB into Carry
+	ld	h,a		; Save result
+	ld	a,(l055b)	; Get bit state
+	ld	l,a		; Get bit
+	ld	a,(l055c)	; Get current byte
+	jp	nc,l24c9	; Bit not set
+	or	l		; Insert bit
+l24c9:
+	rrc	l		; Shift bit to next position
+	jp	nc,l24d2	; Byte not yet complete
+	call	l251a		; Put byte to file
+	xor	a		; Init byte
+l24d2:
+	ld	(l055c),a	; Set current byte
+	ld	a,l
+	ld	(l055b),a	; Set bit state
+	ld	a,h
+;
+; -> Put no bit
+;
+l24da:
+	ret
+;
+; Get byte from member
+; EXIT	Accu holds byte
+;
+l24db:
+	push	hl
+	push	de
+	ld	a,(l2975)	; Load pointer
+	ld	de,(l2975+1)
+	rla			; Calculate record number
+	rl	e
+	rl	d
+	ld	a,(l2975+3)
+	rla
+	or	a
+	jp	nz,l26a9	; Out of range, seek error
+	ld	hl,(FCB+_RRN)
+	sbc	hl,de		; Test within record
+	jp	z,l250c		; Yeap
+	ld	(FCB+_RRN),de
+	push	bc
+	ld	de,l3280
+	call	l01db		; Set disk buffer
+	call	l01e0		; Read random record
+	pop	bc
+	or	a		; Test success
+	jp	nz,l26a9	; Seek error
+l250c:
+	ld	a,(l2975)	; Get pointer
+	and	reclng-1	; Mask it
+	ld	hl,l3280
+	add	a,l		; Add buffer address
+	ld	l,a
+	ld	a,(hl)		; Fetch byte
+	pop	de
+	pop	hl
+	ret
+;
+; Put byte to file
+; ENTRY	Accu holds byte
+;
+l251a:
+	push	hl
+	push	af
+	ld	hl,l3280	; Get write buffer
+	ld	a,(l2975)	; Get write index
+	and	reclng-1	; Extract real index
+	add	a,l
+	ld	l,a
+	pop	af		; Get back byte
+	ld	(hl),a		; Store into buffer
+	push	af
+	call	l2551		; Increment pointer by 1
+	ld	a,(l2975)	; Get back write index
+	and	reclng-1	; Test buffer filled
+	jp	nz,l254e	; Nope
+	push	de
+	push	bc
+	ld	de,l3280
+	call	l01db		; Set disk buffer
+	call	l01e8		; Write random record
+	or	a		; Verify success
+	jp	nz,l26ae	; Delete temp files if not
+	ld	de,(FCB+_RRN)
+	inc	de
+	ld	(FCB+_RRN),de
+	pop	bc
+	pop	de
+l254e:
+	pop	af
+	pop	hl
+	ret
+;
+; Increment four byte temp file pointer by 1
+;
+l2551:
+	push	hl
+	ld	hl,l2975
+	inc	(hl)		; Increment LSbyte
+	jp	nz,l2565	; No carry
+	inc	hl
+	inc	(hl)		; Remember carry
+	jp	nz,l2565
+	inc	hl
+	inc	(hl)
+	jp	nz,l2565
+	inc	hl
+	inc	(hl)
+l2565:
+	pop	hl
+	ret
+;
+; Put byte to temporary file
+; ENTRY	Accu holds byte
+;
+l2567:
+	push	hl
+	push	af
+	ld	hl,l3200
+	ld	a,(l2975)	; Get pointer
+	and	reclng-1
+	add	a,l		; Make address absolute
+	ld	l,a
+	pop	af
+	ld	(hl),a		; Store byte
+	push	af
+	call	l25a0		; Decrement pointer by 1
+	ld	a,(l2975)	; Get pointer
+	and	reclng-1	; Mask
+	cp	reclng-1	; Test write necessary
+	jp	nz,l259d	; Nope
+	push	de
+	push	bc
+	ld	de,l3200
+	call	l01db		; Set disk buffer
+	call	l01e8		; Write random record
+	or	a		; Verify ok
+	jp	nz,l26ae	; Nope, error, delete temp files
+	ld	de,(FCB+_RRN)
+	dec	de		; Fix record
+	ld	(FCB+_RRN),de
+	pop	bc
+	pop	de
+l259d:
+	pop	af
+	pop	hl
+	ret
+;
+; Decrement four byte temp file pointers by 1
+;
+l25a0:
+	push	hl
+	ld	hl,l2975	; Set 1st pointer
+	ld	a,(hl)
+	sub	1		; Decrement
+	ld	(hl),a
+	jp	nc,l25b5	; Remember carry
+	inc	hl
+	ld	a,(hl)
+	sub	1
+	ld	(hl),a
+	jp	nc,l25b5
+	inc	hl
+	dec	(hl)
+l25b5:
+	ld	hl,l0531	; Set 1st pointer
+	ld	a,(hl)
+	sub	1		; Decrement
+	ld	(hl),a
+	jp	nc,l25c9	; Remember carry
+	inc	hl
+	ld	a,(hl)
+	sub	1
+	ld	(hl),a
+	jp	nc,l25c9
+	inc	hl
+	dec	(hl)
+l25c9:
+	pop	hl
+	ret
+;
+; Read byte from base-archive file
+; EXIT	Accu holds byte
+;
+l25cb:
+	push	hl
+	push	de
+	push	bc
+	ld	de,(l2979)	; Get current pointer
+	ld	a,d
+	or	e
+	jp	nz,l25f8
+	ld	a,InpRecs
+	ld	b,a		; Init length of buffer
+	ld	de,l3800	; Init buffer
+l25dd:
+	push	bc
+	push	de
+	call	l01db		; Set disk buffer
+	ld	de,l294b
+	call	l01cc		; Read sequential record from base-archive file
+	pop	de
+	pop	bc
+	or	a		; Test end of file
+	jp	nz,l25f5	; Yeap
+	ld	hl,reclng
+	add	hl,de		; Advance to next buffer address
+	ex	de,hl
+	djnz	l25dd
+l25f5:
+	ld	de,0		; Reset buffer index
+l25f8:
+	ld	hl,l3800
+	add	hl,de		; Position in buffer
+	inc	de
+	ld	a,HIGH (InpRecs * reclng)
+	cp	d		; Test max index
+	jp	nz,l2605	; Nope
+	ld	d,0		; Clear high
+l2605:
+	ld	(l2979),de	; Set current pointer
+	ld	a,(hl)		; Load byte
+	pop	bc
+	pop	de
+	pop	hl
+	or	a
+	ret
+;
+; Put byte to temp file
+; ENTRY	Accu holds byte
+;
+l260f:
+	push	hl
+	ld	hl,(l0539)	; Get disk buffer
+	ld	(hl),a		; Store byte
+	inc	hl
+	ld	a,h
+	cp	HIGH l2e00	; Test buffer filled
+	jp	nz,l2640	; Nope
+	push	de
+	push	bc
+	ld	a,(l054f)	; Test temp file access
+	or	a
+	jr	nz,l2638	; Yeap
+	ld	hl,l2927+_EX
+	call	l1d96		; Init file
+	ld	de,l2927
+	call	l01d6		; Create PMATEMP2.$$$
+	inc	a
+	jp	z,l26b8		; Disk full
+	ld	a,true
+	ld	(l054f),a	; Set temp file access
+l2638:
+	call	l2645		; Write buffer to temp file
+	pop	bc
+	pop	de
+	ld	hl,l2b00	; Reset buffer address
+l2640:
+	ld	(l0539),hl	; Set disk buffer
+	pop	hl
+	ret
+;
+; Write buffer to temp file
+;
+l2645:
+	ld	de,l2b00	; Set start of buffer
+	ld	b,2*(HIGH (l2e00-l2b00))
+l264a:
+	push	de
+	push	bc
+	call	l01db		; Set disk buffer
+	ld	de,l2927
+	call	l01d1		; Write sequential record to PMATEMP2.$$$
+	pop	bc
+	pop	de
+	or	a		; Verify success
+	jp	nz,l26b8	; Disk full
+	ld	hl,reclng
+	add	hl,de		; Position to next address
+	ex	de,hl
+	djnz	l264a
+	ret
+;
+; Get byte from temp file
+; EXIT	Accu holds byte
+;
+l2663:
+	push	hl
+	ld	hl,(l0539)	; Get disk buffer
+	inc	hl
+	ld	a,h
+	cp	HIGH l2e00	; Test buffer scanned
+	jp	nz,l2695	; Nope
+	ld	a,(l054f)	; Test temp file access
+	or	a
+	jp	z,l2692		; Nope
+	push	de
+	push	bc
+	ld	de,l2b00	; Set start of buffer
+	ld	b,2*(HIGH (l2e00-l2b00))
+l267c:
+	push	de
+	push	bc
+	call	l01db		; Set disk buffer
+	ld	de,l2927
+	call	l01cc		; Read sequential record from PMATEMP2.$$$
+	pop	bc
+	pop	de
+	ld	hl,reclng
+	add	hl,de		; Position to next address
+	ex	de,hl
+	djnz	l267c
+	pop	bc
+	pop	de
+l2692:
+	ld	hl,l2b00	; Reset buffer address
+l2695:
+	ld	a,(hl)		; Load byte
+	ld	(l0539),hl	; Save disk buffer
+	pop	hl
+	ret
+;
+;
+;
+l269b:
+	push	bc
+	ld	c,h
+	ld	h,HIGH l0200
+	xor	l
+	ld	l,a
+	ld	b,(hl)
+	inc	h
+	ld	a,c
+	xor	(hl)
+	ld	h,b
+	ld	l,a
+	pop	bc
+	ret
+;
+; Process seek error
+;
+l26a9:
+	ld	de,l2834
+	jr	l26bb		; Tell seek error
+;
+; Delete temp files on error
+;
+l26ae:
+	call	l1d6a		; Delete PMATEMP1.$$$
+	ld	a,(l054f)	; Test temp file access
+	or	a
+	call	nz,l1d79	; Delete PMATEMP2.$$$ if so
+;
+; Give disk full message and exit
+;
+l26b8:
+	ld	de,l2849
+l26bb:
+	call	l01b8		; Give final message
+	rst	0		; Return zo CP/M
+;
+;
+;
+l26bf:
+	ld	hl,(l2971)	; Get first pointer
+	ld	de,(l296f)	; Get second pointer
+	or	a
+	sbc	hl,de
+	ld	b,l		; Get length
+	ex	de,hl
+	call	l26e6		; Print string
+	ld	de,l2859
+	call	l01b8		; Tell not found
+	ld	hl,(l2973)	; Get pointer
+	ld	(l296f),hl	; Save command pointer
+	jp	l0707
+;
+; Indicate empty file
+;
+l26dd:
+	ld	de,l286a
+	call	l01b8		; Tell empty file
+	jp	l09f9
+;
+; Print string of fixed length
+; ENTRY	Reg HL points to string
+;	Reg B  holds length
+;
+l26e6:
+	ld	c,.conout
+l26e8:
+	ld	e,(hl)		; Get character
+	inc	hl
+	push	hl
+	push	bc
+	call	BDOS		; Put to console
+	pop	bc
+	pop	hl
+	djnz	l26e8
+	ret
+;
+; Put hex byte to console
+; ENTRY	Accu holds hex byte
+;
+l26f4:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	rlca			; Get upper bits
+	rlca
+	rlca
+	rlca
+	and	LOMASK		; Mask then
+	add	a,'0'		; Make ASCII
+	cp	'9'+1		; Test hex
+	jp	c,l2707
+	add	a,'A'-'9'-1	; Fix for hex
+l2707:
+	ld	e,a
+	call	l01b3		; Print it
+	pop	af
+	and	LOMASK		; Same for lower bits
+	add	a,'0'
+	cp	'9'+1
+	jp	c,l2717
+	add	a,'A'-'9'-1
+l2717:
+	ld	e,a
+	call	l01b3		; Print it
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Display record number
+;
+l271f:
+	push	ix
+	push	iy
+	push	hl
+	push	de
+	push	bc
+	ld	a,(l017f)	; Get display mode
+	cp	1		; Test support of backspace
+	ld	de,l27c7
+	jr	c,l2735		; Yeap
+	jr	nz,l2749	; Nope, skip
+	ld	de,l27a2
+l2735:
+	call	l01b8		; Give prefix
+	ld	de,(l0544)
+	inc	de		; Bump record
+	ld	(l0544),de
+	ld	a,d
+	call	l26f4		; Put hex to console
+	ld	a,e
+	call	l26f4
+l2749:
+	pop	bc
+	pop	de
+	pop	hl
+	pop	iy
+	pop	ix
+	ret
+;
+; Close file and exit
+;
+l2751:
+	ld	de,FCB
+	call	l01c2		; Close file
+	rst	0		; Then enter CP/M
+;
+; Index into triplet array 'l29e2'
+;
+l2758:
+	db	0,3,6,6,9,9,9,9,12,12,12,12
+	db	15,15,15,15,18,18,18,18,18
+	db	18,18,18,21,21,21,21,21,21,21,21
+;
+; Fix tables
+;
+l2778:
+	db	3,3,4,5,5,5,6,6,6,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,3,3,5,6,7,0
+l2795:
+	db	6,6,7,8,9,10,11,12
+l279d:
+	db	cr,lf
+l279f:
+	db	cr,lf,eot
+l27a2:
+	db	cr,eot
+l27a4:
+	db	'  Reading ',eot
+l27af:
+	db	'  Compressing ',eot
+l27be:
+	db	cr,lf
+l27c0:
+	db	'0000/',eot
+l27c6:
+	db	bs
+l27c7:
+	db	bs,bs,bs,bs,eot
+l27cc:
+	db	'100.0%',eot
+l27d3:
+	db	cr,lf,'Memo>',eot
+l27db:
+	db	'Deleting: ',eot
+l27e6:
+	db	'  Adding',eot
+l27ef:
+	db	'  Updating',eot
+l27fa:
+	db	' as ',eot
+l27ff:
+	db	'  Done.'
+	db	cr,lf,eot
+l2809:
+	db	bell,'Invalid option: ',eot
+l281b:
+	db	cr,lf,bell
+	db	'Bad archive header.'
+	db	cr,lf,eot
+l2834:
+	db	cr,lf,bell
+	db	'Overseek error.'
+	db	cr,lf,eot
+l2849:
+	db	cr,lf,bell
+	db	'Disk full.'
+	db	cr,lf,eot
+l2859:
+	db	' is not found.'
+	db	cr,lf,eot
+l286a:
+	db	' is empty.'
+	db	cr,lf,eot
+l2877:
+	db	cr,lf
+	db	'PMarc Version 2.00 for 46K CP/M(Z80)'
+	db	cr,lf
+	db	'Copyright(C) 1990 by Yoshihiko Mino.'
+	db	eot
+l28c4:
+	db	cr,lf
+	db	'Time stamp supported for'
+l28de:
+	db	' ',eot
+l28e0:
+	db	'-pm2-'
+l28e5:
+	dw	0,0
+l28e9:
+	dw	0,0
+l28ed:
+	dw	0,0
+l28f1:
+	db	00100000b	; File attribute
+				; Bit 0 : R/O
+				; Bit 1 : System file
+	db	0
+l28f3:
+	db	0		; Length of filename
+l28f4:
+	ds	.drv+.nam+.ext
+	db	0
+;
+	db	0,0
+l2903:
+	db	0,'PMATEMP1$$$'
+	ds	fcblng-_EX
+l2927:
+	db	0,'PMATEMP2$$$'
+	ds	fcblng-_EX
+;
+; Base-archive file
+;
+l294b:
+	ds	fcblng
+l296f:
+	dw	0		; Command line pointer
+l2971:
+	dw	0		; Command line pointer
+l2973:
+	dw	0		; Command line pointer
+l2975:
+	ds	4		; Temp file pointer
+l2979:
+	dw	0		; Current file pointer
+l297b:
+	db	0
+l297c:
+	db	0
+l297d:
+	db	0		; High speed mode
+l297e:
+	db	0		; Compression mode
+l297f:
+	db	0
+
+l2980	equ	$
+l2982	equ	l2980+2	;;2982h
+l2984	equ	l2982+2	;;2984h
+l2985	equ	l2984+1	;;2985h
+l2987	equ	l2985+2	;;2987h
+l2988	equ	l2987+1	;;2988h
+l2989	equ	l2988+1	;;2989h
+l298a	equ	l2989+1	;;298ah
+l298c	equ	l298a+2	;;298ch
+l298f	equ	l298c+3	;;298fh
+l2990	equ	l298f+1	;;2990h
+l2992	equ	l2990+2	;;2992h
+l2993	equ	l2992+1	;;2993h
+;
+; #### DYNAMICALLY CLEARED ####
+;
+l2994	equ	l2993+1	;;2994h
+l29a3	equ	l2994+15;;29a3h
+l29b5	equ	29b5h
+l29ca	equ	29cah
+
+l29e2	equ	29e2h
+l29fa	equ	29fah
+l2a27	equ	2a27h
+l2a2a	equ	2a2ah
+l2a2d	equ	2a2dh
+l2a30	equ	2a30h
+l2a33	equ	2a33h
+l2a36	equ	2a36h
+l2a39	equ	2a39h
+
+ll2a39	equ	l2a39-l29e2
+ll29e2	equ	l29e2-l29ca
+gl2a39	equ	l2a39-l29ca
+
+l2a51	equ	2a51h
+;
+; #############################
+;
+l2aa8	equ	2aa8h
+l2abc	equ	2abch
+l2ad4	equ	2ad4h
+
+
+
+l2b00	equ	2b00h		; Disk buffer
+l2e00	equ	2e00h
+l3200	equ	3200h		; Buffer of PMATEMP1.$$$
+l3280	equ	3280h
+l3600	equ	3600h		; Header of file
+l3700	equ	3700h
+l3800	equ	3800h
+l9780	equ	9780h
+
+	end
+

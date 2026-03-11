@@ -1,0 +1,1774 @@
+;
+; Get address mode and value
+;
+AField:
+	ld	b,2
+	call	RdBits		; Get address type
+	ld	(AF.mode),a
+	call	RdAdr		; .. and value
+	ld	(AF.val),hl
+	ret
+;
+; Load name of item
+;
+BField:
+	ld	b,BFbits	; Load length
+	call	RdBits
+	or	a		; Test zero length
+	jr	nz,BF.no0
+	ld	a,_LabLen+2	; Map 0 -->> max
+BF.no0:
+	ld	(BF.Len),a	; .. save length
+	ld	b,a		; Init count
+	ld	hl,BF.Name	; .. and buffer
+BF.loop:
+	push	bc
+	push	hl
+	ld	b,.Byte
+	call	RdBits		; Read character
+	and	NoMSB
+	pop	hl
+	pop	bc
+	ld	(hl),a		; Save character
+	inc	hl		; Bump pointer
+	djnz	BF.loop
+	ret
+;
+; Read records from file
+;
+RdRec:
+	ld	hl,(FCB+.ex)	; Get extent
+	ld	h,0
+	call	MulRec		; Get record count
+	ld	bc,(FCB+.cr)	; .. get current record
+	ld	b,0
+	add	hl,bc
+	ld	(RecSet),hl	; .. as start record
+	ld	hl,InBuf	; Get base buffer
+	ld	bc,(MaxBfp)	; Get max pointer
+	ld	de,FCB
+	call	DiskRd		; .. read
+	ld	de,(RecSet)
+	add	hl,de
+	dec	hl
+	ld	(RecRead),hl	; Set last record
+	ret
+;
+; Save constant byte
+; ENTRY	Accu holds byte to be stored
+;
+ST.B:
+	ld	(STBval),a
+	ld	a,(X$Cnt)
+	sub	@COMM		; Test COMMON
+	sub	1
+	sbc	a,a
+	ld	hl,COMctr	; .. test selected
+	and	(hl)
+	rra
+	ret	c
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc		; Get pointer
+	ld	c,(hl)		; Get value
+	inc	hl
+	ld	b,(hl)
+	ld	a,(STBval)
+	call	ST.Seg		; Store into segment
+	ld	a,(X$Cnt)
+	cp	@abs		; Tell ABSOLUTE
+	jr	nz,ST.B.noABS
+	ld	de,ABS.end	; Get end of ABS
+	ld	bc,ABS.chn
+	call	SUB.@DE.@BC	; Test end
+	jr	nc,ST.B.noFixEnd
+	ld	hl,(ABS.chn)
+	ld	(ABS.end),hl	; .. set end
+ST.B.noFixEnd:
+	ld	bc,ABS.beg	; Get start of ABS
+	ld	de,ABS.chn
+	call	SUB.@DE.@BC	; Test start
+	jr	nc,ST.B.noABS
+	ld	hl,(ABS.chn)
+	ld	(ABS.beg),hl	; ..s et start
+ST.B.noABS:
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab	; Get address pointer
+	add	hl,hl
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	bc		; .. bump
+	dec	hl
+	ld	(hl),c		; .. and store back
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Solve chain
+; ENTRY	Reg Hl holds symbol table pointer
+;	Accu   holds flag
+;	FALSE on CHAIN ADDRESS  - Link Item C
+;	TRUE  on CHAIN EXTERNAL - Link Item 6
+;
+SolveChain:
+	ld	(SC.flag),a	; Save entry
+	ld	(SC.Chn),hl
+	ld	a,(AF.mode)
+	ld	(SC.mode),a	; Save address mode
+	ld	c,a
+	ld	b,0
+	ld	hl,TotalLenTab
+	add	hl,bc
+	add	hl,bc
+	ld	de,AF.val
+	call	ADD.@DE.@HL	; Add value
+	ld	(SC.CurAdr),hl	; .. save address
+Solv.loop:
+	ld	hl,(SC.CurAdr)	; Get current address
+	ld	a,(SC.mode)	; .. and mode
+	call	Get$Y$AdrCnt	; Count addresses
+	jr	nc,Solv.noChn	; .. not same
+	call	Get$Y$Val	; Get value
+	ld	(SC.adr),hl	; .. save it
+	call	Get$Y$Mode	; .. get mode
+	ld	(SC.mode),a	; .. set it
+	sub	@abs		; Check ABS
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,0
+	ld	de,SC.adr	; .. zero address
+	call	SUB.@DE.A
+	or	l
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	ld	hl,(SC.adr)	; Get address
+	call	c,LD.W		; Get address from X temp file
+	ld	(SC.CurAdr),hl	; .. set new one
+	ld	bc,(SC.Chn)	; Get chain
+	call	Put$Y$Val	; .. save
+	ld	a,(SC.flag)	; Get flag
+	call	Put$Y$Solv	; .. save
+	ld	a,(SC.flag)
+	cp	FALSE		; Test CHAIN ADDRESS
+	jr	nz,Solv.loop	; .. nope, CHAIN EXTERNAL
+	ld	a,(X$Cnt)
+	call	Put$Y$Mode	; .. save mode
+	jr	Solv.loop
+Solv.noChn:
+	ld	hl,(SC.CurAdr)	; Save current address
+	push	hl
+	ld	hl,(SC.Chn)	; .. and chain address
+	push	hl
+	ld	hl,(X$Cnt)	; .. and current selection
+	push	hl
+	ld	hl,(SC.flag)	; .. and flag
+	push	hl
+	ld	hl,(SC.mode)	; .. and mode
+	push	hl
+	ld	c,0		; No offset
+	push	bc
+	ld	e,FALSE
+	ld	bc,0
+	call	Build$Y$Rec	; Build temp record
+	ld	a,(ABS.Loc)	; Test ABSOLUTE location set
+	rra
+	ret	nc		; .. nope
+	call	LD.W		; Get address from X temp file
+	ld	(SC.adr),hl	; .. save
+	ld	a,0
+	call	SUB.A.HL	; Test zero
+	or	l
+	ret	z		; .. exit if so
+	ld	hl,(SC.adr)
+	ld	(SC.CurAdr),hl	; Set new address
+	ld	hl,SC.mode
+	ld	(hl),@abs	; .. force ABSOLUTE
+	jp	Solv.loop
+;
+; Load word from segment
+; EXIT	Reg HL holds word
+;
+LD.W:
+	ld	a,(X$Cnt)	; Get mode
+	push	af		; .. save
+	ld	a,(SC.mode)	; Get current mode
+	call	Save$$X		; .. change mode
+	ld	bc,(SC.CurAdr)	; Get current address
+	push	bc
+	call	LD.Seg		; Get LOW byte
+	pop	bc		; Get back address
+	push	af
+	inc	bc		; .. address + 1
+	call	LD.Seg		; Get HI byte
+	ld	h,a
+	pop	af
+	ld	l,a
+	pop	af		; Get back old mode
+	push	hl		; .. save word
+	call	Save$$X		; .. save X
+	pop	hl		; Get result
+	ret
+IF	NOT	@@HASH
+;
+; Clear special language symbols ('#')
+;
+VerifySym:
+	ld	hl,(SymBeg)	; Get start of symbol table
+	ld	(SymPtr),hl	; .. set it
+VS.loop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC	; Test end
+	jr	nc,VS.ex	; ..yeap
+	ld	bc,.SymHed
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to name
+	ld	a,(hl)
+	cp	SpcChar		; Test special
+	jr	nz,VS.skp	; .. nope
+	ld	(hl),null	; .. clear it
+VS.skp:
+	call	GetItmLen	; Get length of item
+	ld	de,SymPtr
+	call	ADD.A.@DE	; .. point to next
+	ex	de,hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	VS.loop
+VS.ex:
+	ld	hl,SpecSym
+	ld	(hl),FALSE	; Reset flag
+	ret
+ENDIF	;NOT @@HASH
+;
+; Link item 0 -->> Set ENTRY
+; (Also used by LIBRARY solver)
+;
+LNK.0:
+	ld	e,.noCOMM
+	call	SrcName		; Search label
+	ret	nc		; .. not found
+	call	GetENT		; Test ENTRY
+	rra
+	ret	c		; .. ok
+	ld	hl,ExtFlg
+	ld	(hl),TRUE	; .. set EXTERNAL
+	ret
+;
+; Link item 1 -->> Set COMMON
+;
+LNK.1:
+	ld	e,.COMM
+	call	SrcName		; Find COMMON
+	jr	nc,LNK.1.Err	; .. error
+	call	GetVAL		; Get length
+	ld	(COMval),hl	; .. save
+	call	GetFix		; Get fixed state
+	ld	(COMctr),a	; .. save it
+	ret
+LNK.1.Err:
+	ld	de,$COMERR	; .. COMMON error
+	jp	AbortString
+;
+; Link Item 2 -->> Name of module
+;
+LNK.2:
+	ld	de,ModLen	; Set save buffer
+	ld	hl,BF.Len	; Set source
+	ld	c,(hl)		; .. get length
+	ld	b,0
+	inc	bc		; .. fix for length field
+	ldir			; Unpack
+	ret
+;
+; Link item 3 -->> Set Lib Request
+;
+LNK.3:
+	ld	a,(BF.Len)
+	ld	hl,BF.Name
+	call	SymFind		; Find LIB in table
+	rra
+	ret	c		; .. end if found
+	ld	bc,BF.Name
+	push	bc
+	ld	hl,(BF.Len)
+	push	hl
+	ld	bc,0
+	push	bc
+	ld	c,@abs
+	push	bc
+	ld	c,.ENT
+	push	bc
+	ld	de,0
+	ld	c,.noCOMM
+	call	InsSym		; Insert if new
+	call	SetRQST		; .. set LIB REQUEST
+	ret
+;
+; Link item 4 -->> Special Link Item (NOT SUPPORTED)
+;
+LNK.4:
+	ld	de,$UNREC.ERR
+	call	CtrlString	; Tell unrecognized
+	ret
+;
+; Link item 5 -->> COMMON size
+;
+LNK.5:
+	ld	e,.COMM
+	call	SrcName		; Find COMMON
+	jr	nc,LNK.5.New	; .. not found
+	call	GetCOMlen	; Get length of 1st
+	ex	de,hl
+	ld	hl,AF.val
+	call	SUB.DE.@HL	; Compare to new
+	ret	nc		; .. OK
+	ld	e,'/'
+	call	BannChar	; Tell name of COMMON
+	call	PrSym		; Tell name
+	ld	e,'/'
+	call	BannChar
+	ld	e,' '
+	call	BannChar
+	ld	de,$NOLARGE	; Tell cause message
+	call	CtrlString
+	call	NL
+	ret
+LNK.5.New:
+	ld	bc,BF.Name
+	push	bc
+	ld	hl,(BF.Len)
+	push	hl
+	ld	de,(CMlen)	; Get single length
+	ld	hl,(CM.len)	; Get total COMMON length
+	add	hl,de
+	push	hl
+	ld	c,@COMM
+	push	bc
+	ld	c,.ENT
+	push	bc
+	ld	de,(AF.val)
+	ld	c,.COMM
+	call	InsSym
+	ld	de,(AF.val)
+	ld	hl,(CMlen)
+	add	hl,de		; Get new length
+	ld	(CMlen),hl
+	ret
+;
+; Link item 6 -->> Chain external
+;
+LNK.6:
+	ld	e,.noCOMM
+	call	SrcName		; Get symbol
+	jr	c,LNK.6.known	; Found
+	ld	bc,BF.Name
+	push	bc
+	ld	hl,(BF.Len)
+	push	hl
+	ld	bc,0
+	push	bc
+	ld	c,@abs
+	push	bc
+	ld	c,.noENT
+	push	bc
+	ld	de,0
+	ld	c,.noCOMM
+	call	InsSym		; Insert symbol
+LNK.6.known:
+	ld	hl,(SymPtr)
+	ld	a,TRUE
+	call	SolveChain
+	ret
+;
+; Link item 7 -->> Entry point
+;
+LNK.7:
+	ld	e,.noCOMM
+	call	SrcName		; Find symbol
+	jr	nc,LNK.7.new	; .. not found
+	call	GetENT		; Test ENTRY
+	rra
+	jr	nc,LNK.7.1st
+	ld	de,$MUL.DEF
+	call	CtrlString
+	call	PrSym		; Tell multiple symbol
+	call	NL
+	ret
+LNK.7.1st:
+	ld	hl,(AF.mode)
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,AF.val
+	call	ADD.@DE.@HL
+	ld	b,h
+	ld	c,l
+	call	SetVAL		; Set value
+	ld	a,1
+	call	SetENT		; Set ENTRY
+	ld	a,(AF.mode)
+	call	SetADRmod	; Set address mode
+	ret
+LNK.7.new:
+	ld	bc,BF.Name	; Get parameters
+	push	bc
+	ld	hl,(BF.Len)
+	push	hl
+	ld	hl,(AF.mode)
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,AF.val
+	call	ADD.@DE.@HL
+	push	hl
+	ld	hl,(AF.mode)
+	push	hl
+	ld	c,.ENT
+	push	bc
+	ld	de,0
+	ld	c,.noCOMM
+	call	InsSym		; Insert new ENTRY
+	ret
+;
+; Link item 8 -->> External - offset
+;
+LNK.8:
+	ld	a,TRUE		; Set - sign
+	ld	(OffSgn),a
+	call	LNK.9		; Do via external + offset
+	ld	a,FALSE		; .. reset + sign
+	ld	(OffSgn),a
+	ret
+;
+; Link item 9 -->> External + offset
+;
+LNK.9:
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc
+	ld	c,(hl)		; Get chain value
+	inc	hl
+	ld	b,(hl)
+	push	bc
+	ld	bc,0
+	push	bc
+	ld	c,0
+	push	bc
+	ld	c,FALSE
+	push	bc
+	ld	hl,(X$Cnt)
+	push	hl
+	ld	c,1		; Offset
+	push	bc
+	ld	bc,(AF.val)	; Get value
+	ld	e,TRUE
+	call	Build$Y$Rec	; Build temp record
+	ret
+;
+; Link item A -->> DSEG size
+;
+LNK.A:
+	ld	hl,(AF.val)
+	ld	(DLen),hl	; Unpack length
+	ret
+;
+; Link item B -->> Set Location Counter
+;
+LNK.B:
+	ld	a,(AF.mode)
+	call	Save$$X
+	ld	a,(X$Cnt)
+	cp	@COMM		; Test COMMON
+	jr	nz,LNK.B.noCOMM
+	ld	de,(COMval)	; Get value
+	ld	hl,(AF.val)
+	add	hl,de
+	ld	(CM.chn),hl	; .. set it
+	jr	LNK.B.skp
+LNK.B.noCOMM:
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,AF.val
+	call	ADD.@DE.@HL	; Get resulting value
+	push	hl
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc
+	pop	bc
+	ld	(hl),c		; .. store it
+	inc	hl
+	ld	(hl),b
+LNK.B.skp:
+	ld	a,(X$Cnt)
+	cp	@abs		; Test ABSOLUTE
+	ret	nz
+	ld	hl,ABS.Loc
+	ld	(hl),TRUE	; Set flag
+	ret
+;
+; Link item C -->> Chain Address
+;
+LNK.C:
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Get chain value
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,FALSE
+	call	SolveChain
+	ret
+;
+; Link item D -->> CSEG size
+;
+LNK.D:
+	ld	hl,(AF.val)
+	ld	(CLen),hl	; Unpack length
+	ret
+;
+; Link item E -->> End of module
+;
+LNK.E:
+	ld	a,0
+	ld	hl,AF.val
+	call	SUB.A.@HL	; Test transfer address
+	sbc	a,a
+	push	af
+	ld	a,(AF.mode)
+	sub	@abs		; Test right mode
+	add	a,-1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jr	nc,LNK.E.noXfer	; .. none
+	ld	a,(XFerFlg)	; Test transfer flag set
+	rra
+	ld	de,$MAIN.ERR
+	jp	c,AbortString	; Tell main module error
+	ld	hl,(AF.mode)
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,AF.val
+	call	ADD.@DE.@HL	; Get total length
+	ld	(XFerAddr),hl	; .. as transfer start
+	ld	a,(AF.mode)
+	ld	(XFerMode),a	; Save address mode
+	ld	hl,XFerFlg
+	ld	(hl),TRUE	; Set transfer flag
+LNK.E.noXfer:
+	ld	a,(BitCnt)	; Test byte boundary
+	cp	.Byte
+	jr	z,LNK.E.boundary
+	ld	b,1
+	call	RdBits		; .. set it
+	jr	LNK.E.noXfer
+LNK.E.boundary:
+	ld	hl,LNK.E.cnt
+	ld	(hl),1		; Init count
+LNK.E.lenLoop:
+	ld	a,$$PcRef-1
+	ld	hl,LNK.E.cnt
+	cp	(hl)		; Test done
+	jr	c,LNK.E.exLen	; .. yeap
+	ld	l,(hl)
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc		; Get table address
+	push	hl
+	ld	hl,(LNK.E.cnt)
+	ld	h,0
+	ld	bc,SngLenTab
+	add	hl,hl
+	add	hl,bc		; .. same for single
+	pop	de
+	call	ADD.@DE.@HL	; Get total length
+	push	hl
+	ld	hl,(LNK.E.cnt)
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc
+	pop	bc
+	ld	(hl),c		; Save length
+	inc	hl
+	ld	(hl),b
+	ld	hl,(LNK.E.cnt)
+	ld	h,0
+	push	bc
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc
+	pop	bc
+	ld	(hl),c		; .. store length again
+	inc	hl
+	ld	(hl),b
+	ld	hl,(LNK.E.cnt)
+	ld	h,0
+	ld	bc,SngLenTab
+	add	hl,hl
+	add	hl,bc
+	xor	a
+	ld	(hl),a		; Clear single length
+	inc	hl
+	ld	(hl),a
+	ld	a,(LNK.E.cnt)
+	inc	a		; Bump count
+	ld	(LNK.E.cnt),a
+	jr	LNK.E.lenLoop
+LNK.E.exLen:
+	ld	bc,HeapTop
+	ld	de,MemTop
+	call	SUB.@DE.@BC	; Check value
+	jr	nc,LNK.E.noHeap
+	ld	hl,(MemTop)	; .. set top
+	ld	(HeapTop),hl
+LNK.E.noHeap:
+	ld	a,(A.opt)	; Test [A] option
+	rra
+	jr	nc,LNK.E.noAopt	; .. not set
+	call	Wr$Y$Data	; Fix temp chain and save
+	ld	hl,(FixTop)	; Set back top
+	ld	(MemTop),hl
+LNK.E.noAopt:
+	ld	a,@c.rel
+	call	Save$$X		; Set code file
+	ld	a,(S.opt)
+	cpl
+	ld	(ExtFlg),a	; Set flag
+IF	NOT	@@HASH
+	ld	a,(SpecSym)	; Test special symbol
+	rra
+	ret	nc		; .. nope
+	call	VerifySym	; .. set it up
+ENDIF	;NOT @@HASH
+	ret
+;
+; Store 16 bit length of segment
+; ENTRY	Reg HL holds value
+;	Accu   holds address mode
+;
+ST.L:
+	ld	(STWmod),a	; Save entry
+	ld	(STWval),hl
+	cp	@COMM		; Test COMMON
+	jr	nz,ST.L.noCOMM	; .. nope
+	ld	de,(COMval)	; Get value
+	add	hl,de		; Add total COMMON
+	ld	(STWval),hl
+	ld	a,(COMctr)	; Get control
+	rra
+	jr	nc,ST.L.chn	; .. not set
+	ld	hl,STWmod
+	ld	(hl),@abs	; Force ABS
+	jr	ST.L.chn
+ST.L.noCOMM:
+	ld	l,a
+	ld	h,0
+	ld	bc,TotalLenTab
+	add	hl,hl
+	add	hl,bc		; Get pointer to total length
+	ld	de,STWval
+	call	ADD.@DE.@HL	; Add to total length
+	ex	de,hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+ST.L.chn:
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,(X$Cnt)	; .. and mode
+	call	Get$Y$AdrCnt	; Count addresses
+	jr	nc,ST.L.skpChn	; .. not same
+	ld	bc,(STWval)
+	call	Put$Y$Val	; .. save value
+	ld	a,(STWmod)
+	call	Put$Y$Mode	; .. store mode
+	jr	ST.ZEROES	; .. close
+ST.L.skpChn:
+	ld	hl,(X$Cnt)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl		; Get chain pointer
+	add	hl,bc
+	ld	c,(hl)		; .. get value
+	inc	hl
+	ld	b,(hl)
+	push	bc
+	ld	hl,(STWval)
+	push	hl
+	ld	hl,(STWmod)
+	push	hl
+	ld	c,FALSE
+	push	bc
+	ld	hl,(X$Cnt)
+	push	hl
+	ld	c,0		; No offset
+	push	bc
+	ld	e,FALSE
+	ld	bc,0
+	call	Build$Y$Rec	; Build temp record
+ST.ZEROES:
+	call	ST.B..0		; Store end code
+ST.B..0:
+	ld	a,0
+	call	ST.B
+	ret
+;
+; Read link item
+; ENTRY	Accu holds special link item
+;
+RdItem:
+	ld	(SavItm),a	; Save item
+	cp	.COMMON
+	call	nc,AField	; Get value
+	ld	a,.EntPnt
+	ld	hl,SavItm
+	cp	(hl)
+	call	nc,BField	; Get name
+	ld	a,(SavItm)	; Test ENTRY
+	cp	.ENTRY
+	jp	z,LNK.0		; .. insert label
+	cp	.ModNam		; Test MODULE
+	jp	z,LNK.2		; Save name of module
+	cp	.ModEnd		; Test end of module
+	jp	z,LNK.E
+	ld	c,a
+	ld	a,(ExtFlg)	; Test external mode
+	rra
+	ret	nc
+	ld	b,0
+	ld	hl,LNK.tab-2
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)		; Get execution address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; .. do it
+;
+; Link item table
+;
+LNK.tab:
+	dw	LNK.1		; 1
+	dw	LNK.2		; 2
+	dw	LNK.3		; 3
+	dw	LNK.4		; 4
+	dw	LNK.5		; 5
+	dw	LNK.6		; 6
+	dw	LNK.7		; 7
+	dw	LNK.8		; 8
+	dw	LNK.9		; 9
+	dw	LNK.A		; A
+	dw	LNK.B		; B
+	dw	LNK.C		; C
+	dw	LNK.D		; D
+;
+; Read item
+; EXIT	Accu holds special link item
+;	(16 on constant or address field
+;
+Item:
+	ld	b,1
+	call	RdBits		; Get bit
+	or	a		; Test control
+	jr	nz,ItemCtrl
+	ld	b,.Byte
+	call	RdBits		; Get constant
+	ld	c,a
+	ld	a,(ExtFlg)	; Test flag
+	rra
+	ld	a,c
+	call	c,ST.B		; Save byte
+	ld	a,.EndFil+1	; Set dummy item
+	ret
+ItemCtrl:
+	ld	b,2
+	call	RdBits		; Get next two bits
+	or	a		; Test link item
+	jr	nz,ItemVal16
+	ld	b,4
+	call	RdBits		; Get link item
+	cp	.EndFil		; Test end of file
+	ret	nc		; .. yeap
+	push	af
+	call	RdItem		; Read control item
+	pop	af
+	ret
+ItemVal16:
+	ld	e,a
+	push	de		; .. save control
+	call	RdAdr		; Get 16 bit value
+	ld	a,(ExtFlg)	; Test flag
+	rra
+	pop	de		; .. and mode
+	ld	a,e
+	call	c,ST.L		; .. store length
+	ld	a,.EndFil+1	; Set dummy item
+	ret
+;
+; Load .REL file
+;
+LoadRELfile:
+	call	Item		; Get items
+	cp	.EndFil		; .. till end of file
+	ret	z
+IF	@@VERB
+	cp	.ENTRY
+	call	z,PrMod		; Print module and file
+ENDIF	; @@VERB
+	jr	LoadRELfile
+;
+; Load one module from library
+;
+LoadModule:
+	ld	hl,BitCnt
+	ld	(hl),Bits	; Set bit count
+LM.loop:
+	call	Item		; Get items
+	cp	.ModEnd		; .. till end of module
+	ret	z
+IF	@@VERB
+	cp	.ENTRY
+	call	z,PrMod		; Print module and file
+ENDIF	; @@VERB
+	jr	LM.loop
+;
+; Execute reading of file
+;
+ExecRead:
+	ld	hl,BitCnt
+	ld	(hl),Bits	; Force byte read
+	ld	hl,BFlen3
+	ld	(InBfp),hl	; Force disk read
+	ld	(MaxBfp),hl	; Set max pointer
+	ld	a,(IRLflag)	; Test .IRL selected
+	rra
+	jr	nc,ExRD.noIRL	; .. no
+	ld	hl,(I.max)
+	ld	de,BFlen3
+	call	SUB.DE.HL
+	ld	(InBfp),hl	; Set pointer
+	ld	(MaxBfp),hl	; .. and max pointer
+	;;	Copy file to IRL file
+IF	@@DU
+	Move	FCB-1,I.FCB-1,1+FCBent
+ELSE
+	Move	FCB,I.FCB,FCBent
+ENDIF	;@@DU
+	ld	b,.Byte
+	call	RdBits		; Read a byte
+	ld	(IRL.ex.),a
+	ld	hl,FCB+.ex
+	cp	(hl)		; Compare extend
+	jr	z,ExRD.SameExt	; .. alreday set
+	ld	(hl),a		; .. set new
+	ld	de,FCB
+	call	open		; Position file
+	cp	OSErr
+	ld	hl,FCB
+	ld	de,$IDXERR	; .. file error
+	jp	z,ErrFN
+ExRD.SameExt:
+	ld	b,.Byte
+	call	RdBits		; Get a byte
+	ld	(FCB+.cr),a	; Set current record
+	ld	(IRL.rec.),a
+	ld	hl,I.FCB+.cr
+	ld	(hl),1		; Set 2nd record for real data
+	ld	hl,(MaxBfp)	; Get max
+	ld	(InBfp),hl	; Set pointer
+	ld	hl,0
+	ld	(RecSet),hl	; Clear records
+	ld	(RecRead),hl
+ExRD.noIRL:
+	ld	a,@c.rel
+	call	Save$$X		; Select temp file
+	ld	a,(S.opt)
+	cpl
+	ld	(ExtFlg),a
+	ld	a,(IRLflag)	; Test .IRL flag selected
+	ld	hl,S.opt
+	and	(hl)		; .. and [S] option
+	rra
+	jp	c,LoadIRLfile	; Load from .IRL file
+IF	@@VERB
+	call	PrFCB		; .. print file
+ENDIF	;@@VERB
+	call	LoadRELfile	; Load .REL file
+	ret
+;
+; Read relocatable file
+;
+ReadFile:
+	ld	a,(FCB+.ext)
+	and	NoMSB
+	cp	' '		; Test extension
+	jr	nz,RdFile.ExtSet
+	;;	Set extension .REL
+	Move	$REL,FCB+.ext,@ext
+RdFile.ExtSet:
+	ld	hl,FCB
+	call	FExist		; File on board ?
+	rra
+	jr	c,Read.On	; .. yes, skip
+	ld	a,(S.opt)	; Test LIB requested
+	rra
+	jr	nc,Read.On	; .. no, leave as it is
+	;;	Set extension .IRL
+	Move	$IRL,FCB+.ext,@ext
+Read.On:
+	ld	b,@ext
+	ld	hl,$IRL
+	ld	de,FCB+.ext
+	call	Compare		; Test .IRL
+	ld	(IRLflag),a	; .. remember
+	ld	hl,FCB
+	call	FOpen		; .. open file
+	call	ExecRead	; .. read it
+	ret
+;
+; Set EXTERNAL ?OVLAY
+;
+Set$OVLAY:
+	ld	hl,$OVLAY
+	ld	e,.noCOMM
+	ld	c,OVLlen
+	call	SrcSym		; Find symbol
+	ret	c		; .. already set
+	ld	bc,$OVLAY
+	push	bc
+	ld	c,OVLlen
+	push	bc
+	ld	bc,0
+	push	bc
+	ld	c,@c.rel
+	push	bc
+	ld	c,.noENT
+	push	bc
+	ld	de,0
+	ld	c,.noCOMM
+	call	InsSym		; Insert symbol
+	ret
+;
+; Solve LIB REQUESTS
+;
+SolveLBRQ:
+	call	GetSymBeg	; Get base address
+	ld	(SymPtr),hl
+SolvL.loop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC	; Test table scanned
+	ret	nc
+	call	GetRQST		; Test LIB REQUEST
+	rra
+	jp	nc,SolvL.noL
+	ld	a,(libdrv)
+	ld	(FCB),a		; Set drive
+	ld	hl,Solv.Cnt
+	ld	(hl),1		; Init count
+SolvL.FCBloop:
+	ld	a,@nam
+	cp	(hl)		; Test file length reached
+	jr	c,SolvL.NamSet
+	call	GetSymLen	; Get length of symbol
+	ld	hl,Solv.Cnt
+	cp	(hl)		; Test symbol length reached
+	jr	nc,SolvL.GetSym
+	ld	l,(hl)
+	ld	h,0
+	ld	bc,FCB
+	add	hl,bc
+	ld	(hl),' '	; Blank rest of name
+	jr	SolvL.nxtPos
+SolvL.GetSym:
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,.SymLab-1
+	add	hl,bc
+	ex	de,hl
+	ld	hl,(SymPtr)
+	add	hl,de		; Point to symbol
+	push	hl
+	ld	hl,(Solv.Cnt)
+	ld	h,0
+	ld	bc,FCB
+	add	hl,bc		; Point to FCB field
+	pop	de
+	ld	a,(de)		; .. unpack symbol
+	ld	(hl),a
+SolvL.nxtPos:
+	ld	hl,Solv.Cnt
+	inc	(hl)		; Bump count
+	jr	SolvL.FCBloop
+SolvL.NamSet:
+	ld	hl,IRLflag	; Force .IRL
+	ld	(hl),TRUE
+	;;	.. set extension .IRL
+	Move	$IRL,FCB+.ext,@ext
+	ld	hl,FCB
+	call	FExist		; Test file there
+	rra
+	jr	c,SolvL.Found
+	ld	hl,IRLflag	; Clear .IRL flag
+	ld	(hl),FALSE
+	;;	Set extension .REL
+	Move	$REL,FCB+.ext,@ext
+	ld	hl,FCB
+	call	FOpen		; Open file
+SolvL.Found:
+	ld	hl,(SymPtr)
+	push	hl		; Save current pointer
+	ld	hl,S.opt
+	ld	(hl),TRUE	; Force [S] option
+	call	ExecRead	; .. solve externals
+	pop	hl
+	ld	(SymPtr),hl	; Restore pointer
+SolvL.noL:
+	call	GetItmLen	; Get length of item
+	ld	de,SymPtr
+	call	ADD.A.@DE	; .. point to next
+	ex	de,hl
+	dec	hl
+	ld	(hl),e		; .. bring back
+	inc	hl
+	ld	(hl),d
+	jp	SolvL.loop	; .. try next
+;
+; Set EXTERNAL ?OVLA0
+;
+Set$OVLA0:
+	;;	Copy symbol
+	Move	$OVLA0,BF.Name,OVLlen
+	ld	hl,BF.Len
+	ld	(hl),OVLlen	; Force length
+	ld	hl,AF.mode
+	ld	(hl),@c.rel	; Set PROGRAM RELATIVE
+	ld	a,@c.rel
+	call	Save$$X		; .. set temp file
+	call	GetSymBeg	; Get symbol base
+	ld	(SymPtr),hl
+S$OV0.Loop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC	; Test all scanned
+	ret	nc		; .. yeap
+	call	GetENT		; Test ENTRY
+	rra
+	jp	c,S$OV0.ENT	; .. skip if so
+	ld	bc,(CS.chn)
+	call	SetVAL		; Set value
+	ld	a,@c.rel
+	call	SetADRmod	; Set program relative
+	ld	a,1
+	call	ST.B		; Save value
+	ld	a,@c.rel
+	ld	hl,6
+	call	ST.L		; Store program relative length
+	ld	a,.JP
+	call	ST.B		; Save JP
+	ld	hl,4
+	ld	(AF.val),hl
+	call	ST.ZEROES	; .. close code
+	ld	hl,(SymPtr)
+	push	hl		; Save pointer
+	call	LNK.6		; Execute CHAIN EXTERNAL
+	pop	hl
+	ld	(SymPtr),hl	; Bring back pointer
+	ld	hl,OV0.Cnt
+	ld	(hl),1		; Init count
+S$OV0.NamLoop:
+	ld	a,@nam
+	cp	(hl)		; Test name filled
+	jr	c,S$OV0.Full
+	call	GetSymLen	; Get length of symbol
+	ld	hl,OV0.Cnt
+	cp	(hl)		; Test all got
+	jr	c,S$OV0.Blnk
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,.SymLab-1
+	add	hl,bc
+	ex	de,hl
+	ld	hl,(SymPtr)
+	add	hl,de		; Point to symbol
+	ld	a,(hl)
+	jr	S$OV0.skp
+S$OV0.Blnk:
+	ld	a,' '
+S$OV0.skp:
+	call	ST.B		; Store character
+	ld	hl,OV0.Cnt
+	inc	(hl)		; Bump count
+	jr	S$OV0.NamLoop
+S$OV0.Full:
+	ld	de,14
+	ld	hl,(CS.len)
+	add	hl,de		; Fix code length
+	ld	(CS.len),hl
+	ld	a,(A.opt)	; Test [A] option
+	rra
+	jr	nc,S$OV0.ENT	; .. nope
+	call	Wr$Y$Data	; Fix temp chain and save
+	ld	hl,(FixTop)	; Set back top
+	ld	(MemTop),hl
+S$OV0.ENT:
+	call	GetItmLen	; Get length of item
+	ld	de,SymPtr
+	call	ADD.A.@DE	; .. point to next
+	ex	de,hl
+	ld	(hl),d		; Bring back
+	dec	hl
+	ld	(hl),e
+	jp	S$OV0.Loop	; .. loop
+;
+; Read number of bits
+; ENTRY	Reg B holds number of bits to be read
+; EXIT	Accu hold bits read
+;
+RdBits:
+	ld	c,0		; Clear bit value
+RB.loop:
+	ld	hl,BitCnt
+	inc	(hl)
+	ld	a,(hl)		; Test count
+	cp	Bits+1
+	jr	c,RB.bit
+	ld	(hl),1		; Init count
+	ld	hl,(InBfp)
+	inc	hl		; Bump pointer
+	ld	(InBfp),hl
+	ld	de,(MaxBfp)
+	ld	a,l
+	sub	e		; Test max reached
+	ld	a,h
+	sbc	a,d
+	jr	c,RB.byte
+	ld	hl,0		; Clear pointer
+	ld	(InBfp),hl
+	push	bc
+	call	RdRec		; Read records
+	pop	bc
+RB.byte:
+	ld	de,(InBfp)	; Get pointer
+	ld	hl,InBuf
+	add	hl,de		; Add to disk buffer
+	ld	a,(hl)		; Get byte
+	ld	(BitVal),a	; .. as new value
+RB.bit:
+	ld	hl,BitVal	; Point to byte
+	rlc	(hl)		; .. rotate it
+	rl	c		; .. shift into result
+	djnz	RB.loop		; .. loop on
+	ld	a,c		; Get result
+	ret
+;
+; Compare strings
+; ENTRY	Reg B  holds length of string
+;	Reg DE points to 1st string
+;	Reg HL points to 2nd string
+; EXIT	Accu holds FALSE if no match
+;	Accu holds TRUE  if    match
+;
+Compare:
+	ld	a,(de)
+IF	@@DU
+	and	NoMSB		; Strip off MSB
+ENDIF	;@@DU
+	cp	(hl)		; Compare
+	ld	a,FALSE
+	ret	nz
+	inc	de
+	inc	hl
+	djnz	Compare
+	ld	a,TRUE		; Set success
+	ret
+;
+; Clear buffer
+; ENTRY	Reg DE points to buffer
+;	Reg BC holds length of buffer
+;
+ClrBuf:
+	ld	h,d		; Copy buffer
+	ld	l,e
+	dec	bc		; Fix length
+	inc	de
+	ld	(hl),0		; Clear first byte
+	ldir			; .. then remainder
+	ret
+;
+$EXT.Tab:
+	db	'COM'
+	db	'PRL'
+IF	NOT @@SYS
+	db	'RSP'
+ENDIF	;NOT @@SYS
+	db	'SPR'
+	db	'OVL'
+	db	'RSX'
+$SYM:
+	db	'SYM'
+;
+; Write zero byte to file
+;
+WrByte.0:
+	ld	e,0		; Set zero
+;
+; Write byte to file
+; ENTRY	Reg E holds byte to be written
+;
+WrByte:
+	ld	hl,(CurAdr)
+	inc	hl		; Bump address
+	ld	(CurAdr),hl
+;
+; Write character to file
+; ENTRY	Reg E holds character
+;
+WrChar:
+	ld	hl,(InPtr)
+	ld	bc,InBuf
+	add	hl,bc		; Point to buffer
+	ld	(hl),e		; .. store character
+	ld	de,(InPtr)
+	inc	de
+	ld	(InPtr),de
+	ld	hl,InMax
+	call	SUB.DE.@HL	; Test buffer filled
+	ret	c
+	ld	hl,InBuf	; Get buffer
+	ld	bc,(InMax)	; Get length
+	ld	de,FCB
+	call	DiskWr		; .. write
+	ld	hl,0
+	ld	(InPtr),hl	; Clear pointer
+	ret
+;
+; Write bit to bit map
+; ENTRY	Reg C holds bit state
+;
+..WrMapBit:
+	ld	a,(MapByte)	; Get old byte
+	add	a,a		; .. shift left
+	or	c		; .. insert new bit
+	ld	e,a
+	ld	(MapByte),a
+	ld	a,(MapCnt)
+	inc	a		; Bump bit count
+	ld	(MapCnt),a
+	cp	Bits		; Test byte filled
+	ret	nz
+	call	WrChar		; .. write byte
+	xor	a
+	ld	(MapCnt),a	; .. clear count
+	ld	(MapByte),a	; .. clear for next
+	ret
+;
+; Write zero word to file
+;
+WrWord.0:
+	ld	hl,0		; Set zero
+;
+; Write word to file
+; ENTRY	Reg HL holds word to be written
+;
+WrWord:
+	push	hl
+	ld	e,l
+	call	WrByte		; .. write LO
+	pop	hl
+	ld	e,h		; .. then HI
+	call	WrByte
+	ret
+;
+; Build complete object file
+;
+BuildObject:
+	ld	a,(Obj.Cnt)
+	cp	@abs		; Test relocatable
+	ret	z		; .. nope
+	ld	a,(O.opt)
+	cp	.OC		; Test .COM file
+	call	nz,BuildPrefix	; Build prefix page if not
+	ld	hl,(loadaddr)
+	ld	(CurAdr),hl	; Set load address base
+	ld	a,(LoadFlg)	; Test load flag
+	rra
+	jr	nc,BObj.NoLoad	; .. nope
+	ld	e,.JP
+	call	WrByte		; Write code
+	ld	hl,(XferStrt)
+	call	WrWord		; .. and start address
+BObj.NoLoad:
+	ld	hl,(ABS.beg)	; Get start of ABSOLUTE
+	ld	(ABS.strt),hl	; .. set it
+	ld	hl,Obj.Tmp
+	ld	(hl),0		; .. init count
+BObj.loop:
+	ld	a,(Obj.Cnt)
+	dec	a		; Get object count
+	cp	(hl)		; .. test ready
+	jr	c,BObj.Rdy
+	ld	l,(hl)
+	ld	h,0		; Get index
+	ld	bc,ObjTable
+	add	hl,bc
+	ld	c,(hl)		; Fetch byte as index
+	ld	b,0
+	ld	hl,StrtTab
+	add	hl,bc
+	add	hl,bc		; Point to start table
+	ex	de,hl
+	ld	bc,loadaddr
+	call	SUB.@DE.@BC	; Check address
+	jr	c,BObj.SkpWrt	; .. skip
+	ld	hl,(Obj.Tmp)
+	ld	h,0
+	ld	bc,ObjTable
+	add	hl,bc
+	ld	c,(hl)		; Get mode
+	call	WrtSegment	; .. write segment
+BObj.SkpWrt:
+	ld	hl,Obj.Tmp
+	inc	(hl)		; Bump count
+	jr	BObj.loop
+BObj.Rdy:
+	ld	a,(O.opt)
+	sub	.OC		; Test .COM
+	add	a,-1
+	sbc	a,a
+	push	af
+	ld	a,(O.opt)
+	sub	.OY		; .. or .SYM
+	add	a,-1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	call	c,BuildBitMap	; .. build page rel map if not
+	ret
+;
+; Write code segment
+; ENTRY	Reg C holds address mode
+;
+WrtSegment:
+	ld	a,c
+	ld	(CurSeg),a
+	cp	@abs		; Test ABS
+	jr	nz,WrSg.noABS
+	ld	hl,(ABS.beg)	; Get start of ABSOLUTE
+	jr	WrSg.go
+WrSg.noABS:
+	ld	b,0
+	ld	hl,StrtTab
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)		; Fetch start address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+WrSg.go:
+	ld	(SegStrt),hl	; .. as segment start
+	ld	de,SegStrt
+	ld	bc,CurAdr
+	call	SUB.@DE.@BC	; Check segments
+	ld	de,$OVERLAP	; .. overlapping
+	jp	c,AbortString
+WrSg.Fill:
+	ld	bc,SegStrt
+	ld	de,CurAdr
+	call	SUB.@DE.@BC	; Check segments resched
+	jr	nc,WrSg.Seg
+	call	WrByte.0	; Fill with zeroes
+	jr	WrSg.Fill
+WrSg.Seg:
+	ld	a,(CurSeg)
+	call	Save$X		; .. save it
+	ld	hl,(CurSeg)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc		; Point to chain
+	ld	a,0
+	call	SUB.A.@HL	; .. test zero
+	jr	nc,WrSg.rdy
+	ld	a,(CurSeg)
+	cp	@abs		; Test ABS
+	ld	hl,0
+	jr	nz,WrSg.notABS
+	ld	hl,(ABS.beg)	; Get start of ABSOLUTE
+WrSg.notABS:
+	call	OutSeg		; Output segment
+WrSg.rdy:
+	ld	de,ModTop
+	ld	bc,CurAdr
+	call	SUB.@DE.@BC	; Check address
+	ret	nc
+	ld	hl,(CurAdr)
+	ld	(ModTop),hl	; .. set top of module
+	ret
+;
+; Output segment
+; Reg HL holds offset
+;
+OutSeg:
+	ld	(OS.off),hl
+	ld	(OS.offS),hl	; .. copy offset
+OS.loop:
+	ld	hl,(CurSeg)
+	ld	h,0
+	ld	bc,ChnTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,OS.off
+	call	ADD.@DE.@HL	; .. bump
+	dec	hl
+	ex	de,hl
+	ld	hl,OS.offS
+	call	SUB.DE.@HL	; Test in range
+	ret	c		; .. nope
+	ld	bc,(OS.offS)
+	call	LD.Seg		; Get from segment
+	ld	e,a
+	call	WrByte		; .. and write
+	ld	hl,(OS.offS)
+	inc	hl		; Bump
+	ld	(OS.offS),hl
+	jr	OS.loop
+;
+; Build prefix page for object file
+;
+BuildPrefix:
+	ld	a,(Obj.Cnt)	; Get object count
+	ld	c,a
+	ld	b,0
+	ld	hl,ObjTable-1
+	add	hl,bc		; .. as index
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,StrtTab
+	add	hl,bc
+	add	hl,bc
+	push	hl		; Save start pointer
+	ld	hl,ChnTab
+	add	hl,bc
+	add	hl,bc		; Get from chain table
+	pop	de
+	call	ADD.@DE.@HL	; Get new start address
+	ex	de,hl
+	ld	hl,(loadaddr)
+	call	SUB.DE.HL	; Get difference
+	ld	(CodeLen),hl	; .. save length
+	call	WrByte.0
+	ld	hl,(CodeLen)
+	call	WrWord		; Write length
+	call	WrByte.0
+	ld	a,(O.opt)
+	cp	.OY		; Test overlay
+	jr	nz,BPr.NoOVL	; .. nope
+	call	WrWord.0	; Give data for overlay
+	call	WrByte.0
+	ld	hl,(loadaddr)
+	call	WrWord
+	jr	BPr.skp
+BPr.NoOVL:
+	ld	hl,(memsize)
+	call	WrWord		; Give data on normal mode
+	call	WrByte.0
+	call	WrWord.0
+BPr.skp:
+	call	WrByte.0
+IF	NOT @@BIOS
+	ld	a,(B.opt)	; Test BIOS option
+	rra
+	jr	nc,BPr.noBIOS	; .. nope
+	ld	hl,(CS.len)	; Get code length
+	call	WrWord		; .. write
+	jr	BPr.endBIOS
+BPr.noBIOS:
+ENDIF	;NOT @@BIOS
+	call	WrWord.0	; Else write zero
+BPr.endBIOS:
+	ld	hl,PrfxCnt
+	ld	(hl),1		; Set count
+Bpr.ClLoop:
+	ld	a,PageLen-HeadLen
+	cp	(hl)		; Test remaining page filled
+	ret	c		; .. yeap
+	call	WrByte.0	; .. clear page
+	ld	hl,PrfxCnt
+	inc	(hl)		; Bump count
+	jr	Bpr.ClLoop
+;
+; Build bit map for object file
+;
+BuildBitMap:
+	ld	hl,(loadaddr)
+	ld	(CurAdr),hl	; Set load address base
+	ld	a,(LoadFlg)	; Test load address defined
+	rra
+	jr	nc,BBM.noLoad	; .. nope
+	ld	c,0
+	call	WrMapBit	; .. write two zeroes
+	ld	c,0
+	call	WrMapBit	; .. for JP <lo> <hi> -> 0 0 1
+	ld	c,1
+	call	WrMapBit	; .. indicate HI relocatable
+BBM.noLoad:
+	ld	hl,Map.Cnt
+	ld	(hl),0		; Init count
+BBM.loop:
+	ld	a,(Obj.Cnt)
+	dec	a
+	cp	(hl)		; Test object count
+	jr	c,BBM.rdy	; .. done
+	ld	l,(hl)
+	ld	h,0
+	ld	bc,ObjTable
+	add	hl,bc
+	ld	a,(hl)		; Get index from table
+	ld	(Map.idx),a	; .. save it
+	cp	@abs		; Test mode
+	jr	z,BBM.ABS	; .. Skip ABSOLUTE
+BBM.fill:
+	ld	hl,(Map.idx)	; Get index
+	ld	h,0
+	ld	bc,StrtTab
+	add	hl,hl
+	add	hl,bc		; Hetch pointer
+	ld	de,CurAdr
+	call	SUB.@DE.@HL	; Test address
+	jr	nc,BBM.filled	; .. yeap
+	ld	c,0
+	call	WrMapBit	; .. write zero
+	jr	BBM.fill
+BBM.filled:
+	ld	a,(A.opt)	; Test option [A]
+	rra
+	jr	nc,BBM.noAopt	; .. nope
+	call	BuildMapAopt	; .. do it for [A]
+	jr	BBM.ABS
+BBM.noAopt:
+	call	BuildMapNorm	; .. do it for no [A]
+BBM.ABS:
+	ld	hl,Map.Cnt
+	inc	(hl)		; Bump count
+	jr	BBM.loop
+BBM.rdy:
+	ld	de,(loadaddr)	; Get load address
+	ld	hl,(CodeLen)
+	add	hl,de		; .. build end address
+	ld	de,CurAdr
+	call	SUB.@DE.HL	; Test address
+	jr	nc,BBM.noFill	; .. done
+	ld	c,0
+	call	WrMapBit	; .. fill zeroes
+	jr	BBM.rdy
+BBM.noFill:
+	ld	a,(MapCnt)	; Get count
+	or	a		; .. test boundary
+	ret	z		; .. yeap
+	ld	c,0
+	call	WrMapBit	; .. fill with zeroes
+	jr	BBM.noFill
+;
+; Write bit to bit map
+; ENTRY	Reg C holds bit state
+;
+WrMapBit:
+	call	..WrMapBit	; .. write it
+	ld	hl,(CurAdr)
+	inc	hl		; Bump address
+	ld	(CurAdr),hl
+	ret
+;
+; Write relocatable bit till address reached
+;
+WrMapToAdr:
+	ld	de,Map.SumAdr
+	ld	bc,CurAdr
+	call	SUB.@DE.@BC	; Test address recahed
+	jr	c,WMTA.found	; .. yeap
+	ld	c,0
+	call	WrMapBit	; .. write not to be relocatble
+	jr	WrMapToAdr	; .. till address found
+WMTA.found:
+	ld	c,1
+	call	WrMapBit	; .. write reloctable
+	ret
+;
+; Build bit map for file generated by no [A] option
+;
+BuildMapNorm:
+	ld	hl,(Map.idx)	; Get map index
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Fetch table address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+BMN.loop:
+	ld	(Heap),hl	; .. for base
+	ld	a,h		; Test address empty
+	or	l
+	ret	z		; .. yeap
+	call	Get$Y$Adr	; Get address
+	push	hl
+	ld	hl,(Map.idx)	; Get map index
+	ld	h,0
+	ld	bc,StrtTab
+	add	hl,hl
+	add	hl,bc		; .. index to value
+	pop	de
+	call	ADD.DE.@HL	; .. add them
+	ld	(Map.SumAdr),hl	; Set new start address
+	call	WrMapToAdr	; Write bit(s)
+	call	Get$Y$Lnk	; Get next linkage
+	jr	BMN.loop
+;
+; Build bit map for file generated by [A] option
+;
+BuildMapAopt:
+	ld	a,(Map.idx)	; Get map index
+	call	Save$Y		; .. save
+	ld	bc,-1
+	ld	a,(iy+Y$.WR)	; Test file created
+	rra
+	jr	nc,BMA.noCrec	; .. nope
+	ld	hl,(Y.FCB)	; Get FCB
+	call	FOpen		; .. open file
+	ld	c,(iy+Y$.len)	; Get length
+	ld	b,(iy+Y$.len+1)
+BMA.noCrec:
+	ld	(iy+Y$.cur),c	; Set value
+	ld	(iy+Y$.cur+1),b
+BMA.loop:
+	call	Rd$Y$byte	; Read byte
+	ld	(Map$Y$chr),a	; .. save
+	cp	Y.eof		; Test EOF
+	ret	z		; .. yeap
+	call	Rd$Y$word	; Get word
+	push	hl		; .. save
+	ld	hl,(Map.idx)	; Get map index
+	ld	h,0
+	ld	bc,StrtTab
+	add	hl,hl
+	add	hl,bc
+	pop	de
+	call	ADD.DE.@HL
+	ld	(Map.SumAdr),hl	; Set new start address
+	call	Rd$Y$word	; Get word
+	ld	a,(Map$Y$chr)
+	and	Y@@off		; Test offset
+	call	nz,Rd$Y$word	; .. skip it
+	call	WrMapToAdr	; Write bit(s)
+	jp	BMA.loop
+;
+; Close file
+;
+CloseF:
+	ld	a,(InPtr)	; Get pointer
+	and	RecLng-1	; .. test buffer filled
+	jr	z,CloseF.filled	; .. yeap
+	ld	e,eof
+	call	WrChar		; Fill with EOF
+	jr	CloseF
+CloseF.filled:
+	ld	hl,InBuf	; Get buffer
+	ld	bc,(InPtr)	; Get length
+	ld	de,FCB
+	call	DiskWr		; Write record(s)
+	ld	hl,FCB
+	call	FClose		; .. close file
+	ret
+;
+; Close up object file
+;
+ObjClose:
+	ld	a,(objdrv)	; Test drive enabled
+	cp	'Z'
+	ret	z		; .. nope, skip it
+	;;	Copy file name and extension
+IF	@@DU
+	Move	$$FCB-1,FCB-1,1+1+@nam+@ext
+ELSE
+	Move	$$FCB,FCB,1+@nam+@ext
+ENDIF	;@@DU
+	ld	a,(FCB+.ext)
+	cp	' '		; Test extension there
+	jr	nz,ObjCl.Ext	; .. yeap
+	ld	hl,(O.opt)	; Get [O]-type
+	ld	h,0
+	ld	de,@ext
+	call	MUL.HL
+	ld	bc,$EXT.Tab
+	add	hl,bc		; Point to selected extension
+	ld	de,FCB+.ext
+	ld	bc,@ext
+	ldir			; .. copy extension
+ObjCl.Ext:
+	ld	a,(objdrv)
+	or	a		; Test current drive
+	jr	z,ObjCl.noDrv	; .. yeap
+	ld	(FCB),a		; .. set other
+ObjCl.noDrv:
+	ld	hl,FCB
+	call	FCreate		; Create file
+	ld	a,(SavFCB+.nam)
+	cp	' '		; Test FCB saved
+	jr	nz,ObjCl.noSav
+	;;	Save FCB
+IF	@@DU
+	Move	FCB-1,SavFCB-1,1+1+@nam+@ext
+ELSE
+	Move	FCB,SavFCB,1+@nam+@ext
+ENDIF	;@@DU
+ObjCl.noSav:
+	ld	hl,0
+	ld	(InPtr),hl	; Clear pointer
+	xor	a
+	ld	(MapByte),a	; .. and map byte
+	ld	(MapCnt),a	; .. and map count
+	call	BuildObject	; Build complete object file
+	call	CloseF		; Close file
+	ret
+

@@ -1,0 +1,631 @@
+	title	U3 - CP/M PLUS UTILITY FOR RECOVERING ERASED FILES
+	name	('U3')
+
+; DASMed version of U3.COM - CP/M 3.x unerase utility
+; By W. Cirsovius
+
+OS	equ	0000h
+BDOS	equ	0005h
+FCB	equ	005ch
+;
+; BDOS system calls
+;
+.string	equ	 9
+.vers	equ	12
+.resdsk	equ	13
+.logdsk	equ	14
+.retdsk	equ	25
+.dpbadr	equ	31
+.usrcod	equ	32
+.bios	equ	50
+;
+; BIOS system calls
+;
+_seldsk	equ	 9
+_settrk	equ	10
+_setsec	equ	11
+_setdma	equ	12
+_read	equ	13
+_write	equ	14
+_sectrn	equ	16
+
+_IMWR	equ	1		; Immediate write sector
+
+_get	equ	-1
+;
+; Offset into Disk Parameter Block
+;
+_DRM	equ	 7		; Number of directory entries less 1
+_REST	equ	13		; Number of reserved tracks
+_PSH	equ	15		; Physical shift factor
+
+CPM3	equ	30h
+
+MAXUSR	equ	15
+
+OLDUSR	equ	0e5h
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_DIR	equ	16
+_DIREC	equ	32
+
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+NOMSB	equ	01111111b
+_recov	equ	00001111b
+
+	db	'U3 ver 1.02'
+	db	'FOR CPM 3.0'
+	db	'12/29/83 - gw'
+	db	'Rev 06/16/84, 12/24/84 - rs'
+;
+; ################
+; ### Enter U3 ###
+; ################
+;
+l0141:
+	ld	sp,l0141
+	call	l0150		; Initialize disk environment
+	call	l015d		; Update directory entries
+	call	l0167		; Tell final state
+	jp	OS		; That's all folks
+;
+; Initialize disk environment
+;
+l0150:
+	call	l018f		; Verify CP/M 3 or higher
+	call	l019a		; Verify valid filename
+	call	l01ba		; Get user area
+	call	l021f		; Set up disk
+	ret
+;
+; Update directory entries
+;
+l015d:
+	call	l02d6		; Read directory sector
+	ret	z		; No more to read
+	call	l0316		; Check entries for file
+	jp	l015d		; Next directory sector
+;
+; Tell final state
+;
+l0167:
+	ld	c,.resdsk
+	call	BDOS		; Reset entire disk system
+	ld	a,(l044c)	; Get number of entries found
+	or	a
+	jp	z,l0188		; None found
+	ld	a,(l0456)	; Get marked user number
+	cp	OLDUSR		; Test new one given
+	jp	z,l0181		; Nope
+	ld	de,l04bf
+	jp	l0184		; File user area changed
+l0181:
+	ld	de,l04ad	; File recovered
+l0184:
+	call	l0408
+	ret
+l0188:
+	ld	de,l06d9
+	call	l0408		; File not found
+	ret
+;
+; Verify CP/M 3 or higher
+;
+l018f:
+	ld	c,.vers
+	call	BDOS		; Get versiob
+	cp	CPM3		; Verify correct versiob
+	jp	c,l02cd		; Invalid
+	ret
+;
+; Verify valid filename
+;
+l019a:
+	ld	a,(FCB)	; Get drive
+	or	a		; Test defualt
+	jp	nz,l01a7	; Nope
+	ld	c,.retdsk
+	call	BDOS		; Return logged disk
+	inc	a
+l01a7:
+	dec	a
+	ld	(FCB),a	; Store disk
+	ld	a,(FCB+.drv)	; Get name of file
+	cp	' '+1
+	ret	nc		; Verify valid name
+	ld	de,l04d9
+	call	l0408		; Give help if not
+	jp	OS
+;
+; Get user area
+;
+l01ba:
+	ld	c,.usrcod
+	ld	e,_get
+	call	BDOS		; Get current user number
+	ld	(l0450),a	; Save it
+	ld	hl,FCB+_DIR+.drv
+	ld	a,' '
+	cp	(hl)		; Test optional user number given
+	jp	z,l020a		; Nope
+	ld	b,'0'		; Init hi part of ASCII user number
+	ld	c,(hl)		; Get low part
+	inc	hl
+	cp	(hl)		; Test only one digit
+	jp	z,l01dc		; Yeap
+	ld	b,c		; Set hi part
+	ld	c,(hl)		; Get real lo part
+	inc	hl
+	cp	(hl)		; Verify two digits
+	jp	nz,l0216	; Invalid if not
+l01dc:
+	ld	d,0		; Init binary hi part
+	ld	a,'0'
+	cp	b		; Test hi part given
+	jp	z,l01eb		; Nope
+	inc	a
+	cp	b		; Verify max 1x
+	jp	nz,l0216	; Invalid if not
+	ld	d,10		; Set hi part
+l01eb:
+	ld	a,'0'-1
+	cp	c		; Verify valid digit
+	jp	nc,l0216	; Nope
+	ld	a,'9'
+	cp	c
+	jp	c,l0216
+	ld	a,c
+	sbc	a,'0'		; Make binary
+	add	a,d		; Add hi
+	cp	MAXUSR+1	; Verify valid range
+	jp	nc,l0216	; Nop, error
+	ld	(l0457),a	; Set result as work number
+	ld	a,(l0450)	; Get entry user number
+	ld	(l0456),a	; Mark new number
+	ret
+l020a:
+	ld	a,(l0450)	; Get entry user number
+	ld	(l0457),a	; Set for work number
+	ld	a,OLDUSR
+	ld	(l0456),a	; Mark no new number
+	ret
+l0216:
+	ld	de,l06ea
+	call	l0408		; Invalid user number
+	jp	OS
+;
+; Set up disk
+;
+l021f:
+	ld	bc,l0740
+	ld	(l0440),bc	; Store dma address
+	ld	a,_setdma
+	ld	(l043e),a
+	call	l0435		; Set dma address
+	call	l0255		; Get disk parameter
+	ld	a,(FCB)	; Get drive
+	ld	c,a
+	ld	b,0
+	ld	e,b
+	ld	(l0440),bc	; Store drive
+	ld	(l0442),de	; Force read
+	ld	a,_seldsk
+	ld	(l043e),a
+	call	l0435		; Select disk
+	ld	a,h		; Test valid disk drive
+	or	l
+	jp	z,l040d		; Nope
+	ld	e,(hl)		; Fetch address of DPH
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l0446),hl	; Save it
+	ret
+;
+; Get disk parameter
+;
+l0255:
+	ld	a,(FCB)	; Get current disk
+	ld	e,a
+	ld	c,.logdsk
+	call	BDOS		; Log it
+	ld	c,.dpbadr
+	call	BDOS		; Get address of disk parameter block
+	ld	e,(hl)		; Get logical SPT
+	inc	hl
+	ld	d,(hl)
+	ld	(l0451),de	; Save sectors per track
+	ld	de,_DRM-1
+	add	hl,de		; Position to DRM
+	ld	e,(hl)		; Fetch DRM
+	inc	hl
+	ld	d,(hl)
+	push	de
+	push	hl
+	ld	de,_PSH-_DRM-1
+	add	hl,de		; Point to PSH
+	ld	a,(hl)
+	ld	(l044e),a	; Save physical shift factor
+	pop	hl
+	pop	de
+	ex	de,hl
+	inc	hl		; Get real number of directory entries
+	ld	a,(l044e)	; Get physical shift factor
+	cp	3		; Test 1024 byte sectors
+	call	z,l03ba
+	ld	a,(l044e)	; Get physical shift factor
+	cp	2		; Test 512 byte sectors
+	call	z,l03c2
+	ld	a,(l044e)	; Get physical shift factor
+	cp	1		; Test 256 byte sectors
+	call	z,l03ca
+	ld	a,(l044e)	; Get physical shift factor
+	or	a		; Test 128 byte sectors
+	call	z,l03d2
+	ld	a,l
+	ld	(l0448),a	; Save resulting directory entries
+	ld	hl,(l0451)	; Get sectors per track
+	ld	a,(l044e)	; Get physical shift factor
+	cp	3		; Test 1024 byte sectors
+	call	z,l03e0
+	ld	a,(l044e)	; Get physical shift factor
+	cp	2		; Test 512 byte sectors
+	call	z,l03e3
+	ld	a,(l044e)	; Get physical shift factor
+	cp	1		; Test 256 byte sectors
+	call	z,l03e6
+	ld	a,l
+	ld	(l0453),a	; Save resulting physical sectors per track
+	ld	hl,_REST-_DRM-1
+	add	hl,de		; Point to number of reserved tracks
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	(l0449),de	; Save number of reserved tracks
+	ret
+;
+; Invalid OS found
+;
+l02cd:
+	ld	de,l0708
+	call	l0408		; CP/M 3.x required
+	jp	OS
+;
+; Read directory sector - Z set says none
+;
+l02d6:
+	ld	a,(l0448)	; Get directory entries
+	or	a
+	ret	z		; No more available
+	call	l03ee		; Compute current physical sector and track
+	ld	bc,(l0449)	; Get number of reserved tracks
+	ld	h,0		; Get physical track number in HL
+	ld	a,(l0455)	; Get track offset
+	ld	l,a
+	add	hl,bc		; Build directory track
+	ld	(l0440),hl	; Store it
+	ld	a,_settrk
+	ld	(l043e),a
+	call	l0435		; Set track
+	ld	a,(l0454)	; Get current physical sector
+	ld	c,a
+	call	l041f		; Translate sector
+	ld	b,0
+	ld	(l0440),bc	; Store sector
+	ld	a,_setsec
+	ld	(l043e),a
+	call	l0435		; Set sector
+	ld	a,_read
+	ld	(l043e),a
+	call	l0435		; Read sector
+	and	00000001b	; Mask success bit (0 is success)
+	xor	00000001b	; Set NZ on success
+	ret
+;
+; Check entries for file
+;
+l0316:
+	xor	a
+	ld	(l044d),a	; Clear recovered flag
+	ld	a,(l044f)	; Get number of directory entries per sector
+	ld	b,a
+	ld	hl,l0740	; Init DMA address
+l0321:
+	ld	a,(l0456)	; Get marked user number
+	ld	d,a
+	ld	a,(hl)		; Get entry from directory
+	cp	d		; Test same user
+	jp	nz,l0342	; Nope
+	push	hl
+	call	l03a1		; Compare filename
+	pop	hl
+	jp	nz,l0342	; No match
+	ld	a,(l0457)	; Get work current number
+	ld	(hl),a		; Recover entry
+	ld	a,_recov
+	ld	(l044d),a	; Set recovered flag
+	ld	a,(l044c)
+	inc	a		; Advance number of entries found
+	ld	(l044c),a
+l0342:
+	ld	de,_DIREC
+	add	hl,de		; Point to next fie entry
+	dec	b		; Test all scanned
+	jp	nz,l0321	; Nope, try next one
+	ld	a,(l044d)	; Get recovered flag
+	or	a		; Test set
+	jp	z,l0392		; Nope
+	call	l03ee		; Compute current physical sector and track
+	ld	bc,(l0449)	; Get number of reserved tracks
+	ld	h,0
+	ld	a,(l0455)	; Get track offset
+	ld	l,a
+	add	hl,bc
+	ld	(l0440),hl	; Store track
+	ld	a,_settrk
+	ld	(l043e),a
+	call	l0435		; Set track
+	ld	a,(l0454)	; Get current physical sector
+	ld	c,a
+	call	l041f		; Translate sector
+	ld	b,0
+	ld	(l0440),bc	; Store sector
+	ld	a,_setsec
+	ld	(l043e),a
+	call	l0435		; Set sector
+	ld	bc,_IMWR
+	ld	(l0440),bc	; Set immediate write
+	ld	a,_write
+	ld	(l043e),a
+	call	l0435		; Write sector
+	or	a		; Vrify success
+	jp	nz,l0416	; Error if not
+l0392:
+	ld	a,(l0448)	; Get directory entries
+	dec	a		; Count down
+	ld	(l0448),a
+	ld	a,(l044b)
+	inc	a		; Next sector
+	ld	(l044b),a
+	ret
+;
+; Compare filename - Z set says match
+;
+l03a1:
+	inc	hl		; Skip drive
+	ld	de,FCB+.drv	; Point to file mask
+	ex	de,hl
+	ld	c,.nam+.ext	; Set length
+l03a8:
+	ld	a,'?'
+	cp	(hl)		; Test wildcard
+	jp	z,l03b3		; Treat as match
+	ld	a,(de)
+	and	NOMSB		; Strip off attribute
+	cp	(hl)		; Compare
+	ret	nz		; No match
+l03b3:
+	inc	de
+	inc	hl
+	dec	c		; Check all
+	jp	nz,l03a8
+	ret
+;
+; Process 1024 byte sectors
+;
+l03ba:
+	ld	a,32		; Set number of directory entries per sector
+	ld	(l044f),a
+	jp	l03da		; Divide HL by 32
+;
+; Process 512 byte sectors
+;
+l03c2:
+	ld	a,16		; Set number of directory entries per sector
+	ld	(l044f),a
+	jp	l03dd		; Divide HL by 16
+;
+; Process 256 byte sectors
+;
+l03ca:
+	ld	a,8		; Set number of directory entries per sector
+	ld	(l044f),a
+	jp	l03e0		; Divide HL by 8
+;
+; Process 128 byte sectors
+;
+l03d2:
+	ld	a,4		; Set number of directory entries per sector
+	ld	(l044f),a
+	jp	l03e3		; Divide HL by 4
+;
+; Divide HL by 32
+;
+l03da:
+	call	l03e6
+;
+; Divide HL by 16
+;
+l03dd:
+	call	l03e6
+;
+; Divide HL by 8
+;
+l03e0:
+	call	l03e6
+;
+; Divide HL by 4
+;
+l03e3:
+	call	l03e6
+;
+; Divide HL by 2
+;
+l03e6:
+	xor	a
+	ld	a,h		; Simple shift right
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	ret
+;
+; Compute current physical sector and track
+;
+l03ee:
+	ld	c,0		; Init physical track
+	ld	a,(l0453)	; Get physical sectors per track PST
+	ld	b,a
+	ld	a,(l044b)	; Get sector
+l03f7:
+	cp	b		; Test match
+	jp	c,l0400		; Yeap
+	sub	b		; Divide by PST
+	inc	c		; Update physical track
+	jp	l03f7
+l0400:
+	ld	(l0454),a	; Set current physical sector
+	ld	a,c
+	ld	(l0455),a	; Set track offset
+	ret
+;
+; Put string ^DE to console
+;
+l0408:
+	ld	c,.string
+	jp	BDOS		; Do it
+;
+; Disk drive invalid
+;
+l040d:
+	ld	de,l0483
+	call	l0408		; Illegal disk drive specified
+	jp	OS
+;
+; Write error
+;
+l0416:
+	ld	de,l0458
+	call	l0408		; Error during writing to disk
+	jp	OS
+;
+; Translate sector
+;
+l041f:
+	ld	hl,(l0446)	; Get address of DPH
+	ex	de,hl
+	ld	(l0440),bc	; Set logical sector
+	ld	(l0442),de	; Set translation table
+	ld	a,_sectrn
+	ld	(l043e),a
+	call	l0435		; Translate
+	ld	c,l		; Get back physical sector
+	ret
+;
+; Execute direct BIOS call
+;
+l0435:
+	ld	c,.bios
+	ld	de,l043e	; Point to parameter block
+	call	BDOS		; Execute call
+	ret
+;
+; BIOS function block
+;
+l043e:
+	ds	1		; Function
+	ds	1		; Accu
+l0440:
+	ds	2		; Reg pair BC
+l0442:
+	ds	2		; Reg pair DE
+	ds	2		; Reg pair HL
+l0446:
+	ds	2		; Address of DPH
+l0448:
+	ds	1		; Directory entries
+l0449:
+	ds	2		; Number of reserved tracks
+l044b:
+	db	0		; Next sector
+l044c:
+	db	0		; Number of entries found
+l044d:
+	ds	1		; Recovered flag
+l044e:
+	ds	1		; Get physical shift factor
+l044f:
+	ds	1		; Number of directory entries per sector
+l0450:
+	ds	1		; Entry user number
+l0451:
+	ds	2		; SPT (Sectors Per Track)
+l0453:
+	ds	1		; Physical sectors per track
+l0454:
+	ds	1		; Current physical sector
+l0455:
+	ds	1		; Track offset
+l0456:
+	ds	1		; Marked user number
+l0457:
+	ds	1		; Work current number
+l0458:
+	db	cr,lf
+	db	'Error occurred during disk Write - ABORT',eot
+l0483:
+	db	cr,lf
+	db	'Specified an illegal disk drive - ABORT',eot
+l04ad:
+	db	cr,lf
+	db	'File recovered.',eot
+l04bf:
+	db	cr,lf
+	db	'File user area changed.',eot
+l04d9:
+	db	cr,lf
+	db	'U3 - CP/M PLUS UTILITY FOR RECOVERING ERASED FILES AND FOR CHANGING THE USER'
+	db	cr,lf
+	db	'AREA OF A FILE.'
+	db	cr,lf,lf
+	db	'The U3 command line takes the form:'
+	db	cr,lf,lf
+	db	tab,tab,'U3 [d:]afn.aft [user area]'
+	db	cr,lf,lf
+	db	'If no user area is specified U3 recoverers all erased files on'
+	db	cr,lf
+	db	'drive d: (or the default if d: is not specified) matching'
+	db	cr,lf
+	db	'afn.aft and places them is the current user area. If a user area'
+	db	cr,lf
+	db	'is specified U3 moves all files in the current user area on'
+	db	cr,lf
+	db	'drive d: (or the default if d: is not specified) matching'
+	db	cr,lf
+	db	'afn.aft to the specified user area.',eot
+l06d9:
+	db	cr,lf
+	db	'File NOT found',eot
+l06ea:
+	db	cr,lf
+	db	'Invalid User Number - ABORT',eot
+l0708:
+	db	cr,lf
+	db	'THIS VERSION OF U3 ONLY WORKS'
+	db	cr,lf
+	db	'FOR CPM 3.0 OR LATER'
+	db	cr,lf,eot
+;
+; Directory buffer starts here
+;
+l0740	equ	$
+
+	end	l0141
+

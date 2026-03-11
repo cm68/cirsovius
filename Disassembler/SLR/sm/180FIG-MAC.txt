@@ -1,0 +1,1027 @@
+	title	SLR180 configuration
+	name	('SLR180CFG')
+
+; Configurator of macro assembler SLR180
+; DASMed by W. Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	macro
+	rst	0
+	endm
+BDOS	equ	0005h
+FCB	equ	005ch
+DMA	equ	0080h
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+
+_EX	equ	12
+_CR	equ	32
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.rdseq	equ	20
+.wrseq	equ	21
+.setdma	equ	26
+
+reclng	equ	128
+
+bel	equ	07h
+bs	equ	08h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+MSB	equ	10000000b
+LOMASK	equ	00001111b
+NZNC	equ	11111111b
+
+$SLRver	equ	0131h		; Expected release
+
+SLRoff	equ	11		; Offset to SLR release
+SLRbeg	equ	14		; Start of SLR code
+
+CTRLEN	equ	8		; Length of control string input
+MODREC	equ	8		; Number of records to modify
+$extlen	equ	1+.ext+1
+StkDep	equ	130
+;
+; Control byte definition
+;
+_getbyt	equ	 0
+_getspc	equ	 1
+_getbol	equ	 2
+_getext	equ	 3
+_getwrd	equ	 4
+_getstr	equ	 5
+_getend	equ	-1
+
+	ld	sp,LocStk	; Get local stack
+	ld	de,$HEAD
+	call	String		; Give ID message
+	ld	a,(FCB+.drv+.nam)
+	cp	' '		; Test extension given
+	jr	nz,GotExt	; Yeap
+	ld	hl,'C'+256*'O'	; Set default .COM
+	ld	(FCB+.drv+.nam),hl
+	ld	a,'M'
+	ld	(FCB+.drv+.nam+2),a
+GotExt:
+	ld	de,FCB
+	xor	a
+	ld	(FCB+_EX),a	; Clear extent
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Test success
+	jr	z,IllFile	; Nope
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	de,FCB
+	ld	c,.rdseq
+	call	BDOS		; Read first record
+	or	a		; Test success
+	jr	nz,IllFile	; Invalid if empty
+	call	RdRecs		; Get first records
+	ld	hl,(DMA+SLRoff)	; Get possible index to SLR
+	ld	de,$SLRver
+	sbc	hl,de		; Verify correct release
+	jr	nz,IllVer	; Nope, should be
+	ld	hl,DMA+SLRbeg
+	ld	(PrgPtr),hl	; Init set up pointer
+	ld	hl,SLR.Ctrl
+	ld	(CtrlPtr),hl	; Init table pointer
+CtrlLoop:
+	call	ExecCtrl	; Process one entry
+	jr	nc,CtrlLoop	; Got more
+	xor	a
+	ld	(FCB+_CR),a
+	ld	de,DMA
+	ld	c,.setdma
+	call	BDOS		; Set default buffer
+	ld	de,FCB
+	ld	c,.wrseq
+	call	BDOS		; Write modified first record
+	call	WrRecs		; Write next records
+	ld	de,FCB
+	ld	c,.close
+	call	BDOS		; Close file
+	OS			; End of configurator
+;
+; Process invalid file error
+;
+IllFile:
+	ld	de,$ILL.FILE
+	call	String		; Tell invalid file
+	OS			; Exit
+;
+; Process invalid release error
+;
+IllVer:
+	ld	de,$ILL.VER
+	call	String		; Tell invalid version
+	OS			; Exit
+;
+$ILL.FILE:
+	db	'Use Legitimate SLR180 file name'
+	db	bel,eot
+$ILL.VER:
+	db	'Not SLR180 Release 1.31'
+	db	bel,eot
+;
+; Control table
+; Byte  0   Type of entry
+; Byte 1,2  Message of entry
+;
+; Type byte :	 0 Get byte
+;		 1 Get special options
+;		 2 Get boolean
+;		 3 Get extension
+;		 4 Get hex word
+;		 5 Get string
+;		-1 End of table
+;
+SLR.Ctrl:
+	db	_getbyt
+	dw	$PAGW$
+	db	_getbyt
+	dw	$PAGL$
+	db	_getspc
+	dw	$SPCOP$
+	db	_getbol
+	dw	$LST4$
+	db	_getbol
+	dw	$LSTF$
+	db	_getbol
+	dw	$FFSTRT$
+	db	_getbyt
+	dw	$LSTM$
+	db	_getbol
+	dw	$MREL6$
+	db	_getbol
+	dw	$NUMRNG$
+	db	_getbol
+	dw	$LSTS$
+	db	_getbol
+	dw	$INTDIS$
+	db	_getbol
+	dw	$FFSUM$
+	db	_getbol
+	dw	$FFEND$
+	db	_getbol
+	dw	$TODLST$
+	db	_getbol
+	dw	$TODOWN$
+	db	_getwrd
+	dw	$TODADR$
+	db	_getbol
+	dw	$TODASC$
+	db	_getbol
+	dw	$MULSEC$
+	db	_getbol
+	dw	$STMT$
+	db	_getbol
+	dw	$STMTLIN$
+	db	_getbyt
+	dw	$ABOCNT$
+	db	_getbyt
+	dw	$LINPAG$
+	db	_getbyt
+	dw	$HEXCNT$
+	db	_getbol
+	dw	$REOPEN$
+	db	_getbol
+	dw	$COLON$
+	db	_getbol
+	dw	$DRIBOOL$
+	db	_getbol
+	dw	$NOIFERR1$
+	db	_getbol
+	dw	$NOLEAD$
+	db	_getbol
+	dw	$FILLSPC$
+	db	_getbol
+	dw	$GENEXCH$
+	db	_getbol
+	dw	$ASEG0$
+	db	_getbol
+	dw	$ORGABS$
+	db	_getbol
+	dw	$COMMBACK$
+	db	_getbyt
+	dw	$TMPDRV$
+	db	_getbyt
+	dw	$SRCUSR$
+	db	_getbol
+	dw	$ERASUB$
+	db	_getbol
+	dw	$MSDOS$
+	db	_getbol
+	dw	$TABSTRG$
+	db	_getbol
+	dw	$NESTLVL$
+	db	_getbol
+	dw	$NOMSB$
+	db	_getext
+	dw	$EXTSRC$
+	db	_getext
+	dw	$EXTREL$
+	db	_getext
+	dw	$EXTBIN$
+	db	_getext
+	dw	$EXTHEX$
+	db	_getext
+	dw	$EXTLST$
+	db	_getext
+	dw	$EXTTMP$
+	db	_getext
+	dw	$EXTINC$
+	db	_getext
+	dw	$EXTLIB$
+	db	_getstr
+	dw	$LEADER$
+	db	_getstr
+	dw	$TRAILER$
+	db	_getend
+$TAB$:
+	db	'Use TAB as separator between Symbols in .SYM',eot
+$PAGW$:
+	db	'Page Width',eot
+$PAGL$:
+	db	'Page Length',eot
+$SPCOP$:
+	db	'SPECIAL OPTIONS',eot
+$LST4$:
+	db	'List more than 4 bytes of object code',eot
+$LSTF$:
+	db	'List lines encountered during a false conditional',eot
+$FFSTRT$:
+	db	'Form Feed at start of listing',eot
+$LSTM$:
+	db	'Macro Listing Option - 1=.LALL, 2=.XALL, 4=.SALL',eot
+$LSTS$:
+	db	'Suppress Source lines containing PAGE, TITLE, etc.',eot
+$INTDIS$:
+	db	'Disable Interrupts',eot
+$FFSUM$:
+	db	'Force Form Feed before Summary',eot
+$FFEND$:
+	db	'Form Feed at End of Listing',eot
+$TODLST$:
+	db	'Time & Date in Listing',eot
+$TODOWN$:
+	db	'This item is significant only if T&D is selected, and'
+	db	cr,lf
+	db	'  you are supplying your own TIME and DATE values'
+	db	cr,lf,lf
+	db	'What are you supplying, '
+	db	'(N = address of values, Y= address of routine',eot
+$TODADR$:
+	db	'Enter HEX address of time value/routine',eot
+$TODASC$:
+	db	'Time & Date in ASCII',eot
+$MULSEC$:
+	db	'Take advantage of multi-sector I/O',eot
+$NUMRNG$:
+	db	'Print 16-bit values in logical direction',eot
+$STMT$:
+	db	'Use Statement #''s instead of Line # in file',eot
+$STMTLIN$:
+	db	'Print Line/Stmt # first on listing line',eot
+$MREL6$:
+	db	'Generate 6 Significant in M-Rel instead of 7',eot
+$ABOCNT$:
+	db	'Number of errors on which to abort',eot
+$LINPAG$:
+	db	'Number of lines per console page (0=no paging)',eot
+$HEXCNT$:
+	db	'Number of bytes (1-60) per line of HEX output',eot
+$REOPEN$:
+	db	'Close and ReOpen File in 2-pass mode',eot
+$COLON$:
+	db	'Require : if label not in column one',eot
+$DRIBOOL$:
+	db	'Conditionals test only bit 0 (DRI Compatibility)',eot
+$NOIFERR1$:
+	db	'Suppress IF parameter errors in 1-pass mode',eot
+$NOLEAD$:
+	db	'Ignore leading Space & Tab chars in IF <> types',eot
+$FILLSPC$:
+	db	'Fill unused space with 0 (N) or FF (Y) in COM',eot
+$GENEXCH$:
+	db	'Generate Empty External Chains (M-REL)',eot
+$ASEG0$:
+	db	'ASEG Default to 0H instead of 100H',eot
+$ORGABS$:
+	db	'ORG <ABSOLUTE> Yields Offset in Current Space',eot
+$COMMBACK$:
+	db	'COMMON always back to relative address 0',eot
+$TMPDRV$:
+	db	'Drive for temporary files (0=Default, 1=A, etc.)',eot
+$SRCUSR$:
+	db	'Alternate User # to Search (0-31)',eot
+$ERASUB$:
+	db	'Erase ','$'+MSB,'$'+MSB,'$'+MSB,'.SUB on Error',eot
+$MSDOS$:
+	db	'Running under MSDOS-based Emulator',eot
+$TABSTRG$:
+	db	'Allow Tabs in Strings',eot
+$NESTLVL$:
+	db	'Print Nesting level in listing',eot
+$NOMSB$:
+	db	'Mask Off High Bit (bit 7)',eot
+$EXTSRC$:
+	db	'Extension for source file',eot
+$EXTREL$:
+	db	'Extension for relocatable file',eot
+$EXTBIN$:
+	db	'Extension for absolute binary file',eot
+;
+	db	'Extension for non-standard (non-100H) absolute binary file',eot
+$EXTHEX$:
+	db	'Extension for Intel-Hex format file',eot
+$EXTLST$:
+	db	'Extension for listing file',eot
+$EXTTMP$:
+	db	'Extension for temporary file',eot
+$EXTINC$:
+	db	'Extension for /I file',eot
+$EXTLIB$:
+	db	'Default Ext for MACLIB file',eot
+$LEADER$:
+	db	'Leader String to send to printer (up to 8 HEX bytes, FF terminated)'
+	db	cr,lf,eot
+$TRAILER$:
+	db	'Trailer string to printer (up to 8 HEX bytes, FF terminated)'
+	db	cr,lf,eot
+$OPEN:
+	db	' (',eot
+$CLOSE:
+	db	') - ',eot
+$BITHLP:
+	db	cr
+	db	'There is a byte which defines several options.'
+	db	cr,lf
+	db	'Bit 0 selects the second-pass listing'
+	db	cr,lf
+	db	'Bit 1 selects the first-pass listing'
+	db	cr,lf
+	db	'Bit 2 selects the symbol table output'
+	db	cr,lf
+	db	'Bit 3 selects cross-reference generation'
+	db	cr,lf
+	db	'Bit 4 selects automatic external declaration'
+	db	cr,lf
+	db	'Bit 5 selects Upper/Lower case distinction'
+	db	cr,lf
+	db	'Bit 6 & 7 define binary output type'
+	db	cr,lf
+	db	'Bit 7=0 6=0 selects .COM type'
+	db	cr,lf
+	db	'Bit 7=0 6=1 selects .HEX type'
+	db	cr,lf
+	db	'Bit 7=1 6=0 selects .REL SLR format'
+	db	cr,lf
+	db	'Bit 7=1 6=1 selects .REL MSFT format'
+	db	cr,lf,lf
+	db	'The current settings are:'
+	db	cr,lf
+	db	'76543210'
+	db	cr,lf,eot
+$BITFLIP:
+	db	cr,lf
+	db	'Bit # to be flipped :',eot
+;
+; Execute by control table
+; EXIT	Carry set on end of table
+;
+ExecCtrl:
+	ld	hl,(CtrlPtr)	; Get pointer to control table
+	ld	a,(hl)		; Fetch control byte
+	rla
+	ret	c		; End if MSB set
+	rra
+	push	af		; Save control byte
+	inc	hl
+	ld	e,(hl)		; Fetch address of message
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(CtrlPtr),hl	; Save next pointer
+	call	String		; Print message
+	ld	de,$OPEN
+	call	String		; Give opening indicator
+	pop	af		; Get back control byte
+	or	a
+	jp	z,ByteIn	; Type 0 - decimal byte input
+	dec	a
+	jp	z,SpcIn		; Type 1 - special options
+	dec	a
+	jp	z,BoolIn	; Type 2 - boolean input
+	dec	a
+	jp	z,ExtIn		; Type 3 - input extension
+	dec	a
+	jr	z,WrdIn		; Type 4 - input hex word
+;
+				; Type 5 - Input control string
+;
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	b,CTRLEN	; And set length
+CtrlPrLoop:
+	ld	a,(hl)		; Get character
+	cp	_getend		; Test end
+	jr	z,EndCtrl
+	call	PrHex8		; Print hex control byte
+	inc	hl
+	ld	de,$COMMA
+	call	String		; Give comma
+	djnz	CtrlPrLoop
+EndCtrl:
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	(PtrSav),hl	; Save it
+	ld	b,CTRLEN
+CtrlInLoop:
+	ld	de,$CLOSE
+	call	String		; Give closing indicator
+	call	HexBin		; Get hex byte
+	jr	z,CtrlEnd	; End of input
+	jp	c,InpErr	; Error
+	ld	hl,(PtrSav)	; Get pointer
+	ld	(hl),a		; Save byte
+	inc	hl
+	ld	(PtrSav),hl
+	cp	_getend		; Test total end
+	jr	nz,CtrlNxt
+CtrlEnd:
+	ld	b,1		; Force end
+CtrlNxt:
+	ld	de,$CRLF
+	call	String		; Give new line
+	djnz	CtrlInLoop
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	de,CTRLEN
+	add	hl,de		; Point to next control
+	ld	(PrgPtr),hl	; Set new pointer to controls
+	ret
+;
+; Type 4: Input hex word
+;
+WrdIn:
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	e,(hl)		; Get low
+	inc	hl
+	ld	a,(hl)
+	call	PrHex8		; Print high byte
+	ld	a,e
+	call	PrHex8		; Print low byte
+	ld	de,$CLOSE
+	call	String		; Print closure
+	call	HexWord		; Input hex word
+	jr	z,NoWrd		; Nothing
+	jp	c,InpErr	; Error
+	ex	de,hl
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	(hl),e		; Save word
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(PrgPtr),hl	; Update pointer
+	ret
+NoWrd:
+	ld	hl,(PrgPtr)
+	inc	hl		; Skip word
+	inc	hl
+	ld	(PrgPtr),hl
+	ret
+;
+; Type 3: Get extension
+;
+ExtIn:
+	ld	hl,(PrgPtr)	; Fetch control pointer
+	ld	d,h		; Copy it
+	ld	e,l
+	inc	hl		; Skip extension
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get next byte
+	ld	(hl),_getend	; Force end
+	push	af
+	push	hl
+	call	PrStrg		; Print current setting
+	ld	de,$CLOSE
+	call	String		; Print closure
+	pop	hl
+	pop	af
+	ld	(hl),a		; Restore byte
+	call	ThreeCh		; Input three characters
+	jr	z,NoExt		; No definition
+	inc	hl
+	ld	de,(PrgPtr)	; Get pointer
+	ldi			; Unpack extension
+	ldi
+	ldi
+	ld	(PrgPtr),de
+	ret
+NoExt:
+	ld	hl,(PrgPtr)	; Get string pointer
+	inc	hl		; Skip extension
+	inc	hl
+	inc	hl
+	ld	(PrgPtr),hl
+	ret
+;
+; Type 0: Input decimal byte value
+;
+ByteIn:
+	ld	hl,(PrgPtr)	; Get control pointer
+	ld	l,(hl)		; Fetch byte
+	ld	h,0
+	ld	de,$ASCBUF
+	call	CnvHtA		; Convert to decimal ASCII
+	ld	a,eot
+	ld	(de),a		; Close number
+	ld	de,$ASCBUF
+	call	String		; Print result
+	ld	de,$CLOSE
+	call	String		; Print closure
+	call	ThreeCh		; Input three characters
+	jr	z,ByteNoIn	; No change
+	inc	hl		; Skip length byte
+	call	CnvAtH		; Convert number
+	jr	c,InpErr	; Error
+	ld	a,l		; Get number
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	(hl),a		; Store new value
+ByteNoIn:
+	ld	hl,(PrgPtr)
+	inc	hl		; Advance pointer
+	ld	(PrgPtr),hl
+	ret
+;
+; Process input error
+;
+InpErr:
+	ld	e,bel
+	ld	c,.conout
+	call	BDOS		; Indicate error
+	ld	hl,(CtrlPtr)	; Get pointer to table
+	dec	hl		; Fix for previous
+	dec	hl
+	dec	hl
+	ld	(CtrlPtr),hl	; Save pointer
+	or	a
+	ret
+;
+; Found control byte 1: Special options
+;
+SpcIn:
+	ld	de,$BITHLP
+	call	String		; Print information
+	ld	b,8		; Set bit count
+ByteStat:
+	ld	hl,(PrgPtr)
+	rlc	(hl)		; Get bit into carry
+	ld	e,'0'		; Make 0
+	jr	nc,BitStat
+	inc	e		; Or 1
+BitStat:
+	push	bc
+	ld	c,.conout
+	call	BDOS		; Print state
+	pop	bc
+	djnz	ByteStat
+	ld	de,$BITFLIP
+	call	String		; Ask for bit to flip
+BitNext:
+	call	Conin		; Get bit number from console
+	cp	' '		; Test digit input
+	jr	c,EndBit	; End if not
+	sub	'0'		; Strip off offset
+	cp	7+1		; Test range
+	jr	c,BitSet	; Ok, position bit
+	ld	de,$DELCH
+	call	String		; Delete number if out of range
+	jr	BitNext		; Try next
+BitSet:
+	ld	b,a		; Get bit number for count
+	or	a
+	ld	a,00000001b	; Init bit
+	jr	z,BitDef
+BitPos:
+	rla			; Put bit into right position
+	djnz	BitPos
+BitDef:
+	ld	hl,(PrgPtr)	; Get pointer
+	xor	(hl)		; Toggle bit
+	ld	(hl),a		; And re/set it
+	jr	SpcIn		; Try next one
+EndBit:
+	ld	hl,(PrgPtr)
+	inc	hl
+	ld	(PrgPtr),hl
+	ld	de,$CRLF
+	call	String		; Give new line
+	or	a
+	ret
+;
+; Type 2: Get boolean
+;
+BoolIn:
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	a,(hl)		; Get state
+	ld	e,'Y'		; Preset echo
+	or	a		; Test TRUE
+	jr	nz,EchoTRUE	; Yeap
+	ld	e,'N'		; Change to FALSE
+EchoTRUE:
+	ld	c,.conout
+	call	BDOS		; Echo boolean state
+	ld	de,$CLOSE
+	call	String		; Print closure
+BoolNew:
+	call	Conin		; Get character from console
+	cp	' '		; Test input requested
+	jr	c,BoolNoIn	; Nope, ignore setting
+	cp	'Y'		; Test valid input
+	ld	c,TRUE		; Preset TRUE
+	jr	z,BoolSet	; Got it
+	cp	'N'		; Verify correct selection
+	jr	nz,BoolErr	; Nope, invalid
+	inc	c		; Map to FALSE
+BoolSet:
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	(hl),c		; Set new state
+BoolNoIn:
+	ld	de,$CRLF
+	call	String		; Close line
+	ld	hl,(PrgPtr)
+	inc	hl		; Advance pointer
+	ld	(PrgPtr),hl
+	or	a
+	ret
+BoolErr:
+	ld	de,$DELCH
+	call	String		; Clear character
+	jr	BoolNew		; And try again
+;
+$DELCH:
+	db	bs,' ',bs,bel,eot
+;
+; Input charater from console in UPPER case or abort
+;
+Conin:
+	push	hl
+	push	de
+	push	bc
+	ld	c,.conin
+	call	BDOS		; Get character
+	pop	bc
+	pop	de
+	pop	hl
+	cp	'a'		; Test range
+	jr	c,NoLower
+	cp	'z'+1
+	jr	nc,NoLower
+	sub	'a'-'A'		; Convert to UPPER case
+NoLower:
+	cp	'C'-'@'		; Test abort
+	ret	nz		; Nope
+	OS
+;
+; Print string on console
+; ENTRY	Reg DE points to string
+;
+String:
+	push	hl
+	push	bc
+	ld	c,.string
+	call	BDOS		; Print string
+	pop	bc
+	pop	hl
+	ret
+;
+; Convert value in reg HL to decimal ASCII in ^DE
+;
+CnvHtA:
+	ld	c,0		; Set no leading zero
+	jr	DoCnv
+;
+; -> Next entry never called
+;
+	ld	c,'0'		; Set leading zero
+DoCnv:
+	push	de
+	ld	de,-10000
+	call	Divide		; Divide by 10000
+	jr	z,Div1000	; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+Div1000:
+	ld	de,-1000
+	call	Divide		; Divide by 1000
+	jr	z,Div100	; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+Div100:
+	ld	de,-100
+	call	Divide		; Divide by 100
+	jr	z,Div10		; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+Div10:
+	ld	de,-10
+	call	Divide		; Divide by 10
+	jr	z,ModDig	; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+ModDig:
+	ld	a,l		; Get units
+	add	a,'0'		; Make ASCII
+	pop	de
+	ld	(de),a		; Store it
+	inc	de
+	ret
+;
+; Divide reg HL by reg DE
+;
+Divide:
+	xor	a
+DivLoop:
+	add	hl,de		; Divide by adding negative value
+	inc	a
+	jr	c,DivLoop
+	sbc	hl,de		; Make remainder > 0
+	dec	a		; Fix qotient
+	or	c		; Test zero result
+	ret	z		; Yeap, suppress leading zero
+	ld	c,'0'
+	or	c		; Make ASCII
+	ret
+;
+; Convert decimal number in ^HL with length in accu to HL
+; C set indicates error
+;
+CnvAtH:
+	push	de
+	push	bc
+	ex	de,hl
+	ld	hl,0		; Init result
+	jr	MulGo
+Mul10:
+	ld	a,b		; Save current length
+	add	hl,hl		; Get old * 10
+	ld	b,h
+	ld	c,l
+	add	hl,hl
+	add	hl,hl
+	add	hl,bc
+MulGo:
+	ld	b,a		; Unpack length
+	ld	a,(de)		; Get character
+	inc	de
+	sub	'0'		; Strip off offset
+	cp	9+1		; Validate correct range
+	jr	nc,DigErr	; Error
+	add	a,l		; Add digit
+	ld	l,a
+	jr	c,DigCY		; Remember carry
+DigNxt:
+	djnz	Mul10		; Next digit
+	or	a
+	pop	bc
+	pop	de
+	ret
+DigCY:
+	inc	h		; Insert carry
+	jr	DigNxt
+DigErr:
+	scf			; Indicate error
+	pop	bc
+	pop	de
+	ret
+;
+; Input three characters - Z set says no input
+;
+ThreeCh:
+	ld	b,.ext		; Set max count
+	ld	hl,'  '
+	ld	(ExtBuff+2),hl	; Blank result
+	ld	hl,ExtBuff+1	; Init pointer
+ThreeNxt:
+	call	Conin		; Get character from console
+	cp	cr		; Test early end
+	jr	z,ThreeEnd	; Yeap
+	ld	(hl),a		; Save character
+	inc	hl
+	djnz	ThreeNxt
+ThreeEnd:
+	ld	a,.ext
+	sub	b		; Calculate length
+	push	af
+	ld	de,$CRLF
+	call	String		; Give new line
+	pop	af
+	ld	hl,ExtBuff
+	ld	(hl),a		; Save length
+	ret
+;
+; Print string in ^DE closed by -1
+;
+PrStrg:
+	ld	a,(de)		; Get character
+	cp	_getend		; Test end
+	ret	z		; Yeap
+	inc	de
+	push	de
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Put to console
+	pop	de
+	jr	PrStrg
+;
+; Print hex byte
+; ENTRY	Accu holds hex byte
+;
+PrHex8:
+	push	af		; Save byte
+	rra			; Get upper bits
+	rra
+	rra
+	rra
+	call	PrNybble	; Convert
+	pop	af
+PrNybble:
+	and	LOMASK		; Mask lower bits
+	add	a,'0'		; Make ASCII
+	cp	'9'+1		; Test range
+	jr	c,PrDecDig
+	add	a,'A'-'0'-10	; Fix for hex
+PrDecDig:
+	push	hl
+	push	de
+	push	bc
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Print hex character to console
+	pop	bc
+	pop	de
+DixErr:
+	pop	hl
+	ret
+;
+; Input hex byte
+; C set says error
+; Z set says end of input
+;
+HexBin:
+	call	DigIn		; Input hex digit
+	ret	c		; Error
+	ret	z		; End of input
+	push	bc
+	ld	c,a
+	call	DigIn		; Input next hex digit
+	jr	c,DixErr	; Error
+	jr	z,DigEnd	; End of input
+	rl	c		; Shift hi into right place
+	rl	c
+	rl	c
+	rl	c
+	or	c
+	ld	c,a		; Insert bits
+DigEnd:
+	or	NZNC		; Set result
+	ld	a,c
+	pop	bc
+	ret
+;
+; Input hex word
+; C set says error
+; Z set says end of input
+;
+HexWord:
+	ld	hl,0		; Set result
+	call	DigIn		; Input first hex digit
+	jr	z,WrdNo		; Empty line
+	jr	Mul16
+WrdNxt:
+	call	DigIn		; Input next hex digit
+Mul16:
+	jr	c,WrdNo		; Error
+	jr	z,WrdOk		; Empty line
+	add	hl,hl		; Old *16
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	or	l		; Insert digit
+	ld	l,a
+	jr	WrdNxt
+WrdOk:
+	or	NZNC		; Set result
+WrdNo:
+	push	hl
+	push	af
+	ld	de,$CRLF
+	call	String		; Give new line
+	pop	af
+	pop	hl
+	ret
+;
+; Input hex digit
+; Z set says end of input
+; C set says error
+;
+DigIn:
+	call	Conin		; Get character from console
+	cp	cr		; Test end of input
+	ret	z		; Yeap
+	sub	'0'		; Strip off offset
+	ret	c		; Invalid
+	cp	9+1		; Test digit
+	jr	c,DigOk		; Ok
+	cp	'A'-'0'		; Verify A..F
+	ret	c
+	sub	'A'-'0'-10
+	cp	15+1
+	jr	c,DigOk
+	or	NZNC		; Set all bits on end
+	scf
+	ret
+DigOk:
+	ccf
+	ret
+;
+; Write modified records of file
+;
+WrRecs:
+	ld	a,.wrseq
+	ld	(IOmode),a	; Change I/O mode
+;
+; Read records to modify
+;
+RdRecs:
+	ld	b,MODREC	; Set count
+	ld	de,IOBuff	; Init disk buffer
+IOLoop:
+	ld	hl,reclng
+	add	hl,de		; Advance buffer
+	push	hl
+	push	bc
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+IOmode	equ	$+1
+	ld	c,.rdseq
+	call	BDOS		; Read/write record
+	or	a		; Verify ok
+	jp	nz,IllFile
+	pop	bc
+	pop	de
+	djnz	IOLoop
+	ret
+;
+$CRLF:
+	db	cr,lf,eot
+$COMMA:
+	db	',',eot
+$HEAD:
+	db	'SLR180 Configuration Utility (c) 1985-86 SLR Systems'
+	db	cr,lf,eot
+PrgPtr:
+	dw	0
+CtrlPtr:
+	dw	0
+PtrSav:
+	dw	0
+$ASCBUF:
+	ds	11
+ExtBuff:
+	ds	$extlen
+EndData:
+;
+; Local stack grows down
+;
+LocStk	equ	EndData+2*StkDep
+;
+; Disc buffer grows up
+;
+IOBuff	equ	LocStk
+
+	end
+

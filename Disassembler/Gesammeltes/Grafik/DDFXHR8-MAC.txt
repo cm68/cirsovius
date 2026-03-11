@@ -1,0 +1,4528 @@
+	title	GSX Printer Driver
+	name	('DDFXHR8')
+
+; DASMed version of CP/M PLUS (JOYCE/PCW8xxx)
+; By W. Cirsovius
+
+; GSX printer driver DDFXHR8.PRL
+
+; NOT ALL CODE UNDERSTOOD :-))
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+
+.warm	equ	 0
+.lstout	equ	 5
+.string	equ	 9
+.close	equ	16
+.delete	equ	19
+.dskwrt	equ	21
+.make	equ	22
+.setdma	equ	26
+.rndred	equ	33
+
+RecLng	equ	128
+
+_RRN	equ	33
+
+lf	equ	0ah
+cr	equ	0dh
+ff	equ	0ch
+esc	equ	1bh
+eot	equ	'$'
+hiASC	equ	7fh
+
+_MaxChr	equ	96
+
+	jp	l0133
+;
+	db	'EPSON1.1 HR8 01 Oct 83'
+	db	'Serial No 5000-1232-654321'
+;
+; %%%%%%%%%%%%%%%%%%
+; %% Driver entry %%
+; %%%%%%%%%%%%%%%%%%
+;
+; ENTRY	Reg DE points to GSX parameter block
+;
+l0133:
+	ld	hl,PB
+	ex	de,hl
+	ld	bc,PBlen
+	call	.LDIR		; Save parameters
+	ld	hl,(CONTRL)	; Get CONTRL
+	ld	a,(hl)		; Get function number
+	ld	de,2*2
+	add	hl,de
+	ld	(CONT.3),hl	; Save address of CONTRL(3)
+	ld	(hl),0		; .. init CONTRL(3)
+	inc	hl
+	ld	(hl),0
+	cp	33+1		; Verify valid range
+	jp	nc,NotImplemented
+	ld	hl,OpcTab
+	rlca			; Double index
+	add	a,l		; .. get table entry
+	ld	l,a
+	ld	a,0
+	adc	a,h
+	ld	h,a
+	ld	e,(hl)		; Get value from table
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; .. go
+NotImplemented:
+	ret
+;
+; Copy of parameter block
+;
+PB	equ	$
+CONTRL:
+	dw	0		; CONTRL
+INTIN:
+	dw	0		; INTIN
+PTSIN:
+	dw	0		; PTSIN
+INTOUT:
+	dw	0		; INTOUT
+PTSOUT:
+	dw	0		; PTSOUT
+PBlen	equ	$-PB
+;
+CONT.3:
+	dw	0
+OpcTab:
+	dw	NotImplemented	;  0 : --
+	dw	InitWS		;  1 : Init work station
+	dw	ClosWS		;  2 : Close work station
+	dw	ClearWS		;  3 : Clear work station
+	dw	ClosWS		;  4 : Update work station
+	dw	ESCAPE		;  5 : Perform device specifics
+	dw	OutPolLine	;  6 : Output a polyline
+	dw	OutMark		;  7 : Output markers
+	dw	WrText		;  8 : Write text
+	dw	FillPoly	;  9 : Fill a polygon
+	dw	DspCellArr	; 10 : Display cell array
+	dw	OutPrim		; 11 : Output a primitive
+	dw	CharHeight	; 12 : Set character height
+	dw	TextDir		; 13 : Set text direction
+	dw	NotImplemented	; 14 : --
+	dw	PolyType	; 15 : Set polyline type
+	dw	NotImplemented	; 16 : --
+	dw	PolyColor	; 17 : Set polyline color index
+	dw	PolyMarkT	; 18 : Set polymarker type
+	dw	MarkScale	; 19 : Set polymarker scale
+	dw	MarkColor	; 20 : Set polymarker color
+	dw	NotImplemented	; 21 : --
+	dw	ColorIdx	; 22 : Set color index
+	dw	IntFill		; 23 : Set interior fill style
+	dw	IdxFill		; 24 : Set fill style index
+	dw	ColFill		; 25 : Set fill color index
+	dw	NotImplemented	; 26 : --
+	dw	NotImplemented	; 27 : --
+	dw	NotImplemented	; 28 : --
+	dw	NotImplemented	; 29 : --
+	dw	NotImplemented	; 30 : --
+	dw	NotImplemented	; 31 : --
+	dw	SetWrMode	; 32 : Set writing mode
+	dw	NotImplemented	; 33 : --
+;
+$$INTIN_1:
+	db	0
+;
+; Opcode 5 : Perform device specific operation
+;
+ESCAPE:
+	ld	hl,(CONTRL)	; Get CONTRL
+	ld	de,2*5
+	add	hl,de		; Point to CONTRL(6)
+	ld	a,(hl)		; Get functiuon id
+	dec	a		; .. only character cells supported
+	ret	nz
+	ld	hl,(INTOUT)	; Get INTOUT
+	ld	(hl),-1		; Set cursor not accessable
+	inc	hl
+	ld	(hl),-1
+	inc	hl
+	ld	(hl),-1
+	inc	hl
+	ld	(hl),-1
+	ret
+;
+; Opcode 12 : Set character height
+;
+CharHeight:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,12
+	call	StCode
+	ld	hl,(PTSIN)
+	inc	hl
+	inc	hl
+	ld	b,(hl)		; .. get PTSIN(2)
+	inc	hl		; .. it's the height
+	ld	a,(hl)		; Get hi
+	or	a
+	jp	nz,l01ea	; .. truncate if not zero
+	ld	a,b
+	cp	_MaxChr
+	jp	c,l01ec
+l01ea:
+	ld	a,_MaxChr	; Set truncation
+l01ec:
+	and	11111000b	; Mask value
+	jp	nz,l01f3
+	ld	a,8		; .. map zero to eight
+l01f3:
+	ld	(CH.HGT),a	; Save value
+	rrca			; Divide by eight
+	rrca
+	rrca
+	ld	(CH..HGT),a
+	call	StCode		; .. store
+	ld	a,(CH..HGT)
+	ld	b,a
+	ld	a,(CH.HGT)	; Get height
+	sub	b
+	sub	b
+	ld	(CELL.WID),a	; Save cell width
+	ld	hl,(PTSOUT)	; Get PTSOUT
+l020e:
+	ld	a,(CH..HGT)
+	ld	b,a
+	ld	a,(CELL.WID)
+	sub	b		; Build actual character width
+	ld	(hl),a		; .. into PTSOUT(1)
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	ld	c,3
+	ld	a,(CH.HGT)	; Get height
+l0220:
+	ld	(hl),a		; .. PTSOUT(2) thru PTSOUT(4)
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	dec	c
+	jp	nz,l0220
+	ld	hl,(PTSOUT)	; Get PTSOUT
+	ld	de,2*2
+	add	hl,de		; .. PTSOUT(3)
+	ld	a,(CELL.WID)
+	ld	(hl),a		; .. set character cell width
+	ld	hl,(CONT.3)
+	ld	(hl),2		; .. set CONTRL(3)
+	ret
+;
+; Opcode 13 : Set text direction
+;
+TextDir:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,13
+	call	StCode
+	ld	hl,(INTIN)
+	ld	e,(hl)		; Get INTIN(1)
+	inc	hl		; .. it's the angle
+	ld	d,(hl)
+	ld	hl,450
+	add	hl,de		; Add 45 degrees
+	ld	c,4		; .. length
+l0252:
+	ld	a,l
+	sub	LOW 900		; Test within 90 degrees
+	ld	l,a		; .. fix angle
+	ld	a,h
+	sbc	a,HIGH 900
+	ld	h,a
+	jp	c,l0261
+	dec	c
+	jp	nz,l0252
+l0261:
+	push	bc
+	ld	a,5
+	sub	c		; Build index
+	and	00000011b	; .. lower part only
+	ld	(ANGL.IDX),a
+	call	StCode		; .. store
+	pop	bc
+	ld	b,0
+	ld	hl,l027f
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)		; Get value
+	inc	hl
+	ld	d,(hl)
+	ld	hl,(INTOUT)	; Get INTOUT
+	ld	(hl),e		; .. save angle into INTOUT(1)
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Supported angles of rotation (tenths of degrees)
+;
+l027f:
+	dw	0
+	dw	2700
+	dw	1800
+	dw	900
+	dw	0
+;
+; Opcode 15 : Set polyline type
+;
+PolyType:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,15
+	call	StCode
+	ld	hl,(INTIN)
+	ld	a,(hl)		; Get INTIN(1), the style
+	cp	1		; Test style in range
+	jp	c,l02a3
+	cp	6+1
+	jp	c,l02a5
+l02a3:
+	ld	a,1		; Set default solid linestyle
+l02a5:
+	ld	hl,(INTOUT)	; Get INTOUT
+	ld	(hl),a		; .. set style into INTOUT(1)
+	inc	hl
+	ld	(hl),0
+	dec	a
+	call	StCode		; .. save style
+	ret
+;
+; Opcode 17 : Set polyline color index
+;
+PolyColor:
+	call	GetIdx
+	ld	(LineFlg),a	; Set line flag
+	or	a		; Test enabled
+	ret	z		; .. nope
+	ld	a,17
+	call	StCode_INT1	; .. set code and index
+	ret
+;
+; Opcode 18 : Set polymarker type
+;
+PolyMarkT:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,18
+	call	StCode		; Set code
+	ld	hl,(INTIN)
+	ld	a,(hl)		; Get INTIN(1), requested type
+	cp	1		; Test range
+	jp	c,l02d9
+	cp	5+1
+	jp	c,l02db
+l02d9:
+	ld	a,3		; Set default '*'
+l02db:
+	ld	hl,(INTOUT)	; Get INTOUT
+	ld	(hl),a		; .. set type into INTOUT(1)
+	inc	hl
+	ld	(hl),0
+	dec	a
+	ld	(INTIN.4),a	; Set marker type
+	call	StCode
+	ret
+;
+; Opcode 19 : Set polymarker scale
+;
+MarkScale:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,19
+	call	StCode		; Set code
+	ld	hl,(PTSIN)
+	inc	hl
+	inc	hl
+	ld	b,(hl)		; Get PTSIN(2), the height
+	inc	hl
+	ld	a,(hl)		; Get HI
+	or	a		; .. test overflow
+	jp	nz,l0308	; .. yeap
+	ld	a,b
+	cp	_MaxChr		; Test range
+	jp	c,l030a
+l0308:
+	ld	a,_MaxChr	; .. truncate max
+l030a:
+	and	11111000b	; Mask it
+	jp	nz,l0311
+	ld	a,8		; .. truncate if zero
+l0311:
+	ld	(MK.HGT),a	; Save marker
+	rrca
+	rrca
+	rrca
+	ld	(MK..HGT),a
+	call	StCode
+	ld	hl,(PTSOUT)
+	ld	(hl),0		; Set PTSOUT
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	ld	a,(MK.HGT)	; Get height in device units
+	ld	(hl),a		; .. into PTSOUT(1)
+	inc	hl
+	ld	(hl),0
+	ld	hl,(CONT.3)
+	ld	(hl),1		; Set CONTRL(3)
+	ret
+;
+; Opcode 20 : Set polymarker color index
+;
+MarkColor:
+	call	GetIdx		; Get index
+	ld	(MarkCol),a	; .. save
+	or	a
+	ret	z		; .. end on white
+	ld	a,20
+	call	StCode_INT1	; .. set index
+	ret
+;
+; Opcode 22 : Set color index
+;
+ColorIdx:
+	call	GetIdx		; Get color index
+	ld	(ColIdx),a	; .. save
+	or	a
+	ret	z		; .. skip zero
+	ld	a,22
+	call	StCode_INT1	; Set index
+	ret
+;
+; Opcode 23 : Set interior fill style
+;
+IntFill:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,23
+	call	StCode
+	ld	hl,(INTIN)
+	ld	a,(hl)		; .. INTIN(1), style
+	cp	0		; Test range
+	jp	c,l0369
+	cp	3+1
+	jp	c,l036b
+l0369:
+	ld	a,0		; .. truncate
+l036b:
+	ld	hl,(INTOUT)
+	ld	(hl),a		; Set style into INTOUT(1)
+	inc	hl
+	ld	(hl),0
+	call	StCode
+	ret
+;
+; Opcode 24 : Set fill style index
+;
+IdxFill:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,24
+	call	StCode
+	ld	hl,(INTIN)
+	ld	a,(hl)		; .. INTIN(1), style
+	cp	1		; Test range
+	jp	c,l0390
+	cp	6+1
+	jp	c,l0392
+l0390:
+	ld	a,1
+l0392:
+	ld	hl,(INTOUT)
+	ld	(hl),a		; Set style into INTOUT(1)
+	inc	hl
+	ld	(hl),0
+	call	StCode
+	ret
+;
+; Opcode 25 : Set fill color index
+;
+ColFill:
+	call	GetIdx		; Get index
+	ld	(FilColIdx),a	; .. save
+	or	a
+	ret	z
+	ld	a,25
+	call	StCode_INT1	; Set index
+	ret
+;
+; Get index from INTIN(1) [0..1]
+;
+GetIdx:
+	ld	hl,(INTIN)
+	ld	a,(hl)		; .. INTIN(1)
+	cp	1+1		; Test range
+	jp	c,l03b6
+	ld	a,1		; .. truncate
+l03b6:
+	ld	hl,(INTOUT)
+	ld	(hl),a		; Set index into INTOUT(1)
+	inc	hl
+	ld	(hl),0
+	ld	($$INTIN_1),a	; .. save into temp
+	or	a		; Test zero
+	jp	z,l03c7		; .. yeap
+	jp	l03d3
+l03c7:
+	ld	a,(Replace)	; Test replace selected
+	or	a
+	jp	nz,l03d2	; .. nope
+	inc	a
+	jp	l03d3
+l03d2:
+	xor	a
+l03d3:
+	ret
+;
+; Store opcode and index from INTIN(1)
+; ENTRY	Accu holds selected opcode
+;
+StCode_INT1:
+	call	StCode		; Set code
+	ld	a,($$INTIN_1)	; Fetch INTIN(1)
+	call	StCode		; .. save
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ret
+;
+; Opcode 32 : Set writing mode
+;
+SetWrMode:
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	a,32
+	call	StCode		; Set code
+	ld	hl,(INTIN)
+	ld	a,(hl)		; .. get INTIN(1), mode
+	or	a		; Test range
+	jp	z,l03fe
+	cp	4+1
+	jp	c,l0400
+l03fe:
+	ld	a,1		; Set default
+l0400:
+	ld	hl,(INTOUT)
+	ld	(hl),a		; Set mode into INTOUT(1)
+	inc	hl
+	ld	(hl),0
+	dec	a
+	ld	b,a
+	jp	z,l040e		; .. replace selected
+	ld	a,1
+l040e:
+	ld	(Replace),a	; Set replace on/off
+	ld	a,b
+	call	StCode
+	ret
+;
+	ret
+;
+; Opcode 6 : Output a poly line
+;
+OPL.cnt:
+	db	0
+;
+OutPolLine:
+	ld	a,(LineFlg)	; Test line enabled
+	or	a
+	ret	z		; .. nope
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	hl,(CONTRL)	; Point to CONTRL
+	ld	a,(hl)		; Get CONTRL(1), the opcode
+	call	StCode		; .. store code
+	ld	hl,(CONTRL)
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; .. CONTRL(2), vertex count
+	ld	(OPL.cnt),a	; .. save
+	call	StCode		; .. and store
+	ld	hl,(PTSIN)	; Save PTSIN
+	ld	(ParPtr),hl
+	ld	a,(OPL.cnt)	; Get back vertex count
+l0440:
+	push	af
+	call	GetPar		; Get next from PTSIN
+	ld	hl,(x@cor)
+	call	max		; Get max x
+	ld	(x@cor),hl
+	call	StWrd		; .. store
+	call	GetPar
+	ld	hl,(y@cor)
+	call	max		; Get max y
+	ld	(y@cor),hl
+	call	StWrd		; .. store
+	pop	af
+	dec	a
+	jp	nz,l0440
+	ret
+;
+; Opcode 7 : Output markers
+;
+OutMark:
+	ld	a,(MarkCol)	; Get color
+	or	a
+	ret	z		; .. skip white
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	hl,(CONTRL)	; Get CONTRL
+	ld	a,(hl)		; .. CONTRL(1)
+	call	StCode		; .. store opcode
+	ld	hl,(CONTRL)
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; .. CONTRL(2)
+	push	af
+	call	StCode		; .. store number of markers
+	ld	hl,(PTSIN)	; Get PTSIN
+	ld	(ParPtr),hl	; .. as pointer
+	pop	af
+l0489:
+	push	af
+	call	GetPar		; Get value
+	ld	a,(MK.HGT)	; Get marker height
+	rrca			; .. divide by 2
+	ld	l,a		; .. expand
+	ld	h,0
+	push	hl
+	push	de
+	call	sub.de.hl	; Get DE-HL
+	ex	de,hl
+	call	StWrd		; Store value
+	pop	de
+	pop	hl
+	add	hl,de
+	ex	de,hl
+	ld	hl,(x@cor)
+	call	max		; Get max x
+	ld	(x@cor),hl
+	call	GetPar		; Get value
+	ld	a,(MK.HGT)	; Get marker height
+	rrca
+	ld	l,a
+	ld	h,0
+	push	hl
+	push	de
+	call	sub.de.hl	; Get DE-HL
+	ex	de,hl
+	call	StWrd		; Store value
+	pop	de
+	pop	hl
+	add	hl,de
+	ex	de,hl
+	ld	hl,(y@cor)
+	call	max		; .. get max y
+	ld	(y@cor),hl
+	pop	af
+	dec	a
+	jp	nz,l0489
+	ret
+;
+TXT.LEN:
+	dw	0
+l04d2:
+	db	0
+CELL.LEN:
+	dw	0
+l04d5:
+	dw	0
+l04d7:
+	dw	0
+l04d9:
+	dw	0
+l04db:
+	dw	0
+l04dd:
+	dw	0
+l04df:
+	dw	0
+;
+; Opcode 8 : Write text at specified position
+;
+WrText:
+	ld	a,(ColIdx)	; Test color index
+	or	a
+	ret	z		; .. skip zero
+	ld	hl,(CONTRL)	; Get CONTRL
+	ld	de,2*3
+	add	hl,de
+	ld	a,(hl)		; .. CONTRL(4), number of characters
+	or	a
+	jp	z,l062e		; .. empty
+	ld	(TXT.LEN),a	; .. save
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	hl,(CONTRL)
+	ld	a,(hl)		; .. CONTRL(1)
+	call	StCode		; .. store code
+	ld	a,(TXT.LEN)
+	call	StCode		; Save character count
+	ld	hl,0
+;;
+	ld	(l04d9),hl
+	ld	(l04db),hl
+	ld	hl,(CH..HGT)
+	ld	(l04dd),hl
+	ld	hl,(CELL.WID)
+	ex	de,hl
+	ld	hl,(TXT.LEN)
+	ld	h,0
+	call	Multiply	; Cell_width*text_length
+	ld	(CELL.LEN),hl
+	ex	de,hl
+	ld	hl,(CH.HGT)	; Get height
+	ld	a,(ANGL.IDX)	; Get rotate angle index
+	rrca
+	jp	c,txt.90?270	; .. 90 or 270 degrees
+	rrca
+	jp	c,txt.180		; .. 180 degrees
+;
+; Rotate 0 degrees
+;
+	ex	de,hl
+	call	neg.hl		; .. negate 
+	ex	de,hl
+	ld	(l04df),hl
+	ld	hl,(CH..HGT)
+	call	neg.hl		; .. negate
+	ld	(l04d9),hl
+	ld	hl,(l04df)
+	ld	a,5
+	jp	l0591
+txt.90?270:
+	rrca
+	jp	c,txt.90		; .. 90 degrees
+;
+; Rotate 270 degrees
+;
+	ex	de,hl
+	ld	(l04df),hl
+	ld	hl,(CH..HGT)
+	call	neg.hl		; .. negate
+	ld	(l04db),hl
+	ld	hl,(l04df)
+	ld	a,14
+	jp	l0591
+;
+; Rotate 90 degrees
+;
+txt.90:
+	call	neg.hl		; .. negate both
+	ex	de,hl
+	call	neg.hl
+	ld	(l04df),hl
+	ld	hl,(CH..HGT)
+	ld	(l04db),hl
+	ld	hl,(l04df)
+	ld	a,0
+	jp	l0591
+;
+; Rotate 180 degrees
+;
+txt.180:
+	call	neg.hl		; .. negate
+	ld	(l04df),hl
+	ld	hl,(CH..HGT)
+	ld	(l04d9),hl
+	ld	hl,(l04df)
+	ld	a,11
+l0591:
+	ld	(l04d5),hl	; Save values
+	ex	de,hl
+	ld	(l04d7),hl
+	ld	(l04d2),a
+	call	StCode		; .. store code
+	ld	hl,(PTSIN)	; Save PTSIN
+	ld	(ParPtr),hl
+	call	GetPar		; Get value
+	ld	hl,(l04d9)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(x@cor)
+	call	max		; Get max
+	ld	(x@cor),hl
+	ld	hl,(l24f4)
+	call	min.0		; .. get min
+	ld	(l24f4),hl
+	push	de
+	call	StWrd		; .. save
+	call	GetPar		; Get value
+	ld	hl,(l04db)
+	add	hl,de
+	ld	a,h
+	or	a
+	jp	nc,l05d1	; ??? JUMP ALWAYS
+	ld	hl,0
+l05d1:
+	ex	de,hl
+	ld	hl,(y@cor)
+	call	max
+	ld	(y@cor),hl
+	ld	hl,(l24f6)
+	call	min.0
+	ld	(l24f6),hl
+	push	de
+	call	StWrd
+	pop	de
+	ld	hl,(l04d7)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(y@cor)
+	call	max
+	ld	(y@cor),hl
+	ld	hl,(l24f6)
+	call	min.0
+	ld	(l24f6),hl
+	pop	de
+	ld	hl,(l04d5)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(x@cor)
+	call	max
+	ld	(x@cor),hl
+	ld	hl,(l24f4)
+	call	min.0
+	ld	(l24f4),hl
+	ld	hl,(INTIN)	; .. save INTIN
+	ld	(ParPtr),hl
+	ld	a,(TXT.LEN)	; Get length
+l0621:
+	push	af
+	call	GetPar		; Get next char from INTIN
+	ld	a,e
+	call	StCode		; .. store
+	pop	af
+	dec	a
+	jp	nz,l0621
+l062e:
+	ret
+;
+l062f:
+	db	0
+l0630:
+	dw	0
+l0632:
+	dw	0
+l0634:
+	db	0
+;
+; Opcode 9 : Fill a polygon
+;
+FillPoly::
+	ld	a,(FilColIdx)	; Test to be filled
+	or	a
+	ret	z		; .. nope
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	hl,0
+	ld	(l1092),hl
+	ld	(l1090),hl
+	ld	hl,32767
+	ld	(l108c),hl	; Set scale
+	ld	(l108e),hl
+	ld	hl,(CONTRL)
+	ld	a,(hl)		; .. CONTRL(1)
+	call	StCode
+	ld	hl,(CONTRL)
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; .. CONTRL(2)
+	ld	(l062f),a	; .. number of vertices
+	call	StCode
+	ld	hl,(PTSIN)	; Save PTSIN
+	ld	(ParPtr),hl
+	xor	a
+	ld	(l0634),a
+	ld	a,(l062f)	; Get number of vertices
+l0673:
+	push	af
+	call	GetPar
+	ld	a,(l0634)
+	or	a
+	jp	nz,l0683
+	ld	h,d
+	ld	l,e
+	ld	(l0630),hl
+l0683:
+	ld	hl,(x@cor)
+	call	max
+	ld	(x@cor),hl
+	ld	hl,(l1090)
+	call	max
+	ld	(l1090),hl
+	ld	hl,(l108c)
+	call	min
+	ld	(l108c),hl
+	call	StWrd
+	call	GetPar
+	ld	a,(l0634)
+	or	a
+	jp	nz,l06b4
+	inc	a
+	ld	(l0634),a
+	ld	h,d
+	ld	l,e
+	ld	(l0632),hl
+l06b4:
+	ld	hl,(y@cor)
+	call	max
+	ld	(y@cor),hl
+	ld	hl,(l1092)
+	call	max
+	ld	(l1092),hl
+	ld	hl,(l108e)
+	call	min
+	ld	(l108e),hl
+	call	StWrd
+	pop	af
+	dec	a
+	jp	nz,l0673
+	ld	hl,(l0630)
+	ex	de,hl
+	call	StWrd
+	ld	hl,(l0632)
+	ex	de,hl
+	call	StWrd
+	ld	hl,(l108c)
+	ex	de,hl
+	call	StWrd
+	ld	hl,(l108e)
+	ex	de,hl
+	call	StWrd
+	ld	hl,(l1090)
+	ex	de,hl
+	call	StWrd
+	ld	hl,(l1092)
+	ex	de,hl
+	call	StWrd
+l0701:
+	ret
+;
+; Opcode 11 : Output a primitive diaplay element
+;
+OutPrim:
+	ld	hl,(CONTRL)
+	ld	de,2*5
+	add	hl,de
+	ld	a,(hl)		; Get CONTRL(6)
+	dec	a		; .. only one is allowed
+	ret	nz
+	call	l0725
+	ret
+;
+; Opcode 10 : Display cell array
+;
+DspCellArr:
+	ld	a,(LineFlg)	; Test line enabled
+	or	a
+	ret	z		; .. nope
+	ld	a,10
+	call	StCode
+	ld	a,5
+	call	StCode
+	ld	a,20
+	call	l073b
+	ret
+;
+;
+;
+l0725::
+	ld	a,(FilColIdx)	; Test fill color index
+	or	a
+	ret	z		; .. nope
+	ld	a,11
+	call	StCode
+	ld	a,1
+	call	StCode
+	ld	a,4
+	call	StCode
+	ld	a,28
+l073b:
+	ld	(l1b72),a
+	ld	hl,(BufIdx)
+	inc	hl		; Bump index
+	ld	(BufIdx),hl
+	ld	hl,(PTSIN)	; Save PTSIN
+	ld	(ParPtr),hl
+	ld	hl,l1b4c
+	ld	(st.ptr),hl	; Init pointer
+	ld	a,2
+l0753:
+	push	af
+	call	GetPar
+	ld	hl,(x@cor)
+	call	max
+	ld	(x@cor),hl
+	call	st.hl		; Store value
+	call	GetPar
+	ld	hl,(y@cor)
+	call	max
+	ld	(y@cor),hl
+	call	st.hl		; Store value
+	pop	af
+	dec	a
+	jp	nz,l0753
+	ld	hl,(l1b4c)
+	ld	e,h
+	ld	d,l
+	ld	hl,l1b54
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	bc,l1b54
+	ld	hl,12
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,16
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,20
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,(l1b4e)
+	ld	e,h
+	ld	d,l
+	ld	hl,2
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,6
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,18
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,22
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,(l1b50)
+	ld	e,h
+	ld	d,l
+	ld	hl,4
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,8
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,24
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,(l1b52)
+	ld	e,h
+	ld	d,l
+	ld	hl,10
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,14
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,26
+	add	hl,bc
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	ld	hl,l1b54
+	ld	(st.ptr),hl	; Init pointer
+l07f5:
+	ld	hl,(st.ptr)
+	ld	a,(hl)		; Get value
+	inc	hl
+	ld	(st.ptr),hl
+	call	StCode
+	ld	a,(l1b72)
+	dec	a
+	ld	(l1b72),a
+	jp	nz,l07f5
+	ret
+;
+; Store value in DE into array
+;
+st.hl:
+	ld	hl,(st.ptr)	; Get pointer
+	ld	(hl),d		; .. store value
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(st.ptr),hl
+	ret
+;
+;
+;
+l0816:
+	pop	hl
+	ex	(sp),hl
+	push	hl
+	ld	a,16
+	ld	(l1b76),a
+	xor	a
+	ld	hl,0
+	ld	de,0
+l0825:
+	ld	a,b
+	rra
+	ld	b,a
+	ld	a,c
+	rra
+	ld	c,a
+	jp	nc,l0835
+	ex	de,hl
+	ex	(sp),hl
+	ex	de,hl
+	add	hl,de
+	ex	de,hl
+	ex	(sp),hl
+	ex	de,hl
+l0835:
+	ld	a,h
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	ld	a,d
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	ld	a,(l1b76)
+	dec	a
+	ld	(l1b76),a
+	jp	nz,l0825
+	inc	sp
+	inc	sp
+	ret
+;
+;
+;
+l084e:
+	ld	a,c
+	or	b
+	jp	nz,l0856
+	jp	l088e
+l0856:
+	ld	a,b
+	cpl
+	ld	b,a
+	ld	a,c
+	cpl
+	ld	c,a
+	inc	bc
+	ld	a,17
+l085f:
+	dec	a
+	jp	nz,l0867
+	ex	de,hl
+	jp	l088d
+l0867:
+	add	hl,hl
+	jp	c,l0881
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jp	nc,l0872
+	inc	l
+l0872:
+	push	hl
+	add	hl,bc
+	jp	c,l087b
+	pop	hl
+	jp	l085f
+l087b:
+	inc	e
+	inc	sp
+	inc	sp
+	jp	l085f
+l0881:
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jp	nc,l0888
+	inc	l
+l0888:
+	add	hl,bc
+	inc	e
+	jp	l085f
+l088d:
+	ex	de,hl
+l088e:
+	ret
+;
+; Get absolute value of reg HL
+;
+abs.hl:
+	inc	h
+	dec	h
+	ret	p
+	call	neg.hl		; .. negate if < 0
+	ret
+;
+; Get difference of registers HL:=DE-HL
+;
+sub.de.hl:
+	ld	a,e
+	sub	l		; .. subtract
+	ld	l,a
+	ld	a,d
+	sbc	a,h
+	ld	h,a
+	ret
+;
+; Signed coordinate compare DE : HL
+; EXIT	Carry set if DE < HL
+;
+sgn.cmp:
+	ld	a,d
+	and	h		; Test either > 0
+	jp	p,l08a9		; .. yeap
+;
+; Both reg pairs < 0
+;
+	ld	a,e		; DE - HL
+	sub	l
+	ld	a,d
+	sbc	a,h
+	ret	z		; .. same
+	ccf			; .. change carry if not same
+	ret
+l08a9:
+	ld	a,d
+	or	h		; Test both > 0
+	jp	p,l08b3		; .. yeap
+;
+; Either reg pair < 0
+;
+	xor	a
+	or	d		; Test DE > 0
+	ret	p		; .. yeap
+	ccf			; .. change carry
+	ret
+;
+; Both reg pairs >= 0
+;
+l08b3:
+	ld	a,e		; .. compare if both > 0
+	sub	l
+	ld	a,d
+	sbc	a,h
+	ret
+;
+; Compare regs HL : DE
+; EXIT	Zero  set if equal
+;	Carry set if DE < HL
+;
+cmp.hl.de:
+	ld	a,d
+	cp	h		; Compare HI
+	ret	nz		; .. not same
+	ld	a,e
+	cp	l		; .. compare LO
+	ret
+;
+; Get min of coordinates (HL,DE) into reg HL
+;
+min:
+	call	sgn.cmp		; Compare
+	ret	nc		; .. DE > HL
+	ld	h,d
+	ld	l,e
+	ret
+;
+; Get positive min of coordinates (HL,DE) into reg HL
+;
+min.0:
+	call	sgn.cmp		; Compare
+	jp	nc,l08cd	; .. DE > HL
+	ld	h,d
+	ld	l,e
+l08cd:
+	ld	a,h
+	or	h		; Verify >= 0
+	ret	p
+	ld	hl,0		; .. truncate to zero
+	ret
+;
+; Get max of coordinates (HL,DE) into reg HL
+;
+max:
+	call	sgn.cmp		; Compare
+	ret	c		; .. DE < HL
+	ld	h,d
+	ld	l,e
+	ret
+;
+; Multiply value by 8 : HL:=HL*8
+;
+Mul.by8:
+	push	bc
+	ld	b,3		; Set count
+l08de:
+	xor	a
+	ld	a,l
+	rla			; *2
+	ld	l,a
+	ld	a,h
+	rla
+	ld	h,a
+	dec	b
+	jp	nz,l08de
+	pop	bc
+	ret
+;
+; HL := HL*DE
+;
+Multiply:
+	push	bc
+	ld	a,h
+	cp	d
+	jp	c,l08f2
+	ex	de,hl
+l08f2:
+	ld	b,h
+	ld	c,l
+	ld	hl,0
+	ld	a,b
+	or	a
+	push	bc
+	call	nz,l0904
+	pop	bc
+	ld	a,c
+	call	l0904
+	pop	bc
+	ret
+;
+;
+;
+l0904:
+	ld	c,8
+l0906:
+	add	hl,hl
+	rla
+	jp	nc,l090c
+	add	hl,de
+l090c:
+	dec	c
+	jp	nz,l0906
+	ret
+;
+; Signed division
+; HL := DE DIV HL
+; BC := DE MOD HL
+;
+Divide:
+	ld	a,h
+	xor	d
+	push	af
+	xor	d
+	call	m,neg.hl	; .. negate
+	ex	de,hl
+	ld	a,h
+	or	a
+	call	m,neg.hl	; .. negate
+	jp	z,l0952
+	ld	b,16
+	ld	a,d
+	or	a
+	jp	nz,l092c
+	or	e
+	jp	p,l095e
+l092c:
+	ld	a,b
+	ld	bc,0
+l0930:
+	push	af
+	add	hl,hl
+	ld	a,c
+	rla
+	ld	c,a
+	ld	a,b
+	rla
+	ld	b,a
+	ld	a,c
+	sub	e
+	ld	a,b
+	sbc	a,d
+	jp	c,l0944
+	ld	b,a
+	ld	a,c
+	sub	e
+	ld	c,a
+	inc	hl
+l0944:
+	pop	af
+	dec	a
+	jp	nz,l0930
+l0949:
+	pop	af
+	ret	p
+;
+; Negate register HL:=-HL
+;
+neg.hl:
+	sub	a
+	sub	l
+	ld	l,a
+	sbc	a,h
+	sub	l
+	ld	h,a
+	ret
+;
+;
+;
+l0952:
+	ld	b,8
+	ld	h,l
+	ld	l,a
+	or	d
+	jp	nz,l092c
+	or	e
+	jp	m,l092c
+l095e:
+	sub	a
+l095f:
+	add	hl,hl
+	rla
+	cp	e
+	jp	c,l0967
+	sub	e
+	inc	hl
+l0967:
+	dec	b
+	jp	nz,l095f
+	ld	c,a
+	jp	l0949
+;
+; *** NEVER CALLED ***
+;
+l096f:
+	pop	bc
+	pop	de
+	push	bc
+	call	Divide
+	ld	h,b
+	ld	l,c
+	ret
+;
+;
+;
+l0978:
+	push	bc
+	xor	a
+	or	h
+	call	m,neg.hl	; .. make > 0
+	push	hl
+	ld	c,16
+	xor	a
+	ld	hl,0
+l0985:
+	ld	a,d
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	jp	nc,l0993
+	ld	a,c
+	pop	bc
+	add	hl,bc
+	push	bc
+	ld	c,a
+l0993:
+	ld	a,h
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	dec	c
+	jp	nz,l0985
+	jp	nc,l09a1
+	inc	hl
+l09a1:
+	pop	de
+	pop	bc
+	ret
+;
+;
+;
+l09a4:
+	call	abs.hl		; Make absolute
+	push	hl
+	ld	h,b
+	ld	l,c
+	call	abs.hl		; .. dtto.
+	ld	b,h
+	ld	c,l
+	pop	hl
+	ld	a,16
+	push	af
+	ld	de,0
+l09b6:
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	add	hl,hl
+	ld	a,l
+	sub	c
+	ld	l,a
+	ld	a,h
+	sbc	a,b
+	ld	h,a
+	jp	nc,l09c7
+	add	hl,bc
+	jp	l09c8
+l09c7:
+	inc	de
+l09c8:
+	pop	af
+	dec	a
+	push	af
+	jp	nz,l09b6
+	pop	af
+	ret
+;
+; Opcode 3 : Clear a graphic workstation
+;
+ClearWS:
+	call	NewPage		; Give new page
+;
+; Opcode 2 : Close a graphic workstation
+; Opcode 4 : Update a graphic workstation
+;
+ClosWS:
+	ld	hl,(BufIdx)	; Test any in buffer
+	ld	a,h
+	or	l
+	jp	z,l09e1		; .. nope
+	call	Flush		; Flush file
+	call	Plot		; .. plot whatever we got
+l09e1:
+	ld	hl,0		; Clear ..
+	ld	(BufIdx),hl	; .. buffer index
+	ld	(x@cor),hl	; .. coordinates
+	ld	(y@cor),hl
+	call	Unlink		; Erase temp file
+	ret
+;
+; Data to be initilaized by opening a workstation
+;
+INT.ini	equ	$
+mx@cor:
+	dw	823		;  1 : Max addressable width
+my@cor:
+	dw	575		;  2 : Max addressable height
+	dw	0		;  3 : Device capability
+l09f7:
+	dw	246		;  4 : Widht of one pixel
+l09f9:
+	dw	352		;  5 : Height of one pixel
+	dw	12		;  6 : Number of char heights
+	dw	6		;  7 : Number of linetypes
+	dw	1		;  8 : Number of line widths
+	dw	5		;  9 : Number of marker types
+	dw	12		; 10 : Number of marker sizes
+	dw	1		; 11 : Number of fonts
+	dw	6		; 12 : Number of patterns
+	dw	6		; 13 : Number of hatch styles
+	dw	2		; 14 : Number of colours
+	dw	1		; 15 : Number of GDPs
+	dw	1		; 16 : Bar
+l0a11:
+	dw	-1		; 17
+	dw	-1		; 18
+	dw	-1		; 19
+	dw	-1		; 20
+	dw	-1		; 21
+	dw	-1		; 22
+	dw	-1		; 23
+	dw	-1		; 24
+	dw	-1		; 25
+	dw	3		; 26 : Fill area
+	dw	-1		; 27
+	dw	-1		; 28
+	dw	-1		; 29
+	dw	-1		; 30
+	dw	-1		; 31
+	dw	-1		; 32
+	dw	-1		; 33
+	dw	-1		; 34
+	dw	-1		; 35
+	dw	0		; 36 : No color
+	dw	1		; 37 : Text rotation
+	dw	1		; 38 : Fill area
+	dw	0		; 39 : No read cell
+	dw	2		; 40 : Monochrome
+	dw	0		; 41 : Locator devices
+	dw	0		; 42 : Valuator devices
+	dw	0		; 43 : Choice devices
+	dw	0		; 44 : String devices
+	dw	0		; 45 : Output only device
+IOlen	equ	$-INT.ini
+;
+PTS.ini:
+	dw	0		;  1 : 0
+	dw	8		;  2 : Min char height
+	dw	0		;  3 : 0
+	dw	96		;  4 : Max char height
+	dw	1		;  5 : Min line width
+	dw	0		;  6 : 0
+	dw	1		;  7 : Max line width
+	dw	0		;  8 : 0
+	dw	0		;  9 : 0
+	dw	8		; 10 : Min marker height
+	dw	0		; 11 : 0
+	dw	96		; 12 : Max marker height
+POlen	equ	$-PTS.ini
+;
+; Array set up on init
+;
+l0a63:
+	dw	0
+CH..HGT:
+	dw	0
+ANGL.IDX:
+	dw	0
+MK..HGT:
+	dw	0
+CELL.WID:
+	dw	0		; Character cell width in device units
+CH.HGT:
+	dw	0		; Character height in device units
+MK.HGT:
+	dw	0		; Marker height in device units
+;
+; Copy of INTIN(1..10)
+;
+INTIN.1:
+	dw	0		;  1 : Workstation ID
+INTIN.2:
+	dw	0		;  2 : Linerype
+INTIN.3:
+	dw	0		;  3 : Polyline color index
+INTIN.4:
+	dw	0		;  4 : Marker type
+INTIN.5:
+	dw	0		;  5 : Polymarker color index
+INTIN.6:
+	dw	0		;  6 : Text font
+INTIN.7:
+	dw	0		;  7 : Text color index
+INTIN.8:
+	dw	0		;  8 : Fill interior index
+INTIN.9:
+	dw	0		;  9 : Fill style index
+INTIN.10:
+	dw	0		; 10 : Fill color index
+INT.cpy	equ	$-INTIN.1
+;
+l0a85:
+	dw	0
+Poly$Type:
+	dw	1111110000110000b
+Replace:
+	db	0		; Write mode
+@@@$1:
+	db	0
+@@@$2:
+	dw	1
+LineFlg:
+	db	1		; Line enable flag
+FilColIdx:
+	db	1		; Fill color index
+ColIdx:
+	db	1		; Color index
+MarkCol:
+	db	1		; Marker color index
+l0a91:
+	dw	1
+TX$1:
+	db	0
+TX$2:
+	db	1
+PM$1:
+	db	0
+C$1:
+	db	0
+PL$1:
+	db	0
+FC$1:
+	db	0
+PM$2:
+	db	1
+C$2:
+	db	1
+PL$2:
+	db	1
+FC$2:
+	dw	1
+	db	0
+CpyLen	equ	$-l0a63
+;
+	db	0,0
+;
+; Field to be filled
+;
+l0aa1:
+	ds	64
+;
+; Opcode 1 : Initialize a graphic workstation
+;
+InitWS:
+	ld	hl,(MX$COR)	; Init device specific values
+	ld	(mx@cor),hl
+	ld	hl,(MY$COR)
+	ld	(my@cor),hl
+	ld	hl,(l1b48)
+	ld	(l09f7),hl
+	ld	hl,(l1b4a)
+	ld	(l09f9),hl
+	ld	hl,(INTIN)	; Get INTIN
+	ld	de,INTIN.1
+	ld	bc,INT.cpy
+	call	.LDIR		; .. Save INTIN array
+	ld	hl,INTIN.2
+	dec	(hl)		; Fix line type
+	ld	hl,INTIN.4
+	dec	(hl)		; .. and marker type
+	ld	a,1		; Set ..
+	ld	(CH..HGT),a	; .. character height DIV 8
+	ld	(MK..HGT),a	; .. mark height DIV 8
+	ld	(l0a63),a
+	ld	(ANGL.IDX),a	; .. angle index (270 deg)
+	ld	(@@@$2),a	; .. text modes (replace)
+	ld	(TX$2),a
+	ld	(PL$2),a
+	ld	(C$2),a
+	ld	(FC$2),a
+	ld	(PM$2),a
+	ld	(LineFlg),a
+	ld	(FilColIdx),a	; .. fill color index
+	ld	(ColIdx),a	; .. color index
+	ld	(MarkCol),a	; .. black marker
+	ld	(l0a91),a
+	dec	a		; Clear ..
+	ld	(l0a85),a
+	ld	(Replace),a	; .. write mode
+	ld	(@@@$1),a	; .. text modes (replace)
+	ld	(TX$1),a
+	ld	(C$1),a
+	ld	(FC$1),a
+	ld	(PL$1),a
+	ld	(PM$1),a
+	ld	a,8
+	ld	(CH.HGT),a	; Init character height
+	ld	(MK.HGT),a	; .. marker height
+	dec	a
+	dec	a
+	ld	(CELL.WID),a	; .. character cell width
+	ld	hl,l0a63
+	ld	de,l0aa1
+	ld	bc,CpyLen
+	call	.LDIR		; .. copy
+	xor	a
+	ld	(FileAct),a	; Clear file flag
+	call	ResBuff		; Reset buffer
+	ld	hl,0
+	ld	(x@cor),hl	; Clear coordinates
+	ld	(y@cor),hl
+	ld	hl,32767
+	ld	(l24f6),hl	; Set scale
+	ld	(l108e),hl
+	ld	hl,(CONT.3)
+	ld	(hl),6		; Set CONTRL(3)
+	ld	de,2*2
+	add	hl,de
+	ld	(hl),45		; .. and CONTRL(5)
+	inc	hl
+	ld	(hl),0
+	ld	hl,(INTOUT)
+	ex	de,hl
+	ld	hl,INT.ini
+	ld	bc,IOlen
+	call	.LDIR		; .. copy to INTOUT
+	ld	hl,(PTSOUT)
+	ex	de,hl
+	ld	hl,PTS.ini
+	ld	bc,POlen
+	call	.LDIR		; .. copy into PTSOUT
+	ret
+;
+; Move BC bytes from @HL to @DE
+;
+.LDIR:
+	ld	a,(hl)		; .. just move
+	inc	hl
+	ld	(de),a
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,.LDIR
+	ret
+;
+; Flush temp file
+;
+Flush:
+	ld	a,(FileAct)	; Test file active
+	and	a
+	jp	z,ResBuff	; .. nope, reset buffer
+	ld	de,TMPbuff
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,$$FCB
+	ld	c,.dskwrt
+	call	BDOS		; .. write record
+	and	a		; Test success
+	jp	nz,WrErr	; .. error
+RdRec0:
+	ld	hl,0
+	ld	($$FCB+_RRN),hl	; Set first record
+	ld	de,TMPbuff
+	ld	c,.setdma
+	call	BDOS
+	ld	de,$$FCB
+	ld	c,.rndred
+	call	BDOS		; .. read it
+	and	a		; Verify success
+	jp	nz,RdErr
+;
+; Reset token buffer
+;
+ResBuff:
+	ld	hl,@Buffer
+	ld	(BufPtr),hl	; Init buffer pointer
+	ld	hl,0
+	ld	(CurRRN),hl	; .. and record
+	ret
+;
+; Erase temp file
+;
+Unlink:
+	ld	hl,FileAct	; Test file active
+	ld	a,(hl)
+	or	a
+	jp	z,ResBuff	; .. nope, reset buffer
+	ld	(hl),0		; .. set passive
+	ld	de,$$FCB
+	ld	c,.close
+	call	BDOS		; Close file
+	ld	de,$$FCB
+	ld	c,.delete
+	call	BDOS		; .. then delete
+	jp	ResBuff		; .. and reset buffer
+;
+; Got write error on temp file - Break
+;
+BREAK:
+	ld	de,$$FCB
+	ld	c,.delete
+	call	BDOS		; Delete file
+	ld	c,.warm
+	call	BDOS		; .. and exit
+l0c27:
+	ret
+;
+; Get code from file or buffer
+;
+LdCode:
+	ld	hl,(BufPtr)	; Get buffer pointer
+	ld	a,(FileAct)	; Test file active
+	and	a
+	jp	z,l0c4c		; .. nope
+	ld	de,TMPbuff
+	dec	de
+	call	cmp.hl.de	; Compare buffers
+	jp	nc,l0c4c	; .. within limits
+	ld	hl,(CurRRN)	; Get record number
+	ex	de,hl
+	ld	hl,($$FCB+_RRN)
+	call	cmp.hl.de	; Compare record numbers
+	jp	nz,RdRRN	; .. not same, read new record
+l0c49:
+	ld	hl,(BufPtr)	; Get buffer pointer
+l0c4c:
+	ld	b,(hl)		; Get value
+	inc	hl
+	ex	de,hl
+	ld	hl,TMPbuff+RecLng
+	call	cmp.hl.de	; .. compare
+	ex	de,hl
+	jp	c,l0c63		; HL < DE
+	ld	hl,(CurRRN)
+	inc	hl		; Bump record
+	ld	(CurRRN),hl
+	ld	hl,TMPbuff
+l0c63:
+	ld	(BufPtr),hl	; Set buffer pointer
+	ld	a,b		; .. get value
+	and	a
+	ret
+RdRRN:
+	ex	de,hl
+	ld	($$FCB+_RRN),hl	; Set record
+	ld	de,TMPbuff
+	ld	c,.setdma
+	call	BDOS		; .. disk buffer
+	ld	de,$$FCB
+	ld	c,.rndred
+	call	BDOS		; Read record
+	and	a		; Test success
+	jp	nz,RdErr	; .. nope
+	jp	l0c49
+RdErr:
+	ld	de,$RD.ERR
+	ld	c,.string	; Give error
+	call	BDOS
+	scf
+	jp	BREAK		; .. and stop
+;
+; Store code into buffer
+; ENTRY	Accu holds code to be stored
+; EXIT	Carry set on error
+;
+StCode:
+	ld	hl,(BufPtr)	; Get buffer pointer
+	ld	(hl),a		; .. store code
+	inc	hl		; Update pointer
+	ld	(BufPtr),hl
+	ld	de,TMPbuff+RecLng
+	call	cmp.hl.de	; Test buffer filles
+	jp	z,WrBuff	; .. yeap
+	or	a
+	ret
+WrBuff:
+	call	Rewrite		; Rewrite file if necessary
+	ld	hl,TMPbuff
+	ld	(BufPtr),hl	; Re-init pointer
+	ex	de,hl
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,$$FCB
+	ld	c,.dskwrt
+	call	BDOS		; .. write record
+	and	a
+	ret	z		; .. ok
+WrErr:
+	ld	de,$WRT.ERR
+	ld	c,.string	; Give error
+	call	BDOS
+	scf
+	jp	BREAK		; .. and stop
+;
+; Rewrite temorary file
+;
+Rewrite:
+	ld	a,(FileAct)	; Test file already active
+	and	a
+	ret	nz		; .. yeap
+	ld	de,$$FCB
+	ld	hl,..FCB
+	ld	bc,FCBlen
+	call	.LDIR		; .. copy FCB
+	ld	de,$$FCB
+	ld	c,.delete
+	call	BDOS		; .. delete ole one
+	ld	de,$$FCB
+	ld	c,.make
+	call	BDOS		; .. and make new one
+	inc	a
+	ld	(FileAct),a	; .. set flag
+	ret	nz		; .. ok
+	jp	WrErr		; .. fatal
+;
+; Store word into buffer
+; ENTRY	Reg DE holds word
+;
+StWrd:
+	ld	a,d
+	push	de
+	call	StCode		; Write HI
+	pop	de
+	jp	c,l0c27
+	ld	a,e
+	call	StCode		; .. and LO
+	jp	c,l0c27
+	ret
+;
+; Load next word pair into regs DE, BC
+;
+LdWords:
+	call	LdCode		; Get 1st word
+	ld	d,a
+	push	de
+	call	LdCode
+	pop	de
+	ld	e,a
+	push	de
+	call	LdCode		; .. 2nd word
+	ld	b,a
+	push	bc
+	call	LdCode
+	pop	bc
+	ld	c,a
+	pop	de
+	ret
+;
+; Update buffer pointer by length in reg HL
+;
+UpdateBuff:
+	ex	de,hl
+	ld	hl,(BufPtr)	; Get buffer pointer
+	add	hl,de		; .. add length
+	ld	(BufPtr),hl	; .. set back pointer
+	ex	de,hl
+	ld	hl,TMPbuff+RecLng
+	call	sub.de.hl	; Get DE-HL
+	jp	c,l0d4d		; .. in range
+	ld	de,0
+	ld	bc,0
+	ld	a,h		; Test remainder
+	or	l
+	jp	z,l0d3d		; .. nope
+	ex	de,hl
+	ld	hl,RecLng
+	call	Divide		; Calculate record count
+l0d3d:
+	ex	de,hl
+	ld	hl,(CurRRN)
+	inc	hl		; Bump record
+	add	hl,de		; .. fix it
+	ld	(CurRRN),hl
+	ld	hl,TMPbuff	; Get base
+	add	hl,bc		; .. add offset
+	ld	(BufPtr),hl	; .. set pointer
+l0d4d:
+	ret
+;
+; Code 8 : Write text
+;
+@WrText::
+	ld	hl,(x@cor)
+	inc	hl
+	ld	(l20b3),hl
+	ld	a,(C$1)		; Copy bits to global
+	ld	(TX$1),a
+	ld	a,(C$2)
+	ld	(TX$2),a
+	call	LdCode		; Get length
+	push	af		; .. save
+	call	LdCode		; Get rotation factor
+	ld	(rot.fac),a
+	xor	a
+	ld	a,(CH..HGT)
+	ld	(l0e48),a
+	call	LdWords		; Get word pair (coordinates)
+	ex	de,hl
+	ld	(l106d),hl	; .. 1st
+	ld	h,b
+	ld	l,c
+	ld	(l106f),hl	; .. 2nd
+	ld	(l20b1),hl
+	ld	a,(rot.fac)	; Get rotation factor
+	rrca
+	jp	c,l0da9		; .. 0 or 180 degrees
+	ld	a,(rot.fac)
+	and	00000100b
+	ld	a,1
+	jp	nz,l0d94
+	ld	a,-1
+l0d94:
+	ld	(l1082),a	;  1 -> 270
+				; -1 ->  90
+	ld	a,(rot.fac)
+	and	00001000b
+	ld	a,1
+	jp	nz,l0da3
+	ld	a,-1
+l0da3:
+	ld	(l1081),a	;  1 -> 270
+				; -1 ->  90
+	jp	l0dc7
+l0da9:
+	ld	a,(rot.fac)
+	and	00000100b
+	ld	a,1
+	jp	nz,l0db5
+	ld	a,-1
+l0db5:
+	ld	(l1081),a	;  1 ->   0
+				; -1 -> 180
+	ld	a,(rot.fac)
+	and	00001000b
+	ld	a,1
+	jp	nz,l0dc4
+	ld	a,-1
+l0dc4:
+	ld	(l1082),a	;  1 -> 180
+				; -1 ->   0
+l0dc7:
+	pop	af		; Get back length
+	dec	a
+	jp	m,l0e47		; .. skip if 0
+	push	af
+	call	LdCode		; Get next character
+	sub	esc		; Test valid range
+	jp	m,l0e1f
+	cp	hiASC-esc+1
+	jp	p,l0e1f
+	ld	l,a		; .. get as index
+	ld	h,0
+	call	Mul.by8
+	ld	de,chr$mat
+	add	hl,de
+	ld	(chr@mat),hl	; Save matrix pointer
+	ld	hl,(CELL.WID)
+	ld	a,(rot.fac)
+	and	00000010b
+	jp	nz,l0e02
+	call	neg.hl		; .. negate
+	ld	(l20af),hl
+	ld	hl,(CH.HGT)	; Get character height
+	call	neg.hl		; .. negate
+	inc	hl
+	jp	l0e09
+l0e02:
+	ld	(l20af),hl
+	ld	hl,(CH.HGT)	; Get character height
+	dec	hl
+l0e09:
+	ex	de,hl
+	ld	hl,(l106f)
+	add	hl,de
+	ld	a,h
+	or	h
+	jp	p,l0e16
+	ld	hl,0
+l0e16:
+	ld	(l107b),hl
+	call	l0eec
+	call	nc,l0e49
+l0e1f:
+	ld	hl,(l20af)
+	ex	de,hl
+	ld	a,(rot.fac)
+	rrca
+	jp	c,l0e38
+	ld	hl,(l106d)
+	add	hl,de
+	ld	(l106d),hl
+	xor	a
+	ld	(l20aa),a
+	jp	l0dc7
+l0e38:
+	ld	hl,(l106f)
+	add	hl,de
+	ld	(l106f),hl
+	ld	a,1
+	ld	(l20aa),a
+	jp	l0dc7
+l0e47:
+	ret
+;
+l0e48:
+	db	0
+;
+;
+;
+l0e49:
+	ld	hl,(l106f)	; Init coordinates
+	ld	(l1073),hl
+	ld	hl,(l106d)
+	ld	(l1071),hl
+	ld	hl,(chr@mat)	; Get matrix pointer
+	ld	a,7
+l0e5a:
+	push	af
+	push	hl
+	ld	b,(hl)		; Get matrix code
+	ld	a,(l0e48)
+l0e60:
+	push	af
+	push	bc
+	ld	a,6
+	push	af
+l0e65:
+	ld	a,b		; Get pixel
+	ld	b,0		; .. init value
+	rrca			; Test LSB
+	jp	nc,l0e6d
+	inc	b		; .. set it
+l0e6d:
+	push	af
+	ld	a,(l0e48)
+l0e71:
+	push	af
+	xor	a
+	or	b		; Test LSB
+	push	bc
+	call	nz,l18cc	; .. yeap
+	ld	a,(rot.fac)
+	rrca
+	jp	nc,l0e85
+	call	l0ed9
+	jp	l0e88
+l0e85:
+	call	l0ec6
+l0e88:
+	pop	bc
+	pop	af
+	dec	a
+	jp	nz,l0e71
+	pop	bc
+	pop	af
+	dec	a
+	jp	m,l0e98
+	push	af
+	jp	l0e65
+l0e98:
+	ld	a,(rot.fac)
+	rrca
+	jp	nc,l0eab
+	call	l0ec6
+	ld	hl,(l106f)
+	ld	(l1073),hl
+	jp	l0eb4
+l0eab:
+	call	l0ed9
+	ld	hl,(l106d)
+	ld	(l1071),hl
+l0eb4:
+	pop	bc
+	pop	af
+	dec	a
+	jp	nz,l0e60
+	pop	de
+	pop	af
+	dec	a
+	jp	m,l0ec5
+	ex	de,hl
+	inc	hl
+	jp	l0e5a
+l0ec5:
+	ret
+;
+; ptr++ or ptr-- (direction 1 or -1)
+;
+l0ec6:
+	ld	hl,(l1071)	; Get pointer
+	ld	a,(l1081)	; .. direction
+	and	a
+	jp	m,l0ed4
+	inc	hl		; .. ptr++
+	jp	l0ed5
+l0ed4:
+	dec	hl		; .. ptr--
+l0ed5:
+	ld	(l1071),hl
+	ret
+;
+; ptr++ or ptr-- (direction 1 or -1)
+;
+l0ed9:
+	ld	hl,(l1073)	; Get pointer
+	ld	a,(l1082)	; .. direction
+	and	a
+	jp	m,l0ee7
+	inc	hl		; .. ptr++
+	jp	l0ee8
+l0ee7:
+	dec	hl		; .. ptr--
+l0ee8:
+	ld	(l1073),hl
+	ret
+;
+;
+;
+l0eec:
+	ld	hl,(l106d)
+	ld	a,h
+	or	h
+	jp	m,l0f1b
+	ex	de,hl
+	ld	hl,(l20b3)
+	call	cmp.hl.de	; Compare
+	jp	nc,l0f1b	; HL >= DE
+	ld	hl,(l106f)
+l0f01:
+	call	l1809
+	ld	a,b
+	ld	(l1083),a
+	ld	hl,(l107b)
+	call	l1809
+	ld	a,b
+	ld	(l1084),a
+	ld	a,(l1083)
+	and	b
+	jp	nz,l0f1b
+	or	a
+	ret
+l0f1b:
+	scf
+	ret
+;
+l0f1d:
+	db	0
+;
+; Code 7 : Output markers
+;
+@OutMark::
+	ld	a,(PM$1)	; Copy bits to global
+	ld	(TX$1),a
+	ld	a,(PM$2)
+	ld	(TX$2),a
+	call	LdCode		; Get marker count
+	ld	(l0f1d),a
+	push	af
+	ld	a,14
+	ld	(rot.fac),a	; Set 270 degrees
+	xor	a
+	ld	a,(MK..HGT)	; Get height
+	ld	(l0e48),a
+	rla			; .. *4
+	rla
+	rla
+	ld	(MK.HGT),a	; .. set marker height
+	ld	a,(INTIN.4)	; Get marker type
+	ld	l,a
+	ld	h,0
+	call	Mul.by8		; *8
+	ld	de,chr$mat
+	add	hl,de
+	ld	(chr@mat),hl	; Set character matrix pointer
+	ld	a,1
+	ld	(l1082),a	; Init direction
+	ld	(l1081),a
+l0f5b:
+	pop	af		; Get back count
+	dec	a		; Test done
+	jp	m,l0f95		; .. yeap
+	push	af
+	call	LdWords		; Get next word pair (coordinates)
+	ex	de,hl
+	ld	(l106d),hl
+	ld	h,b
+	ld	l,c
+	ld	(l106f),hl
+	ld	hl,(MK.HGT)	; Get marker height
+	dec	hl
+	ex	de,hl
+	ld	hl,(l106d)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(mx@cor)	; Get max X
+	call	cmp.hl.de	; Compare
+	jp	nc,l0f92	; HL > DE
+	ld	hl,(MK.HGT)	; Get marker height
+	dec	hl
+	ex	de,hl
+	ld	hl,(l106f)
+	add	hl,de
+	ld	(l107b),hl
+	call	l0eec
+	call	nc,l0e49
+l0f92:
+	jp	l0f5b
+l0f95:
+	ret
+;
+; Plot data to printer
+;
+Plot::
+	call	Scale		; Scale plot coordinates
+	ld	a,(l2502)
+	ld	b,a
+	ld	hl,(y@cor)
+l0fa0:
+	push	bc
+	ld	(l23dd),hl
+	ex	de,hl
+	ld	hl,(l2505)
+	add	hl,de
+	ld	(l23e1),hl
+	ld	a,h
+	or	a
+	jp	p,l0fb4
+	ld	hl,0
+l0fb4:
+	ld	(l23df),hl
+	call	l0ff2
+	call	l1a8d
+	call	clr.pic.buff	; Clear buffer
+	ld	hl,(l23df)
+	dec	hl
+	ld	a,h
+	or	a
+	pop	bc
+	jp	m,l0fdf
+	dec	b
+	jp	z,l0fdf
+	ld	a,b
+	cp	1
+	jp	nz,l0fa0
+	ex	de,hl
+	ld	hl,(l23e4)
+	ld	(l2500),hl
+	ex	de,hl
+	jp	l0fa0
+l0fdf:
+	call	Set.6cpi	; Set characters per inch
+	ret
+;
+; Put byte to printer
+; ENTRY	Accu holds byte
+;
+Lstout:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	c,.lstout
+	ld	e,a
+	call	BDOS		; .. print
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Do the opcode execution
+;
+l0ff2:
+	ld	de,l0a63
+	ld	hl,l0aa1
+	ld	bc,CpyLen
+	call	.LDIR		; .. copy current setting
+	ld	a,(FileAct)	; Test file active
+	and	a
+	jp	z,l100b		; .. nope
+	call	RdRec0		; Read 1st record
+	jp	l100e
+l100b:
+	call	ResBuff		; Reset buffer
+l100e:
+	ld	hl,(BufIdx)	; Get buffer index
+l1011:
+	dec	hl		; Test queue processed
+	ld	a,h
+	or	h
+	jp	m,@not.impl	; .. yeap, give up
+l1017:
+	push	hl		; Save index
+	call	LdCode		; Get code
+	ld	hl,@OpcTab-2*5
+	rlca			; *2
+	add	a,l		; Position into table
+	ld	l,a
+	ld	a,0
+	adc	a,h
+	ld	h,a
+	ld	e,(hl)		; Fetch execution address
+	inc	hl
+	ld	d,(hl)
+	ld	hl,l102e
+	push	hl		; Set return address
+	ex	de,hl
+	jp	(hl)		; .. go
+l102e:
+	pop	hl		; Get back index
+	jp	l1011
+@not.impl:
+	ret
+;
+; Opcode execution table
+;
+@OpcTab:
+	dw	@not.impl	;  5 : --
+	dw	@OutPolLine	;  6 : Output a polyline
+	dw	@OutMark	;  7 : Output markers
+	dw	@WrText		;  8 : Write text
+	dw	@FillPoly	;  9 : Fill a polygon
+	dw	@DspCellArr	; 10 : Display cell array
+	dw	@OutPrim	; 11 : Output a primitive
+	dw	@CharHeight	; 12 : Set character height
+	dw	@TextDir	; 13 : Set text direction
+	dw	@not.impl	; 14 : --
+	dw	@PolyType	; 15 : Set polyline type
+	dw	@not.impl.	; 16 : --
+	dw	@PolyColor	; 17 : Set polyline color index
+	dw	@PolyMarkT	; 18 : Set polymarker type
+	dw	@MarkScale	; 19 : Set polymarker scale
+	dw	@MarkColor	; 20 : Set polymarker color
+	dw	@not.impl..	; 21 : --
+	dw	@ColorIdx	; 22 : Set color index
+	dw	@IntFill	; 23 : Set interior fill style
+	dw	@IdxFill	; 24 : Set fill style index
+	dw	@ColFill	; 25 : Set fill color index
+	dw	@not.impl	; 26 : --
+	dw	@not.impl	; 27 : --
+	dw	@not.impl	; 28 : --
+	dw	@not.impl	; 29 : --
+	dw	@not.impl	; 30 : --
+	dw	@not.impl	; 31 : --
+	dw	@SetWrMode	; 32 : Set writing mode
+	dw	@not.impl	; 33 : --
+l106d:
+	dw	0
+l106f:
+	dw	0
+l1071:
+	dw	0
+l1073:
+	dw	0
+l1075:
+	dw	0
+l1077:
+	db	0
+l1078:
+	db	0
+l1079:
+	dw	0
+l107b:
+	dw	0
+l107d:
+	dw	0
+l107f:
+	dw	0
+l1081:
+	db	0
+l1082:
+	db	0
+l1083:
+	db	0
+l1084:
+	db	0
+l1085:
+	db	0
+;;l1086:
+	db	1
+l1087:
+	dw	0
+;;l1089:
+	db	0
+ParPtr:
+	dw	0
+l108c:
+	dw	0
+l108e:
+	dw	0
+l1090:
+	dw	0
+l1092:
+	dw	0
+pic@bits:
+	db	0
+pic@@:
+	dw	0
+;
+; Code 6 : Output a polyline
+;
+@OutPolLine::
+	ld	a,(PL$1)	; Copy bits to global
+	ld	(TX$1),a
+	ld	a,(PL$2)
+	ld	(TX$2),a
+	call	LdCode
+	call	l151e
+	ret
+;
+; Get next word from array
+; EXIT	Reg DE holds next word
+;
+GetPar:
+	ld	hl,(ParPtr)	; Get pointer
+	ld	e,(hl)		; .. fetch word
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(ParPtr),hl
+	ret
+;
+; Code 12 : Set character height
+;
+@CharHeight:
+	call	LdCode		; Get code
+	ld	(CH..HGT),a	; .. set height
+	ld	b,a		; .. save
+	rla			; .. *8
+	rla
+	rla
+	ld	(CH.HGT),a	; .. set height
+	sub	b
+	sub	b
+	ld	(CELL.WID),a	; .. and cell width
+	ret
+;
+; Code 13 : Set text direction
+;
+@TextDir:
+	call	LdCode		; Get from buffer
+	ld	(ANGL.IDX),a
+	ret
+;
+; Code 15 : Set polyline type
+;
+@PolyType:
+	call	LdCode
+	ld	(INTIN.2),a	; Save line type
+	ld	hl,l10e5
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Position type
+	add	hl,de
+	ld	e,(hl)		; .. get it
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(Poly$Type),hl	; .. save
+	ret
+;
+l10e5:
+	dw	1111111111111111b	; Solid
+	dw	1111100011111000b	; Dash
+	dw	1000100010001000b	; Dot
+	dw	1111110000110000b	; Dash, dot
+	dw	1111111111100000b	; Long dash
+	dw	1111110011001100b	; Dash, dot, dor
+;
+; Code 16 : NOT IMPLEMENTED
+;
+@not.impl.:
+	ret
+;
+; Code 17 : Set polyline color index
+;
+@PolyColor:
+	call	LdCode
+	ld	(INTIN.3),a	; Save polyline marker index
+	or	a		; Test 'color'
+	jp	nz,l1104
+	inc	a		; Set values
+	ld	(PL$1),a
+	cpl
+	jp	l110d
+l1104:
+	ld	a,(@@@$1)	; Copy bit pattern
+	ld	(PL$1),a
+	ld	a,(@@@$2)
+l110d:
+	ld	(PL$2),a
+	ret
+;
+; Code 18 : Set polymarker type
+;
+@PolyMarkT:
+	call	LdCode
+	ld	(INTIN.4),a	; Save marker type
+	ret
+;
+; Code 19 : Set polymarker scale
+;
+@MarkScale:
+	call	LdCode
+	ld	(MK..HGT),a
+	ret
+;
+; Code 20 : Set polymarker color
+;
+@MarkColor:
+	call	LdCode
+	ld	(INTIN.5),a	; Save polymarker color index
+	or	a		; Test zero
+	jp	nz,l1131
+	inc	a		; Set values
+	ld	(PM$1),a
+	cpl
+	jp	l113a
+l1131:
+	ld	a,(@@@$1)	; Copy bit pattern
+	ld	(PM$1),a
+	ld	a,(@@@$2)
+l113a:
+	ld	(PM$2),a
+	ret
+;
+; Code 21 : NOT IMPLEMENTED
+;
+@not.impl..:
+	ret
+;
+; Code 22 : Set color index
+;
+@ColorIdx:
+	call	LdCode
+	ld	(INTIN.7),a	; Save text color index
+	or	a		; Test zero
+	jp	nz,l1151
+	inc	a
+	ld	(C$1),a		; Set values
+	cpl
+	jp	l115a
+l1151:
+	ld	a,(@@@$1)	; Copy bit pattern
+	ld	(C$1),a
+	ld	a,(@@@$2)
+l115a:
+	ld	(C$2),a
+	ret
+;
+; Code 23 : Set interior fill style
+;
+@IntFill:
+	call	LdCode
+	ld	(INTIN.9),a	; Save fill style index
+	ret
+;
+; Code 24 : Set fill style index
+;
+@IdxFill:
+	call	LdCode
+	ld	(INTIN.8),a	; Save fill interior style
+	ret
+;
+; Code 25 : Set fill color index
+;
+@ColFill:
+	call	LdCode
+	ld	(INTIN.10),a	; Save fill color index
+	or	a		; Test zero
+	jp	nz,l117e
+	inc	a
+	ld	(FC$1),a	; Set values
+	cpl
+	jp	l1187
+l117e:
+	ld	a,(@@@$1)	; .. copy bit pattern
+	ld	(FC$1),a
+	ld	a,(@@@$2)
+l1187:
+	ld	(FC$2),a
+	ret
+;
+; Code 32 : Set writing mode
+;
+@SetWrMode:
+	call	LdCode		; Get code
+	ld	(l0a85),a
+	or	a		; Test replace
+	jp	nz,l119b
+	ld	(Replace),a	; .. clear flag if so
+	jp	l11a7
+l119b:
+	ld	b,a
+	ld	a,1
+	ld	(Replace),a	; Set no replace
+	ld	a,b
+	cp	2
+	jp	nc,l11b0
+l11a7:
+	ld	a,00000001b	; Set bitt pattern
+	ld	(@@@$2),a
+	xor	a
+	jp	l11c4
+l11b0:
+	cp	3		; Build selections
+	jp	nc,l11be
+	dec	a
+	ld	(@@@$2),a	; Set 00000001b
+	ld	a,11111111b	; Set mask
+	jp	l11c4
+l11be:
+	ld	a,11111110b
+	ld	(@@@$2),a
+	cpl
+l11c4:
+	ld	(@@@$1),a	; Init bits for all
+	ld	(TX$1),a
+	ld	(PL$1),a
+	ld	(PM$1),a
+	ld	(C$1),a
+	ld	(FC$1),a
+	ld	a,(@@@$2)
+	ld	(TX$2),a
+	ld	(PL$2),a
+	ld	(PM$2),a
+	ld	(C$2),a
+	ld	(FC$2),a
+	ret
+;
+	ret
+;
+; Code 9 : Fill a polygon
+;
+@FillPoly::
+	xor	a
+	ld	(l23e3),a
+l11ee:
+	ld	a,(INTIN.3)	; Get polyline color index
+	ld	(l24c6),a
+	ld	a,(INTIN.10)	; Get fill color index
+	ld	(INTIN.3),a	; .. as plyline color index
+	ld	a,(INTIN.2)	; Get line type
+	ld	(l24ef),a
+	call	LdCode
+	ld	(l24b0),a
+	inc	a
+	ld	hl,(BufPtr)	; Get buffer pointer
+	ld	(l24bc),hl
+	ld	hl,(CurRRN)	; Get record
+	ld	(l24c0),hl
+	ld	l,a
+	ld	h,0
+	add	hl,hl		; .. *4
+	add	hl,hl
+	call	UpdateBuff	; Update pointer
+	call	LdWords		; Get next word pair
+	ex	de,hl
+	ld	(l24b2),hl
+	ld	(l23e6),hl
+	ld	h,b
+	ld	l,c
+	ld	(l24b4),hl
+	call	LdWords		; Get next word pair
+	ex	de,hl
+	ld	(l24b6),hl
+	ld	(l23e8),hl
+	ld	h,b
+	ld	l,c
+	ld	(l24b8),hl
+	ld	hl,(BufPtr)	; Get buffer pointer
+	ld	(l24be),hl
+	ld	hl,(CurRRN)	; Get record
+	ld	(l24c2),hl
+	ld	hl,(l24b8)
+	ex	de,hl
+	ld	hl,(l23df)
+	call	cmp.hl.de	; Compare
+	jp	c,l1498		; HL < DE
+	ld	hl,(l23dd)
+	ex	de,hl
+	ld	hl,(l24b4)
+	call	cmp.hl.de	; Compare
+	jp	c,l1498		; HL < DE
+	ld	a,(INTIN.9)	; Get fill style index
+	or	a
+	jp	z,l1469
+	ld	hl,(Poly$Type)	; Get polyline type
+	ld	(l24c4),hl
+	ld	a,(FC$1)	; Copy bits to global
+	ld	(TX$1),a
+	ld	a,(FC$2)
+	ld	(TX$2),a
+	ld	hl,0
+	ld	a,(INTIN.9)	; Get fill style index
+	ld	(INTIN.2),a	; .. into line type
+	dec	a
+	jp	z,l1294
+	ld	hl,(INTIN.8)	; Get fill interior style
+	cp	2
+	jp	z,l1291
+	ld	de,6
+	add	hl,de
+l1291:
+	call	Mul.by8		; Multiply by 8
+l1294:
+	ld	de,l3412
+	add	hl,de		; Poiint to pattern
+	ld	(l24e0),hl
+	ld	hl,(l23dd)
+	ld	(l24cc),hl
+	ld	hl,(l23df)
+	ld	(l24ca),hl
+	ex	de,hl
+	ld	hl,(l24b4)
+	call	cmp.hl.de	; Compare
+	jp	nc,l12b4	; HL >= DE
+	ld	(l24ca),hl
+l12b4:
+	ld	hl,(l24cc)
+	ex	de,hl
+	ld	hl,(l24b8)
+	call	cmp.hl.de	; Compare
+	jp	c,l12c5		; HL < DE
+	ld	(l24cc),hl
+	ex	de,hl
+l12c5:
+	ld	hl,(l24ca)
+	ld	(l24c8),hl
+	call	sub.de.hl	; Get DE-HL
+	inc	hl
+	ld	(l24ba),hl
+l12d2:
+	ld	a,(l23e3)
+	or	a
+	jp	z,l12e1
+	ld	a,1
+	ld	(l24de),a
+	jp	l13e9
+l12e1:
+	xor	a
+	ld	(l24d6),a
+	ld	a,(l24b0)
+	ld	(l24dc),a
+	ld	hl,(l24bc)
+	ld	(BufPtr),hl	; Restore buffer pointer
+	ld	hl,(l24c0)
+	ld	(CurRRN),hl	; Get record
+	call	LdWords		; .. get word pair
+	ex	de,hl
+	ld	(l24ce),hl
+	ld	h,b
+	ld	l,c
+	ld	(l24d0),hl
+l1303:
+	call	LdWords		; Get next word pair
+	ex	de,hl
+	ld	(l24d2),hl
+	ld	d,b
+	ld	e,c
+	ld	hl,(l24c8)
+	ex	de,hl
+	ld	(l24d4),hl
+	call	sub.de.hl	; Get DE-HL
+	ld	(l24e2),hl
+	rra
+	and	10000000b
+	ld	(l24ee),a
+	ld	hl,(l24c8)
+	ex	de,hl
+	ld	hl,(l24d0)
+	call	sub.de.hl	; Get DE-HL
+	rra
+	and	10000000b
+	ld	b,a
+	ld	a,(l24ee)
+	cp	b
+	jp	z,l13be
+	ld	hl,(l24d0)
+	ex	de,hl
+	ld	hl,(l24d4)
+	call	sub.de.hl	; Get DE-HL
+	ld	(l24ec),hl
+	ld	a,h
+	or	l
+	jp	z,l13be
+	ld	hl,(l24ce)
+	ex	de,hl
+	ld	hl,(l24d2)
+	call	sub.de.hl	; Get DE-HL
+	rra
+	and	10000000b
+	ld	b,a
+	jp	z,l135a
+	call	neg.hl		; .. negate
+l135a:
+	ld	(l24e4),hl
+	ld	hl,(l24e2)
+	ld	a,h
+	and	10000000b
+	jp	z,l136b
+	xor	b
+	ld	b,a
+	call	neg.hl		; .. negate
+l136b:
+	push	bc
+	ld	b,h
+	ld	c,l
+	ld	hl,(l24e4)
+	push	hl
+	call	l0816
+	pop	bc
+	push	hl
+	ld	hl,(l24ec)
+	ld	a,h
+	and	10000000b
+	jp	z,l1385
+	xor	b
+	ld	b,a
+	call	neg.hl		; .. negate
+l1385:
+	push	bc
+	ld	b,h
+	ld	c,l
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	ld	a,l
+	adc	a,a
+	ld	l,a
+	ld	a,h
+	adc	a,a
+	ld	h,a
+	inc	de
+	call	l084e
+	xor	a
+	ld	a,d
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	ex	de,hl
+	pop	bc
+	ld	a,b
+	or	a
+	jp	z,l13a8
+	call	neg.hl		; .. negate
+l13a8:
+	ex	de,hl
+	ld	hl,(l24d2)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l24d6)
+	inc	hl
+	ld	(l24d6),hl
+	dec	hl
+	add	hl,hl
+	ld	bc,l23e6
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l13be:
+	ld	a,(l24dc)
+	dec	a
+	ld	(l24dc),a
+	ld	hl,(l24d2)
+	ld	(l24ce),hl
+	ld	hl,(l24d4)
+	ld	(l24d0),hl
+	jp	nz,l1303
+	ld	a,(l24d6)
+	cp	2
+	jp	c,l1458
+	call	l14ab
+	ld	a,(l24d6)
+	inc	a
+	and	11111110b
+	rrca
+	ld	(l24de),a
+l13e9:
+	ld	hl,l23e6
+l13ec:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	push	hl
+	ld	h,b
+	ld	l,c
+	call	cmp.hl.de	; Compare
+	jp	nc,l144d	; .. HL >= DE
+	ld	(l1079),hl
+	ld	(l1075),hl
+	ex	de,hl
+	ld	(l106d),hl
+	ld	(l1071),hl
+	ld	a,l
+	ld	(l24e8),a
+	ld	hl,(l24c8)
+	ld	(l1073),hl
+	ld	(l106f),hl
+	ld	(l107b),hl
+	ld	(l1077),hl
+	ld	a,l
+	and	00000111b
+	ld	l,a
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l24e0)
+	add	hl,de
+	ld	a,(hl)
+	ld	(l24e6),a
+	ld	a,(l24e8)
+	and	00000111b
+	or	a
+	ld	c,a
+	ld	a,(l24e6)
+	jp	z,l143e
+l1439:
+	rlca
+	dec	c
+	jp	nz,l1439
+l143e:
+	ld	h,a
+	ld	l,a
+	ld	(Poly$Type),hl	; .. set polyline type
+	ld	(l1087),hl
+	xor	a
+	ld	(l1085),a	; Set 00000000
+	call	l1605
+l144d:
+	pop	hl
+	ld	a,(l24de)
+	dec	a
+	ld	(l24de),a
+	jp	nz,l13ec
+l1458:
+	ld	hl,(l24c8)
+	inc	hl
+	ld	(l24c8),hl
+	ld	a,(l24ba)
+	dec	a
+	ld	(l24ba),a
+	jp	nz,l12d2
+l1469:
+	ld	a,(FC$1)	; Copy bits to global
+	ld	(TX$1),a
+	ld	a,(FC$2)
+	ld	(TX$2),a
+	xor	a
+	ld	(INTIN.2),a	; Clear line type
+	ld	hl,(l24bc)
+	ld	(BufPtr),hl	; Restore buffer pointer
+	ld	hl,(l24c0)
+	ld	(CurRRN),hl	; . and record
+	ld	a,(l24b0)
+	inc	a
+	call	l151e
+	ld	hl,(l24be)
+	ld	(BufPtr),hl	; Restore buffer pointer
+	ld	hl,(l24c2)
+	ld	(CurRRN),hl	; .. and record
+l1498:
+	ld	a,(l24c6)
+	ld	(INTIN.3),a	; Set polyline color index
+	ld	a,(l24ef)
+	ld	(INTIN.2),a	; .. and line type
+	ld	hl,(l24c4)
+	ld	(Poly$Type),hl	; .. polyline type
+	ret
+;
+;
+;
+l14ab:
+	dec	a
+	ld	(l24d8),a
+l14af:
+	ld	a,1
+	ld	(l24da),a
+	ld	hl,l23e6
+	ld	(l24ea),hl
+l14ba:
+	ld	hl,(l24ea)
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	call	cmp.hl.de	; Compare
+	jp	c,l14dc		; HL < DE
+	ex	de,hl
+	push	hl
+	ld	hl,(l24ea)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	dec	hl
+	jp	l14e1
+l14dc:
+	ld	hl,(l24ea)
+	inc	hl
+	inc	hl
+l14e1:
+	ld	(l24ea),hl
+	ld	a,(l24da)
+	inc	a
+	ld	(l24da),a
+	ld	b,a
+	ld	a,(l24d8)
+	cp	b
+	jp	nc,l14ba
+	dec	a
+	ld	(l24d8),a
+	jp	nz,l14af
+	ret
+;
+l14fb:
+	dw	0
+;
+; Code 11 : Output a primitive
+;
+@OutPrim::
+	call	LdCode
+	dec	a
+	ret	nz
+	inc	a
+	ld	(l23e3),a
+	call	l11ee
+	ret
+;
+; Code 10 : Display cell array
+;
+@DspCellArr::
+	ld	a,(INTIN.2)	; Get line type
+	ld	(l14fb),a
+	xor	a
+	ld	(INTIN.2),a	; .. clear it
+	call	@OutPolLine	; Output plyline
+	ld	a,(l14fb)
+	ld	(INTIN.2),a	; Restore line type
+	ret
+;
+;
+;
+l151e:
+	push	af
+	call	LdWords		; Get word pair
+	ex	de,hl
+	ld	(l1071),hl
+	ld	(l106d),hl
+	ld	h,b
+	ld	l,c
+	ld	(l1073),hl
+	ld	(l106f),hl
+	ex	de,hl
+l1532:
+	pop	af
+	dec	a
+	jp	z,l156b
+	push	af
+	call	LdWords		; Get next word pair (coordinates)
+	ex	de,hl
+	ld	(l1079),hl
+	ld	(l1075),hl
+	ld	h,b
+	ld	l,c
+	ld	(l107b),hl
+	ld	(l1077),hl
+	ld	hl,(Poly$Type)	; Get polyline type
+	ld	(l1087),hl
+	call	l1785
+	call	z,l1605
+	ld	hl,(l1075)
+	ld	(l1071),hl
+	ld	(l106d),hl
+	ld	hl,(l1077)
+	ld	(l1073),hl
+	ld	(l106f),hl
+	jp	l1532
+l156b:
+	ret
+;
+;
+;
+l156c:
+	ld	a,(l1601)
+	or	a
+	jp	nz,l158d
+	ld	a,(l1082)
+	or	a
+	jp	m,l1580
+	ld	hl,(l106f)
+	jp	l15ab
+l1580:
+	ld	hl,(y@cor)
+	ex	de,hl
+	ld	hl,(l106f)
+	call	sub.de.hl	; Get DE-HL
+	jp	l15ab
+l158d:
+	ld	a,(l1082)
+	or	a
+	jp	z,l15c2
+	ld	a,(l1081)
+	or	a
+	jp	m,l15a1
+	ld	hl,(l106d)
+	jp	l15ab
+l15a1:
+	ld	hl,(x@cor)
+	ex	de,hl
+	ld	hl,(l106d)
+	call	sub.de.hl	; Get DE-HL
+l15ab:
+	ld	a,l
+	and	00001111b
+	or	a
+	ld	c,a
+	ld	hl,(l1087)
+	jp	z,l15bf
+l15b6:
+	add	hl,hl
+	jp	nc,l15bb
+	inc	hl
+l15bb:
+	dec	c
+	jp	nz,l15b6
+l15bf:
+	ld	(l1087),hl
+l15c2:
+	ret
+;
+; EXIT	Carry set if ???
+;
+l15c3:
+	push	hl
+	push	bc
+	ld	hl,(l1087)
+	add	hl,hl
+	jp	nc,l15cd
+	inc	hl
+l15cd:
+	ld	(l1087),hl
+	ld	a,(Replace)	; Test replace
+	rra
+	jp	c,l15f7		; .. nope
+	ld	b,a
+	ld	a,(INTIN.3)	; Get polyline color index
+	rrca
+	and	b
+	ld	a,1
+	scf
+	jp	m,l15ed
+	ld	(TX$1),a	; Set bit modes
+	cpl
+	ld	(TX$2),a
+	jp	l15f8
+l15ed:
+	ld	(TX$2),a
+	dec	a
+	ld	(TX$1),a
+	jp	l15f8
+l15f7:
+	rla
+l15f8:
+	pop	bc
+	pop	hl
+	ret
+;
+l15fb:
+	dw	0
+l15fd:
+	dw	0
+l15ff:
+	dw	0
+l1601:
+	db	0
+l1602:
+	dw	0
+;;l1604:
+	db	0
+;
+;
+;
+l1605:
+	call	l16a1
+	ld	hl,(l106f)
+	ex	de,hl
+	ld	hl,(l106d)
+	call	pic.adr		; Get buffer values
+	ld	a,(INTIN.2)	; Get line type
+	or	a
+	jp	nz,l1622
+	ld	hl,-1
+	ld	(l1087),hl
+	jp	l1625
+l1622:
+	call	l156c
+l1625:
+	call	l15c3
+	jp	nc,l1635
+	ld	hl,(pic@@)	; Get address
+	ld	a,(pic@bits)	; .. bit position
+	ld	b,a
+	call	AttacheBit	; .. attache bit
+l1635:
+	ld	a,(l1601)
+	or	a
+	ex	de,hl
+	jp	z,l1659
+	ld	hl,(l106d)
+	call	l170f
+	push	de
+	ex	de,hl
+	ld	hl,(l15ff)
+	ex	de,hl
+	call	cmp.hl.de	; Compare
+	pop	de
+	jp	nc,l1672	; HL >= DE
+	ld	hl,(l106f)
+	call	l174d
+	jp	l1672
+l1659:
+	ld	hl,(l106f)
+	call	l174d
+	push	de
+	ex	de,hl
+	ld	hl,(l15ff)
+	ex	de,hl
+	call	cmp.hl.de	; Compare
+	pop	de
+	jp	nc,l1672	; HL >= DE
+	ld	hl,(l106d)
+	call	l170f
+l1672:
+	push	de
+	ld	hl,(l106d)
+	ex	de,hl
+	ld	hl,(l1079)
+	call	cmp.hl.de	; Compare
+	jp	nz,l1696	; .. not same
+	ld	hl,(l106f)
+	ex	de,hl
+	ld	hl,(l107b)
+	call	cmp.hl.de	; Compare
+	jp	nz,l1696	; .. not same
+	pop	hl
+	call	l15c3
+	ret	nc
+	call	AttacheBit	; Attache bit
+	ret
+l1696:
+	pop	hl
+	ld	(pic@@),hl	; Save address
+	ld	a,b
+	ld	(pic@bits),a	; .. and bit position
+	jp	l1625
+;
+;
+;
+l16a1:
+	ld	hl,(l1079)
+	ex	de,hl
+	ld	hl,(l106d)
+	call	l16f3
+	ld	(l1081),a
+	ld	(l107d),hl
+	call	abs.hl		; Make absolute
+	ld	(l15fb),hl
+	ld	hl,(l107b)
+	ex	de,hl
+	ld	hl,(l106f)
+	call	l16f3
+	ld	(l1082),a
+	ld	(l107f),hl
+	call	abs.hl		; Make absolute
+	ld	(l15fd),hl
+	ex	de,hl
+	ld	hl,(l15fb)
+	call	cmp.hl.de	; Compare
+	jp	nc,l16e3	; .. HL >= DE
+	xor	a
+	ld	a,h
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	ld	a,1
+	jp	l16ec
+l16e3:
+	xor	a
+	ld	a,d
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	ex	de,hl
+	xor	a
+l16ec:
+	ld	(l1601),a
+	ld	(l15ff),hl
+	ret
+;
+; ENTRY	Reg DE holds ??
+;	Reg HL holds ??
+; EXIT	Reg HL holds ??
+;	Accu holds ??
+;
+l16f3:
+	push	hl
+	call	sub.de.hl	; Get DE-HL
+	ld	b,h
+	ld	c,l
+	pop	hl
+	call	sgn.cmp		; Compare DE:HL
+	jp	nc,l1705	; .. DE > HL
+	ld	a,-1
+	jp	l170c
+l1705:
+	ld	a,b
+	or	c
+	jp	z,l170c
+	ld	a,1
+l170c:
+	ld	h,b
+	ld	l,c
+	ret
+;
+;
+;
+l170f:
+	ld	a,(l1081)
+	and	a
+	jp	z,l174c
+	jp	m,l1726
+	inc	hl
+	inc	b
+	ld	a,00000111b
+	and	b		; Mask bits
+	jp	nz,l1732
+	ld	b,a
+	inc	de
+	jp	l1732
+l1726:
+	dec	hl
+	xor	a
+	dec	b
+	jp	p,l1734
+	ld	b,00000111b	; Set max
+	dec	de
+	jp	l1734
+l1732:
+	ld	a,1
+l1734:
+	ld	(l106d),hl
+	push	bc
+	ld	hl,(l107f)
+	or	a
+	call	nz,neg.hl	; .. negate
+	ld	b,h
+	ld	c,l
+	ld	hl,(l1602)
+	add	hl,bc
+	ld	(l1602),hl
+	call	abs.hl		; Make absolute
+	pop	bc
+l174c:
+	ret
+;
+;
+;
+l174d:
+	ld	a,(l1082)
+	and	a
+	jp	z,l1780
+	jp	m,l175d
+	inc	hl
+	ld	a,1
+	jp	l175f
+l175d:
+	dec	hl
+	xor	a
+l175f:
+	ld	(l106f),hl
+	push	af
+	ld	hl,(l24f8)
+	or	a
+	call	z,neg.hl	; .. negate
+	add	hl,de
+	pop	af
+	push	hl
+	ld	hl,(l107d)
+	or	a
+	call	z,neg.hl	; .. negate
+	ex	de,hl
+	ld	hl,(l1602)
+	add	hl,de
+	ld	(l1602),hl
+	call	abs.hl		; Make absolute
+	pop	de
+l1780:
+	ret
+;
+	dw	0
+l1783:
+	dw	0
+;
+;
+;
+l1785:
+	xor	a
+	ld	(l1085),a	; Set 00000000
+	ld	hl,(l106f)
+	call	l1809
+	ld	a,b
+	ld	(l1083),a
+	ld	hl,(l107b)
+	call	l1809
+	ld	a,b
+	ld	(l1084),a
+	ld	a,(l1083)
+	and	b
+	ret	nz
+	ld	a,(l1083)
+	or	b
+	ret	z
+	ld	hl,(l1079)
+	ex	de,hl
+	ld	hl,(l106d)
+	call	sub.de.hl	; Get DE-HL
+	ld	(l107d),hl
+	ld	hl,(l107b)
+	ex	de,hl
+	ld	hl,(l106f)
+	call	sub.de.hl	; Get DE-HL
+	ld	(l107f),hl
+	ld	a,(l1084)
+	or	a
+	jp	z,l17df
+	ld	b,a
+	rra
+	ld	(l1085),a	; Set mask (??)
+	ld	a,b
+	ld	hl,(l107b)
+	ex	de,hl
+	ld	hl,(l1079)
+	call	l1824
+	ld	(l1079),hl
+	ex	de,hl
+	ld	(l107b),hl
+l17df:
+	ld	a,(l1083)
+	or	a
+	jp	z,l1807
+	ld	b,a
+	rrca
+	jp	c,l17f0
+	ld	a,11111111b
+	jp	l17f2
+l17f0:
+	ld	a,00000001b
+l17f2:
+	ld	(l1085),a	; Set mask (??)
+	ld	a,b
+	ld	hl,(l106f)
+	ex	de,hl
+	ld	hl,(l106d)
+	call	l1824
+	ld	(l106d),hl
+	ex	de,hl
+	ld	(l106f),hl
+l1807:
+	xor	a
+	ret
+;
+; ENTRY	Reg DE holds ??
+; EXIT	Reg B holds 0 if ??
+;	Reg B holds 1 if ??
+;	Reg B holds 2 if ??
+;
+l1809:
+	ld	b,0
+	ex	de,hl
+	ld	hl,(l23dd)
+	ex	de,hl
+	call	cmp.hl.de	; Compare
+	jp	nc,l1819	; HL >= DE
+	inc	b
+	inc	b
+	ret
+l1819:
+	ex	de,hl
+	ld	hl,(l23df)
+	call	cmp.hl.de	; Compare
+	ret	nc		; HL >= DE
+	inc	b
+	ret
+;
+l1823:
+	db	0
+;
+;
+;
+l1824:
+	ld	b,h
+	ld	c,l
+	rrca
+	ld	hl,(l23dd)
+	inc	hl
+	jp	nc,l1831
+	ld	hl,(l23df)
+l1831:
+	push	af
+	push	bc
+	push	hl
+	ex	de,hl
+	call	sub.de.hl	; Get DE-HL
+	ld	(l1783),hl
+	ld	hl,(l107d)
+	ex	de,hl
+	ld	hl,(l107f)
+	ld	a,h
+	xor	d		; Get combined sign
+	push	af		; .. save
+	call	Divide		; HL:=DE DIV HL
+	push	hl
+	ld	hl,0
+	ld	a,b		; Test remainder
+	or	c
+	jp	nz,l1855	; .. yeap
+	push	hl
+	jp	l1867
+l1855:
+	ld	d,b
+	ld	e,c
+	ld	hl,(l107f)
+	ex	de,hl
+	ld	b,d
+	ld	c,e
+	call	l09a4
+	push	de
+	ld	hl,(l1783)
+	call	l0978
+l1867:
+	pop	bc
+	pop	de
+	ld	a,d
+	or	e
+	ld	a,34h
+	jp	nz,l1875
+	cp	b
+	jp	m,l1875
+	xor	a
+l1875:
+	ld	(l1823),a
+	pop	af
+	push	hl
+	ld	hl,(l1783)
+	ld	a,h
+	rlca
+	jp	p,l1883
+	ccf
+l1883:
+	push	af
+	call	Multiply	; Get product
+	call	abs.hl		; .. absolute
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	add	hl,de
+	pop	af
+	call	c,neg.hl	; .. negate
+	pop	bc
+	pop	de
+	add	hl,de
+	pop	af
+	ex	de,hl
+	jp	c,l18b7
+	dec	bc
+	ld	a,(l1823)
+	or	a
+	jp	z,l18b7
+	ld	hl,(l107d)
+	ld	a,h
+	or	l
+	jp	z,l18b7
+	ld	a,h
+	ld	hl,(l107f)
+	xor	h
+	jp	m,l18b6
+	dec	de
+	jp	l18b7
+l18b6:
+	inc	de
+l18b7:
+	xor	a
+	or	d
+	jp	p,l18bf
+	ld	de,0
+l18bf:
+	ld	hl,(x@cor)
+	call	cmp.hl.de	; Compare
+	jp	nc,l18c9	; HL >= DE
+	ex	de,hl
+l18c9:
+	ld	d,b
+	ld	e,c
+	ret
+;
+;
+;
+l18cc:
+	ld	hl,(l1071)
+	ld	a,h
+	or	h
+	ret	m
+	ex	de,hl
+	ld	hl,(l20b3)
+	call	cmp.hl.de	; Compare
+	ret	nc		; HL >= DE
+	ld	hl,(l1073)
+	call	l1809
+	xor	a
+	or	b
+	ret	nz
+	ld	hl,(l1073)
+	ex	de,hl
+	ld	hl,(l1071)
+	call	pic.adr		; Get buffer values
+	call	AttacheBit	; Attache bit
+	ret
+;
+; Calculate buffer values
+; ENTRY	Reg HL holds ???
+;	Reg DE holds ???
+;
+pic.adr:
+	call	pic@offs	; Calculate buffer offset
+	call	pos.pic.buff	; Position buffer
+	ld	(pic@@),hl	; .. save
+	ld	a,b
+	ld	(pic@bits),a	; .. save modulo
+	ret
+;
+; Position pixel buffer
+; Map relative address in HL to absolute one
+;
+pos.pic.buff:
+	ld	de,pic@buf
+	add	hl,de		; Position buffer
+	ret
+;
+; Calculate buffer index
+; ENTRY	Reg HL holds ???
+; EXIT	Reg HL holds relative buffer address
+;	Reg B  holds reg HL MOD 8
+;
+pic@offs:
+	ld	a,00000111b
+	ld	(l250f),a	; .. save pattern
+	and	l		; Get modulo
+	push	af		; .. save
+	ld	b,3
+l190d:
+	xor	a
+	ld	a,h
+	rra			; Divide by 8
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	dec	b
+	jp	nz,l190d
+	push	hl
+	ld	hl,(l23e1)
+	call	sub.de.hl	; Get DE-HL
+	ex	de,hl
+	ld	hl,(l24f8)
+	call	Multiply	; Get product
+	pop	de
+	add	hl,de		; .. add
+	pop	bc		; Get back modulo
+	ret
+;
+; Manipulate pattern at ^HL - reg B holds bit position
+;
+AttacheBit:
+	push	bc
+	ld	a,(TX$2)	; Get pattern mask
+				; Either 00000001
+				; .. or  11111110
+l192e:
+	rrca			; .. rotate bit
+	dec	b
+	jp	p,l192e
+	ld	c,a		; .. save
+	ld	a,(TX$1)	; Get pattern bits
+				; Either 00000000
+				; .. or  11111111
+				; .. or  00000001
+	or	a		; .. combine them
+	ld	a,c
+	jp	z,l1947		; Select bit operation
+	jp	m,l1943
+	and	(hl)		; .. erase bit
+	jp	l1948
+l1943:
+	xor	(hl)		; .. complement bit
+	jp	l1948
+l1947:
+	or	(hl)		; .. set bit
+l1948:
+	ld	(hl),a		; Set new value
+	pop	bc
+	ret
+;
+;
+;
+Scale::
+	ld	hl,(mx@cor)	; Get max X
+	ex	de,hl
+	ld	hl,(x@cor)	; .. current X
+	call	cmp.hl.de	; Compare
+	jp	nc,l195c	; HL >= DE
+	ex	de,hl
+	ld	(x@cor),hl	; .. set new max
+l195c:
+	ld	b,3
+l195e:
+	xor	a
+	ld	a,h
+	rra			; Divide X by 8
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	dec	b
+	jp	nz,l195e
+	inc	hl
+	ld	(l24f8),hl	; .. save
+	ld	de,8
+	call	Multiply	; Multiply less remainder
+	ld	(l24fe),hl
+	ld	de,15*256
+	call	Divide		; Divide
+	ld	a,11111110b
+	and	l		; .. get even result
+	ld	l,a
+	ld	de,2
+	call	cmp.hl.de	; Compare
+	jp	c,l198c		; HL < DE
+	ld	hl,2		; Set max
+l198c:
+	push	hl
+	ld	hl,(y@cor)
+	ld	a,h
+	or	l
+	jp	z,l19ab
+	ld	a,h
+	or	a
+	jp	m,l19ab
+	ex	de,hl
+	ld	hl,8
+	call	Divide		; Divide by 8
+	inc	hl
+	ld	de,2
+	call	cmp.hl.de	; Compare
+	jp	c,l19b1		; HL < DE
+l19ab:
+	ld	hl,2
+	ld	(y@cor),hl
+l19b1:
+	ld	(l24fc),hl
+	pop	de
+	push	hl
+	call	cmp.hl.de	; Compare
+	jp	nc,l19bd	; HL >= DE
+	ex	de,hl
+l19bd:
+	ld	(l2500),hl
+	ld	(l23e4),hl
+	pop	de
+	push	hl
+	call	Divide		; Divide
+	ld	a,c		; Test remainder
+	or	a
+	jp	z,l19ce		; .. nope
+	inc	hl		; .. fix quotient
+l19ce:
+	ld	(l2502),hl
+	pop	de
+	ld	hl,(l24fe)
+	call	Multiply	; Get product
+	ld	(l250d),hl
+	ld	de,pic@buf
+	add	hl,de		; Position buffer
+	ex	de,hl
+	ld	hl,(l24f8)
+	call	neg.hl		; .. negate
+	ld	(l24fa),hl
+	add	hl,de		; .. get buffer address
+	ld	(pic@adr),hl	; .. save
+	ld	hl,(l2500)
+	ld	de,-8
+	call	Multiply	; *-8
+	inc	hl
+	ld	(l2505),hl
+	ld	hl,(l24fa)
+	ld	de,8
+	inc	de
+	call	Multiply	; *8
+	ld	(l2503),hl
+	ld	hl,(l24f8)
+	call	Mul.by8
+	ld	(l2507),hl
+	ret
+;
+; Set bit density for pixel output
+;
+SetBit:
+	ld	a,esc
+	call	Lstout		; Give prefix
+	ld	a,'L'
+	call	Lstout
+	ld	a,(Pixel)	; .. fetch LO
+	call	Lstout
+	ld	a,(Pixel+1)	; .. and HI
+	call	Lstout
+	ret
+;
+; Give new page to printer
+;
+NewPage:
+	ld	a,ff
+	call	Lstout		; Print form feed
+	ret
+;
+; Set 6 characters per inch
+;
+Set.6cpi:
+	ld	a,esc
+	call	Lstout		; Give prefix
+	ld	a,'2'
+	call	Lstout		; .. and code
+	ret
+;
+; Set line distance 23/216"
+;
+SetDist:
+	ld	a,esc
+	call	Lstout		; Give prefix
+	ld	a,'3'
+	call	Lstout
+	ld	a,23		; .. distance 23/216"
+	call	Lstout
+	ld	a,cr		; Give new line
+	call	Lstout
+	ld	a,lf
+	call	Lstout
+	ret
+;
+; Set line distance 1/216"
+;
+SetHighDist:
+	ld	a,cr
+	call	Lstout
+	ld	a,esc
+	call	Lstout		; Give prefix
+	ld	a,'3'
+	call	Lstout
+	ld	a,1		; .. distance 1/216"
+	call	Lstout
+	ld	a,lf
+	call	Lstout
+	ret
+;
+; Clear pixel buffer
+;
+clr.pic.buff:
+	ld	hl,15*256
+	ex	de,hl
+	ld	hl,pic@buf	; Init buffer
+l1a74:
+	ld	(hl),0		; Clear entire buffer
+	inc	hl
+	dec	de
+	ld	a,d
+	or	e
+	jp	nz,l1a74
+	xor	a
+	ld	(l250f),a
+	ret
+;
+l1a82:
+	dw	0,0
+l1a86:
+	dw	0
+l1a88:
+	dw	0
+l1a8a:
+	dw	0
+l1a8c:
+	db	0
+;
+;
+;
+l1a8d:
+	ld	hl,(l24fa)
+	add	hl,hl
+	ld	(l1a88),hl
+	ex	de,hl
+	ld	hl,(l2503)
+	add	hl,hl
+	ex	de,hl
+	call	sub.de.hl	; Get DE-HL
+	ld	(l1a8a),hl
+	ld	a,2
+	ld	(l1a8c),a
+	ld	hl,(pic@adr)	; Get pixel address
+	ld	b,h		; .. copy
+	ld	c,l
+	ld	hl,(l2500)
+l1aad:
+	push	hl
+	ld	a,(l250f)
+	or	a
+	jp	nz,l1abb
+	call	l1af0
+	jp	l1ae0
+l1abb:
+	ld	hl,(l2507)
+	ld	(l1a82),hl
+	push	bc		; Save pixel address
+	ld	hl,(l1a82)
+	ld	(Pixel),hl	; Set pixels
+	call	SetBit		; Set bit density
+	ld	hl,(l24f8)	; Get length
+	pop	de		; .. get back address
+l1acf:
+	push	hl
+	call	l1b12		; Output a block
+	pop	hl
+	inc	de
+	dec	hl
+	ld	a,h
+	or	l
+	jp	nz,l1acf
+	ld	b,d
+	ld	c,e
+	call	l1af0
+l1ae0:
+	pop	hl
+	dec	hl
+	ld	a,h
+	or	l
+	ret	z
+	ex	de,hl
+	ld	hl,(l1a86)
+	add	hl,bc		; Advance address
+	ld	b,h
+	ld	c,l
+	ex	de,hl
+	jp	l1aad
+;
+;
+;
+l1af0:
+	ld	a,(l1a8c)
+	dec	a
+	ld	(l1a8c),a
+	jp	z,l1b03
+	call	SetHighDist	; Set high distance
+	ld	hl,(l1a88)
+	jp	l1b0e
+l1b03:
+	call	SetDist		; Set line distance
+	ld	a,2
+	ld	(l1a8c),a
+	ld	hl,(l1a8a)
+l1b0e:
+	ld	(l1a86),hl
+	ret
+;
+; ENTRY	Reg DE points to buffer
+;
+l1b12::
+	ld	hl,8*256+1	; Set count
+	ld	b,10000000b	; .. and bit position
+l1b17:
+	ld	c,8		; Set length
+	push	de
+	push	hl
+	call	pos.byte	; Get pixel data
+	call	Lstout		; .. print byte
+	pop	hl
+	pop	de
+	ld	a,b
+	rrca
+	ld	b,a
+	inc	l
+	dec	h
+	jp	nz,l1b17
+	ret
+;
+; Position pixel - length in reg C - from buffer at ^DE
+; Pixel mask in reg B, counters in reg HL
+;
+pos.byte:
+	push	hl		; Save entry
+	ex	de,hl
+	xor	a		; Init pixel
+l1b2f:
+	rlca			; Rotate pixel
+	ld	e,a		; .. save old
+	ld	a,(hl)		; Get new 
+	and	b		; .. mask
+	or	e		; .. and combine
+	ex	de,hl
+	ld	hl,(l1a88)	; Get relative pointer
+	add	hl,de		; .. position buffer address
+	dec	c
+	jp	nz,l1b2f
+	pop	hl
+l1b3e:
+	rlca			; .. position byte
+	dec	l		; .. to right position
+	jp	nz,l1b3e
+	ret
+;
+MX$COR:
+	dw	959		; Max addressable width
+MY$COR:
+	dw	1367		; Max adressable height
+l1b48:
+	dw	212		; Width of one pixel
+l1b4a:
+	dw	176		; Height of one pixel
+;
+; >>>>
+;
+l1b4c:
+	dw	0
+l1b4e:
+	dw	0
+l1b50:
+	dw	0
+l1b52:
+	dw	0
+l1b54:
+	ds	2*15
+;
+; <<<<
+;
+l1b72:
+	dw	0
+st.ptr:
+	dw	0
+l1b76:
+	dw	0
+$WRT.ERR:
+	db	'Disk Write Error, Temporary File : '
+	db	'GSXTMP.',cr,lf,eot
+$RD.ERR:
+	db	'Disk Read Error, Temporary File : '
+	db	'GSXTMP.',cr,lf,eot
+l1bd1:
+	db	0,0,0,0
+BufPtr:
+	dw	0
+CurRRN:
+	dw	0
+..FCB:
+	db	0,'GSXTMP  $$$'
+	ds	28
+FCBlen	equ	$-..FCB
+$$FCB:
+	db	0,'GSXTMP  $$$'
+	ds	25
+FileAct:
+	db	0
+	db	0,0
+@Buffer:
+	ds	1024
+TMPbuff:
+	ds	RecLng
+rot.fac:
+	db	0
+l20aa:
+	db	0
+chr@mat:
+	dw	0
+;;l20ad:
+	dw	0
+l20af:
+	db	0,0
+l20b1:
+	db	0,0
+l20b3:
+	db	0,0
+;
+; Character matrix table - lower line .. upper line
+;
+; Start with character pattern 0x1d
+; Stop  with character pattern 0x7f
+;
+chr$mat:
+	db	00h,00h,00h,38h,38h,38h,00h,00h
+	db	00h,00h,08h,08h,3eh,08h,08h,00h
+	db	00h,00h,54h,38h,7ch,38h,54h,00h
+	db	00h,00h,7ch,44h,44h,44h,7ch,00h
+	db	00h,00h,44h,28h,10h,28h,44h,00h
+	db	00h,00h,00h,00h,00h,00h,00h,00h
+	db	00h,04h,00h,00h,04h,04h,04h,04h
+	db	00h,00h,00h,00h,00h,05h,0ah,0ah
+	db	00h,0ah,0ah,1fh,0ah,1fh,0ah,0ah
+	db	00h,04h,0eh,14h,0eh,05h,0eh,04h
+	db	00h,19h,19h,02h,04h,08h,13h,13h
+	db	00h,16h,09h,15h,12h,05h,05h,02h
+	db	00h,00h,00h,00h,00h,02h,04h,06h
+	db	00h,08h,04h,02h,02h,02h,04h,08h
+	db	00h,02h,04h,08h,08h,08h,04h,02h
+	db	00h,00h,12h,0ch,1eh,0ch,12h,00h
+	db	00h,00h,04h,04h,1fh,04h,04h,00h
+	db	02h,04h,06h,06h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,1fh,00h,00h,00h
+	db	00h,06h,06h,00h,00h,00h,00h,00h
+	db	00h,00h,01h,02h,04h,08h,10h,00h
+	db	00h,0eh,11h,13h,15h,19h,11h,0eh
+	db	00h,0eh,04h,04h,04h,04h,06h,04h
+	db	00h,1fh,02h,04h,08h,10h,11h,0eh
+	db	00h,0eh,11h,10h,08h,04h,08h,1fh
+	db	00h,08h,08h,1fh,09h,0ah,0ch,08h
+	db	00h,0eh,11h,10h,10h,0fh,01h,1fh
+	db	00h,0eh,11h,11h,0eh,02h,04h,08h
+	db	00h,02h,02h,04h,08h,10h,10h,1fh
+	db	00h,0eh,11h,11h,0eh,11h,11h,0eh
+	db	00h,02h,04h,08h,0eh,11h,11h,0eh
+	db	00h,06h,06h,00h,00h,06h,06h,00h
+	db	02h,04h,06h,06h,00h,06h,06h,00h
+	db	00h,08h,04h,02h,01h,02h,04h,08h
+	db	00h,00h,00h,1fh,00h,1fh,00h,00h
+	db	00h,02h,04h,08h,10h,08h,04h,02h
+	db	00h,04h,00h,04h,08h,10h,11h,0eh
+	db	00h,1eh,01h,1dh,15h,1dh,11h,0eh
+	db	00h,11h,11h,1fh,11h,11h,0ah,04h
+	db	00h,0fh,12h,12h,0eh,12h,12h,0fh
+	db	00h,0eh,11h,01h,01h,01h,11h,0eh
+	db	00h,0fh,12h,12h,12h,12h,12h,0fh
+	db	00h,1fh,01h,01h,0fh,01h,01h,1fh
+	db	00h,01h,01h,01h,0fh,01h,01h,1fh
+	db	00h,0eh,11h,11h,1dh,01h,11h,0eh
+	db	00h,11h,11h,11h,1fh,11h,11h,11h
+	db	00h,0eh,04h,04h,04h,04h,04h,0eh
+	db	00h,06h,09h,09h,08h,08h,08h,1ch
+	db	00h,11h,09h,05h,03h,05h,09h,11h
+	db	00h,1fh,01h,01h,01h,01h,01h,01h
+	db	00h,11h,11h,11h,15h,15h,1bh,11h
+	db	00h,11h,11h,19h,15h,13h,11h,11h
+	db	00h,0eh,11h,11h,11h,11h,11h,0eh
+	db	00h,01h,01h,01h,0fh,11h,11h,0fh
+	db	00h,16h,09h,15h,11h,11h,11h,0eh
+	db	00h,11h,11h,09h,0fh,11h,11h,0fh
+	db	00h,0eh,11h,10h,0eh,01h,11h,0eh
+	db	00h,04h,04h,04h,04h,04h,04h,1fh
+	db	00h,0eh,11h,11h,11h,11h,11h,11h
+	db	00h,04h,0ah,0ah,11h,11h,11h,11h
+	db	00h,11h,1bh,15h,15h,11h,11h,11h
+	db	00h,11h,11h,0ah,04h,0ah,11h,11h
+	db	00h,04h,04h,04h,04h,0ah,11h,11h
+	db	00h,1fh,01h,02h,04h,08h,10h,1fh
+	db	00h,0eh,02h,02h,02h,02h,02h,0eh
+	db	00h,00h,10h,08h,04h,02h,01h,00h
+	db	00h,0eh,08h,08h,08h,08h,08h,0eh
+	db	00h,00h,00h,00h,00h,11h,0ah,04h
+	db	1fh,00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,08h,04h,0ch
+	db	00h,16h,09h,0eh,08h,07h,00h,00h
+	db	00h,07h,09h,09h,09h,07h,01h,01h
+	db	00h,0eh,01h,01h,01h,0eh,00h,00h
+	db	00h,1ch,12h,12h,12h,1ch,10h,10h
+	db	00h,0eh,01h,1fh,11h,0eh,00h,00h
+	db	00h,04h,04h,04h,1fh,04h,14h,0ch
+	db	07h,08h,0eh,09h,09h,0eh,00h,00h
+	db	00h,09h,09h,09h,09h,07h,01h,01h
+	db	00h,0eh,04h,04h,04h,06h,00h,04h
+	db	04h,0ah,08h,08h,08h,0ch,00h,08h
+	db	00h,09h,05h,03h,05h,09h,01h,01h
+	db	00h,0eh,04h,04h,04h,04h,04h,06h
+	db	00h,15h,15h,15h,15h,0fh,00h,00h
+	db	00h,11h,11h,11h,11h,0fh,00h,00h
+	db	00h,0eh,11h,11h,11h,0eh,00h,00h
+	db	01h,01h,07h,09h,09h,07h,00h,00h
+	db	18h,08h,0eh,09h,09h,0eh,00h,00h
+	db	00h,01h,01h,01h,0bh,05h,00h,00h
+	db	00h,0fh,10h,0eh,01h,0eh,00h,00h
+	db	00h,0ch,02h,02h,02h,0fh,02h,02h
+	db	00h,16h,09h,09h,09h,09h,00h,00h
+	db	00h,04h,0ah,0ah,11h,11h,00h,00h
+	db	00h,0ah,15h,15h,11h,11h,00h,00h
+	db	00h,11h,0ah,04h,0ah,11h,00h,00h
+	db	0eh,10h,1eh,11h,11h,11h,00h,00h
+	db	00h,0fh,01h,02h,04h,0fh,00h,00h
+	db	00h,18h,04h,04h,02h,04h,04h,18h
+	db	00h,04h,04h,04h,00h,04h,04h,04h
+	db	00h,03h,04h,04h,08h,04h,04h,03h
+	db	00h,00h,00h,00h,00h,08h,15h,02h
+	db	00h,1fh,1fh,1fh,1fh,1fh,1fh,1fh
+l23dd:
+	dw	0
+l23df:
+	dw	0
+l23e1:
+	dw	0
+l23e3:
+	db	0
+l23e4:
+	dw	0
+l23e6:
+	dw	0
+l23e8:
+	dw	0
+;;l23ea:
+	ds	198
+l24b0:
+	dw	0
+l24b2:
+	dw	0
+l24b4:
+	dw	0
+l24b6:
+	dw	0
+l24b8:
+	dw	0
+l24ba:
+	dw	0
+l24bc:
+	dw	0
+l24be:
+	dw	0
+l24c0:
+	dw	0
+l24c2:
+	dw	0
+l24c4:
+	dw	0
+l24c6:
+	dw	0
+l24c8:
+	dw	0
+l24ca:
+	dw	0
+l24cc:
+	dw	0
+l24ce:
+	dw	0
+l24d0:
+	dw	0
+l24d2:
+	dw	0
+l24d4:
+	dw	0
+l24d6:
+	dw	0
+l24d8:
+	dw	0
+l24da:
+	dw	0
+l24dc:
+	dw	0
+l24de:
+	dw	0
+l24e0:
+	dw	0
+l24e2:
+	dw	0
+l24e4:
+	dw	0
+l24e6:
+	dw	0
+l24e8:
+	dw	0
+l24ea:
+	dw	0
+l24ec:
+	dw	0
+l24ee:
+	db	0
+l24ef:
+	db	0
+x@cor:
+	dw	0		; Current coordinates
+y@cor:
+	dw	0
+l24f4:
+	dw	32767
+l24f6:
+	dw	32767
+l24f8:
+	dw	0
+l24fa:
+	dw	0
+l24fc:
+	dw	0
+l24fe:
+	dw	0
+l2500:
+	dw	0
+l2502:
+	db	0
+l2503:
+	dw	0
+l2505:
+	dw	0
+l2507:
+	dw	0
+Pixel:
+	dw	0
+pic@adr:
+	dw	0
+l250d:
+	dw	0
+l250f:
+	db	0
+BufIdx:
+	dw	0
+pic@buf:
+	ds	15*256
+;
+; Style pattern
+;
+l3412:
+	db	0ffh,0ffh,0ffh,0ffh,0ffh,0ffh,0ffh,0ffh
+	db	080h,080h,080h,080h,080h,080h,080h,080h
+	db	0ffh,000h,000h,000h,000h,000h,000h,000h
+	db	001h,002h,004h,008h,010h,020h,040h,080h
+	db	080h,040h,020h,010h,008h,004h,002h,001h
+	db	0ffh,080h,080h,080h,080h,080h,080h,080h
+	db	081h,042h,024h,018h,018h,024h,042h,081h
+	db	080h,000h,000h,000h,000h,000h,000h,001h
+	db	002h,000h,020h,000h,002h,000h,020h,000h
+	db	000h,022h,000h,088h,000h,022h,000h,088h
+	db	000h,0aah,000h,022h,000h,0aah,000h,022h
+	db	000h,0aah,000h,0aah,000h,0aah,000h,0aah
+	db	011h,0aah,044h,0aah,011h,0aah,044h,0aah
+	db	055h,0aah,055h,0aah,055h,0aah,055h,0aah
+
+	end
+

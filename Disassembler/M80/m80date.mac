@@ -1,0 +1,436 @@
+	title	Z80 ASM Date and Time
+	name	('M80DATE')
+	maclib	m80
+
+; File : M80DATE.MAC
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Z80 Assembler Project - M80 compatible
+;
+; Date Routines for the Z80 assembler
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; ===== To the kernel =====
+
+	entry	GetDate,CompTi,getclk
+
+; ===== From the kernel =====
+
+	ext	$head1,usgdiv,mult,dev.flag,cnv.htd
+
+; ===== From the I/O =====
+
+	ext	Dopt,Eopt,String,lines,crlf
+
+;
+; ################ Time routines ################
+;
+; Get date and time
+; 
+GetDate:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	a,(Dopt)	; Test date requested
+	or	a
+	call	nz,..getdate
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+..getdate:
+	ld	de,TOD		; Get time
+	call	clock		; ..into system parameter block
+	ld	de,hour		; Get BCD
+	ld	hl,($head1-2)	; .. and ASCII
+	call	time		; Convert the time
+	ld	hl,(TOD)
+	push	hl
+	call	day.of.week	; Get day of week
+	pop	hl
+	call	.dcvrt		; Convert date
+	ret
+;	
+; Read time into parameter block
+; ENTRY	Reg DE points to TOD
+; EXIT	TOD parameter block filled
+; 
+clock:
+	ld	hl,second-TOD
+	add	hl,de		; Point to second field
+	push	hl
+	ld	c,.getdat
+	call	BDOS		; Do it thru BDOS
+	pop	hl
+	ld	(hl),a		; .. set seconds
+	ret
+; 
+; Convert time to string which must be at least 9 bytes long
+; ENTRY	Reg DE points to HH,MM,SS field
+;	Reg HL points to ASCII buffer
+; EXIT	ASCII buffer filled with time value
+; 
+time:
+	ld	b,..BCD-1
+.clklp:
+	call	bcd$dec		; Convert to ASCII
+	ld	(hl),':'
+	inc	hl
+	inc	de
+	djnz	.clklp
+; 
+; Convert BCD to ASCII
+; ENTRY	Reg DE points to BCD buffer
+;	Reg HL points to ASCII buffer
+; EXIT	Accu holds decimal number
+; 
+bcd$dec:
+	ld	a,(de)		; Get BCD
+	rrca			; Get HI part
+	rrca
+	rrca
+	rrca
+	call	str.a		; Store
+	ld	a,(de)		; .. and LO part
+;
+; Store ASCII number into buffer
+; ENTRY	Accu holds BCD
+;	Reg HL points to ASCII buffer
+;
+str.a:
+	and	LoMask		; Get lo bits
+	add	a,'0'		; .. make ASCII
+	ld	(hl),a		; Store
+	inc	hl
+	ret
+;
+; #####################################################
+;
+; Day and Hour      08/86        M. Neuhaus       (c't)
+;
+; #####################################################
+;
+; Get day of the week
+; ENTRY	Reg HL holds date
+;
+day.of.week:
+	ld	de,weeks*w.days
+	or	a
+cd.loop.1:
+	sbc	hl,de
+	jr	nc,cd.loop.1
+	add	hl,de
+	ld	de,w.days
+	or	a
+cd.loop.2:
+	sbc	hl,de
+	jr	nc,cd.loop.2
+	add	hl,de
+	ld	e,l
+	ld	d,0
+	ld	hl,days
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ld	de,($head1-4)
+	ld	bc,d.item
+	ldir
+	ret
+;
+; #####################################################
+;
+; DATE.ASM v 1.10   10/26/83     S. Kluger El Paso RCPM
+;
+; #####################################################
+;
+; Enter with the number of days since 1-1-78 in HL
+;
+.dcvrt:
+	ld	(drtime),hl	; Save it for now
+	ld	b,basyer	; Set years counter
+loop:
+	call	ckleap
+	ld	de,-.days	; Set up for subtract
+	jr	nz,nolpy	; Skip if no leap year
+	dec	de		; Set for leap year
+nolpy:
+	add	hl,de		; Subtract
+	jr	nc,ydone	; Continue if years done
+	ld	a,h
+	or	l
+	jr	z,ydone
+	ld	(drtime),hl	; Else save days count
+	inc	b		; Increment years count
+	jr	loop		; And do again
+;
+; The years are now finished, the years count is in B
+; and drtime holds the days (HL is invalid)
+;
+ydone:
+	call	ckleap		; Check if leap year
+	ld	a,-.feb
+	jr	nz,febno	; February not 29 days
+	ld	a,-.feb-1	; Leap year
+febno:
+	ld	(feb),a		; Set february
+;;	ld	a,b		; Get years count
+	call	fix.2000	; Fix for > 2000
+	ld	hl,($head1-6)	; Point to years field
+	call	stasha		; Stash A into years field
+	ld	hl,(drtime)	; Get days count
+	ld	de,mtable	; Point to months table
+	ld	b,-1		; Set up B for subtract
+	ld	a,0		; Set a for # of months
+mloop:
+	push	af
+	ld	a,(de)		; Get month
+	ld	c,a		; Put in C for subtract
+	pop	af
+	ld	(drtime),hl	; Save days count
+	add	hl,bc		; Subtract
+	inc	de		; Increment months counter
+	inc	a
+	jr	c,mloop		; And loop for next month
+;
+; The months are finished, days count is on stack.
+; First, calculate month.
+;
+mdone:
+	ld	b,a		; Save months
+	ld	hl,(drtime)
+	ld	a,h
+	or	l
+	jr	nz,nzd
+	dec	de
+	dec	de
+	ld	a,(de)
+	neg
+	ld	l,a
+	ld	(drtime),hl
+	dec	b
+nzd:
+	ld	a,b
+	push	hl
+	ld	hl,($head1-8)	; Point to months field
+	call	stasha		; Put A into months field
+	pop	hl		; Get days count back
+	ld	a,l		; Into A
+	ld	hl,($head1-10)	; Point to day field
+;
+; Plug the accumulator into <HL> as decimal
+;
+stasha:
+	push	bc		; Save bc as counter
+	ld	b,0		; Initialize tens
+stl:
+	cp	10		; > 10?
+	jr	c,got10		; No, done
+	sub	10		; Subtract 10 from A
+	inc	b		; Increment tens
+	jr	stl		; And loop
+;
+; B has the tens, A has the units. Store the units first
+;
+got10:
+	add	a,'0'		; Make ASCII
+	ld	(hl),a		; Stash units
+	ld	a,b		; Get tens
+	add	a,'0'		; Make ASCII
+	dec	hl		; Point to tens
+	ld	(hl),a
+	pop	bc		; Restore BC
+	ret
+;
+; This routine checks for leap years.
+;
+ckleap:
+	ld	a,b
+	and	11111100b
+	cp	b
+	ret
+;
+; Get start of time
+;
+getclk:
+	ld	de,.clkon
+	call	clock		; Get time
+	ret
+;
+; Calculate time differences
+; ENTRY	Reg pair DE points to parameter block
+; EXIT	Parameter block filled with values
+; 
+calcon:
+	push	de
+	ld	de,.clkof
+	call	clock		; Get time
+	pop	de
+	inc	de		; .. bump to end
+	inc	de
+	ld	ix,clkon+2
+	ld	iy,clkoff+2
+	ld	a,(iy-2)	; Get off hour
+	cp	(ix-2)		; Test against on hour
+	jr	nc,noDatFix
+	add	a,24h		; Add one day for midnight
+	daa
+	ld	(iy-2),a	; .. bring back
+noDatFix:
+	ld	b,..BCD		; Set length
+	or	a
+..calcon:
+	ld	a,(iy+0)
+	sbc	a,(ix+0)	; Subtract
+	daa			; .. BCD
+	jr	nc,no.adj	; Test fix
+	sub	040h		; Ten's complement
+	scf			; .. carry was set
+no.adj:
+	ld	(de),a		; Save digit
+	dec	de
+	dec	ix
+	dec	iy
+	djnz	..calcon
+	ret
+;
+; Get integer from BCD
+;
+get..dig:
+	ld	a,(bc)
+	and	HiMask		; .. HI
+	rrca
+	rrca
+	rrca
+	ld	e,a
+	add	a,a
+	add	a,a
+	add	a,e
+	ld	e,a
+	ld	a,(bc)
+	and	LoMask		; .. LO
+	add	a,e
+	ld	e,a
+	ld	d,0
+	inc	bc
+	ret
+;
+; Multiply * 60
+;
+mul.60:
+	push	bc
+	push	de
+	ld	de,60
+	call	mult		; Multiply
+	ex	de,hl
+	pop	de
+	pop	bc
+	ret
+;
+; Get total seconds into reg HL
+;
+get.time:
+	ld	bc,clkmy
+	call	get..dig	; Get hour
+	ex	de,hl
+	call	mul.60		; * 60
+	call	get..dig	; Get minute
+	add	hl,de
+	call	mul.60
+	call	get..dig
+	add	hl,de		; .. total
+	ret
+; 
+; Tell the compile time and compiler statistic
+; 
+CompTi:
+	ld	de,clkmy
+	call	calcon		; Get connection time
+	ld	de,clkmy
+	ld	hl,$conas
+	call	time		; Convert the time
+	ld	hl,$cncms
+	call	String		; Tell the compile time
+	ld	hl,$lincmp
+	call	String		; .. tell lines compiled
+	ld	a,(dev.flag)
+	push	af
+	ld	a,(Eopt)
+	push	af
+	ld	a,1
+	ld	(dev.flag),a	; .. force CON:
+	xor	a
+	ld	(Eopt),a
+	ld	hl,(lines)
+	call	cnv.htd		; Print lines
+	call	crlf
+	call	get.time	; Get total time
+	ld	de,(lines)
+	ld	a,l
+	or	h		; Test zero seconds
+	jr	z,no..div
+	call	usgdiv		; Get lines/second
+no..div:
+	ld	hl,$linps
+	call	String
+	ex	de,hl
+	call	cnv.htd
+	pop	af
+	ld	(Eopt),a	; Get back state
+	pop	af
+	ld	(dev.flag),a
+	ret
+;
+; Return fixed year count from reg B to Accu
+;
+fix.2000:
+	ld	a,b		; Get years count
+	sub	100		; Test > 1999
+	ret	nc		; .. yeap
+	ld	a,b		; Get original
+	ret
+;
+TOD:
+	dw	0		; Mysterious date
+hour:
+	db	0		; BCD hour
+minute:
+	db	0		; BCD minute
+second:
+	db	0		; BCD second
+..BCD	equ	$-hour
+clkmy:	ds	..BCD
+.clkon:	ds	2
+clkon:	ds	..BCD
+.clkof:	ds	2
+clkoff:	ds	..BCD
+$cncms:	
+	db	'Compile time  : '
+$conas:	ds	8
+	db	0
+$lincmp:
+	db	cr,lf,'Compiled lines: ',0
+$linps:
+	db	'Lines/second  : ',0
+;
+; This is the months table
+;
+mtable:
+	db	-31		; January
+feb:
+	db	-28		; February
+	db	-31,-30,-31,-30	; Mar-Jun
+	db	-31,-31,-30	; Jul-Sep
+	db	-31,-30,-31	; Oct-Dec
+drtime:
+	dw	0		; Temporary storage
+days:
+	db	'Sat'
+d.item	equ	$-days
+	db	'SunMonTueWedThuFri'
+
+	end
+

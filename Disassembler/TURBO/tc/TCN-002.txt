@@ -1,0 +1,1410 @@
+;
+; Process BEGIN
+;
+ProcBeg:
+	ld	hl,(LabPtr)	; Get label pointer
+l4e8d:
+	ld	de,(CurLab)	; Get current pointer
+	or	a
+	sbc	hl,de
+	add	hl,de
+	ret	z		; .. end on level 0
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	add	hl,de
+	ld	a,(hl)
+	cp	6
+	jr	z,l4ea4
+	cp	5
+	jr	nz,l4e8d
+l4ea4:
+	push	hl
+	dec	hl
+	dec	hl
+l4ea7:
+	bit	_MB,(hl)
+	dec	hl
+	jr	z,l4ea7
+	ld	a,(hl)
+	or	a
+	call	ErrNZ		; Undefined FORWARD
+	db	_UndefFORW
+	pop	hl
+	jr	l4e8d
+;
+;
+l4eb5:
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	ld	b,0
+l4ebb:
+	push	bc
+	ld	d,_pointer	; Set type
+	ld	a,(l7b91)
+	ld	e,a		; .. set value
+	call	StLabWrd	; Put to table
+	call	GetLabel	; Get label
+	call	StLabByte	; Store into table
+	call	StLabWrd	; Put to table
+	call	StLabWrd	; .. twice
+	call	SetLabPtr	; Set label pointer
+	pop	bc
+	inc	b
+	call	IsComma		; Test comma
+	jr	z,l4ebb		; .. yeap
+	pop	hl
+	ret
+;
+;
+;
+l4edd:
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	call	GetTYPE		; Get TYPE
+	pop	hl
+	call	l5295
+	call	FindStr		; Find ABSOLUTE
+	dw	$ABSOLUTE
+	ld	a,0
+	jr	nz,l4f14	; .. nope
+	ld	a,(l7b91)
+	or	a
+	call	ErrNZ		; Invalid ABSOLUTE
+	db	_InvalABS
+	_BC	_pointer,0
+	call	FndLABEL	; Find label
+	jr	nz,l4f0c	; .. nope
+	ld	a,(hl)
+	ld	(l7b8f),a
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	jr	l4f0f
+l4f0c:
+	call	.GetIntC	; Get integer constant
+l4f0f:
+	ld	(l7b7f),hl	; .. store
+	ld	a,-1
+l4f14:
+	ld	(l7b90),a
+	ret
+;
+; Find special type STRING
+; EXIT	Zero set if found
+;
+GetSTRING:
+	ld	a,(FirstVAR)
+	ld	(.FirstVAR),a	; .. save old flag
+	ld 	hl,(PrevLabPtr)	; Save current pointer
+	push	hl
+	ld	hl,$STR$-1
+	ld	(PrevLabPtr),hl	; .. change
+	ld	hl,$STR$+..STRN+1
+	_BC	_simple,0
+	call	l6de3		; .. find it
+	call	nz,ResFlag	; .. restore flag if not
+	jr	nz,GotNoStrg	; .. nope
+	call	SetLine		; .. fix line
+	call	..SetSimpTYPE	; .. set type
+GotNoStrg:
+	pop	hl
+	ld	(PrevLabPtr),hl	; .. reset pointer
+	ret
+ResFlag:
+	ld	a,(.FirstVAR)
+	ld	(FirstVAR),a	; .. restore old flag
+	ret
+.FirstVAR:
+	ds	1
+;
+; Process variable on PROCEDURE and FUNCTION
+;
+GetProcVAR:
+	call	GetSTRING	; Find special type STRING
+	call	nz,GetSimpTYPE	; Get simple type if not
+	call	ErrNZ		; Type declaration expected
+	db	_TypeExp
+	xor	a
+	ld	(l7b90),a
+	ld	a,(l7b8f)
+	or	a
+	ret	nz
+	ld	a,(Type)
+	cp	_RecF
+	ret	c
+	cp	_String
+	ret	nc
+	call	ERROR		; Files must be VAR
+	db	_VarFile
+;
+;
+;
+l4f35:
+	call	l4eb5
+	push	hl
+	push	bc
+	call	MustColon	; Verify :
+	xor	a
+	ld	(l7b8f),a
+	call	l4edd
+	pop	bc
+	ld	a,(l7b90)
+	or	a
+	jr	z,l4f51
+	ld	a,b
+	dec	a
+	call	ErrNZ		; Invalid ABSOLUTE
+	db	_InvalABS
+l4f51:
+	pop	hl
+l4f52:
+	push	bc
+	push	hl
+	ld	a,(l7b8f)
+	ld	hl,2
+	or	a
+	jr	nz,l4f60
+	ld	hl,(TypLen)	; Get length
+l4f60:
+	ex	de,hl
+	ld	a,(l7b91)
+	or	a
+	jr	nz,l4f72
+	ld	a,(l7b90)
+	or	a
+	jr	nz,l4f72
+	call	VarAlloc	; Allocate memory
+	jr	l4f7b
+l4f72:
+	ld	hl,(l7b7f)
+	push	hl
+	add	hl,de
+	ld	(l7b7f),hl
+	pop	hl
+l4f7b:
+	ex	de,hl
+	pop	hl
+	dec	hl
+l4f7e:
+	dec	hl
+	bit	_MB,(hl)
+	jr	z,l4f7e
+	dec	hl
+	ld	a,(l7b8f)
+	ld	(hl),a
+	dec	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	de,(TypeTable)	; Get type table
+	ld	(hl),d		; .. store
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	dec	hl
+	dec	hl
+	pop	bc
+	djnz	l4f52
+	ret
+;
+; Get a TYPE
+;
+GetTYPE:
+	call	GetSimpTYPE	; Test simple type
+	ret	z
+	call	FindStr		; Skip PACKED
+	dw	$PACKED
+	call	..ARRAY		; Check ARRAY
+	ret	z
+	call	..RECORD	; Check RECORD
+	ret	z
+	call	..SET		; Check SET
+	ret	z
+	call	..PTR		; Check ^
+	ret	z
+	call	..FILE		; Check FILE
+	ret	z
+	call	..STRING	; Check STRING
+	ret	z
+	call	..SCALARE	; Test SCALARE ()
+	ret	z
+	call	..RANGE		; Test RANGE ..
+	ret	z
+	call	ERROR		; Type declaration expected
+	db	_TypeExp
+;
+; Get SIMPLE TYPE
+; EXIT	Zero set if found
+;
+GetSimpTYPE:
+	_BC	_simple,0
+	call	FndLABEL	; Get from table
+	ret	nz		; .. not found
+..SetSimpTYPE:
+	ld	d,(hl)		; Fetch type table
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	ld	(TypeTable),hl	; .. save
+	call	Get$TYPE	; Get name
+	xor	a		; Set success
+	ret
+;
+; Look for ARRAY
+;
+..ARRAY:
+	call	FindStr		; Check ARRAY
+	dw	$ARRAY
+	ret	nz		; .. nope
+	call	MustOpen	; Verify [
+	ld	b,0
+l4fe6:
+	push	bc
+	call	GetRange	; Get range of array
+	pop	bc
+	ld	hl,(TypeTable)	; Get type table
+	push	hl
+	ld	hl,(High.Rng)	; Get higher limit
+	ld	de,(Low.Rng)	; .. lower limit
+	or	a
+	sbc	hl,de		; Verify *NOT* zero
+	inc	hl
+	ld	a,h
+	or	l
+	call	ErrZ		; Compiler overflow
+	db	_MemOverflow
+	push	hl
+	inc	b
+	call	IsComma		; Test ,
+	jr	z,l4fe6		; .. yeap
+	push	bc
+	call	MustClose	; Verify ]
+	call	MustOF		; Verify OF
+	call	GetTYPE		; Get TYPE
+	pop	bc
+l5012:
+	ld	hl,(TypeTable)	; Get type table
+	ld	(Low.Rng),hl	; .. as lower value
+	ld	hl,(TypLen)	; Get length of type
+	pop	de
+	push	bc
+	call	MulNum		; Multiply numbers
+	call	ErrCY		; Compiler overflow if > 64k
+	db	_MemOverflow
+	pop	bc
+	ld	(TypLen),hl	; .. set new length
+	pop	hl
+	ld	(High.Rng),hl	; Set high limit
+	ld	a,_Array
+	ld	(Type),a
+	push	bc
+	call	Put$TYPE	; Put to table
+	pop	bc
+	djnz	l5012
+	ret
+;
+; Look for RECORD
+;
+..RECORD:
+	call	FindStr		; Check RECORD
+	dw	$RECORD
+	ret	nz		; .. nope
+	ld	a,(l7b9a)
+	push	af
+	ld	a,(l7b91)
+	push	af
+	ld	hl,l7b92
+	inc	(hl)
+	ld	a,(hl)
+	ld	(l7b91),a
+	ld	hl,(l7b7f)
+	push	hl
+	ld	hl,(l7b81)
+	push	hl
+	ld	hl,0
+	ld	(l7b7f),hl
+	ld	(l7b81),hl
+	xor	a
+	ld	(l7b9a),a
+	call	l508b
+	ld	hl,(l7b81)
+	ld	(TypLen),hl	; Set length
+	pop	hl
+	ld	(l7b81),hl
+	pop	hl
+	ld	(l7b7f),hl
+	ld	a,(l7b91)
+	ld	(l7b5d),a
+	pop	af
+	ld	(l7b91),a
+	pop	af
+	ld	(l7b9a),a
+	ld	a,_Record
+	ld	(Type),a
+	jp	Put$TYPE	; Put to table
+;
+;
+;
+l508b:
+	call	l50f9
+	ret	z
+	call	FindStr		; Find CASE
+	dw	$CASE
+	jr	z,l50b0		; .. yeap
+	call	l4f35
+	ld	hl,(l7b7f)
+	ld	de,(l7b81)
+	or	a
+	sbc	hl,de
+	jr	c,l50a9
+	add	hl,de
+	ld	(l7b81),hl
+l50a9:
+	call	IsSemicolon	; Test ;
+	jr	z,l508b		; .. yeap
+	jr	l50e8
+l50b0:
+	call	GetSimpTYPE	; Get simple TYPE
+	call	nz,l4f35	; .. nope
+	call	MustOF		; Verify OF
+l50b9:
+	call	l50f9
+	ret	z
+	ld	hl,(l7b7f)
+	push	hl
+l50c1:
+	call	.GetConst	; Get constant
+	call	IsComma		; Test ,
+	jr	z,l50c1		; .. yeap
+	call	MustColon	; Verify :
+	call	MustLeftParen	; Verify (
+	ld	a,(l7b9a)
+	push	af
+	ld	a,-1
+	ld	(l7b9a),a
+	call	l508b
+	pop	af
+	ld	(l7b9a),a
+	pop	hl
+	ld	(l7b7f),hl
+	call	IsSemicolon	; Test ;
+	jr	z,l50b9		; .. yeap
+l50e8:
+	ld	a,(l7b9a)
+	or	a
+	jp	nz,MustRightParen	; Verify )
+	call	FindStr		; Verify END
+	dw	$END
+	ret	z		; .. yeap
+	call	ERROR		; END expected
+	db	_ENDexp
+;
+;
+;
+l50f9:
+	ld	a,(l7b9a)
+	or	a
+	jp	nz,IsRightParen	; .. check )
+	call	FindStr		; Look for END
+	dw	$END
+	ret
+;
+; Look for SET
+;
+..SET:
+	call	FindStr		; Check SET
+	dw	$SET
+	ret	nz		; .. nope
+	call	MustOF		; Verify OF
+	call	GetRange	; Get range of set
+	ld	hl,(High.Rng)	; Get higher set
+	ld	de,(Low.Rng)	; .. and lower set
+	ld	a,h		; Verify set in range
+	or	d
+	call	ErrNZ		; Set out of range
+	db	_SETrange
+	srl	l
+	srl	l
+	srl	l
+	srl	e
+	srl	e
+	srl	e
+	ld	a,l
+	inc	a
+	sub	e
+	ld	l,a
+	ld	(TypLen),hl	; Set length of SET
+	ld	hl,(TypeTable)	; Get type table
+	ld	(Low.Rng),hl	; .. as lower range
+	ld	a,_Set
+	ld	(Type),a
+	jp	Put$TYPE	; Put to table
+;
+; Look for Pointer ^
+;
+..PTR:
+	call	IsPtr		; Test ^
+	ret	nz		; .. nope
+	ld	de,0
+	call	StLabWrd	; Put to table
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	call	l6dba
+	call	SetLabPtr	; Set label pointer
+	pop	hl
+	ld	(Low.Rng),hl	; Set value
+	ld	a,_Ptr
+	ld	(Type),a
+	ld	a,-1
+	ld	(l7b5d),a
+	ld	hl,2
+	ld	(TypLen),hl	; Set length of pointer
+	jp	Put$TYPE	; Put to table
+;
+; Look for FILE
+;
+..FILE:
+	call	FindStr		; Check FILE
+	dw	$FILE
+	ret	nz		; .. nope
+	call	FindStr		; Look for OF
+	dw	$OF
+	jr	nz,l5197	; .. nope
+	call	GetTYPE		; Get TYPE of file
+	ld	a,(Type)
+	cp	_RecF
+	jr	c,l518a
+	cp	_String
+	jr	nc,l518a
+	call	ERROR		; No files as file components
+	db	_FileRefErr
+l518a:
+	ld	hl,(TypeTable)	; Get type table
+	ld	(Low.Rng),hl	; .. as pointer
+	ld	a,_RecF
+	ld	hl,FIBlen+RecLng
+	jr	l519c
+l5197:
+	ld	a,_UntF
+	ld	hl,FIBlen
+l519c:
+	ld	(Type),a
+	ld	(TypLen),hl	; Set length
+	jp	Put$TYPE	; Put to table
+;
+; Look for STRING
+;
+..STRING:
+	call	FindStr		; Check STRING
+	dw	$STRING
+	ret	nz		; .. nope
+	call	IsOpen		; Test [
+	ld	hl,DefSTR	; Set default if not
+	jr	nz,StrDef
+	call	.GetIntC	; Get integer constant
+	inc	h		; .. verify less 256
+	dec	h
+	call	ErrNZ		; Invalid length of string
+	db	_InvStrLen
+	inc	l
+	dec	l
+	call	ErrZ		; Invalid length of string
+	db	_InvStrLen
+	call	MustClose	; Verify ]
+StrDef:
+	inc	hl
+	ld	a,_String	; .. set type
+	jr	l519c
+;
+; Test SCALARE
+;
+..SCALARE:
+	call	IsLeftParen	; Test (
+	ret	nz		; .. nope
+	ld	hl,-1
+l51cc:
+	push	hl
+	_DE	_const,0
+	call	StLabWrd	; Set type
+	call	GetLabel	; Get label
+	ld	a,(l7b93)
+	call	StLabByte	; Store into table
+	pop	de		; .. get back
+	inc	de		; Increment
+	push	de
+	call	StLabWrd	; Put to table
+	call	SetLabPtr	; Set label pointer
+	pop	hl
+	call	IsComma		; Test ,
+	jr	z,l51cc		; .. yeap
+	call	MustRightParen	; Verify )
+	push	hl
+	ld	hl,l7b93
+	ld	a,(hl)		; Get type
+	inc	(hl)
+	pop	hl
+	ld	de,0
+l51f8:
+	ld	(Type),a	; Set type
+	ld	(Low.Rng),de	; .. lower limit
+	ld	(High.Rng),hl	; .. higher limit
+	ld	a,d
+	or	h
+	ld	hl,1		; Init byte length
+	jr	z,l520a
+	inc	hl		; .. fix for integer
+l520a:
+	ld	(TypLen),hl	; Set length
+	jp	Put$TYPE	; Put to table
+;
+; Test RANGE
+;
+..RANGE:
+	call	GetConst	; Get constant
+	ret	nz		; .. label
+	ld	a,b
+	push	af
+	cp	_Integ
+	call	ErrCY		; Invalid range
+	db	_InvScalar
+	push	hl
+	call	FindStr		; Verify '..'
+	dw	$..
+	call	ErrNZ		; '..' expected
+	db	..Exp
+	call	.GetConst	; Get 2nd constant
+	pop	de
+	pop	af
+	push	af
+	cp	b
+	call	ErrNZ		; Invalid types
+	db	_InvType
+	call	CmpNum		; Compare range
+	call	ErrCY		; LO limit greater HI limit
+	db	_LimErr
+	pop	af
+	jr	l51f8
+;
+; Get range of set or array
+;
+GetRange:
+	call	..RANGE		; Test range ..
+	ret	z
+	call	..SCALARE	; Test scalare ()
+	ret	z
+	call	GetSimpTYPE	; Get simple TYPE
+	call	ErrNZ		; Simple type expected
+	db	_SimpTexp
+	ld	a,(Type)
+	cp	_Integ
+	ret	nc
+	call	ERROR		; Simple type expected
+	db	_SimpTexp
+;
+; Put label to table
+;
+Put$TYPE:
+	_DE	8,0
+	call	StLabWrd	; Put type to table
+	ld	hl,(LabPtr)	; Get label pointer
+	ld	(TypeTable),hl	; .. save as type table
+	ld	hl,Type		; Get source
+	ld	b,LabLen
+P$T.Loop:
+	ld	a,(hl)
+	call	StLabByte	; Store into table
+	inc	hl
+	djnz	P$T.Loop
+	call	SetLabPtr	; Set label pointer
+	xor	a
+	ret
+;
+; Copy name of label
+; ENTRY	Reg HL points to address to get name from
+;
+Get$ENV:
+	ld	de,l7b69
+	jr	Get$LABEL	; Get name
+;
+; Load environment from table
+; ENTRY	Reg HL points to label
+;
+Get@Table:
+	ld	a,(hl)		; Get ????
+	dec	hl
+	ld	(l7b57),a
+	ld	d,(hl)		; Fetch value
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	ld	(TypVal),de
+	ld	d,(hl)		; Get string address
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+;
+; Copy name of label
+; ENTRY	Reg HL points to address to get name from
+;	(In reversed order)
+;
+Get$TYPE:
+	ld	de,Type		; Set default
+;
+; Copy name of label
+; ENTRY	Reg HL points to address to get name from
+;	Reg DE holds destination
+;
+Get$LABEL:
+	push	bc
+	ld	b,LabLen	; Set max
+G$L.Loop:
+	ld	a,(hl)		; Get from source
+	ld	(de),a		; .. save
+	dec	hl		; NOTE reversed order
+	inc	de
+	djnz	G$L.Loop
+	pop	bc
+	ret
+;
+;
+;
+l5295:
+	ld	(l7b79),hl	; Save entry
+	ld	hl,(LabPtr)	; Get label pointer
+l529b:
+	ld	bc,(l7b79)	; Get entry
+	or	a
+	sbc	hl,bc		; Test same address
+	add	hl,bc
+	ret	z		; .. yeap
+	inc	hl
+	ld	c,(hl)		; Get length
+	inc	hl
+	ld	b,(hl)
+	add	hl,bc
+	ld	a,(hl)
+	cp	8
+	jr	nz,l529b
+	ld	(hl),0
+	push	hl
+	dec	hl
+	dec	hl
+	ld	a,(hl)
+	cp	4
+	jr	nz,l52f8
+	dec	hl
+	ld	a,(hl)
+	or	a
+	jr	z,l52f8
+	ld	(hl),0
+	dec	hl
+	push	hl
+	ld	e,(hl)
+	dec	hl
+	ld	d,(hl)
+	ld	hl,(LabPtr)	; Get label pointer
+l52c7:
+	ld	bc,(l7b77)
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	call	ErrZ		; Undefined pointer
+	db	_UndefPtr
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	add	hl,bc
+	ld	a,(hl)
+	cp	3
+	jr	nz,l52c7
+	push	hl
+	push	de
+	dec	hl
+	dec	hl
+l52e1:
+	ld	a,(de)
+	cp	(hl)
+	jr	z,l52e9
+	pop	de
+	pop	hl
+	jr	l52c7
+l52e9:
+	bit	7,(hl)
+	dec	hl
+	dec	de
+	jr	z,l52e1
+	pop	bc
+	pop	bc
+	ld	b,(hl)
+	dec	hl
+	ld	c,(hl)
+	pop	hl
+	ld	(hl),c
+	dec	hl
+	ld	(hl),b
+l52f8:
+	pop	hl
+	jp	l529b
+;
+;
+;
+l52fc:
+	xor	a
+	ld	(l7b95),a
+	ld	(l7bc9),a
+	call	.BEGIN
+	SavPC	l7ba4		; Save PC
+	call	StJP@		; Set JP addr
+	ld	hl,(LabPtr)	; Get label pointer
+l5310:
+	ld	de,(PrevLabPtr)	; Get previous pointer
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	nc,l5363
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	push	bc
+	ld	b,a
+	ld	a,d
+	or	e
+	jr	z,l533a
+	ex	de,hl
+	dec	hl
+	ld	a,(hl)
+	ld	c,a
+	inc	a
+	call	ErrZ		; Undefined label
+	db	_UndefLab
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	jr	l5340
+l533a:
+	ld	de,(l7ba4)
+	ld	c,0
+l5340:
+	pop	hl
+l5341:
+	ld	a,b
+	sub	c
+	jr	nz,l534a
+	call	StBack		; Store back
+	jr	l5360
+l534a:
+	call	ErrCY		; Invalid GOTO
+	db	_GOTOerr
+	push	de
+	push	af
+	call	StBackPC	; Store back PC
+	pop	af
+	ld	b,a
+l5355:
+	call	StPOP		; Set POP HL
+	djnz	l5355
+	ld	a,.JP		; JP addr
+	pop	hl
+	call	StCode
+l5360:
+	pop	hl
+	jr	l5310
+l5363:
+	ld	hl,(l7ba4)
+	inc	hl
+	CopyPC	de		; Copy PC
+	dec	de		; .. fix it
+	dec	de
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jp	nz,StBackPC	; Store back PC
+	dec	hl
+	jp	ChkChn		; Check chain
+;
+; BEGIN
+;
+.BEGIN:
+	call	Statement	; Get statement
+	call	FindStr		; Look for END
+	dw	$END
+	ret	z		; .. yeap
+	call	l6f50
+	jr	.BEGIN
+;
+; Process a statement
+;
+Statement::
+	ld	a,-1
+	ld	(BlockCheck),a	; Set line in progress
+	ld	a,(Options)	; Get options
+	ld	(LocOpt),a
+	bit	.Uopt,a		; Test interrupt
+	jr	z,l539c		; .. no
+	ld	a,RST
+	ld	(BRKmode),a	; Set interrupt code
+	call	StByte		; .. store it ast RST x
+l539c:
+	call	FndTabStr	; Find control statements
+	db	_Addr
+	dw	$STMT1
+	jr	z,l53cb		; .. yeap
+	call	l67b2		; Find variable
+	jp	z,l57ea		; .. yeap
+	_BC	5,0
+	call	FndLABEL	; Find label
+	jp	z,l573d		; .. yeap
+	_BC	1,0
+	call	FndLABEL	; Try next
+	jr	z,l53d0		; .. yeap
+	_BC	6,0
+	call	FndLABEL
+	jp	z,l591f
+	call	FndTabStr	; Find standard statements
+	db	_Addr
+	dw	$STMT2
+	ret	nz		; .. nope
+l53cb:
+	ld	e,(hl)		; Fetch statement address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; .. go
+l53d0:
+	call	MustColon	; Verify :
+	ld	a,(l7b94)
+	cp	(hl)
+	call	ErrNZ		; Label out of block
+	db	_LABELerr
+	dec	hl
+	ld	a,(hl)
+	inc	a
+	call	ErrNZ		; Double label
+	db	_DoubleLab
+	ld	a,(l7b95)
+	ld	(hl),a
+	CopyPC	de		; Copy PC
+	dec	hl
+	ld	(hl),d		; .. store it
+	dec	hl
+	ld	(hl),e
+	jr	Statement
+;
+; IF expr THEN stmt1 {ELSE stmt2}
+;
+.IF:
+	call	BoolExpr	; Get expression
+	call	StImm
+	db	@L9
+$I9:
+	BIT	_LB,L
+	db	.JPZ		; JP Z,addr
+@L9	equ	$-$I9
+	PushPC			; Save PC
+	call	StWrd
+	call	FindStr		; Verify THEN
+	dw	$THEN
+	call	ErrNZ		; THEN expected
+	db	_THENexp
+	call	Statement	; Process statement
+	call	FindStr		; Test ELSE
+	dw	$ELSE
+	jr	nz,l5420	; .. nope
+	call	StJP		; Set JP
+	pop	hl
+	PushPC
+	call	StWrd		; Store PC
+	call	StBackPC	; Store back PC
+	call	Statement	; Process ELSE statement
+l5420:
+	pop	hl		; Get start PC
+	jp	StBackPC	; .. store back
+;
+; WHILE expr DO stmt
+;
+.WHILE:
+	PushPC			; Save PC
+	call	BoolExpr	; Get expression
+	call	FindStr		; Verify DO
+	dw	$DO
+	call	ErrNZ		; DO expected
+	db	_DOexp
+	call	StImm
+	db	@L10
+$I10:
+	BIT	_LB,L
+	db	.JPZ		; JP Z,addr
+@L10	equ	$-$I10
+	PushPC			; Save PC
+	call	StWrd
+	call	Statement	; Process statement
+	pop	de		; Get back PCs
+	pop	hl
+	ld	a,.JP
+	call	StCode		; JP addr
+	ex	de,hl
+	jp	StBackPC	; Store back PC
+;
+; REPEAT stmt UNTIL expr
+;
+.REPEAT:
+	PushPC			; Save PC
+l544e:
+	call	Statement	; Process statement
+	call	FindStr		; Test UNTIL
+	dw	$UNTIL
+	jr	z,l545d		; .. yeap, exit
+	call	l6f50
+	jr	l544e
+l545d:
+	call	BoolExpr	; Process expression
+	call	StImm
+	db	@L11
+$I11:
+	BIT	_LB,L
+	db	.JPZ		; JP Z,addr
+@L11	equ	$-$I11
+	pop	hl		; Get start PC
+	jp	StWrd
+;
+; FOR stmt1 {DOWN}TO expr DO stmt2
+;
+.FOR:
+	_BC	_pointer,0
+	call	FndLABEL	; Find label
+	call	ErrNZ		; Syntax error
+	db	_Undef
+	call	Get@Table	; Get from table
+	ld	a,(l7b57)
+	or	a
+	jr	nz,l5485
+	ld	a,(Type)
+	cp	_Integ
+	jr	nc,l5489
+l5485:
+	call	ERROR		; Simple type expected
+	db	_SimpTexp
+l5489:
+	call	SavEnv1		; Save environment
+	ld	a,(Type)
+	push	af
+	call	MustAss		; Verify :=
+	call	Expression	; Get expression
+	call	StPUSH		; Set PUSH HL
+	pop	af
+	push	af
+	cp	b
+	call	ErrNZ		; Invalid types
+	db	_InvType
+	call	FndTabStr	; Find TO or DOWNTO
+	db	_Byte
+	dw	$DOWN.TO
+	call	ErrNZ		; TO or DOWNTO expected
+	db	_D.TOexp
+	ld	e,(hl)
+	push	de
+	call	Expression	; Get expression
+	pop	de
+	pop	af
+	push	de
+	cp	b
+	call	ErrNZ		; Invalid types
+	db	_InvType
+	call	FindStr		; Verify DO
+	dw	$DO
+	call	ErrNZ		; DO expected
+	db	_DOexp
+	call	StImm
+	db	@L12
+$I12:
+	POP	DE
+@L12	equ	$-$I12
+	pop	de
+	call	CpyEnv1		; Copy environment
+	push	de
+	ld	a,e
+	ld	hl,toset
+	cp	.INC.HL
+	jr	z,l54d5
+	ld	hl,downtoset
+l54d5:
+	call	StCALL@
+	PushPC			; Save PC
+	call	StImm
+	db	@L13
+$I13:
+	LD	A,D
+	OR	E
+	JP	Z,$-$
+	PUSH	DE
+@L13	equ	$-$I13
+	call	l661b
+	ld	hl,l7b95
+	inc	(hl)
+	call	Statement	; Process statemnt
+	ld	hl,l7b95
+	dec	(hl)
+	pop	hl
+	pop	de
+	call	RestEnv1	; Restore environment
+	push	hl
+	ld	hl,(TypVal)	; Get value
+	ld	a,.LD@HL	; LD HL,(addr)
+	call	StCode
+	ld	a,(TypLen)	; Get length
+	dec	a
+	jr	nz,l550c
+	call	StImm
+	db	@L14
+$I14:
+	LD	H,0
+@L14	equ	$-$I14
+l550c:
+	ld	a,e
+	call	StByte		; Store byte
+	call	StImm
+	db	@L15
+$I15:
+	POP	DE
+	DEC	DE
+	db	.JP		; JP addr
+@L15	equ	$-$I15
+	pop	hl
+	call	StWrd
+	inc	hl
+	inc	hl
+	inc	hl
+	jp	StBackPC	; Store back PC
+;
+; CASE expr OF ... {OTHERWISE} stmt
+;
+.CASE:
+	call	ActParam	; Get expression
+	ld	(l7b9c),a
+	xor	a
+	ld	(l7b9b),a
+	call	MustOF		; Verify OF
+	ld	b,0
+	push	bc
+l5531:
+	ld	b,1
+l5533:
+	push	bc
+	ld	hl,l7b9b
+	bit	_MB,(hl)
+	jr	z,l5549
+	call	StImm
+	db	@L16
+$I16:
+	ADD	HL,DE
+@L16	equ	$-$I16
+	bit	4,(hl)
+	jr	z,l5549
+	call	StImm
+	db	@L17
+$I17:
+	ADD	HL,BC
+@L17	equ	$-$I17
+l5549:
+	call	.GetConst	; Get constant
+	ld	a,(l7b9c)
+	cp	b
+	call	ErrNZ		; Invalid CASE slector
+	db	_IllCASE
+	call	StLD.DE		; Set LD DE,val16
+	push	hl
+	call	FindStr		; Look for '..'
+	dw	$..
+	pop	hl
+	jr	nz,l5582	; .. nope
+	push	hl
+	call	.GetConst	; Get constant
+	ld	a,(l7b9c)
+	cp	b
+	call	ErrNZ		; Invalid CASE selector
+	db	_IllCASE
+	pop	de
+	or	a
+	sbc	hl,de
+	inc	hl
+	call	StLD.BC		; Set LD BC,val16
+	call	StImm
+	db	@L18
+$I18:
+	OR	A
+	SBC	HL,DE
+	OR	A
+	SBC	HL,BC
+@L18	equ	$-$I18
+	ld	a,.JPC		; JP C,addr
+	jr	l558b
+l5582:
+	call	StImm
+	db	@L19
+$I19:
+	OR	A
+	SBC	HL,DE
+@L19	equ	$-$I19
+	ld	a,.JPZ		; JP Z,addr
+l558b:
+	ld	(l7b9b),a
+	call	IsColon		; Test :
+	pop	bc
+	jr	z,l55a5		; .. yeap
+	ld	a,(l7b9b)
+	call	StByte		; Store byte
+	PushPC
+	call	StWrd
+	call	MustComma	; Verify ,
+	inc	b
+	jr	l5533
+l55a5:
+	CopyPC	de		; Copy PC
+	inc	de		; .. fix
+	inc	de
+	inc	de
+l55ab:
+	dec	b
+	jr	z,l55b4
+	pop	hl
+	call	StBack		; Store back
+	jr	l55ab
+l55b4:
+	ld	a,(l7b9b)
+	res	3,a
+	call	StByte		; Store byte
+	pop	bc
+	PushPC
+	inc	b
+	push	bc
+	call	StWrd
+	ld	a,(l7b9b)
+	push	af
+	ld	a,(l7b9c)
+	push	af
+	call	Statement	; Process statement
+	pop	af
+	ld	(l7b9c),a
+	pop	af
+	ld	(l7b9b),a
+	call	IsSemicolon	; Test ;
+	ld	e,1
+	jr	z,l55df		; .. yeap
+	dec	e
+l55df:
+	push	de
+	call	FindStr		; Check END
+	dw	$END
+	pop	de
+	jr	z,l561e		; .. nope
+	call	StJP		; Set JP
+	pop	bc
+	pop	hl
+	PushPC
+	push	bc
+	push	de
+	call	StWrd
+	call	StBackPC	; Store back PC
+	call	FindStr		; Test ELSE
+	dw	$ELSE
+	pop	de
+	jr	z,l560f		; .. yeap
+	dec	e
+	jp	z,l5531
+	ld	a,(BlockCheck)	; Test line in progress
+	or	a
+	call	ErrZ		; END expected
+	db	_ENDexp
+	call	ERROR		; Syntax error
+	db	_Undef
+l560f:
+	call	Statement	; Process statement
+	call	FindStr		; Test END
+	dw	$END
+	jr	z,l561e		; .. nope
+	call	l6f50
+	jr	l560f
+l561e:
+	pop	bc
+l561f:
+	pop	hl
+	call	StBackPC	; Store back PC
+	djnz	l561f
+	ret
+;
+; GOTO expr
+;
+.GOTO:
+	_BC	1,0
+	call	FndLABEL	; Get label
+	call	ErrNZ		; Undefined label
+	db	_UndefLab
+	ld	a,(l7b94)
+	cp	(hl)
+	call	ErrNZ		; Label out of block
+	db	_LABELerr
+	ex	de,hl
+l5639:
+	call	StLabWrd	; Put to table
+	ld	a,(l7b95)
+	call	StLabByte	; Store into table
+	call	StJP		; Set JP
+	CopyPC	de		; Get PC
+	call	StLabWrd	; Put PC to table
+	jp	StWrd
+;
+; WITH expr DO stmt
+;
+.WITH:
+	ld	a,(l7bc9)
+	push	af
+l5652:
+	ld	a,(l7bc6)
+	ld	hl,l7bc9
+	cp	(hl)
+	call	ErrZ		; Too many WITH
+	db	_WITHerr
+	call	l677f
+	ld	a,(Type)
+	cp	2
+	call	ErrNZ		; Record var expected
+	db	_RecVexp
+	ld	hl,l7bc9
+	ld	e,(hl)
+	ld	d,0
+	inc	(hl)
+	ld	hl,l7bcc
+	add	hl,de
+	ld	a,(l7b5d)
+	ld	(hl),a
+	ld	hl,(l7bca)
+	add	hl,de
+	add	hl,de
+	ld	a,.ST@HL	; LD (addr),HL
+	call	StCode
+	call	IsComma		; Test ,
+	jr	z,l5652		; .. yeap
+	call	FindStr		; Verify DO
+	dw	$DO
+l568c:
+	call	ErrNZ		; DO expected
+	db	_DOexp
+	call	Statement	; Process statement
+	pop	af
+	ld	(l7bc9),a
+	ret
+;
+; INLINE(...)
+;
+.INLINE:
+	call	MustLeftParen	; Verify (
+l569b:
+	ld	a,'>'
+	call	IsAny		; Test word selection
+	ld	a,_Addr
+	jr	z,InlSt..	; .. yeap
+	ld	a,'<'
+	call	IsAny		; Test byte selection
+	ld	a,_Byte
+	jr	z,InlSt..	; .. yeap
+	xor	a		; Set none
+InlSt..:
+	ld	(l7ba6),a	; Save mode
+	xor	a
+	ld	h,a		; Clear a bit
+	ld	l,a
+	ld	b,a
+l56b5:
+	push	bc
+	push	hl
+	call	GetConst	; Get value
+	jr	nz,l56c5	; .. label
+	ld	a,b
+	cp	_Integ		; Should be integer
+	jr	z,l5702
+	call	ERROR		; Integer constant expected
+	db	_IntCexp
+l56c5:
+	ld	hl,l7ba6
+	ld	a,(hl)
+	or	a
+	jr	nz,l56ce
+	ld	(hl),_Addr	; Force two bytes
+l56ce:
+	ld	a,'*'
+	call	IsAny		; Test program counter ref
+	jr	nz,l56da	; .. nope
+	CopyPC	hl		; Copy PC
+	jr	l5702
+l56da:
+	_BC	_pointer,0
+	call	FndLABEL	; Find label
+	jr	nz,l56ea	; .. nope
+	call	Get@Table	; Get from table
+	ld	hl,(TypVal)	; Get value
+	jr	l5702
+l56ea:
+	_BC	5,0
+	call	FndLABEL	; Find label
+	jr	z,l56fc		; .. got it
+	_BC	6,0
+	call	FndLABEL
+	call	ErrNZ		; INLINE error
+	db	_INLINEerr
+l56fc:
+	dec	hl
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+l5702:
+	pop	de
+	pop	bc
+	dec	b
+	jr	nz,l570a
+	call	NegateInt	; Negate number
+l570a:
+	add	hl,de
+	ld	b,0
+	ld	a,'+'
+	call	IsAny		; Test reference
+	jr	z,l56b5		; .. yeap
+	inc	b
+	ld	a,'-'
+	call	IsAny		; .. negative
+	jr	z,l56b5		; .. yeap
+	ld	a,(l7ba6)
+	cp	_Byte		; Test mode
+	jr	z,l5729
+	jr	nc,l572f
+	inc	h
+	dec	h
+	jr	nz,l572f
+l5729:
+	ld	a,l
+	call	StByte		; Store byte
+	jr	l5732
+l572f:
+	call	StWrd
+l5732:
+	ld	a,'/'
+	call	IsAny		; Test separator
+	jp	z,l569b		; .. yeap
+	jp	MustRightParen	; Verify )
+

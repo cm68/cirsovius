@@ -1,0 +1,3417 @@
+	title	PMARC catalog program
+	name	('PMCAT')
+
+; DASMed version of PMCAT.COM
+; By W. Cirsovius
+
+; The archive catalog program PMCAT
+
+; This is a program with which you can update and catenate or
+; delete files in PM- archives. Start up the program without
+; arguments to get help.
+
+; 1) PMCAT [-S] <receive-archive>[=<base-archive>] [<send-archive> [<filematch>]]
+
+;  Catenate members in <send-archive> matching with <filematch> to
+; <receive-archive>. If <base-archive> is fixed,copy the archive to
+; <receive-archive>,and do as the above. If <filematch> is absent,
+; all members are catenated. If <send-archive> is absent,it mean
+; refresh <receive-archive>. If switch -S is fixed,sort members in
+; alphabetical order before catenating.
+
+; Sort may also be selected by -S[E] or -R[E] for normal or reverse
+; sort [of extensions].
+
+; 2) PMCAT -U <receive-archive> <send-archive> [<filematch>]
+
+;  Update <receive-archive> directry by members in <send-archive>
+; matching with <filematch>.
+
+; 3) PMCAT -D[D] <archive> <filematch>
+
+;  Delete members in <archive> matching with <filematch>. If fix
+; -DD,rewrite <archive> directry.
+
+; Option -B allows backup of *.PMA to *.PMB
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+FCB	equ	005ch
+CCP	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.make	equ	22
+.rename	equ	23
+.setdma	equ	26
+.rndrd	equ	33
+.rndwr	equ	34
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+DIRlen	equ	16
+_RRN	equ	33
+FCBlen	equ	36
+
+rrnlen	equ	4
+
+reclng	equ	128
+
+MAXREC	equ	0ffffh
+
+null	equ	00h
+bell	equ	07h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+_files	equ	10		; Number of files in array
+
+empty	equ	-1
+
+MEMTYP	equ	 4		; Pointer to member type
+MEMBER	equ	 5		; Pointer to member
+MEMLEN	equ	16		; Length of member record
+
+l0004	equ	04h
+
+	jr	l0110
+;
+	db	'PMcat Ver 2.11'
+;
+; %%%%%%%%%%%%%%%%%
+; %% Start PMCAT %%
+; %%%%%%%%%%%%%%%%%
+;
+l0110:
+	ld	de,l19ad
+	ld	c,.string
+	call	BDOS		; Give copyright
+	ld	hl,CCP	; Point to command line
+	ld	b,0
+	ld	c,(hl)		; FEtch length of command
+	add	hl,bc		; Point to end
+	inc	hl
+	ld	(hl),null	; Close it
+	ld	hl,FCB
+	call	l1485		; Init FCBs
+	ld	hl,l1aa9
+	call	l1485
+	ld	hl,l1acd
+	call	l1485
+	ld	hl,l1a31	; Init file array
+	ld	c,_files
+l0139:
+	ld	(hl),empty	; Mark passive
+	inc	hl
+	ld	b,.nam+.ext
+l013e:
+	ld	(hl),'?'	; Set wildcard
+	inc	hl
+	djnz	l013e
+	dec	c		; Do all files available
+	jr	nz,l0139
+	ld	hl,l1a1c	; Init dynamic area
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),0
+	ld	b,l1a2d-l1a1c-1
+	call	l149c		; Fill with zero
+	ld	hl,l4000
+	ld	(l1a10),hl	; Init pointer to members
+	ld	hl,CCP+1	; Init CCP pointer
+l015c:
+	ld	a,(hl)		; Get command character
+	inc	hl
+	cp	' '		; Test end of command
+	jp	c,l150b		; Print help if so
+	jr	z,l015c
+	cp	'-'		; Test option prefix
+	jr	z,l016d		; Yeap
+	dec	hl		; Fix pointer
+	jp	l01c9		; Parse file
+l016d:
+	ld	a,(hl)		; Get next character
+	inc	hl
+	cp	' '		; Verify printable
+	jp	c,l150b		; Print help if not
+l0174:
+	cp	'a'-1		; Test lower case
+	jr	c,l017a
+	sub	'a'-'A'		; Convert to upper case
+l017a:
+	cp	'R'		; Test catenate and sort in reversed alphabetically order
+	jr	z,l019b
+	cp	'S'		; Test sort
+	jr	z,l01a6
+	cp	'E'		; Test alternate sort
+	jr	z,l01a6
+	cp	'D'		; Test delete/fix
+	jr	z,l01ab
+	cp	'U'		; Test update
+	jr	z,l01b6
+	cp	'B'		; Test backup creation
+	jr	z,l01bb
+	ld	de,l180a
+	ld	c,.string
+	call	BDOS		; Tell invalid option
+	rst	0		; Exit tp CP/M
+;
+; Option -R : Catenate and sort in reversed alphabetically order
+;
+l019b:
+	ld	(l1a1f),a	; Set reversed flag
+	ld	a,(l1a1e)	; Test sort already selected
+	or	a
+	jr	nz,l01be	; Yeap
+	ld	a,'S'		; Select it
+;
+; Option -S      : Catenate and sort in alphabetically order
+; Option -[S|R]E : Sort by member extensions
+;
+l01a6:
+	ld	(l1a1e),a	; Set sort flag
+	jr	l01be
+;
+; Option -D  : Delete members
+; Option -DD : Delete members and rewrite directory
+;
+l01ab:
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'D'		; Test already delete selected
+	ld	a,'D'
+	jr	nz,l01b6	; Nope, so do it now
+	ld	a,'d'		; Change for rewrite directory
+;
+; Option -U : Update members
+;
+l01b6:
+	ld	(l1a1c),a	; Set update flag
+	jr	l01be
+;
+; Option -B : Create backup
+;
+l01bb:
+	ld	(l1a20),a	; Set backup flag
+l01be:
+	ld	a,(hl)		; Get next character
+	inc	hl
+	cp	' '		; Verify still printable
+	jp	c,l150b		; Nope, give help then
+	jr	nz,l0174	; Get next option
+	jr	l015c		; Get next item
+;
+; -> Get file name
+;
+l01c9:
+	ld	de,FCB
+	call	l14bf		; Get drive
+	ld	b,.nam		; Set length for name
+l01d1:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jp	z,l0273		; Delimiter to next
+	cp	'='		; Test assignment
+	jr	z,l021e
+	cp	'.'		; Test type delimiter
+	jr	z,l01f9
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l01d1
+l01e7:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jp	z,l0273		; Delimiter to next
+	cp	'='		; Test assignment
+	jr	z,l021e
+	cp	'.'		; Wait for type delimiter
+	jr	nz,l01e7
+l01f9:
+	ld	de,FCB+.drv+.nam
+	ld	b,.ext		; Prepare type
+l01fe:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jp	z,l0273		; Delimiter to next
+	cp	'='		; Test assignment
+	jr	z,l021e
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l01fe
+l0210:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jp	z,l0273		; Delimiter to next
+	cp	'='		; Test assignment
+	jr	nz,l0210
+;
+; ->> Found '=' Get assignment of base archive
+;
+l021e:
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'd'		; Verify not set
+	jr	z,l0229
+	cp	'D'
+	jr	nz,l0232
+l0229:
+	ld	de,l1836
+	ld	c,.string
+	call	BDOS		; Tell invalid command
+	rst	0		; Exit to CP/M
+l0232:
+	ld	de,l1acd
+	call	l14bf		; Get drive for base archive
+	ld	b,.nam		; Prepare name
+l023a:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	z,l0273		; Delimiter to next
+	cp	'.'		; Test type delimiter
+	jr	z,l0258		; Yeap
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l023a
+l024b:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	z,l0273		; Delimiter to next
+	cp	'.'		; Wait for type delimiter
+	jr	nz,l024b
+l0258:
+	ld	de,l1acd+.drv+.nam
+	ld	b,.ext		; Prepare type
+l025d:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	z,l0273		; Delimiter to next
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l025d
+l026a:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	nz,l026a	; Position to blank
+;
+; ->> Found ' ' Get next archive or file match
+;
+l0273:
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'd'
+	jp	z,l02c1		; Selected delete
+	cp	'D'
+	jp	z,l02c1
+	ld	de,l1aa9
+	call	l14bf		; Get drive for send archive
+	ld	b,.nam		; Prepare name
+l0288:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	z,l02c1		; Delimiter to next
+	cp	'.'		; Test type delimiter
+	jr	z,l02a6
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l0288
+l0299:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	z,l02c1		; Delimiter to next
+	cp	'.'		; Wait for type delimiter
+	jr	nz,l0299
+l02a6:
+	ld	de,l1aa9+.drv+.nam
+	ld	b,.ext		; Prepare type
+l02ab:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	z,l02c1		; Delimiter to next
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l02ab
+l02b8:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l032c		; Nope, end of command
+	jr	nz,l02b8	; Position to blank
+;
+; ->> Found final ' ' Get matching files
+;
+l02c1:
+	ld	de,l1a31	; Init file array
+	ld	c,_files
+l02c6:
+	ld	a,(hl)		; Get next character
+	inc	hl
+	cp	' '		; Test printable
+	jp	c,l0329		; Nope, exit
+	jr	z,l02c6		; Skip blanks
+	cp	'-'		; Test special prefix
+	jr	z,l02d5		; Yeap
+	dec	hl		; Fix pointer
+	xor	a		; Set active
+l02d5:
+	ld	(de),a		; Store flag
+	inc	de
+	ld	b,.nam		; Prepare name
+l02d9:
+	ld	a,(hl)		; Get next character
+	cp	' '+1		; Test printable
+	jr	c,l02f1		; Fill with blanks if not
+	cp	'.'		; Test type delimiter
+	jr	z,l02f1
+	inc	hl
+	cp	'*'		; Test wildcard
+	jr	z,l02ed
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l02d9
+	jr	l02f7
+l02ed:
+	ld	a,'?'		; Map to wildcard character
+	jr	l02f3
+l02f1:
+	ld	a,' '		; Init blank
+l02f3:
+	ld	(de),a		; Fill remainder of name
+	inc	de
+	djnz	l02f3
+l02f7:
+	ld	b,.ext		; Prepare type
+l02f9:
+	ld	a,(hl)		; Get next character
+	cp	' '+1		; Test printable
+	jr	c,l0317		; Fill with blanks if not
+	inc	hl
+	cp	'.'		; Wait type delimiter
+	jr	nz,l02f9
+l0303:
+	ld	a,(hl)		; Get next character
+	cp	' '+1		; Test printable
+	jr	c,l0317		; Fill with blanks if not
+	inc	hl
+	cp	'*'		; Test wildcard
+	jr	z,l0313
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l0303
+	jr	l031d
+l0313:
+	ld	a,'?'		; Map to wildcard character
+	jr	l0319
+l0317:
+	ld	a,' '		; Init blank
+l0319:
+	ld	(de),a		; Fill remainder of type
+	inc	de
+	djnz	l0319
+l031d:
+	ld	a,(hl)		; Get next character
+	inc	hl
+	cp	' '		; Test printable
+	jr	c,l0329		; End of list if so
+	jr	nz,l031d	; Wait for blank
+	dec	c		; Test all files scanned
+	jp	nz,l02c6	; Nope
+l0329:
+	ld	a,-1
+	ld	(de),a		; Mark end of list
+;
+; End of command line scanner
+;
+l032c:
+	ld	a,(FCB+.drv)	; Get name of file
+	cp	' '		; Test defined
+	jr	nz,l0359	; Yeap
+	ld	a,(l1a1c)	; Get delete flag
+	or	a
+	jp	nz,l150b	; Invalid delete/update selected
+	ld	a,(l1acd+.drv)
+	cp	' '		; Test name of second file given
+	jp	z,l150b		; Should be
+	ld	a,(FCB)	; Get drive
+	or	a		; Test default
+	jp	z,l150b		; Invalid, so give help
+	ld	hl,l1acd+.drv
+	ld	de,FCB+.drv
+	ld	b,.nam+.ext
+	call	l149c		; Unpack name and type
+	ld	sp,l1809	; Load local stack
+	jr	l0390
+l0359:
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'd'
+	jr	z,l0364
+	cp	'D'
+	jr	nz,l0374	; No delete selected
+l0364:
+	ld	a,(l1a31)	; Get from first file in list
+	cp	empty		; Verify any member
+	jr	nz,l0374
+	ld	de,l1836
+	ld	c,.string
+	call	BDOS		; Tell invalid command
+	rst	0		; Exit to CP/M
+l0374:
+	ld	sp,l1809	; Load local stack
+	ld	a,(l1acd+.drv)
+	cp	' '		; Test file name given
+	jr	nz,l0390	; Yeap
+	ld	a,(l1acd)	; Get base drive
+	or	a		; Test default
+	jp	z,l0424		; Yeap
+	ld	hl,FCB+.drv
+	ld	de,l1acd+.drv
+	ld	b,.nam+.ext
+	call	l149c		; Unpack name and type
+l0390:
+	ld	a,(l1acd+.drv+.nam)
+	cp	' '		; Test type given
+	jr	z,l03a5		; Nope
+	ld	de,l1acd
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Verify on disk
+	jp	z,l1502		; Nope, tell it
+	jr	l03c2
+l03a5:
+	ld	hl,l1993	; Point to list of supported types
+l03a8:
+	ld	a,(hl)		; Get from list
+	or	a		; Test end of list
+	jp	z,l1502		; File not found if so
+	ld	de,l1acd+.drv+.nam
+	ld	b,.ext
+	call	l149c		; Unpack type
+	push	hl
+	ld	de,l1acd
+	ld	c,.open
+	call	BDOS		; Test if file on disk
+	pop	hl
+	inc	a		; Nope, try next type
+	jr	z,l03a8
+l03c2:
+	ld	hl,l1acd
+	ld	de,l18e2
+	call	l12b7		; Tell base archive
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	ld	a,(FCB+.drv+.nam)
+	cp	' '		; Test type given
+	jr	nz,l03e5	; Yeap
+	ld	hl,l1acd+.drv+.nam
+	ld	de,FCB+.drv+.nam
+	ld	b,.ext
+	call	l149c		; Unpack type
+l03e5:
+	ld	hl,FCB
+	ld	de,l18cf
+	call	l12b7		; Tell receive archive
+	ld	de,l1918
+	ld	c,.string
+	call	BDOS		; Tell new
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Test file does exist
+	inc	a
+	jp	z,l0627		; Nope, create it
+	ld	de,l18a8
+	ld	c,.string
+	call	BDOS		; Ask for overwrite
+	ld	c,.conin
+	call	BDOS		; Read answer
+	push	af
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	pop	af
+	cp	'y'		; Test yes
+	jp	z,l061f
+	cp	'Y'
+	jp	z,l061f
+	rst	0		; Exit to CP/M
+l0424:
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'd'		; Test rewrite directory
+	jr	nz,l0437	; Nope
+	ld	a,(l1a1e)	; Test sort selected
+	or	a
+	jp	nz,l056e	; Yeap
+	ld	de,l1908	; Tell archive file
+	jr	l0451
+l0437:
+	ld	a,(l1aa9+.drv)
+	cp	' '		; Test send archive defined
+	jp	z,l056e		; Nope
+	ld	a,(l1a1e)	; Test sort selected
+	or	a
+	jp	nz,l05ce	; Yeap
+	ld	a,(l1a1c)	; Get upadate flag
+	cp	'U'		; Test update selected
+	jp	nz,l05ce
+	ld	de,l18cf	; Tell receive archive
+l0451:
+	push	de
+	ld	hl,FCB+.drv+.nam
+	ld	a,(hl)
+	cp	' '		; Test type defined
+	jr	nz,l0462	; Yeap
+	ld	(hl),'P'	; Force .PMA
+	inc	hl
+	ld	(hl),'M'
+	inc	hl
+	ld	(hl),'A'
+l0462:
+	ld	hl,FCB
+	pop	de
+	call	l12b7		; Tell file action
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Test file on disk
+	inc	a		; Yeap
+	jr	nz,l0491
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'd'		; Test rewrite directory
+	jr	z,l0486		; Yeap
+	ld	de,l1918
+	ld	c,.string
+	call	BDOS		; Tell new
+	jp	l0627
+l0486:
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	jp	l1502		; File not found
+l0491:
+	ld	de,l192a
+	ld	c,.string
+	call	BDOS		; Tell rewrite
+	ld	hl,MAXREC
+	ld	(FCB+_RRN),hl	; Set max record
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'd'		; Test rewrite directory
+	ld	a,'0'
+	jr	z,l04aa		; Yeap
+	ld	a,'A'
+l04aa:
+	ld	(l1a1c),a	; Change delete flag
+l04ad:
+	ld	hl,(l1a10)	; Get pointer to members
+	ex	de,hl
+	ld	hl,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record value
+	xor	a
+	ld	(de),a		; Close end
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	or	a		; Test end
+	jr	nz,l04d4	; Nope, got header
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	(l1a12),hl
+	ld	de,MEMLEN
+	add	hl,de		; Advance pointer
+	ld	(l1a10),hl
+	jp	l06fd
+l04d4:
+	ld	b,a		; Set length of header
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	c,a		; Save checksum
+	ld	hl,l1af1	; Init pointer to header
+	xor	a		; Init checksum
+l04e0:
+	ld	d,a
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	(hl),a		; Unpack character
+	inc	hl
+	add	a,d		; Update checksum
+	djnz	l04e0
+	cp	c		; Verify match
+	jr	z,l04f8		; Got it
+	ld	de,l184a
+	ld	c,.string
+	call	BDOS		; Tell bad header
+	rst	0		; Exit to CP/M
+l04f8:
+	ld	hl,(l1a10)	; Get pointer to members
+	ex	de,hl
+	inc	de		; Skip bytes
+	inc	de
+	inc	de
+	inc	de
+	ld	a,1
+	ld	(de),a		; Set flag
+	inc	de
+	ld	hl,l1af1
+	call	l14a3		; Get type of archive
+	jr	nz,l0516	; Not standard
+	ld	b,.nam+.ext
+	ld	a,' '
+l0510:
+	ld	(de),a		; Blank name and type
+	inc	de
+	djnz	l0510
+	jr	l0550
+l0516:
+	ld	hl,l1af1+ARCnam
+	ld	c,(hl)		; Get length of name
+	inc	c
+	inc	hl
+	ld	b,.nam
+l051e:
+	dec	c
+	jr	z,l0536
+	ld	a,(hl)		; Get name
+	inc	hl
+	cp	'.'		; Test delimiter
+	jr	z,l0536
+	ld	(de),a		; Unpack
+	inc	de
+	djnz	l051e
+l052b:
+	dec	c
+	jr	z,l053c
+	ld	a,(hl)
+	inc	hl
+	cp	'.'		; Wait for delimiter
+	jr	nz,l052b
+	jr	l053c
+l0536:
+	ld	a,' '
+l0538:
+	ld	(de),a		; Blank remainder of name
+	inc	de
+	djnz	l0538
+l053c:
+	inc	c
+	ld	b,.ext
+l053f:
+	dec	c
+	jr	z,l054a
+	ld	a,(hl)		; Get character
+	inc	hl
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l053f
+	jr	l0550
+l054a:
+	ld	a,' '
+l054c:
+	ld	(de),a		; Blank remainder of type
+	inc	de
+	djnz	l054c
+l0550:
+	ex	de,hl
+	ld	(l1a10),hl	; Set pointer to members
+	ld	hl,(l1a21)	; Get record pointer
+	ex	de,hl
+	ld	hl,(l1af1+ARClen)
+	add	hl,de		; Add length
+	ld	(l1a21),hl
+	ld	hl,(l1a21+2)
+	ex	de,hl
+	ld	hl,(l1af1+ARClen+2)
+	adc	hl,de
+	ld	(l1a21+2),hl
+	jp	l04ad		; Try next member
+l056e:
+	ld	hl,FCB
+	ld	de,l1acd
+	ld	b,.drv+.nam+.ext
+	call	l149c		; Copy FCB to base archive
+	ld	hl,l19f5
+	ld	de,FCB+.drv
+	ld	b,.nam+.ext
+	call	l149c		; Copy temp file to FCB
+	ld	a,'R'
+	ld	(l1a1d),a	; Set temp file
+	ld	a,(l1acd+.drv+.nam)
+	cp	' '		; Test extension defined
+	jr	z,l059e		; Nope
+	ld	de,l1acd
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Verify file found
+	jp	z,l1502		; Error if not
+	jr	l05bb		; Fall into action
+l059e:
+	ld	hl,l19a0	; Point to list of supported types
+l05a1:
+	ld	a,(hl)		; Get from list
+	or	a		; Test end of list
+	jp	z,l1502		; File not found if so
+	ld	de,l1acd+.drv+.nam
+	ld	b,.ext
+	call	l149c		; Unpack type
+	push	hl
+	ld	de,l1acd
+	ld	c,.open
+	call	BDOS		; Test if file on disk
+	pop	hl
+	inc	a
+	jr	z,l05a1		; Nope, try next type
+l05bb:
+	ld	hl,l1acd
+	ld	de,l1908
+	call	l12b7		; Tell archive file
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	jr	l061f
+l05ce:
+	ld	hl,FCB+.drv+.nam
+	ld	a,(hl)
+	cp	' '		; Test extension defined
+	jr	nz,l05de	; Yeap
+	ld	(hl),'P'	; Force type .PMA
+	inc	hl
+	ld	(hl),'M'
+	inc	hl
+	ld	(hl),'A'
+l05de:
+	ld	hl,FCB
+	ld	de,l18cf
+	call	l12b7		; Tell receive archive
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Test on disk
+	jr	nz,l05fc	; Yeap
+	ld	de,l1918
+	ld	c,.string
+	call	BDOS		; Tell new
+	jr	l0627
+l05fc:
+	ld	de,l1921
+	ld	c,.string
+	call	BDOS		; Tell add
+	ld	hl,FCB
+	ld	de,l1acd
+	ld	b,FCBlen
+	call	l149c		; Unpack FCB
+	ld	hl,l19f5
+	ld	de,FCB+.drv
+	ld	b,.nam+.ext
+	call	l149c		; Copy temp file to FCB
+	ld	a,'R'
+	ld	(l1a1d),a	; Set temp file
+l061f:
+	ld	de,FCB
+	ld	c,.delete
+	call	BDOS		; Delete file
+l0627:
+	ld	de,FCB
+	ld	c,.make
+	call	BDOS		; Create new file
+	inc	a		; Verify success
+	jp	z,l14e7		; Nope, disk full
+	ld	a,(l1acd+.drv)
+	cp	' '		; Test base archive
+	jp	z,l06fd		; Nope
+	ld	hl,MAXREC
+	ld	(l1acd+_RRN),hl	; Set max record
+l0641:
+	ld	hl,(l1a10)	; Get pointer to members
+	ex	de,hl
+	ld	hl,l1a29
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	xor	a
+	ld	(de),a		; Set end
+	call	l142f		; Read byte
+	or	a		; Test end
+	jp	z,l06fd		; Yeap
+	ld	b,a		; Set length
+	call	l142f		; Read byte
+	ld	c,a		; Set checksum
+	ld	hl,l1af1	; Init pointer to header
+	xor	a		; Init checksum
+l065f:
+	ld	d,a
+	call	l142f		; Read byte
+	ld	(hl),a		; Store into header
+	inc	hl
+	add	a,d		; Upadet checksum
+	djnz	l065f
+	cp	c		; Verify match
+	jr	z,l0674
+	ld	de,l184a
+	ld	c,.string
+	call	BDOS		; Tell bad header if not
+	rst	0		; Exit to CP/M
+l0674:
+	ld	hl,(l1a10)	; Get pointer to members
+	ex	de,hl
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	ld	a,4		; Set type
+	ld	(de),a
+	inc	de
+	ld	hl,l1af1
+	call	l14a3		; Get type of archive
+	jr	nz,l0693	; Not standard
+	ld	b,.nam+.ext
+	ld	a,' '
+l068c:
+	ld	(de),a		; Blank name and type
+	inc	de
+	djnz	l068c
+	ex	de,hl
+	jr	l06e0
+l0693:
+	ld	hl,l1af1+ARCnam
+	ld	c,(hl)		; Get length of name
+	inc	c
+	inc	hl
+	ld	b,.nam
+l069b:
+	dec	c
+	jr	z,l06b3
+	ld	a,(hl)		; Get name
+	inc	hl
+	cp	'.'		; Test delimiter
+	jr	z,l06b3
+	ld	(de),a		; Unpack
+	inc	de
+	djnz	l069b
+l06a8:
+	dec	c
+	jr	z,l06b9
+	ld	a,(hl)
+	inc	hl
+	cp	'.'		; Wait for delimiter
+	jr	nz,l06a8
+	jr	l06b9
+l06b3:
+	ld	a,' '
+l06b5:
+	ld	(de),a		; Blank remainder of name
+	inc	de
+	djnz	l06b5
+l06b9:
+	inc	c
+	ld	b,.ext
+l06bc:
+	dec	c
+	jr	z,l06c7
+	ld	a,(hl)		; Get character
+	inc	hl
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l06bc
+	jr	l06cd
+l06c7:
+	ld	a,' '
+l06c9:
+	ld	(de),a		; Blank remainder of type
+	inc	de
+	djnz	l06c9
+l06cd:
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'D'		; Test delete
+	jr	nz,l06dc	; Nope
+	call	l1270		; Find file
+	jr	z,l06e3		; Yeap, do not add
+l06dc:
+	ld	de,MEMLEN
+	add	hl,de
+l06e0:
+	ld	(l1a10),hl	; Set pointer to members
+l06e3:
+	ld	hl,(l1a29)
+	ex	de,hl
+	ld	hl,(l1af1+ARClen)
+	add	hl,de		; Add length
+	ld	(l1a29),hl
+	ld	hl,(l1a29+2)
+	ex	de,hl
+	ld	hl,(l1af1+ARClen+2)
+	adc	hl,de
+	ld	(l1a29+2),hl
+	jp	l0641
+l06fd:
+	ld	a,(l1aa9+.drv)
+	cp	' '		; Test name of send archive givem
+	jp	z,l0852		; Nope
+	ld	a,(l1a31)
+	cp	empty		; Test any in list
+	jr	nz,l0710	; Yeap
+	xor	a
+	ld	(l1a31),a	; Enable one entry
+l0710:
+	ld	a,(l1aa9+.drv+.nam)
+	cp	' '		; Test extension defined
+	jr	z,l0725		; Nope
+	ld	de,l1aa9
+	ld	c,.open
+	call	BDOS		; Test file on disk
+	inc	a
+	jp	z,l1502		; File not found
+	jr	l0742
+l0725:
+	ld	hl,l19a0	; Point to list of supported types
+l0728:
+	ld	a,(hl)		; Get from list
+	or	a		; Test end of list
+	jp	z,l1502		; File not found if so
+	ld	de,l1aa9+.drv+.nam
+	ld	b,.ext
+	call	l149c		; Unpack type
+	push	hl
+	ld	de,l1aa9
+	ld	c,.open
+	call	BDOS		; Test if file on disk
+	pop	hl
+	inc	a
+	jr	z,l0728		; Nope, try next type
+l0742:
+	ld	hl,l1aa9
+	ld	de,l18f5
+	call	l12b7		; Tell send archive
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	ld	hl,MAXREC
+	ld	(l1aa9+_RRN),hl	; Set max record
+l0759:
+	ld	hl,(l1a10)	; Get pointer to members
+	ex	de,hl
+	ld	hl,l1a25
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	xor	a
+	ld	(de),a
+	call	l13d9		; Read byte from send archive
+	or	a		; Test end
+	jp	z,l0852		; Yeap
+	ld	b,a		; Set length
+	call	l13d9		; Read byte from send archive
+	ld	c,a		; Set checksum
+	ld	hl,l1af1	; Init pointer to header
+	xor	a		; Init checksum
+l0777:
+	ld	d,a
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store into header
+	inc	hl
+	add	a,d		; Update checksum
+	djnz	l0777
+	cp	c		; Verify match
+	jr	z,l078c
+	ld	de,l184a
+	ld	c,.string
+	call	BDOS		; Tell bad header if not
+	rst	0		; Exit to CP/M
+l078c:
+	ld	hl,(l1a10)	; Get pointer to members
+	ex	de,hl
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	ld	a,3
+	ld	(de),a		; Set type
+	inc	de
+	ld	hl,l1af1
+	call	l14a3		; Get type of archive
+	jp	z,l0838		; Got standard
+	ld	hl,l1af1+ARCnam
+	ld	c,(hl)		; Get length of name
+	inc	c
+	inc	hl
+	ld	b,.nam
+l07a9:
+	dec	c
+	jr	z,l07c1
+	ld	a,(hl)		; Get name
+	inc	hl
+	cp	'.'		; Test delimiter
+	jr	z,l07c1
+	ld	(de),a		; Unpack
+	inc	de
+	djnz	l07a9
+l07b6:
+	dec	c
+	jr	z,l07c7
+	ld	a,(hl)
+	inc	hl
+	cp	'.'		; Wait for delimiter
+	jr	nz,l07b6
+	jr	l07c7
+l07c1:
+	ld	a,' '
+l07c3:
+	ld	(de),a		; Blank rtemainder of name
+	inc	de
+	djnz	l07c3
+l07c7:
+	inc	c
+	ld	b,.ext
+l07ca:
+	dec	c
+	jr	z,l07d5
+	ld	a,(hl)		; Get character
+	inc	hl
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l07ca
+	jr	l07db
+l07d5:
+	ld	a,' '
+l07d7:
+	ld	(de),a		; Blank remainder of type
+	inc	de
+	djnz	l07d7
+l07db:
+	ld	hl,(l1a10)	; Get pointer to members
+	call	l1270		; Find file
+	jr	nz,l0821	; Not in match list
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'A'
+	jr	z,l082e		; Update or delete
+	ld	de,MEMBER
+	add	hl,de		; Point to member
+	ld	de,l4000+MEMBER
+l07f1:
+	ld	a,l		; Test same pointer
+	cp	e
+	jr	nz,l07f9	; Nope
+	ld	a,h
+	cp	d
+	jr	z,l082e
+l07f9:
+	push	hl
+	push	de
+	ld	b,.nam+.ext
+l07fd:
+	ld	a,(de)
+	cp	(hl)		; Test same file
+	jr	nz,l0818	; Nope
+	inc	de
+	inc	hl
+	djnz	l07fd
+	pop	de
+	pop	hl
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	b,MEMLEN
+	call	l149c		; Unpack if same
+	jr	l0838
+l0818:
+	pop	de
+	ld	hl,MEMLEN
+	add	hl,de		; Bump to next
+	ex	de,hl
+	pop	hl
+	jr	l07f1
+l0821:
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'A'		; Test rewrite directory
+	jr	nz,l0838	; Yeap
+	ld	de,MEMTYP
+	add	hl,de		; Point to type
+	ld	(hl),-1
+l082e:
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next one
+	ld	(l1a10),hl
+l0838:
+	ld	hl,(l1a25)
+	ex	de,hl		; Add offset
+	ld	hl,(l1af1+ARClen)
+	add	hl,de
+	ld	(l1a25),hl
+	ld	hl,(l1a25+2)
+	ex	de,hl
+	ld	hl,(l1af1+ARClen+2)
+	adc	hl,de
+	ld	(l1a25+2),hl
+	jp	l0759
+l0852:
+	ld	a,(l1a1e)	; Test sort selected
+	or	a
+	jp	z,l0910		; Nope
+	ld	hl,l4000+MEMTYP-MEMLEN
+l085c:
+	ld	de,MEMLEN
+	add	hl,de
+	ld	a,(hl)
+	or	a
+	jp	z,l0910
+	ld	d,h
+	ld	e,l
+l0867:
+	push	hl
+	ld	hl,MEMLEN
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	a,(de)
+	or	a
+	jr	z,l085c
+	push	hl
+	push	de
+	push	hl
+	push	de
+	ld	a,(l1a1e)	; Test normal sort selected
+	cp	'S'
+	jr	nz,l08a3	; Nope
+	ld	b,.nam+.ext
+l087f:
+	ld	a,(l1a1f)	; Test reversed sort
+	or	a
+	jr	nz,l0894	; Yeap
+l0885:
+	inc	de
+	inc	hl
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jp	c,l08f6
+	jp	nz,l08ef
+	djnz	l0885
+	jp	l08d6
+l0894:
+	inc	de
+	inc	hl
+	ld	a,(de)
+	cp	(hl)
+	jp	c,l08ef
+	jp	nz,l08f6
+	djnz	l0894
+	jp	l08d6
+l08a3:
+	ld	b,.nam
+l08a5:
+	inc	de
+	inc	hl
+	djnz	l08a5
+	ld	b,.ext
+	ld	a,(l1a1f)	; Test reversed sort
+	or	a
+	jr	nz,l08bf	; Yeap
+l08b1:
+	inc	de
+	inc	hl
+	ld	a,(de)
+	cp	(hl)
+	jp	c,l08f6
+	jp	nz,l08ef
+	djnz	l08b1
+	jr	l08cb
+l08bf:
+	inc	de
+	inc	hl
+	ld	a,(de)
+	cp	(hl)
+	jp	c,l08ef
+	jp	nz,l08f6
+	djnz	l08bf
+l08cb:
+	ld	b,.nam+.ext
+l08cd:
+	dec	de
+	dec	hl
+	djnz	l08cd
+	ld	b,.nam
+	jp	l087f
+l08d6:
+	pop	hl
+	pop	de
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	ld	b,10h
+	call	l149c		; Unpack
+	pop	de
+	pop	hl
+	inc	de
+	ld	a,0ffh
+	ld	(de),a
+	dec	de
+	jp	l0867
+l08ef:
+	pop	hl
+	pop	de
+	pop	de
+	pop	hl
+	jp	l0867
+l08f6:
+	pop	hl
+	pop	de
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	ld	b,10h
+l0902:
+	ld	c,(hl)
+	ld	a,(de)
+	ld	(hl),a
+	ld	a,c
+	ld	(de),a
+	inc	hl
+	inc	de
+	djnz	l0902
+	pop	de
+	pop	hl
+	jp	l0867
+l0910:
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	ld	a,(l1a1c)	; Get delete flag
+	cp	'A'
+	jp	z,l0bad		; Update or delete
+	cp	'0'
+	jp	z,l0a2f		; Rewrite directory
+	ld	hl,l4000
+	ld	(l1a10),hl	; Init pointer to members
+l092b:
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	a,(hl)
+	or	a		; Test active
+	jp	z,l11c0		; Nope
+	ld	(l1a1a),a
+	inc	hl
+	ld	a,(hl)
+	ld	(l1a1b),a
+	inc	a
+	jp	z,l11c0
+	push	de
+	ld	de,.nam+.ext
+	add	hl,de		; Advance pointer
+	ld	(l1a10),hl	; Set pointer to members
+	pop	de
+	ld	a,(l1a1a)
+	cp	3
+	jp	nz,l098d
+	ex	de,hl
+	ld	(l1a25),hl	; Set record pointer
+	ld	h,b
+	ld	l,c
+	ld	(l1a25+2),hl
+	call	l13d9		; Read byte from send archive
+	ld	b,a		; Set as length
+	call	l1363		; Put to file
+	call	l13d9		; Read byte from send archive
+	ld	c,a		; Set as checksum
+	call	l1363		; Put to file
+	ld	hl,l1af1
+l0972:
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store into header
+	inc	hl
+	call	l1363		; Put to file
+	djnz	l0972
+	ld	de,l1944
+	ld	c,.string
+	call	BDOS		; Tell catenating
+	call	l1305		; Print file
+	ld	hl,l13d9	; Set address of read byte from send archive
+	jp	l09d0
+l098d:
+	ex	de,hl
+	ld	(l1a29),hl	; Set pointer
+	ld	h,b
+	ld	l,c
+	ld	(l1a29+2),hl
+	call	l142f		; Read byte
+	ld	b,a		; Set for length
+	call	l1363		; Put to file
+	call	l142f		; Read byte
+	ld	c,a		; Set for checksum
+	call	l1363		; Put to file
+	ld	hl,l1af1
+l09a7:
+	call	l142f		; Read byte
+	ld	(hl),a		; Store into header
+	inc	hl
+	call	l1363		; Put to file
+	djnz	l09a7
+	ld	de,l1937
+	ld	c,.string
+	call	BDOS		; Tell copying
+	ld	a,(l1a1b)
+	cp	' '		; Test file name
+	jr	nz,l09ca
+	ld	de,l1982
+	ld	c,.string
+	call	BDOS		; Tell SFX/EXE module
+	jr	l09cd
+l09ca:
+	call	l1305		; Print file
+l09cd:
+	ld	hl,l142f	; Read byte address
+l09d0:
+	ld	(l09e0),hl	; Store address
+	ld	hl,(l1af1+ARClen)
+	ex	de,hl
+	ld	hl,(l1af1+ARClen+2)
+	ld	b,h
+	ld	c,l
+l09dc:
+	ld	hl,l2000
+l09df:
+l09e0	equ	$+1
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store it
+	inc	hl
+	ld	a,e
+	sub	1		; Decrement length
+	ld	e,a
+	jp	nc,l09fd
+	ld	a,d
+	sub	1		; Remember carry
+	ld	d,a
+	jp	nc,l09fd
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l09fd
+	ld	a,b
+	sub	1
+	ld	b,a
+l09fd:
+	ld	a,b
+	or	c		; Test all done
+	or	d
+	or	e
+	jr	z,l0a1a		; Yeap
+	ld	a,h
+	cp	HIGH l4000	; Test entire buffer filled
+	jp	nz,l09df	; Nope
+	ld	hl,l2000	; Reset pointer
+l0a0c:
+	ld	a,(hl)
+	call	l1363		; Put to file
+	inc	hl
+	ld	a,h
+	cp	HIGH l4000	; Test entire buffer written
+	jp	nz,l0a0c	; Nope
+	jp	l09dc
+l0a1a:
+	ld	de,l2000	; Init buffer
+l0a1d:
+	ld	a,(de)
+	call	l1363		; Put remainder to file
+	inc	de
+	ld	a,d
+	cp	h		; Test done
+	jp	nz,l0a1d	; Nope
+	ld	a,e
+	cp	l
+	jp	nz,l0a1d
+	jp	l092b		; Try next
+l0a2f:
+	ld	hl,l4000
+	ld	(l1a10),hl	; Reset pointer to members
+	ld	hl,0
+	ld	(l1a21),hl	; Clear record pointer
+	ld	(l1a21+2),hl
+	ld	hl,FCB
+	ld	de,l1aa9
+	ld	b,FCBlen
+	call	l149c		; Unpack FCB
+	ld	hl,MAXREC
+	ld	(l1aa9+_RRN),hl	; Set max record
+l0a4f:
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,l1a25
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	a,(hl)		; Get entry
+	or	a
+	jr	nz,l0a64
+	call	l1320		; Read character
+	jp	l11c0
+l0a64:
+	ld	hl,(l1a10)	; Get pointer to members
+	call	l1270		; Find file
+	jr	z,l0a8b		; Yeap
+	ld	de,l1a21
+	ld	b,rrnlen
+l0a71:
+	ld	a,(de)
+	cp	(hl)		; Test same record pointer
+	jr	nz,l0ab5
+	inc	de
+	inc	hl
+	djnz	l0a71
+	ld	de,MEMLEN-MEMTYP
+	add	hl,de
+	ld	(l1a10),hl	; Set pointer to members
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	jp	l0a4f
+l0a8b:
+	call	l13d9		; Read length byte from send archive
+	ld	b,a
+	call	l13d9		; Read checksum byte from send archive
+	ld	c,a
+	ld	hl,l1af1
+l0a96:
+	call	l13d9		; Read header from send archive
+	ld	(hl),a
+	inc	hl
+	djnz	l0a96
+	ld	de,l1951
+	ld	c,.string
+	call	BDOS		; Tell deleting
+	call	l1305		; Print file
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next
+	ld	(l1a10),hl
+	jp	l0a4f
+l0ab5:
+	ld	hl,(l1a10)	; Get pointer to members
+	push	hl
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next
+	ld	(l1a10),hl
+	ex	de,hl
+	pop	hl
+;
+	ld	bc,l1a0c
+	ld	a,(de)
+	sub	(hl)		; Fix value
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+;
+	ld	hl,l1a0c
+	ld	de,l1a21
+	ld	bc,l1a2d
+	ld	a,(de)
+	ld	(bc),a		; Combine pointers
+	add	a,(hl)
+	ld	(de),a
+	inc	bc
+	inc	de
+	inc	hl
+	ld	a,(de)
+	ld	(bc),a
+	adc	a,(hl)
+	ld	(de),a
+	inc	bc
+	inc	de
+	inc	hl
+	ld	a,(de)
+	ld	(bc),a
+	adc	a,(hl)
+	ld	(de),a
+	inc	bc
+	inc	de
+	inc	hl
+	ld	a,(de)
+	ld	(bc),a
+	adc	a,(hl)
+	ld	(de),a
+	ld	a,(l1a21)	; Get file pointer
+	and	reclng-1	; Mask it
+	jr	z,l0b15		; REcord boundary
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate gap
+	ld	b,a
+	ld	hl,l1f80
+l0b0b:
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	(hl),a		; Store character
+	inc	hl
+	djnz	l0b0b
+l0b15:
+	ld	hl,l1a2d
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack
+	call	l1320		; Read character
+	ld	hl,l1a0c
+	ld	e,(hl)		; Fetch count
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+l0b2d:
+	ld	hl,l2000
+l0b30:
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a
+	inc	hl
+	ld	a,e
+	sub	1		; Decrement value by 1
+	ld	e,a
+	jp	nc,l0b4e	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l0b4e
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l0b4e
+	ld	a,b
+	sub	1
+	ld	b,a
+l0b4e:
+	ld	a,b
+	or	c		; Test end
+	or	d
+	or	e
+	jr	z,l0b6b
+	ld	a,h
+	cp	HIGH l4000	; Test buffer filled
+	jp	nz,l0b30
+	ld	hl,l2000	; Reset buffer
+l0b5d:
+	ld	a,(hl)
+	call	l1363		; Put to file
+	inc	hl
+	ld	a,h
+	cp	HIGH l4000	; Test buffer empty
+	jp	nz,l0b5d
+	jp	l0b2d
+l0b6b:
+	ld	de,l2000	; Init buffer
+l0b6e:
+	ld	a,(de)
+	call	l1363		; Put to file
+	inc	de
+	ld	a,d
+	cp	h		; Test end of buffer reached
+	jp	nz,l0b6e
+	ld	a,e
+	cp	l
+	jp	nz,l0b6e
+	ld	hl,l1a21
+	ld	de,l1a2d
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	a,(l1a21)
+	and	reclng-1	; Mask record
+	jp	z,l0a4f		; Detected reclng
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate remaining length
+	ld	b,a
+	ld	hl,l1f80	; Set base of buffer
+l0b98:
+	ld	a,(hl)
+	call	l1363		; Put to file
+	inc	hl
+	djnz	l0b98
+	ld	hl,l1a2d
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	jp	l0a4f
+l0bad:
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	de,MEMLEN
+	add	hl,de		; Advance
+	ld	(l1a10),hl	; Set pointer to members
+l0bb7:
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,MEMTYP
+	add	hl,de		; Position to type
+	ld	a,(hl)		; Get it
+	or	a		; Test it
+	jr	nz,l0bd3	; Got <> 0
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack
+	call	l1320		; Read character
+	jp	l11c0
+l0bd3:
+	inc	a		; Test -1
+	jr	nz,l0bdf	; Nope
+	ld	de,MEMLEN-MEMTYP
+	add	hl,de
+	ld	(l1a10),hl	; Set pointer to members
+	jr	l0bb7
+l0bdf:
+	inc	hl
+	ld	de,l4000+l0004
+l0be3:
+	ld	a,(de)		; Get state
+	or	a		; Test active
+	jp	z,l0c0d		; Nope
+	inc	de
+	push	hl
+	push	de
+	ld	b,.nam+.ext
+l0bed:
+	ld	a,(de)
+	cp	(hl)		; Test match of name
+	jr	nz,l0c04	; Nope
+	inc	de
+	inc	hl
+	djnz	l0bed
+	pop	de
+	pop	hl
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	jp	l0d1d
+l0c04:
+	pop	de
+	ld	hl,MEMLEN-1
+	add	hl,de		; Position to next member in list
+	ex	de,hl
+	pop	hl
+	jr	l0be3
+l0c0d:
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	call	l1320		; Read character
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,l1a25
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,MEMLEN
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	a,e
+	sub	(hl)		; Build difference
+	ld	e,a
+	inc	hl
+	ld	a,d
+	sbc	a,(hl)
+	ld	d,a
+	inc	hl
+	ld	a,c
+	sbc	a,(hl)
+	ld	c,a
+	inc	hl
+	ld	a,b
+	sbc	a,(hl)
+	ld	b,a
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	a,e
+	add	a,(hl)		; Fix values
+	ld	e,a
+	inc	hl
+	ld	a,d
+	adc	a,(hl)
+	ld	d,a
+	inc	hl
+	ld	a,c
+	adc	a,(hl)
+	ld	c,a
+	inc	hl
+	ld	a,b
+	adc	a,(hl)
+	ld	b,a
+	inc	hl
+	push	de
+	push	bc
+	ex	de,hl
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	bc,MEMTYP
+	add	hl,bc
+	ld	b,MEMLEN-MEMTYP
+	call	l149c		; Unpack part of member
+	ld	(l1a10),hl	; Set pointer to members
+	ex	de,hl
+	ld	(l1a12),hl	; Set pointer to members
+	pop	bc
+	pop	de
+	ld	(hl),e		; Store record pointer
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	(hl),0
+	call	l13d9		; Read byte from send archive
+	ld	b,a		; Set length
+	call	l1363		; Put to file
+	call	l13d9		; Read byte from send archive
+	ld	c,a		; Set checksum
+	call	l1363		; Put to file
+	ld	hl,l1af1
+l0c8c:
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store header
+	inc	hl
+	call	l1363		; Put to file
+	djnz	l0c8c
+	ld	de,l195c
+	ld	c,.string
+	call	BDOS		; Tell appending
+	call	l1305		; Print file
+	ld	hl,(l1af1+ARClen)
+	ex	de,hl
+	ld	hl,(l1af1+ARClen+2)
+	ld	b,h
+	ld	c,l
+l0caa:
+	ld	hl,l2000	; Init base address
+l0cad:
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store in buffer
+	inc	hl
+	ld	a,e
+	sub	1		; Decrement length by 1
+	ld	e,a
+	jp	nc,l0ccb	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l0ccb
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l0ccb
+	ld	a,b
+	sub	1
+	ld	b,a
+l0ccb:
+	ld	a,b
+	or	c		; Test all read
+	or	d
+	or	e
+	jr	z,l0ce8		; Yeap
+	ld	a,h
+	cp	HIGH l4000	; Test buffer filled completely
+	jp	nz,l0cad	; Nope
+	ld	hl,l2000	; Reset buffer address
+l0cda:
+	ld	a,(hl)
+	call	l1363		; Put to file
+	inc	hl
+	ld	a,h
+	cp	HIGH l4000	; Test buffer written completely
+	jp	nz,l0cda	; Nope
+	jp	l0caa
+l0ce8:
+	ld	de,l2000	; Reset buffer address
+l0ceb:
+	ld	a,(de)
+	call	l1363		; Put to file
+	inc	de
+	ld	a,d
+	cp	h		; Test end address reached
+	jp	nz,l0ceb	; Nope
+	ld	a,e
+	cp	l
+	jp	nz,l0ceb
+	xor	a
+	call	l1363		; Put to file
+	ld	a,(l1a21)
+	and	reclng-1	; Test record boundary
+	jp	z,l0bb7		; Yeap
+	ld	de,l1e00
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rndwr
+	call	BDOS		; Write record to file
+	or	a		; Verify success
+	jp	nz,l14e7	; Disk full if no
+	jp	l0bb7
+l0d1d:
+	push	de
+	push	hl
+	ld	de,l1a25
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointers
+	ld	de,MEMLEN-MEMTYP
+	add	hl,de		; Point to next member
+	ld	e,(hl)		; Fetch record pointer
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	pop	hl
+	ld	a,e
+	sub	(hl)		; Get difference
+	ld	e,a
+	inc	hl
+	ld	a,d
+	sbc	a,(hl)
+	ld	d,a
+	inc	hl
+	ld	a,c
+	sbc	a,(hl)
+	ld	c,a
+	inc	hl
+	ld	a,b
+	sbc	a,(hl)
+	ld	b,a
+	ld	hl,l1a04
+	ld	(hl),e		; Save resulting record pointer
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ld	hl,(l1a10)	; Get pointer to members
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next
+	ld	(l1a10),hl
+	pop	hl
+	ld	(l1a14),hl	; Save pointer
+	ld	de,MEMLEN
+	add	hl,de		; Point to following
+	ld	e,(hl)		; Get record pointer
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(l1a14)
+	ld	a,e
+	sub	(hl)		; Get difference
+	ld	e,a
+	inc	hl
+	ld	a,d
+	sbc	a,(hl)
+	ld	d,a
+	inc	hl
+	ld	a,c
+	sbc	a,(hl)
+	ld	c,a
+	inc	hl
+	ld	a,b
+	sbc	a,(hl)
+	ld	b,a
+	ld	hl,l1a00
+	ld	(hl),e		; Save pointer
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ld	hl,l1a04+3
+	ld	a,(hl)
+	cp	b		; Compare record pointers
+	jr	c,l0dcf
+	jp	nz,l0f59
+	dec	hl
+	ld	a,(hl)
+	cp	c
+	jr	c,l0dcf
+	jp	nz,l0f59
+	dec	hl
+	ld	a,(hl)
+	cp	d
+	jr	c,l0dcf
+	jp	nz,l0f59
+	dec	hl
+	ld	a,(hl)
+	cp	e
+	jr	c,l0dcf
+	jp	nz,l0f59
+	ld	hl,(l1a14)
+	ld	de,MEMLEN
+	add	hl,de		; Point to next member
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	a,(l1a21)
+	and	reclng-1	; Test record boundary
+	jp	z,l1119		; Yeap
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate remainder
+	ld	b,a
+	ld	hl,l1f80
+l0dc2:
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	(hl),a		; Store remainder
+	inc	hl
+	djnz	l0dc2
+	jp	l1119
+l0dcf:
+	ld	de,l1974
+	ld	c,.string
+	call	BDOS		; Tell shifting
+	ld	hl,(l1a14)
+	ld	de,MEMLEN
+	add	hl,de		; Point to next member
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	de,l1a21
+	ex	de,hl
+	ld	bc,l1a0c
+	ld	a,(de)
+	sub	(hl)		; Calculate difference
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	ld	de,l1a00
+	ld	hl,l1a04
+	ld	bc,l1a08
+	ld	a,(de)
+	sub	(hl)		; Calculate difference
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	ld	hl,(l1a14)	; Get pointer to member
+l0e26:
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next
+	push	hl
+	ld	de,l1a08
+	ex	de,hl
+	ld	a,(de)
+	sub	(hl)		; Calculate difference
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(de)
+	or	a		; Test active
+	pop	hl
+	jp	nz,l0e26	; Yeap, proceed
+	ld	hl,(l1a14)
+	ld	de,MEMLEN
+	add	hl,de		; Point to next member
+	ld	a,(hl)
+	push	af
+	inc	hl
+	rla			; Divide by 128
+	ld	a,(hl)
+	inc	hl
+	rla
+	ld	e,a
+	ld	a,(hl)
+	rla
+	ld	d,a
+	ex	de,hl
+	ld	(l1a16),hl	; Save resulting record
+	ld	hl,l1a0c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	pop	af
+	and	reclng-1	; Test record boundary
+	jr	z,l0eab		; Yeap
+	ld	hl,(l1a16)
+	inc	hl		; Fix record if not
+	ld	(l1a16),hl
+	push	bc
+	ld	b,a
+	ld	a,reclng
+	sub	b
+	pop	bc
+	ld	hl,l1f80
+l0e7d:
+	push	af
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	(hl),a		; Store character
+	inc	hl
+	ld	a,b
+	or	c		; Test all read
+	or	d
+	or	e
+	jp	z,l1118		; Yeap
+	ld	a,e
+	sub	1		; Decrement by 1
+	ld	e,a
+	jp	nc,l0ea6	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l0ea6
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l0ea6
+	ld	a,b
+	sub	1
+	ld	b,a
+l0ea6:
+	pop	af
+	dec	a		; Test done
+	jp	nz,l0e7d
+l0eab:
+	ld	hl,l2000	; Reset buffer address
+l0eae:
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	(hl),a		; Store character
+	inc	hl
+	ld	a,b
+	or	c		; Test all done
+	or	d
+	or	e
+	jp	z,l0f1c		; Yeap
+	ld	a,e
+	sub	1		; Decrement by 1
+	ld	e,a
+	jp	nc,l0ed6	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l0ed6
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l0ed6
+	ld	a,b
+	sub	1
+	ld	b,a
+l0ed6:
+	ld	a,h
+	cp	HIGH l4000	; Test end of buffer
+	jp	nz,l0eae	; Nope
+	push	de
+	push	bc
+	ld	hl,(FCB+_RRN)	; Get current record
+	ld	(l1a18),hl	; Save it
+	ld	hl,(l1a16)	; Get start record
+	ld	de,l2000	; Init buffer address
+l0eea:
+	ld	(FCB+_RRN),hl	; Save record
+	push	hl
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rndwr
+	call	BDOS		; Write record
+	or	a		; Verify success
+	jp	nz,l14e7	; Disk full if not
+	pop	de
+	ld	hl,reclng
+	add	hl,de		; Advance disk buffer
+	ex	de,hl
+	pop	hl
+	inc	hl		; Next record
+	ld	a,d
+	cp	HIGH l4000	; Test end of buffer
+	jp	nz,l0eea
+	ld	(l1a16),hl	; Save resulting record
+	ld	hl,(l1a18)	; Get old record
+	ld	(FCB+_RRN),hl	; Reset it
+	pop	bc
+	pop	de
+	jp	l0eab
+l0f1c:
+	push	hl
+	ld	hl,(l1a16)	; Get record
+	dec	hl		; Set previous
+	ld	(FCB+_RRN),hl
+	pop	hl
+	ld	de,l2000	; Init buffer
+l0f28:
+	push	hl
+	ld	hl,(FCB+_RRN)
+	inc	hl		; Next record
+	ld	(FCB+_RRN),hl
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rndwr
+	call	BDOS		; Write record
+	or	a		; Verify success
+	jp	nz,l14e7	; Disk full if not
+	pop	de
+	ld	hl,reclng
+	add	hl,de		; Advance buffer
+	ex	de,hl
+	pop	hl
+	ld	a,d
+	cp	h		; Test end of buffer reached
+	jp	c,l0f28
+	jp	nz,l1119
+	ld	a,e
+	cp	l
+	jp	c,l0f28
+	jp	l1119
+l0f59:
+	ld	de,l1974
+	ld	c,.string
+	call	BDOS		; Tell shifting
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	de,l1a2d
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	hl,(l1a14)	; Get member pointer
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next one
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	de,l1a21
+	ex	de,hl
+	ld	bc,l1a0c
+	ld	a,(de)
+	sub	(hl)		; Build difference
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	ld	de,l1a04
+	ld	hl,l1a00
+	ld	bc,l1a08
+	ld	a,(de)
+	sub	(hl)		; Fix record pointer
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	de
+	inc	hl
+	inc	bc
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	ld	hl,(l1a14)	; Get member address
+l0fbb:
+	ld	de,MEMLEN
+	add	hl,de		; Advance to next member
+	push	hl
+	ld	de,l1a08
+	ex	de,hl
+	ld	a,(de)
+	add	a,(hl)		; Fix record pointer
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	adc	a,(hl)
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	adc	a,(hl)
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	adc	a,(hl)
+	ld	(de),a
+	inc	de
+	ld	a,(de)		; Get flag
+	or	a		; Test active
+	pop	hl
+	jp	nz,l0fbb
+	ld	hl,(l1a14)
+	ld	de,MEMLEN
+	add	hl,de		; Position to next member
+	ld	a,(hl)
+	and	reclng-1	; Mask record
+	jr	z,l1032		; Got record boundary
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate length
+	ld	hl,l1a0c
+	ld	e,(hl)		; Fetch entire length
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	hl,l1f80	; Init buffer address
+l0ffa:
+	push	af
+	call	l1320		; Read character
+	call	l139f		; Increment record pointer
+	ld	(hl),a		; Store it
+	inc	hl
+	ld	a,b
+	or	c		; Test total end
+	or	d
+	or	e
+	jp	z,l1118		; Yeap
+	ld	a,e
+	sub	1		; Decrement length by 1
+	ld	e,a
+	jp	nc,l1023	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l1023
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l1023
+	ld	a,b
+	sub	1
+	ld	b,a
+l1023:
+	pop	af
+	dec	a		; Count down
+	jp	nz,l0ffa
+	ld	hl,l1a0c
+	ld	(hl),e		; Bring back record pointer
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+l1032:
+	ld	hl,l1a2d
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	ld	hl,(l1a12)	; Get pointer to members
+	ld	a,(hl)
+	push	af
+	inc	hl
+	rla			; Divide by 128
+	ld	a,(hl)
+	inc	hl
+	rla
+	ld	e,a
+	ld	a,(hl)
+	rla
+	ld	d,a
+	ex	de,hl
+	ld	(l1a16),hl	; Save resulting record
+	ld	hl,l1a0c
+	ld	e,(hl)		; Get record pointer
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	hl,l4000-1	; Init last buffer address
+	pop	af
+	and	reclng-1	; Mask address
+	cp	reclng-1	; Test at top
+	jp	z,l106a		; Yeap
+l1064:
+	dec	hl
+	inc	a
+	cp	reclng-1	; Fix for top
+	jr	nz,l1064
+l106a:
+	call	l1320		; Read character
+	call	l13b5		; Decrement record pointer
+	ld	(hl),a
+	dec	hl
+	ld	a,b
+	or	c		; Test all done
+	or	d
+	or	e
+	jp	z,l10db		; Yeap
+	ld	a,e
+	sub	1		; Decremnt by one
+	ld	e,a
+	jp	nc,l1092	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l1092
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l1092
+	ld	a,b
+	sub	1
+	ld	b,a
+l1092:
+	ld	a,h
+	cp	HIGH l2000	; Test end of buffer
+	jp	nc,l106a	; Nope
+	push	de
+	push	bc
+	ld	hl,(FCB+_RRN)
+	ld	(l1a18),hl	; Save old record
+	ld	hl,(l1a16)	; Get record
+	ld	de,l4000-reclng	; Init buffer address
+l10a6:
+	ld	(FCB+_RRN),hl	; Set record
+	push	hl
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rndwr
+	call	BDOS		; Write record
+	or	a		; Verify success
+	jp	nz,l14e7	; Disk full if not
+	pop	de
+	ld	hl,-reclng
+	add	hl,de		; Get previous buffer
+	ex	de,hl
+	pop	hl
+	dec	hl
+	ld	a,d
+	cp	HIGH l2000	; Test end of buffer
+	jp	nc,l10a6	; Nope
+	ld	(l1a16),hl	; Save resulting record
+	ld	hl,(l1a18)	; Get old record
+	ld	(FCB+_RRN),hl
+	pop	bc
+	pop	de
+	ld	hl,l4000-1	; Reset address
+	jp	l106a
+l10db:
+	push	hl
+	ld	hl,(l1a16)	; Get record
+	inc	hl		; Advance it
+	ld	(FCB+_RRN),hl	; Set record
+	pop	hl
+	ld	de,l4000-reclng	; Set start of buffer
+l10e7:
+	push	hl
+	ld	hl,(FCB+_RRN)
+	dec	hl		; Get previous record
+	ld	(FCB+_RRN),hl
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rndwr
+	call	BDOS		; Write record to disk
+	or	a		; Verify success
+	jp	nz,l14e7	; Disk full if not
+	pop	de
+	ld	hl,-reclng
+	add	hl,de		; Get previous buffer
+	ex	de,hl
+	pop	hl
+	ld	a,h
+	cp	d		; Test buffer done
+	jp	c,l10e7
+	jp	nz,l1119
+	ld	a,l
+	cp	e
+	jp	c,l10e7
+	jp	l1119
+l1118:
+	pop	af
+l1119:
+	ld	hl,(l1a14)
+	ld	de,l1a21
+	ld	b,rrnlen
+	call	l149c		; Unpack record pointer
+	call	l1320		; Read character
+	call	l13d9		; Read byte from send archive
+	ld	b,a		; Set length
+	call	l1363		; Put to file
+	call	l13d9		; Read byte from send archive
+	ld	c,a		; Set checksum
+	call	l1363		; Put to file
+	ld	hl,l1af1	; Init header address
+l1138:
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store header
+	inc	hl
+	call	l1363		; Put to file
+	djnz	l1138
+	ld	de,l1968
+	ld	c,.string
+	call	BDOS		; Tell updating
+	call	l1305		; Print file
+	ld	hl,(l1af1+ARClen)	; Load length
+	ex	de,hl
+	ld	hl,(l1af1+ARClen+2)
+	ld	b,h
+	ld	c,l
+l1156:
+	ld	hl,l2000	; Init buffer address
+l1159:
+	call	l13d9		; Read byte from send archive
+	ld	(hl),a		; Store it
+	inc	hl
+	ld	a,e
+	sub	1		; Decrement by 1
+	ld	e,a
+	jp	nc,l1177	; Remember carry
+	ld	a,d
+	sub	1
+	ld	d,a
+	jp	nc,l1177
+	ld	a,c
+	sub	1
+	ld	c,a
+	jp	nc,l1177
+	ld	a,b
+	sub	1
+	ld	b,a
+l1177:
+	ld	a,b
+	or	c		; Tell all read
+	or	d
+	or	e
+	jr	z,l1194		; Yeap
+	ld	a,h
+	cp	HIGH l4000	; Test buffer filed
+	jp	nz,l1159	; Nope
+	ld	hl,l2000	; Reset buffer address
+l1186:
+	ld	a,(hl)		; Get byte
+	call	l1363		; Put to file
+	inc	hl
+	ld	a,h
+	cp	HIGH l4000	; Test buffer emptied
+	jp	nz,l1186	; Nope
+	jp	l1156
+l1194:
+	ld	de,l2000	; Init buffer address
+l1197:
+	ld	a,(de)		; Get byte
+	call	l1363		; Put to file
+	inc	de
+	ld	a,d
+	cp	h		; Test end address reached
+	jp	nz,l1197	; Nope
+	ld	a,e
+	cp	l
+	jp	nz,l1197
+	ld	a,(l1a21)
+	and	reclng-1	; Mask pointer
+	jp	z,l0bb7		; Skip on record boundary
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate length
+	ld	b,a
+	ld	hl,l1f80	; Init address
+l11b6:
+	ld	a,(hl)		; Get byte
+	call	l1363		; Put to file
+	inc	hl
+	djnz	l11b6
+	jp	l0bb7
+l11c0:
+	xor	a
+	call	l1363		; Put to file
+	ld	a,(l1a21)
+	and	reclng-1	; Mask record pointer
+	jr	z,l11d7		; Ignore record boundary
+	ld	b,a
+	ld	a,reclng	; Calculate length
+	sub	b
+	ld	b,a
+l11d0:
+	ld	a,eof
+	call	l1363		; Put end of file
+	djnz	l11d0
+l11d7:
+	ld	de,FCB
+	ld	c,.close
+	call	BDOS		; Close file
+	inc	a		; Verify success
+	jp	z,l14e7		; Disk full if not
+	ld	a,(l1a1d)	; Get file flag
+	cp	'R'		; Test temp file
+	jp	nz,l126f	; Nope
+	ld	a,(l1a20)	; Get backup flag
+	or	a
+	jr	z,l123d		; Nope
+	ld	hl,l1aa9
+	call	l1485		; Init FCB
+	ld	hl,l1acd
+	ld	de,l1aa9
+	ld	b,.drv+.nam+.ext
+	call	l149c		; Unpack name and type
+	ld	hl,l1aa9+.drv+.nam
+	ld	(hl),'P'	; Force type .PMB
+	inc	hl
+	ld	(hl),'M'
+	inc	hl
+	ld	(hl),'B'
+	ld	de,l1aa9
+	ld	c,.delete
+	call	BDOS
+	ld	hl,l1aa9
+	ld	de,l1acd+DIRlen
+	ld	b,DIRlen
+	call	l149c		; Unpack file
+	ld	hl,0		; Clear entries
+	ld	(l1acd+_EX),hl
+	ld	(l1acd+_EX+2),hl
+	ld	(l1acd+DIRlen+_EX),hl
+	ld	(l1acd+DIRlen+_EX+2),hl
+	ld	de,l1acd
+	ld	c,.rename
+	call	BDOS		; Rename file
+	inc	a		; Verify success
+	jp	z,l14f9		; Disk I/O error if not
+	jr	l1249
+l123d:
+	ld	de,l1acd
+	ld	c,.delete
+	call	BDOS		; Delete file
+	inc	a		; Verify success
+	jp	z,l14f9		; Disk I/O error if not
+l1249:
+	ld	hl,l1acd
+	ld	de,FCB+DIRlen
+	ld	b,DIRlen
+	call	l149c		; Unpack file
+	ld	hl,0		; Clear entries
+	ld	(FCB+_EX),hl
+	ld	(FCB+_EX+2),hl
+	ld	(FCB+DIRlen+_EX),hl
+	ld	(FCB+DIRlen+_EX+2),hl
+	ld	de,FCB
+	ld	c,.rename
+	call	BDOS		; Rename file
+	inc	a		; Verify success
+	jp	z,l14f9		; Disk I/O error if not
+l126f:
+	rst	0		; Exit to CP/M
+;
+; Find file in match list
+; ENTRY	Reg HL points to member record
+; EXIT	Zero set if file found in match list
+;
+l1270:
+	push	hl
+	push	de
+	push	bc
+	ld	de,MEMBER
+	add	hl,de		; Point to member
+	ld	de,l1a31	; Point to match list
+	ld	a,(de)		; Get entry
+	or	a		; Test active
+	ld	c,-1
+	jr	z,l1282
+	ld	c,0
+l1282:
+	ld	b,_files	; Set max file count
+l1284:
+	ld	a,(de)		; Get entry
+	cp	empty		; Test end of list
+	jr	z,l12b1		; Yeap
+	push	hl
+	push	de
+	push	bc
+	inc	de
+	ld	b,.nam+.ext
+	ld	c,a
+l1290:
+	ld	a,(de)		; Get character
+	cp	'?'		; Test match
+	jr	z,l1298
+	cp	(hl)
+	jr	nz,l12a7	; No match
+l1298:
+	inc	de
+	inc	hl
+	djnz	l1290
+	ld	a,c
+	pop	bc
+	or	a
+	ld	c,0
+	jr	z,l12a8
+	ld	c,-1
+	jr	l12a8
+l12a7:
+	pop	bc
+l12a8:
+	pop	de
+	ld	hl,MEMLEN-MEMTYP
+	add	hl,de		; Point to next list entry
+	ex	de,hl
+	pop	hl
+	djnz	l1284
+l12b1:
+	ld	a,c		; Get result flag
+	or	a		; Get result
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Print message and name of file
+; ENTRY	Reg DE points to message
+;	Reg HL points to FCB
+;
+l12b7:
+	push	hl
+	ld	c,.string
+	call	BDOS		; Print message
+	pop	hl
+	ld	a,(hl)		; Get drive
+	or	a		; Test default
+	jr	z,l12d3		; Yeap, ignore drive
+	push	hl
+	add	a,'A'-1		; Make ASCII
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Print drive
+	ld	e,':'
+	ld	c,.conout
+	call	BDOS		; Print delimiter
+	pop	hl
+l12d3:
+	inc	hl
+	ld	b,.nam
+	ld	c,.conout
+l12d8:
+	ld	a,(hl)		; Get name character
+	inc	hl
+	cp	' '		; Test printable
+	jr	z,l12e6		; Ignore blanks
+	ld	e,a
+	push	bc
+	push	hl
+	call	BDOS		; Print name
+	pop	hl
+	pop	bc
+l12e6:
+	djnz	l12d8
+	push	hl
+	ld	e,'.'
+	ld	c,.conout
+	call	BDOS		; Print delimiter
+	pop	hl
+	ld	b,.ext
+	ld	c,.conout
+l12f5:
+	ld	a,(hl)		; Get type character
+	inc	hl
+	cp	' '		; Test printable
+	ret	z		; Ignore blanks
+	ld	e,a
+	push	bc
+	push	hl
+	call	BDOS		; Print type
+	pop	hl
+	pop	bc
+	djnz	l12f5
+	ret
+;
+; Tell name of member file
+;
+l1305:
+	ld	hl,l1af1+ARCnam
+	ld	b,(hl)		; Get length
+	ld	c,.conout
+	inc	hl
+l130c:
+	push	hl
+	push	bc
+	ld	e,(hl)		; Get character
+	call	BDOS		; Print it
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l130c
+	ld	de,l19f2
+	ld	c,.string
+	call	BDOS		; Close line
+	ret
+;
+; Get character from file
+; EXIT	Accu holds character
+;
+l1320:
+	push	hl
+	push	de
+	ld	a,(l1a21)	; Get position
+	ld	hl,(l1a21+1)
+	ex	de,hl
+	rla			; Build record by DIV 128
+	ld	a,e
+	rla
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	ld	hl,(FCB+_RRN)	; Get record from file
+	ld	a,h
+	xor	d		; Test same
+	ld	h,a
+	ld	a,l
+	xor	e
+	or	h
+	jr	z,l1355		; Yeap
+	ex	de,hl
+	ld	(FCB+_RRN),hl	; Set new record
+	push	bc
+	ld	de,l1e00
+	ld	c,.setdma
+	call	BDOS		; Set buffer
+	ld	de,FCB
+	ld	c,.rndrd
+	call	BDOS		; Read record
+	pop	bc
+	or	a		; Verify success
+	jp	nz,l14f0	; Nope, overseek error
+l1355:
+	ld	a,(l1a21)	; Get pointer
+	and	reclng-1	; Mask it
+	ld	hl,l1e00
+	add	a,l		; Build address
+	ld	l,a
+	ld	a,(hl)		; Load character
+	pop	de
+	pop	hl
+	ret
+;
+; Put byte to file
+;
+l1363:
+	push	hl
+	push	af
+	ld	hl,l1e00	; Init buffer address
+	ld	a,(l1a21)	; Fetch pointer
+	and	reclng-1	; Mask it
+	add	a,l		; Build address
+	ld	l,a
+	pop	af
+	ld	(hl),a		; Store byte in buffer
+	push	af
+	call	l139f		; Increment record pointer
+	ld	a,(l1a21)	; Get pointer again
+	and	reclng-1	; Mask it
+	jp	nz,l139c	; Test buffer not yet filled
+	push	de
+	push	bc
+	ld	de,l1e00
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rndwr
+	call	BDOS		; Write record to file
+	or	a		; Verify success
+	jp	nz,l14e7	; Disk full if not
+	ld	hl,(FCB+_RRN)
+	inc	hl		; Get next record
+	ld	(FCB+_RRN),hl
+	pop	bc
+	pop	de
+l139c:
+	pop	af
+	pop	hl
+	ret
+;
+; Increment record pointer by one
+;
+l139f:
+	push	hl
+	ld	hl,l1a21
+	inc	(hl)		; Increment low
+	jp	nz,l13b3	; Remember carry
+	inc	hl
+	inc	(hl)
+	jp	nz,l13b3
+	inc	hl
+	inc	(hl)
+	jp	nz,l13b3
+	inc	hl
+	inc	(hl)
+l13b3:
+	pop	hl
+	ret
+;
+; Decrement record pointer by one
+;
+l13b5:
+	push	hl
+	push	af
+	ld	hl,l1a21
+	ld	a,(hl)
+	sub	1		; Decrement low
+	ld	(hl),a
+	jp	nc,l13d6	; Remember borrow
+	inc	hl
+	ld	a,(hl)
+	sub	1
+	ld	(hl),a
+	jp	nc,l13d6
+	inc	hl
+	ld	a,(hl)
+	sub	1
+	ld	(hl),a
+	jp	nc,l13d6
+	inc	hl
+	ld	a,(hl)
+	sub	1
+	ld	(hl),a
+l13d6:
+	pop	af
+	pop	hl
+	ret
+;
+; Read byte from send archive
+; EXIT	Accu holds byte
+;
+l13d9:
+	push	hl
+	push	de
+	ld	a,(l1a25)	; Get position
+	ld	hl,(l1a25+1)
+	ex	de,hl
+	rla			; Build record by DIV 128
+	ld	a,e
+	rla
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	ld	hl,(l1aa9+_RRN)	; Get record from file
+	ld	a,h
+	xor	d		; Test same
+	ld	h,a
+	ld	a,l
+	xor	e
+	or	h
+	jr	z,l140e		; Yeap
+	ex	de,hl
+	ld	(l1aa9+_RRN),hl	; Set new record
+	push	bc
+	ld	de,l1e80
+	ld	c,.setdma
+	call	BDOS		; Set buffer
+	ld	de,l1aa9
+	ld	c,.rndrd
+	call	BDOS		; Read record
+	pop	bc		; Verify success
+	or	a
+	jp	nz,l14f0	; Nope, overseek error
+l140e:
+	ld	a,(l1a25)	; Get pointer
+	and	reclng-1	; Mask it
+	ld	hl,l1e80
+	add	a,l		; Build address
+	ld	l,a
+	ld	a,(hl)		; Load byte
+	pop	de
+	ld	hl,l1a25
+	inc	(hl)		; Increment position by one
+	jp	nz,l142d	; Remember carry
+	inc	hl
+	inc	(hl)
+	jp	nz,l142d
+	inc	hl
+	inc	(hl)
+	jp	nz,l142d
+	inc	hl
+	inc	(hl)
+l142d:
+	pop	hl
+	ret
+;
+; Read byte from base archive
+; EXIT	Accu holds byte
+;
+l142f:
+	push	hl
+	push	de
+	ld	a,(l1a29)	; Get position
+	ld	hl,(l1a29+1)
+	ex	de,hl
+	rla			; Build record by DIV 128
+	ld	a,e
+	rla
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	ld	hl,(l1acd+_RRN)	; Get record from file
+	ld	a,h
+	xor	d		; Test same
+	ld	h,a
+	ld	a,l
+	xor	e
+	or	h
+	jr	z,l1464		; Yeap
+	ex	de,hl
+	ld	(l1acd+_RRN),hl	; Set new record
+	push	bc
+	ld	de,l1f00
+	ld	c,.setdma
+	call	BDOS		; Set buffer
+	ld	de,l1acd
+	ld	c,.rndrd
+	call	BDOS		; Read record
+	pop	bc
+	or	a		; Verify success
+	jp	nz,l14f0	; Nope, overseek error
+l1464:
+	ld	a,(l1a29)	; Get pointer
+	and	reclng-1	; Mask it
+	ld	hl,l1f00
+	add	a,l		; Build address
+	ld	l,a
+	ld	a,(hl)		; Load character
+	pop	de
+	ld	hl,l1a29
+	inc	(hl)		; Increment position by one
+	jp	nz,l1483	; Remember carry
+	inc	hl
+	inc	(hl)
+	jp	nz,l1483
+	inc	hl
+	inc	(hl)
+	jp	nz,l1483
+	inc	hl
+	inc	(hl)
+l1483:
+	pop	hl
+	ret
+;
+; Init FCB
+; ENTRY	Reg HL points to FCB
+;
+l1485:
+	ld	(hl),0		; Init default drive
+	inc	hl
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),' '
+	ld	b,.nam+.ext-1
+	call	l149c		; Init name and extension
+	inc	hl
+	inc	de
+	ld	(hl),0
+	ld	b,FCBlen-_EX-1
+	call	l149c		; Clear remainder of FCB
+	ret
+;
+; Unpack B-bytes from ^HL to ^DE
+;
+l149c:
+	ld	a,(hl)		; Get byte
+	ld	(de),a		; Unpack it
+	inc	hl
+	inc	de
+	djnz	l149c
+	ret
+;
+; Get type of archive member
+; ENTRY	Reg HL points to header
+; EXIT	Zero set if standard archive
+;
+l14a3:
+	ld	b,(hl)		; Get first character
+	inc	hl
+	ld	a,(hl)
+	cp	'p'		; Test standard
+	ret	nz		; Nope
+	inc	hl
+	ld	a,(hl)
+	cp	'm'		; Verify standard
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	's'
+	ret	nz
+	inc	hl
+	ld	a,(hl)
+	cp	'-'
+	ret	nz
+	ld	a,b
+	cp	'-'
+	ret	z
+	cp	1
+	ret
+;
+; Get drive from ^Hl to ^DE
+;
+l14bf:
+	xor	a
+	ld	(de),a		; Set default
+l14c1:
+	ld	a,(hl)		; Get charecter
+	inc	hl
+	cp	' '		; Test end of line
+	jp	c,l150b
+	jr	z,l14c1		; Skip blanks
+	ld	a,(hl)		; Get next character
+	dec	hl
+	cp	':'		; Test drive delimiter
+	jr	nz,l14dc	; Nope
+	ld	a,(hl)		; Get character
+	sub	'A'-1		; Verify drive
+	jr	z,l14de		; Invalid
+	cp	'P'+1-('A'-1)
+	jr	nc,l14de	; Store it
+	ld	(de),a
+	inc	hl		; Fix pointer
+	inc	hl
+l14dc:
+	inc	de
+	ret
+;
+; Give message and exit
+;
+l14de:
+	ld	de,l181d
+	ld	c,.string
+	call	BDOS		; Tell invalid drive
+	rst	0		; Exit to CP/M
+l14e7:
+	ld	de,l1874
+	ld	c,.string
+	call	BDOS		; Tell disk full
+	rst	0		; Exit to CP/M
+l14f0:
+	ld	de,l1861
+	ld	c,.string
+	call	BDOS		; Tell overseek error
+	rst	0		; Exit to CP/M
+l14f9:
+	ld	de,l1895
+	ld	c,.string
+	call	BDOS		; Tell disk I/O error
+	rst	0		; Exit to CP/M
+l1502:
+	ld	de,l1882
+	ld	c,.string
+	call	BDOS		; Tell file not found
+	rst	0		; Exit to CP/M
+l150b:
+	ld	de,l1514
+	ld	c,.string
+	call	BDOS		; Give help
+	rst	0		; Exit to CP/M
+;
+l1514:
+	db	'1) PMCAT [-S] <receive-archive>[=<base-archive>] [<send-archive> [<filematch>]]'
+	db	cr,lf,cr,lf
+	db	'  Catenate members in <send-archive> matching with <filematch> to'
+	db	cr,lf
+	db	' '
+	db	'<receive-archive>. If <base-archive> is fixed,copy the archive to'
+	db	cr,lf
+	db	' <receive-archive>,and do as the above. If <filematch> is absent,'
+	db	cr,lf
+	db	' all '
+	db	'members are catenated. If <send-archive> is absent,it mean'
+	db	cr,lf
+	db	' refresh <receive-archive>. If switch -S is fixed,sort members in'
+	db	cr,lf
+	db	' alphabetical order before catenating.'
+	db	cr,lf,cr,lf
+	db	'2) PMCAT -U <receive-archive> <send-archive> [<filematch>]'
+	db	cr,lf,cr,lf
+	db	'  Update <receive-archive> directry by members in <send-archive>'
+	db	cr,lf
+	db	' matching with <filematch>.'
+	db	cr,lf,cr,lf
+	db	'3) PMCAT -D[D] <archive> <filematch>'
+	db	cr,lf,cr,lf
+	db	'  Delete members in <archive> matching with <filematch>. If fix'
+	db	cr,lf
+	db	' -DD,rewrite <archive> directry.'
+	db	cr,lf
+l1809:
+	db	eot
+l180a:
+	db	bell,'Invalid option.'
+	db	cr,lf,eot
+l181d:
+	db	bell,'Invalid drive number.'
+	db	cr,lf,eot
+l1836:
+	db	bell,'Invalid command.'
+	db	cr,lf,eot
+l184a:
+	db	bell,'Bad archive header.'
+	db	cr,lf,eot
+l1861:
+	db	bell,'Overseek error.'
+	db	cr,lf,eot
+l1874:
+	db	bell,'Disk full.'
+	db	cr,lf,eot
+l1882:
+	db	bell,'File not found.'
+	db	cr,lf,eot
+l1895:
+	db	bell,'Disk I/O error.'
+	db	cr,lf,eot
+l18a8:
+	db	'File already exists. Overwrite? (Y/N) ',eot
+l18cf:
+	db	'Receive-archive = ',eot
+l18e2:
+	db	'Base-archive    = ',eot
+l18f5:
+	db	'Send-archive    = ',eot
+l1908:
+	db	'Archive file = ',eot
+l1918:
+	db	' (NEW)'
+	db	cr,lf,eot
+l1921:
+	db	' (ADD)'
+	db	cr,lf,eot
+l192a:
+	db	' (REWRITE)'
+	db	cr,lf,eot
+l1937:
+	db	'Copying:    ',eot
+l1944:
+	db	'Catenating: ',eot
+l1951:
+	db	'Deleting: ',eot
+l195c:
+	db	'Appending: ',eot
+l1968:
+	db	'Updating:  ',eot
+l1974:
+	db	'Shifting...'
+	db	cr,lf,eot
+l1982:
+	db	'SFX/EXE module'
+	db	cr,lf,eot
+l1993:
+	db	'COM'
+	db	'PMA'
+	db	'LZH'
+	db	'LZS'
+	db	null
+l19a0:
+	db	'PMA'
+	db	'COM'
+	db	'LZH'
+	db	'LZS'
+	db	null
+l19ad:
+	db	cr,lf
+	db	'PMcat Version 2.11 for CP/M'
+	db	cr,lf
+	db	'Copyright(C) 1990 by Yoshihiko Mino.'
+	db	cr,lf
+l19f2:
+	db	cr,lf,eot
+l19f5:
+	db	'PMCATTMP$$$'
+
+l1a00	equ	$
+l1a04	equ	l1a00+rrnlen
+l1a08	equ	l1a04+rrnlen
+l1a0c	equ	l1a08+rrnlen
+;
+; Structure of member entry:
+; 0..3	Length of file in bytes
+;  4	Type of member
+; 5..15	Name and extension of member
+;
+l1a10	equ	l1a0c+rrnlen		; Pointer to members
+l1a12	equ	l1a10+2			; Pointer to members dtto.
+l1a14	equ	l1a12+2			; Pointer to members dtto.
+l1a16	equ	l1a14+2			; Record number
+l1a18	equ	l1a16+2			; Old record number
+l1a1a	equ	l1a18+2
+l1a1b	equ	l1a1a+1
+;
+; ### DYNAMIC AREA SET TO ZERO ###
+;
+l1a1c	equ	l1a1b+1		; Delete/Update flag
+l1a1d	equ	l1a1c+1		; Temp file flag
+l1a1e	equ	l1a1d+1		; Sort flag
+l1a1f	equ	l1a1e+1		; Reversed sort flag
+l1a20	equ	l1a1f+1		; Backup flag
+l1a21	equ	l1a20+1
+l1a25	equ	l1a21+rrnlen
+l1a29	equ	l1a25+rrnlen
+;
+; ##### END OF DYNAMIC AREA ######
+;
+l1a2d	equ	l1a29+rrnlen
+l1a31	equ	l1a2d+rrnlen
+l1aa9	equ	l1a31+_files*(1+.nam+.ext); FCB
+l1acd	equ	l1aa9+FCBlen		  ; FCB
+
+ARClen	equ	 5
+ARCnam	equ	19
+
+l1af1	equ	l1acd+FCBlen	; Archive header
+
+l1b00	equ	l1af1+255 AND 0FF00h
+
+l1e00	equ	l1b00+0300h
+l1e80	equ	l1e00+reclng
+l1f00	equ	l1e80+reclng
+l1f80	equ	l1f00+reclng
+l2000	equ	l1f80+reclng
+l4000	equ	l2000+2000h		; Start of members
+
+	end
+

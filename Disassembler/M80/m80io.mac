@@ -1,0 +1,1237 @@
+	title	MicroSoft M80 Assembler
+	name	('M80IO')
+	maclib	m80
+
+; File : M80IO.MAC
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Z80 Assembler Project - M80 compatible
+;
+; I/O routines for the Z80 assembler
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; ===== To the kernel =====
+
+	entry	Copt,Dopt,Eopt,Iopt,Gopt
+	entry	Mopt,Oopt,Qopt,Sopt,Uopt,Xopt
+	entry	Ywrt,Eflag
+	entry	getINC,getMAC,LNKchn
+	entry	putPRN,putREL,putERR
+	entry	clsINC,clsMAC,clsPRN,clsREL,clsERR
+	entry	PRNdev,MACdev,gtfINC,iniMAC
+	entry	String,ConOut,lines,crlf
+
+; ===== To the temp data =====
+
+	entry	LinDat,TopPtr,Heap,exitM80,LinPtr
+	entry	relFCB,prnFCB,macFCB,errFCB
+	entry	FPB,parse,$$DRV,$$EXT,$$FN
+	entry	$$MAC,$$$FCB,ERRdev,$CMDCH
+	entry	REL.PB,PRN.PB,INC.PB,ERR.PB,MAC.PB
+	entry	LYopt,LnkFlg,GetLin,UnpFCB
+  	entry	FOpen,conin,consta,iniERR,iniPRN,iniREL
+	entry	Bopt,Hopt,Lopt,Popt,Ropt,Vopt,Wopt,Yopt
+
+; ===== From the kernel =====
+
+	ext	$head1,M80go
+
+; ===== From the time routines =====
+
+	ext	getclk
+
+; ===== Begin of IO fields =====
+;
+; Option variables
+;
+Bopt:
+	db	FALSE
+Copt:
+	db	FALSE
+Dopt:
+	db	FALSE
+Eopt:
+	db	FALSE
+Gopt:
+	db	NoGlbl
+Hopt:
+	db	FALSE
+Iopt:
+	db	FALSE
+Lopt:
+	db	FALSE
+Mopt:
+	db	FALSE
+Oopt:
+	db	FALSE
+Popt:
+	db	1		; Default 256 bytes stack space
+Qopt:
+	db	FALSE		; Quiet on .PRINTX
+Ropt:
+	db	FALSE
+Sopt:
+	db	FALSE
+Uopt:
+	db	FALSE
+Vopt:
+	db	FALSE		; Verbose on opening files
+Wopt:
+	db	FALSE
+Xopt:
+	db	FALSE
+Yopt:
+	db	FALSE
+Zopt	equ	Iopt
+;
+LYopt:
+	db	FALSE
+Ywrt:
+	db	FALSE
+Eflag:
+	db	FALSE
+;
+LST.row:
+	db	0
+ERRdev:
+errFCB:
+	db	0
+	db	'M80$$   ERR'
+	ds	FCB..-FCBnam-FCBext-1
+relFCB:	
+	ds	FCB..
+PRNdev:
+prnFCB:
+	ds	FCBnam+1
+	ds	FCB..-FCBnam-1
+MACdev:
+macFCB:	
+	ds	FCB..
+$$$FCB:
+incFCB:
+$$DRV:				; Temporary drive/device
+	db	0
+$$FN:				; Temporary file name
+	ds	FCBnam
+$$EXT:				; Temporary extension
+	ds	FCBext
+	ds	FCB..-FCBnam-FCBext-1
+;
+; Default file extensions
+; -----------------------
+;
+$$MAC:
+	db	'MAC'		; LINK-80 source
+$$LIB:
+	db	'LIB'		; Include source
+actFCB:
+	dw	0
+TopPtr:
+	dw	0
+LinPtr:	
+FPB:
+	dw	0
+	dw	$$DRV
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% File Parameter Blocks %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Structure:
+;
+; Bytes 0,1	Address of FCB
+; Bytes 2,3	Address of disk buffer	(set dynamically)
+; Bytes 4,5	Current disk pointer
+; Bytes 6,7	Max disk pointer (MDP)
+; Byte   8	Records in buffer (RC)
+; Byte   9	Actual device (AD)
+;
+; ***** .REL file *****
+;
+REL.PB:
+	dw	relFCB
+	dw	0		; Set up by cold start of M80
+	dw	0		; Set up by initialization
+	dw	RELt
+	db	RELr
+	db	0		; Set by ininitialization
+;
+; ***** .PRN file *****
+;
+PRN.PB:
+	dw	prnFCB
+	dw	0		; Set up by cold start of M80
+	dw	0		; Set up by initialization
+	dw	PRNt
+	db	PRNr
+	db	0		; Set by ininitialization
+;
+; ***** ERR log file *****
+;
+ERR.PB:
+	dw	errFCB
+	dw	0		; Set up by cold start of M80
+	dw	0		; Set up by initialization
+	dw	ERRt
+	db	ERRr
+	db	0		; Set by ininitialization
+;
+; ***** .MAC file *****
+;
+MAC.PB:
+	dw	macFCB
+	dw	0		; Set up by cold start of M80
+	dw	0		; Set up by initialization
+	dw	MACt
+	db	MACr
+	db	0		; Set by ininitialization
+;
+; ***** .INC file *****
+;
+INC.PB:
+	dw	incFCB
+	dw	0		; Set up by cold start of M80
+	dw	0		; Set up by initialization
+	dw	INCt
+	db	INCr
+	db	0		; Set by ininitialization
+;
+; Command line
+;
+.max	equ	80
+	db	.max
+	db	0
+LinDat:
+	ds	.max
+;
+; Command entry error messages
+; ----------------------------
+;
+	.comment		*
+$noName:
+	db	'?File name empty',null
+				*
+$opn.ERR:
+	db	'?File not found',null
+$mak.ERR:
+	db	'?Can''t enter file',null
+$cls.ERR:
+	db	'?Can''t close file',null
+FCB.delim:
+	db	' : ',null
+;
+$pass:
+	db	'PASS ',null
+$pass.c:
+	db	0
+lines:
+	dw	0
+;
+; Print string on console closed by zero
+; ENTRY	Reg HL points to zero closed string
+;
+String:
+	ld	a,(hl)		; Get character
+	or	a		; Test zero
+	ret	z
+	call	ConOut		; .. print
+	inc	hl
+	jp	String		; CAUSE OF 8080 CPUs
+;
+; Give new line
+;
+crlf:
+	ld	a,cr		; .. CR
+	call	ConOut
+	ld	a,lf		; .. LF
+;
+; Type character on console
+; ENTRY	Accu holds character
+;
+ConOut:
+	push	hl		; Save regs
+	push	de
+	push	bc
+	push	af
+	ld	c,.conout
+	and	noMSB		; Strip off MSB
+	ld	e,a
+	call	BDOS		; .. type
+con.pop:
+	pop	af		; Get back regs
+	pop	bc
+	pop	de
+	pop	hl
+	or	a
+	ret
+;
+; Check console break
+;
+Break:
+	push	hl		; Save regs
+	push	de
+	push	bc
+	push	af
+	call	consta		; Get console state
+	jr	nc,con.pop	; Test state
+	call	conin		; Get character
+	cp	CtrlC		; Test break
+	jr	nz,con.pop
+	ld	hl,$Break
+	call	String		; Tell break detected
+wt.key:
+	call	consta		; Wait for key
+	jr	nc,wt.key
+	call	conin		; Get character
+	and	11011111b	; Make UPPER
+	call	ConOut		; Echo
+	cp	'Y'
+	jr	z,do.break	; Check real break
+	ld	hl,$no.break
+	call	String
+	jr	con.pop		; Exit
+do.break:
+	ld	hl,$stop
+stopM80:
+	call	String		; Give full message
+	ld	de,relFCB
+	call	delete		; Delete output files
+	ld	de,prnFCB
+	call	delete
+	call	clsERR		; Keep .LOG file alive
+	jp	OS		; .. hard stop
+$Break:
+	db	'BREAK detected - stop assembly [Y,N] ',null
+$no.break:
+	db	cr,'                                      '
+	db	cr,null
+$stop:
+	db	cr,lf,'Assembly stopped - no file generated'
+	db	cr,lf,null
+consta:
+	ld	c,.consta
+	call	BDOS		; Get status
+	rra			; Look for ready bit
+	ret
+conin:
+	ld	c,.condir
+	ld	e,C.in
+	call	BDOS		; Get chracter
+	ret
+;
+; CCP error error messages
+; ------------------------
+	.comment		*
+;
+;
+; Invalid file name
+;
+noName:
+	call	crlf		; Close line
+	ld	hl,$noName
+	call	String		; Tell empty
+	jp	OS		; .. hard stop
+				*
+opn.ERR:
+	.comment		*
+	ld	hl,(actFCB)	; Get FCB
+	inc	hl
+	ld	a,(hl)		; Test file name defined
+	cp	' '+1
+	jr	c,noName	; .. nope
+				*
+	ld	hl,$opn.ERR
+	jr	F???.ERR
+cls.ERR:
+	ld	hl,$cls.ERR
+	jr	F???.ERR
+mak.ERR:
+	ld	hl,$mak.ERR
+F???.ERR:
+	call	crlf		; Close line
+	call	String		; Give message
+	ld	hl,FCB.delim
+	call	String
+	scf
+	call	pr.FCB		; Type FCB
+	jp	OS
+;
+; Get line from console
+; Load either from CCP buffer or console
+; EXIT	Reg HL points to current buffer
+;
+GetLin:
+	push	bc
+	push	de
+	ld	hl,CPMbuff	; Set CCP buffer
+	ld	a,(hl)		; .. get length
+	ld	(hl),0		; .. clear current
+	or	a
+	ld	b,a
+getcomskip:
+	jr	z,nullin	; .. zero remaining
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Skip blanks
+	jr	nz,getcomnospc
+	dec	b
+	jr	getcomskip
+getcomnospc:
+	ld	de,LinDat-1	; Init line pointer
+	ld	a,b		; Get remaining length
+	dec	hl
+	inc	b
+getcomcopy:
+	ld	(de),a		; Copy CCP line
+	inc	de
+	inc	hl
+	dec	b
+	jr	z,getcomexit
+	ld	a,(hl)
+	jr	getcomcopy
+nullin:
+	ld	c,.rdline
+	ld	de,LinDat-2
+	call	BDOS		; Read a line
+	ld	a,lf
+	call	ConOut		; .. close input
+getcomexit:
+	pop	de
+	pop	bc
+	ld	a,(LinDat-1)	; Get length
+	ld	hl,LinDat
+	push	hl
+	push	bc
+	ld	(LinPtr),hl	; Init line pointer
+	ld	c,a
+	ld	b,0
+	add	hl,bc
+	pop	bc
+	ld	(hl),cr		; Clear end
+	ld	(TopPtr),hl	; .. set top
+	inc	hl
+	ld	a,lf
+	ld	(hl),a
+	pop	hl
+	ret
+;
+; Parse a file name
+; ENTRY	Parse control block filled
+; EXIT	Carry set on parse error
+;	Zero  set on end of line
+;
+parse:
+	ld	de,FPB
+	ld	c,.parse
+	call	BDOS		; Parse file name
+	inc	hl
+	ld	a,l
+	or	h		; Test error
+	scf
+	ret	z		; On -1 we got it
+	dec	hl
+	ld	a,l
+	or	h		; Test end of input
+	ret	
+;
+; Check buffer filled
+; EXIT	Zero flag set if filled
+;	Reg HL holds disk buffer
+;	Reg DE holds current pointer
+;
+tst.new:
+	ld	l,(ix+maxLO)	; Get max
+	ld	h,(ix+maxHI)
+	ld	e,(ix+curLO)	; .. and current
+	ld	d,(ix+curHI)
+	or	a
+	sbc	hl,de		; Test equal
+	ld	l,(ix+dmaLO)	; Get buffer
+	ld	h,(ix+dmaHI)
+	ret
+;
+; Get and set parameter of file control block
+; ENTRY	Reg IX points to parameter block
+; EXIT	Reg DE holds FCB
+;	Reg BC holds max pointer
+;	Sign set on character device
+;
+fill.PB:
+	ld	e,(ix+FCBLO)	; Get FCB
+	ld	d,(ix+FCBHI)
+	ld	(actFCB),de
+	ld	a,(de)		; Get code
+	ld	(ix+device),a
+	or	a		; Test character
+	ret	m		; .. yes, go
+	ld	c,(ix+maxLO)	; Get max
+	ld	b,(ix+maxHI)
+	ld	l,(ix+dmaLO)	; Get buffer
+	ld	h,(ix+dmaHI)
+	ret
+;
+; Perform file function
+; ENTRY	Reg IX points to file parameter block
+;	Reg HL points to disk buffer
+;	Reg C holds file function
+; EXIT	Zero flag set if all done properly
+;	Reg DE initialized to zero
+;	Rec C holds records read
+;
+file.func:
+	call	Break		; Test console break
+	push	hl
+	push	bc
+	ex	de,hl
+	ld	c,.setdma
+	call	BDOS		; Set buffer
+	ld	e,(ix+recs)	; Get record count
+	ld	c,.mulsec
+	call	BDOS		; .. set it
+	ld	e,(ix+FCBLO)	; Get FCB
+	ld	d,(ix+FCBHI)
+	ld	(actFCB),de
+	pop	bc		; Get back function
+	call	BDOS		; .. do it
+	ld	c,h		; Get records read
+	pop	hl
+	ld	de,0		; Init pointer
+	or	a		; Attache zero flag
+	ret
+;
+; Initialize file for reading
+; ENTRY	Reg IX points to file parameter block
+;	Reg HL holds address of disk buffer
+; EXIT	Carry set indicates file not found
+;
+iniRD:
+	call	fill.PB		; Set up parameter block
+	ret	m		; .. end on character device
+	ld	(ix+curLO),c	; Set up max as current
+	ld	(ix+curHI),b
+	push	de
+	pop	ix
+	ld	(ix+f.CR),0	; Clear current record
+	ld	c,.open
+	jr	..init
+;
+; Initialize file for writing
+; ENTRY	Reg IX points to file parameter block
+;	Reg HL holds address of disk buffer
+; EXIT	Carry set indicates file not creatable
+;
+iniWR:
+	call	fill.PB		; Set up parameter block
+	ret	m		; .. end on character device
+	ld	(ix+curLO),0	; Set up empty pointer
+	ld	(ix+curHI),0
+	push	de
+	pop	ix
+	push	de
+	ld	c,.delete
+	call	BDOS		; Delete existent file
+	pop	de
+	ld	c,.make
+..init:
+	ld	(ix+f.EX),0	; Clear extent
+	ld	(ix+f.CR),0	; .. and record
+	call	BDOS		; Create file
+	add	a,a		; Set up carry
+	ret
+;
+; Initialize MAC file
+;
+iniMAC:
+	push	ix
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,0
+	ld	(lines),hl	; Clear line count
+	ld	ix,MAC.PB
+	call	iniRD		; Init for reading
+	jp	c,opn.ERR	; .. not here
+	ld	hl,$pass
+	call	String		; Tell pass
+	ld	hl,$pass.c
+	ld	a,(hl)
+	ld	c,a
+	xor	1		; Toggle pass
+	ld	(hl),a
+	ld	a,'1'
+	add	a,c
+	call	ConOut
+	call	crlf
+	call	prCurFN		; Tell active
+	jr	pop.ini
+;
+; Initialize PRN file
+;
+iniPRN:
+	push	ix
+	push	af
+	ld	a,(LYopt)
+	ld	ix,PRN.PB
+	jr	ini..out	; Init for writing
+;
+; Initialize ERROR log file
+;
+iniERR:
+	push	ix
+	push	af
+	ld	a,(relFCB)
+	ld	(errFCB),a	; Set same drive as .REL file
+	ld	a,(Eopt)
+	ld	ix,ERR.PB
+	jr	ini..out	; Init for writing
+;
+; Initialize REL file
+;
+iniREL:
+	push	ix
+	push	af
+	ld	a,(Ropt)
+	ld	ix,REL.PB
+ini..out:
+	or	a		; Test requested
+	jr	z,pop..ini
+	push	bc
+	push	de
+	push	hl
+	call	iniWR		; Init for writing
+	jp	c,mak.ERR	; .. not possible
+pop.ini:
+	pop	hl
+	pop	de
+pop..cls:
+	pop	bc
+pop..ini:
+	pop	af
+	pop	ix
+	ret
+;
+; Close .INC read file
+; ENTRY	Any
+; EXIT	No change
+;
+clsINC:
+	ret			; .. dummy
+;
+; Close .MAC read file
+; ENTRY	Any
+; EXIT	No change
+;
+clsMAC:
+	ret			; .. dummy
+;
+; Close ERROR log file
+;
+clsERR:
+	push	ix
+	push	af
+	push	bc
+	call	any.err		; Test any written
+	jr	z,pop..cls
+	ld	b,-2		; Set character device
+	ld	c,TRUE		; Allow line closure
+	ld	a,(Eopt)
+	ld	ix,ERR.PB
+	jr	cls..do		; Go close
+;
+; Close .PRN file
+;
+clsPRN:
+	push	ix
+	push	af
+	push	bc
+	ld	b,-2		; Set character device
+	ld	c,TRUE		; Allow line closure
+	ld	a,(LYopt)
+	ld	ix,PRN.PB
+	jr	cls..do		; Go close
+;
+; Close .REL file
+;
+clsREL:
+	push	ix
+	push	af
+	push	bc
+	ld	b,-3		; Set NO character device
+	ld	c,FALSE		; Suppress line closure
+	ld	a,(Ropt)
+	ld	ix,REL.PB
+cls..do:
+	or	a		; Test request
+	jr	z,pop..cls
+	push	de
+	push	hl
+	call	clsWR		; Close write file
+	jr	nc,pop.ini
+	jp	cls.ERR		; .. not possible
+;
+; Close write file
+; ENTRY	Reg IX points to file parameter block
+;	Reg B holds character device to be closed
+;	Reg C holds line closure mode
+; EXIT	Carry set indicates file cannot be closed
+;
+clsWR:
+	ld	a,(ix+device)
+	cp	b		; Test close device
+	jp	z,pr.FF		; Give form feed if so
+	inc	a		; Test print device
+	ret	z		; .. no, skip if console
+	ld	a,c
+	cp	TRUE		; Test line to be closed
+	jr	nz,..no.cls
+	ld	a,cr
+	call	put		; Close last line
+	ld	a,lf
+	call	put
+..no.cls:
+	ld	a,eof
+	call	put		; Indicate EOF
+	ld	l,(ix+curLO)	; Get current pointer
+	ld	h,(ix+curHI)
+	ld	a,l
+	or	h		; Test any in buffer
+	jr	z,..close
+	add	hl,hl		; Get record count
+	ld	a,l
+	or	a
+	jr	z,..wrt
+	inc	h		; .. fix remainder
+..wrt:
+	ld	c,(ix+recs)	; Save current count
+	push	bc
+	ld	(ix+recs),h	; Set temporary
+	ld	l,(ix+dmaLO)	; Get buffer
+	ld	h,(ix+dmaHI)
+	ld	c,.wrtsq
+	call	file.func	; Write it
+	pop	bc
+	ld	(ix+recs),c	; Reset ole count
+	jr	z,..close
+	scf			; .. error
+	ret
+..close:
+	ld	e,(ix+FCBLO)	; Get FCB
+	ld	d,(ix+FCBHI)
+	ld	c,.close
+	call	BDOS		; Close file
+	add	a,a		; Fix carry
+	ret
+;
+; Get character from device
+; ENTRY	Reg IX points to file parameter block
+; EXIT	Carry set indicates end of file
+;
+get:
+	push	bc
+	push	de
+	push	hl
+	ld	a,(ix+device)	; Get device
+	inc	a
+	jr	z,get.CON	; Get from console
+	inc	a
+	jr	z,get.AUX	; .. or auxiliary
+	call	tst.new		; Test if to read new sector
+	jr	nz,..get	; .. no
+	ld	c,.rdsq
+	call	file.func	; .. read
+	jr	z,..get		; .. ok
+	ld	a,c		; Get records read
+	or	a
+	jr	nz,any.got	; Test any read
+	ld	(hl),eof	; Set EOF
+..get:
+	add	hl,de		; Get real pointer
+	ld	a,(hl)		; Get character
+	cp	eof		; Test EOF
+	scf			; Indicate it
+	jr	z,inc.ptr
+	ccf
+	jr	inc.ptr
+any.got:
+	push	de
+	ex	de,hl
+	ld	l,0
+	ld	h,c
+	srl	h		; Get pointer
+	rr	l
+	add	hl,de		; .. make real
+	ld	(hl),eof	; .. set end
+	ex	de,hl
+	pop	de
+	jr	..get
+get.AUX:
+	ld	c,.auxin
+	call	BDOS		; Get character
+	or	a		; Set success
+	jr	pop.chr
+;
+; Read a character from CON
+; EXIT	Accu holds character
+;	Carry set indicates EOF
+;
+get.CON:
+	ld	hl,(LinPtr)	; Get current line pointer
+	dec	hl
+	ld	a,(hl)
+	cp	lf		; Test EOL
+	inc	hl
+	call	z,GetLin	; .. fill line if so
+	inc	hl
+	ld	(LinPtr),hl	; New pointer
+	dec	hl
+	ld	a,(hl)
+	cp	eof		; Test eof
+	scf
+	jr	z,pop.chr	; .. carry if so
+	or	a		; Else reset carry
+	jr	pop.chr
+;
+; Put character/byte to device
+; ENTRY	Reg IX points to file parameter block
+;	Accu holds character to be put
+; EXIT	Carry set indicates file write error
+;
+put:
+	push	bc
+	push	de
+	push	hl
+	ld	b,a		; Save character
+	ld	a,(ix+device)
+	inc	a
+	jr	z,put.CON	; Put to console
+	inc	a
+	jr	z,put.LST	; .. or printer
+	call	tst.new		; Test buffer to be written
+	jr	nz,..put
+	push	bc
+	ld	c,.wrtsq
+	call	file.func	; .. write
+	pop	bc
+	jr	z,..put		; Test success
+	scf
+..put:
+	ld	a,b
+	push	af
+	add	hl,de		; Set address
+	pop	af
+	ld	(hl),a		; Save character
+inc.ptr:
+	inc	de		; Bump relative pointer
+	ld	(ix+curLO),e
+	ld	(ix+curHI),d
+pop.chr:
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+pr.FF:
+	push	bc
+	push	de
+	push	hl
+	ld	b,ff		; Give formfeed
+put.LST:
+	ld	c,.lstout
+	jr	put.chr.dev
+put.CON:
+	ld	c,.conout	; Set function
+put.chr.dev:
+	ld	e,b
+	push	bc
+	call	BDOS		; Output character
+	pop	bc
+	ld	a,b
+	or	a
+	jr	pop.chr
+;
+; Put character to ERROR log file
+;
+putERR:
+	push	ix
+	and	noMSB		; Strip off MSB
+	push	af
+	ld	a,TRUE
+	ld	(Eflag),a	; Set flag
+	ld	a,(Eopt)
+	ld	ix,ERR.PB
+	jr	put...out	; Init for writing
+;
+; Put character to .PRN file
+;
+..putPRN:
+	pop	af
+.putPRN:
+	push	ix
+	and	noMSB		; Strip off MSB
+	push	af
+	ld	a,(LYopt)
+	ld	ix,PRN.PB
+	jr	put..out	; Init for writing
+;
+; Put byte to .REL file
+;
+putREL:
+	push	ix
+	push	af
+	ld	a,(Ropt)
+	ld	ix,REL.PB
+put...out:
+	bit	7,(ix+device)	; Test character I/O
+	jr	nz,pop.put	; .. skip
+put..out:
+	or	a		; Test requested
+	jr	z,pop.put
+	pop	af
+	push	af
+	call	put		; Write
+	jr	c,dsk.wrt.ERR	; .. not possible
+pop.put:
+	pop	af
+	pop	ix
+	ret
+;
+; Disk write error
+;
+dsk.wrt.ERR:
+	ld	hl,$dsk.ERR
+	call	String		; Tell disk
+	scf
+	call	pr.drive	; Print drive from FCB
+	ld	hl,$full.ERR
+	jp	stopM80		; .. stop
+;
+$dsk.ERR:
+	db	'DISK ',null
+$full.ERR:
+	db	' FULL',cr,lf,null
+;
+; Print current active file
+;
+prCurFN:
+	ld	a,(Vopt)	; Test verbose
+	or	a
+	ret	z		; .. nope
+	ld	hl,(actFCB)	; Get FCB
+	ld	a,(hl)
+	or	a
+	ret	m		; Skip character device
+	ld	a,'['
+	call	ConOut
+	or	a
+	call	pr.FCB		; Print file
+	ld	a,']'
+	call	ConOut
+	call	crlf
+	ret
+;
+; Put character to .PRN file
+;
+putPRN:
+	push	af
+	ld	a,(Yopt)	; Test symbols enabled
+	or	a
+	jr	z,..putPRN
+	ld	a,(Ywrt)	; Test write enabled
+	or	a
+	jr	z,Put?		; .. nope
+	pop	af
+;;	cp	so+MSB		; Test disable
+;;	jr	nz,.putPRN	; .. nope
+
+	jr	.putPRN		; .. print
+
+;;	push	af
+;;	xor	a
+;;	jr	D.E..		; Disable write
+Put?:
+	pop	af
+;;	cp	si+MSB		; Test enable
+;;	ret	nz		; .. nope
+
+	ret
+
+;;	push	af
+;;	ld	a,TRUE
+;;D.E..:
+;;	ld	(Ywrt),a	; .. set flag
+;;	pop	af
+;;	ret
+;
+; Print disk from FCB
+; ENTRY	Carry reset suppresses printing the drive
+; EXIT	Reg DE holds actual FCB
+;
+pr.drive:
+	ld	de,(actFCB)	; Get FCB
+	ret	nc		; .. skip if not requested
+	ld	a,(de)		; .. get disk
+	add	a,'A'-1		; .. make ASCII
+	cp	'A'-1
+	ret	z		; Not the currrent
+	call	ConOut		; Tell A..P
+	ld	a,':'
+	call	ConOut
+	ret
+;
+; Print file from FCB
+; ENTRY	Carry reset suppresses printing the drive
+;
+pr.FCB:
+	call	pr.drive	; Print drive
+	ld	hl,1
+	ld	b,FCBnam
+	call	pr.FN		; .. name
+	ld	a,'.'
+	call	ConOut
+	ld	hl,FCBnam+1
+	ld	b,FCBext	; .. extension
+pr.FN:
+	add	hl,de
+pr..f:
+	ld	a,(hl)
+	cp	' '		; .. no blanks
+	ret	z
+	call	ConOut
+	inc	hl
+	djnz	pr..f
+	ret
+;
+; Get character from .INC file
+;
+getINC:
+	push	ix
+	ld	ix,INC.PB
+	jr	get..in
+;
+; Get character from .MAC file
+;
+getMAC:
+	push	ix
+	ld	ix,MAC.PB
+get..in:
+	call	get		; Get byte
+	res	7,a		; .. no MSB
+	pop	ix
+	push	af
+	call	chk.NL		; Test new line
+	pop	af
+	ret
+chk.NL:
+	cp	lf		; Test new line
+	ret	nz
+	push	hl
+	ld	hl,(lines)
+	inc	hl		; Bump lines
+	ld	(lines),hl
+	pop	hl
+	ret
+;
+; Build FCB from MACLIB - $INCLUDE pseudo code
+; ENTRY	Reg HL points to buffer
+; EXIT	Accu set to zero on success
+;	Accu holds non zero on error
+;
+gtfINC:
+	push	hl
+	push	de
+	push	bc
+	ld	(FPB),hl	; Set buffer
+	call	parse		; .. parse
+	ld	a,TRUE		; Set error
+	jr	c,get.I..exit.	; .. yes, do it
+	ld	a,($$EXT)	; Test extension
+	cp	' '
+	jr	nz,get.I..ext	; .. skip if so
+	ld	hl,(FPB)	; Get back pointer
+get..I:
+	ld	a,(hl)
+	cp	'.'		; Look for delimiter
+	jr	z,get.I..ext
+	inc	hl
+	cp	cr		; .. check end
+	jr	nz,get..I
+	ld	hl,$$MAC	; .. set default if not
+	call	INCdef
+	call	openINC		; Find this file
+	jr	nz,get.I..exit..; .. ok
+	ld	hl,$$LIB	; .. set 2nd default if not
+	call	INCdef
+get.I..ext:
+	call	openINC		; Find file
+	jr	z,get.I..exit
+get.I..exit..:
+	ld	hl,incFCB
+	ld	(actFCB),hl
+	call	prCurFN		; Print current file
+	xor	a
+get.I..exit:
+	ld	hl,INCt
+	ld	(INC.PB+curLO),hl
+get.I..exit.:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+INCdef:
+	ld	bc,FCBext	; Set count
+	ld	de,$$EXT
+	ldir			; .. set extension
+	ret
+;
+; Open .INC file
+; EXIT	Zero flag set if file not found
+;
+openINC:
+	ld	de,incFCB
+;
+; Open file
+; ENTRY	Reg DE holds FCB
+; EXIT	Zero flag set if file not found
+;
+FOpen:
+	push	de
+	ld	c,.open		; Open file
+	call	BDOS
+	cp	CPMerr		; Test error
+	pop	de
+	ret
+;
+; Delete file
+; ENTRY	Reg DE holds FCB
+;
+delete:
+	ld	a,(de)
+	or	a		; Test character device
+	ret	m		; .. no action
+	ld	c,.delete
+	call	BDOS		; Delete file
+	ret
+;
+; %%%%% The LINK chain implementation %%%%%
+;
+; Unpack name of file
+; ENTRY	Reg DE points to FCB
+;	Reg HL points to buffer
+;
+UnpFCB:
+	ld	b,FCBnam
+	ld	a,(de)		; Test drive
+	or	a
+	jr	z,LNKcpy	; .. skip default
+	add	a,'A'-1
+	ld	(hl),a
+	inc	hl
+	ld	(hl),':'
+	inc	hl
+LNKcpy:
+	inc	de
+Unp..:
+	ld	a,(de)
+	ld	(hl),a		; .. unpack
+	cp	' '
+	ret	z		; .. till blank
+	inc	hl
+	djnz	LNKcpy		; .. or end
+	ret
+LnkFlg:
+	db	0
+$CMDCH:
+	ds	2+FCBnam+1
+$L80.end:
+	db	'/N/E'
+L80.end	equ	$-$L80.end
+;
+; Chain entry
+;
+LNKchn:
+	ld	a,(Bopt)	; .. test enabled
+	or	a
+	ret	z		; .. no
+	ld	a,(LnkFlg)	; Test linker here
+	or	a
+	ret	z		; .. no
+	push	af
+	ld	hl,CPMbuff
+	ld	de,$CMDCH
+	ld	b,FCBnam+2
+	call	Unp..		; Unpack name of linker
+	inc	hl
+	ld	de,relFCB
+	push	de
+	call	UnpFCB		; Set .COM file
+	pop	de
+	pop	af
+	dec	a
+	jr	nz,DR.LINK	; .. test linker
+	ld	(hl),','
+	inc	hl
+	call	UnpFCB		; .. unpack again
+	ex	de,hl
+	ld	hl,$L80.end
+	ld	bc,L80.end
+	ldir			; .. unpack
+	ex	de,hl
+DR.LINK:
+	ld	(hl),0		; .. close CMD
+	call	crlf
+	ld	e,0
+	ld	c,.chain
+	call	BDOS		; .. chain
+	ret
+;
+; Check error log written
+; EXIT	Zero flag set if none written
+;
+any.err:
+	push	de
+	push	hl
+	ld	a,(Eopt)	; Test enabled
+	or	a
+	ld	a,1
+	jr	z,any.ex
+	ld	a,(Eflag)	; Test any written
+	or	a
+	jr	nz,any.ex
+	ld	a,(ERRdev)	; Test device
+	or	a
+	ld	a,1
+	jp	m,any.ex
+	ld	de,errFCB
+	ld	c,.delete
+	call	BDOS		; Delete file
+	xor	a
+any.ex:
+	or	a
+	pop	hl
+	pop	de
+	ret
+;
+; #############################################
+;
+; End of official assembler in line input mode
+;
+; Following code will be executed only ONCE
+; and overwritten after cold start of M80
+;
+; Code stays intact on special option -M
+;
+; #############################################
+;
+exitM80:
+	dw	OS		; Exit after pass 2
+Heap:
+	dw	0
+;
+; $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+; $$$ TEMPORARY (USED BY CALL OF M80 ONLY) CODE FOLLOWS $$$
+; $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+;
+	end
+

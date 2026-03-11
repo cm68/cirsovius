@@ -1,0 +1,481 @@
+	title	Map Report
+	name	('BITADR')
+
+; Bit map report program. Reads bit map typically found at the end
+; of a program. It reports all addresses referenced by the map.
+
+; Call it:
+;
+;	BITADR	[+]FILE STARTCODE STARTMAP ENDMAP
+;
+; Where:
+;
+; FILE		defines the input file. Prefixed by "+" writes to a dump file, too
+; STARTCODE	defines start of code to be relocated
+; STARTMAP	defines start of bit map
+; ENDMAP	defines end of bit map
+
+; Written by nerd W.Cirsovius for fiddly assembler
+
+; @Copyleft W.Cirsovius, all wrongs reserved :-)
+
+
+	maclib	base80.lib
+
+	ext	cmdarg,hexin,hexout,strcn0,parse,incasc,filnam
+	ext	open,creatd,WrFCB,WrBuf,emplin,closef
+	ext	setdma,modrec,rdbfp,fseek,dskget
+
+	entry	$memry
+
+argc	equ	4
+
+HEXcol	equ	12
+DIGCNT	equ	 5
+
+	dseg
+$ARG:
+	db	'Argument error: Tool requires exactly ',argc+'0',' parameters'
+	db	cr,lf,lf
+$HELP:
+	db	'Bit map report program. Reads bit map typically found at the end'
+	db	cr,lf
+	db	'of a program. It reports all addresses referenced by the map.'
+	db	cr,lf,lf
+	db	'Call it:'
+	db	cr,lf,lf
+	db	tab,'BITADR',tab,'[+]FILE STARTCODE STARTMAP ENDMAP'
+	db	cr,lf,lf
+	db	'Where:'
+	db	cr,lf,lf
+	db	'FILE',tab,tab,'defines the input file. Prefixed by "+" writes to a dump file, too'
+	db	cr,lf
+	db	'STARTCODE',tab,'defines start of code to be relocated'
+	db	cr,lf
+	db	'STARTMAP',tab,'defines start of bit map'
+	db	cr,lf
+	db	'ENDMAP',tab,'defines end of bit map'
+	db	cr,lf,null
+$ERPARSE:
+	db	'Error parsing file ',null
+$DIGERR:
+	db	'Error parsing number ',null
+$OPNERR:
+	db	'Cannot open file ',null
+$CRCERR:
+	db	'Cannot create file ',null
+$CLSERR:
+	db	'Cannot close file ',null
+$WRERR:
+	db	'Error writing file ',null
+$RDERR:
+	db	'Error reading file ',null
+$MAPERR:
+	db	'Error: Map end address less or equal start address'
+	db	cr,lf,null
+$DUMPED:
+	db	'References dumped to file ',null
+$HEXLIN:
+	rept	HEXcol
+	db	'     '
+	endm
+	db	null
+$DONE:
+	rept	DIGCNT-1
+	db	' '
+	endm
+M$cnt:
+	db	'0 maps of '
+	rept	DIGCNT-1
+	db	' '
+	endm
+B$cnt:
+	db	'0 bytes'
+	db	cr,lf
+	db	'Ready'
+@crlf:
+	db	cr,lf,null
+$HEAD:
+	db	'Adresses to be relocated:'
+	db	cr,lf
+	db	'-------------------------'
+	db	cr,lf,null
+HeadMark:
+	db	FALSE
+ParsePB:
+	ds	2
+	dw	FCB
+FileDmp:
+	db	null
+$memry:
+	ds	2
+argv:
+	ds	2*argc
+StCode:
+	ds	2
+StMap:
+	ds	2
+EndMap:
+	ds	2
+LenMap:
+	ds	2
+HexPtr:
+	dw	$HEXLIN
+FCBo:
+	db	0,'12345678MAP'
+	ds	fcblen-(.fdrv+.fname+.fext)
+OPE.PB:
+	ds	2
+	dw	$OPNERR
+CRE.PB:
+	ds	2
+	dw	$CRCERR
+CLE.PB:
+	ds	2
+	dw	$CLSERR
+WRE.PB:
+	ds	2
+	dw	$WRERR
+RDE.PB:
+	dw	FCB
+	dw	$RDERR
+	cseg
+;
+; Print header if not yet done
+;
+TstHeader:
+	ld	hl,HeadMark
+	ld	a,(hl)
+	or	a
+	ret	nz
+	dec	(hl)
+	ld	de,$HEAD
+	call	Fstrcn0		; Print header
+	ret
+;
+; Empty line if any there
+;
+empasc:
+	ld	a,($HEXLIN)
+	cp	' '		; Test any there
+	ret	z		; Nope
+;
+; Print hex line on console
+;
+PrHex:
+	call	TstHeader	; Test if header printed
+	ld	de,$HEXLIN
+	call	Fstrcn0		; Print line
+	call	Fcrlf
+	ld	l,e		; Copy pointer
+	ld	h,d
+	ld	(HexPtr),hl	; Reset it
+	ld	(hl),' '
+	inc	de
+	ld	bc,HEXcol*5-1
+	ldir			; Blank line
+	ret
+;
+; Convert binary to ASCII
+; ENTRY	Reg HL holds binary
+;
+itoa:
+	push	af
+	push	hl
+	push	de
+	push	bc
+	push	hl
+	ld	hl,M$cnt
+	call	incval		; Increment count
+	pop	hl
+	ld	de,(HexPtr)	; Get current line pointer
+	call	hexout		; Put ASCII there
+	inc	de
+	ld	(HexPtr),de	; Update pointer
+	ld	a,(de)		; Test end of line
+	or	a
+	call	z,PrHex		; Print line if so
+	pop	bc
+	pop	de
+	pop	hl
+	pop	af
+	ret
+;
+; Increment ASCII number
+; ENTRY	Reg HL points to LSD
+;
+incval:
+	push	bc
+	ld	b,DIGCNT
+	call	incasc		; Increment it
+	pop	bc
+	ret
+;
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; Error package
+;
+Help:
+	ld	de,$HELP
+	jr	LastMsg		; Give help
+ArgErr:
+	ld	de,$ARG
+	jr	LastMsg		; Tell error and give help
+IllMap:
+	ld	de,$MAPERR
+LastMsg:
+	call	strcn0
+	jp	OS
+DigErr:
+	push	de		; Save pointer
+	ld	de,$DIGERR
+	jr	Last2Msg	; Print digit line
+ErrParse:
+	ld	de,(ParsePB)	; Get name pointer
+	push	de
+	ld	de,$ERPARSE
+Last2Msg:
+	call	strcn0		; Tell error
+	pop	de
+	call	strcn0		; Print file name
+	call	crlf
+	jp	OS
+WrErr:
+	ld	ix,WRE.PB
+	jr	FOerr
+ClsErr:
+	ld	ix,CLE.PB
+FOerr:
+	ld	hl,(WrFCB)
+	ld	(ix+0),l	; Save FCB
+	ld	(ix+1),h
+	jr	FilErr
+RdErr:
+	ld	ix,RDE.PB
+	jr	FilErr
+CrecErr:
+	ld	(CRE.PB),de	; Save FCB
+	ld	ix,CRE.PB
+	jr	FilErr
+OpenErr:
+	ld	(OPE.PB),de	; Save FCB
+	ld	ix,OPE.PB
+FilErr:
+	ld	e,(ix+2)	; Get message
+	ld	d,(ix+3)
+	call	strcn0		; Tell error
+	ld	e,(ix+0)	; Get FCB
+	ld	d,(ix+1)
+	inc	de
+	call	filnam		; Tell file
+	call	crlf
+	jp	OS
+;
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+;
+; Enable file dump
+;
+enaDmp:
+	ld	(FileDmp),a	; Enable file dump
+	inc	hl		; Skip flag
+	ret
+;
+; Test file dump enabled
+; EXIT	Zero flag set if not
+;
+isDmp:
+	ld	a,(FileDmp)
+	or	a		; Test it
+	ret
+;
+; Close line
+;
+Fcrlf:
+	push	de
+	ld	de,@crlf
+	call	Fstrcn0		; Close it
+	pop	de
+	ret
+;
+; Put string to console and file if enabled
+;
+Fstrcn0:
+	call	strcn0		; Put to console
+	call	isDmp		; Test file, too
+	ret	z		; Nope
+	push	bc
+	ld	b,null
+	call	emplin		; Put line to file
+	pop	bc
+	ret	nc
+	jp	WrErr		; Error
+;
+; Close file if enabled
+;
+Fclose:
+	call	isDmp		; Test file, too
+	ret	z		; Nope
+	call	closef		; Close file
+	jp	c,ClsErr	; Error
+	call	Dmp2File	; Tell result
+	ret
+;
+; Tell dumped to file
+;
+Dmp2File:
+	ld	de,$DUMPED
+	call	strcn0		; Tell it
+	ld	de,(WrFCB)
+	inc	de
+	call	filnam		; Print name of file
+crlf:
+	ld	de,@crlf
+	call	strcn0		; Close line
+	ret
+;
+; Read byte from file
+; EXIT	Accu holds byte
+;
+fget:
+	call	dskget		; Read it
+	jp	c,RdErr		; Early end
+	push	af
+	push	hl
+	ld	hl,B$cnt
+	call	incval		; Increment count
+	pop	hl
+	pop	af
+	ret
+;
+; Position file for bitmap
+;
+posFile:
+	ld	de,DMA
+	call	setdma		; Set disk buffer
+	ld	hl,(StMap)	; Get start of map
+	dec	h		; Fix for 0000H relative
+	call	modrec		; Get record
+	ld	(rdbfp),a	; Set position in buffer
+	xor	a		; Clear hi part
+	ld	de,FCB
+	call	fseek		; Position in file
+	ret
+;
+; Divide by 8
+; ENTRY	Reg DE holds number
+; EXIT	Reg DE holds number divided by 8
+;
+div8:
+	call	div2		; DIV 2
+	call	div2		; DIV 4
+div2:
+	srl	d		; DIV 8
+	rr	e
+	ret
+;
+; Convert ASCII hex to binary
+; ENTRY	Reg HL points to ASCII
+; EXIT	Reg HL holds binary
+;
+atoi:
+	push	hl
+	ex	de,hl
+	ld	b,null
+	call	hexin		; Get it
+	pop	de
+	ret	nc
+	jp	DigErr		; Error
+;
+; Open file for read
+;
+reset:
+	ld	de,FCB
+	call	open		; Open file
+	ret	nc
+	jp	OpenErr		; Cannot find file
+;
+; Open file for read
+;
+rewrite:
+	call	isDmp		; Test file dump enabled
+	ret	z		; Nope
+	ld	hl,FCB		; Point to FCB
+	ld	de,FCBo
+	push	de
+	ld	bc,.fdrv+.fname
+	ldir			; Unpack FCB
+	pop	de
+	call	creatd		; Create new one
+	jp	c,CrecErr
+	ld	hl,FCBo
+	ld	(WrFCB),hl	; Init file setting
+	ld	hl,($memry)
+	ld	(WrBuf),hl
+	ret
+;
+; ############################
+; ###### START THE TOOL ######
+; ############################
+;
+BITADR:
+	ld	sp,(TPATOP)	; Get top for stack
+	ld	a,(FCBnam)
+	cp	' '		; Verify any parameter given
+	jp	z,Help		; Nop, so give a bit help
+	ld	hl,argv
+	ld	de,CCPBUF
+	ld	b,argc
+	call	cmdarg		; Get arguments
+	jp	c,ArgErr	; Verify correct number
+	cp	argc
+	jp	nz,ArgErr
+	ld	hl,(argv)	; Get name of file
+	ld	a,(hl)
+	cp	'+'		; Test dump to file
+	call	z,enaDmp	; Yeap, enable it
+	ld	(ParsePB),hl	; Set name pointer
+	ld	de,ParsePB
+	call	parse		; Parse name
+	jp	c,ErrParse
+	jp	nz,ErrParse
+	call	reset		; Reset file
+	call	rewrite		; Rewrite dump file if requested
+	ld	hl,(argv+2)	; Get start of code
+	call	atoi
+	ld	(StCode),hl
+	ld	hl,(argv+4)	; Get start of map
+	call	atoi
+	ld	(StMap),hl
+	push	hl
+	ld	hl,(argv+6)	; Get end of map
+	call	atoi
+	ld	(EndMap),hl
+	pop	de
+	or	a
+	sbc	hl,de
+	ld	(LenMap),hl	; Save length of map
+	jp	c,IllMap	; Error if end less start
+	jp	c,IllMap
+	call	posFile		; Position fileto start of bit map
+	ld	hl,(StCode)	; Get start of code
+	ld	de,(LenMap)	; Get length of code
+	call	div8		; Divide by 8
+CodeLoop:
+	ld	b,8		; Get length of byte
+	call	fget		; Get byte
+ByteLoop:
+	add	a,a		; Get bit
+	call	c,itoa		; Print hex if so
+	inc	hl		; Point to next code byte
+	djnz	ByteLoop	; Go thru the byte
+	dec	de		; Count down
+	ld	a,d
+	or	e		; Test more
+	jr	nz,CodeLoop	; Yeap
+	call	empasc		; Empty line
+	call	Fclose		; Close dump file if any
+	ld	de,$DONE
+	call	strcn0		; Tell done
+	jp	OS
+
+	end	BITADR
+

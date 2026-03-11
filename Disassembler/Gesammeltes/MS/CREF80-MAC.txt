@@ -1,0 +1,1753 @@
+	title	XRef CREF80
+	name('CREF80')
+
+; DASMed MS CREF80
+; By W.Cirsovius
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPAtop	equ	BDOS+1
+DMA	equ	0080h
+CCPbuf	equ	DMA
+reclng	equ	128
+page	equ	256
+
+..Fext	equ	 9
+.Fname	equ	 8
+.Fext	equ	 3
+.Flen	equ	11
+.ex	equ	12
+.cr	equ	32
+.clr	equ	 4
+
+.conout	equ	 2
+.auxin	equ	 3
+.lstout	equ	 5
+.getlin	equ	10
+.resdsk	equ	13
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.getdsk	equ	25
+.setdma	equ	26
+
+tab	equ	09h
+lf	equ	0ah
+ff	equ	0ch
+cr	equ	0dh
+eof	equ	1ah
+
+TabCol	equ	00000111b
+NoMSB	equ	01111111b
+MSB	equ	10000000b
+
+Rd.rec	equ	4		; Define read  record size
+Wr.rec	equ	4		; Define write record size
+??.rec	equ	2
+;
+Rd.buf	equ	Rd.rec*reclng	; Buffer space
+Wr.buf	equ	Wr.rec*reclng
+??.buf	equ	??.rec*reclng
+;
+Rd.pag	equ	Rd.buf / page	; Page size
+Wr.pag	equ	Wr.buf / page
+??.pag	equ	??.buf / page
+
+.ConLen	equ	80
+DecDig	equ	 5
+
+EOFItm	equ	0
+StrtItm	equ	1
+DefItm	equ	2
+EndItm	equ	3
+ItmMask	equ	00011111b
+ItmLink	equ	4
+LinkOff	equ	3
+REFbit	equ	10000000b
+
+MaxRow	equ	51		; Max lines on list page
+MaxCol	equ	12		; Max items in line
+
+LD.BC	macro
+	db	01h
+	endm
+
+;
+; ############################
+; # ENTRY VIA CCP OR RESTART #
+; ############################
+;
+CREF.cold:
+	ld	hl,Run.CREF
+	jp	CREF80		; Go start
+	db	'CR','F'+MSB
+;
+; Run time start
+; ENTRY	Reg HL holds top of RAM
+;
+Run.CREF:
+	ld	(LocalStk),hl	; Save address
+	ld	hl,(LocalStk)
+	ld	sp,hl		; .. get as stack
+	ld	hl,1
+	ld	(LineNr),hl	; Init line number
+	ld	hl,TOP
+	ld	(TOPptr),hl	; Init top memory
+RunLoop:
+	call	Get		; Read character
+	jp	c,EOF.Source	; .. end of source
+RunCheck:
+	cp	StrtItm		; Test reference
+	jp	z,DefRef
+	cp	DefItm		; Test definition
+	jp	z,DefRef
+	cp	EndItm		; Test end of ref/def
+	jp	z,EndDef
+	cp	EOFItm		; Test end of file
+	jp	z,EOF.Source	; End on this item
+	jp	PutChar
+EndDef:
+	ld	hl,(LineNr)	; Get line number
+	push	hl
+	call	PrDec		; .. as decimal
+	pop	hl
+	inc	hl		; Bump line number
+	ld	(LineNr),hl
+	ld	a,tab
+	call	Put
+GetChar:
+	call	Get		; Get next
+	jp	c,EOF.Source	; End of file
+PutChar:
+	cp	EndItm+1	; .. skip control
+	jp	c,RunCheck
+	call	Put		; Echo
+	cp	lf		; Test new line
+	jp	nz,GetChar
+	jp	RunLoop
+DefRef:
+	ld	b,a		; .. save type
+	ld	hl,$BUFF	; Init buffer
+	ld	c,0		; Init counter
+SampleDefRef:
+	call	Get		; Get character
+	cp	EndItm+1	; Test control
+	jp	c,EndRefDef
+	cp	' '		; Test printable
+	jp	c,EndRefDef
+	ld	(hl),a		; Save character
+	inc	hl		; .. bump
+	inc	c
+	jp	SampleDefRef
+EndRefDef:
+	push	af
+	call	InsertItem	; Put into the list
+	pop	af
+	cp	cr		; Test end of line
+	jp	z,PutChar
+	jp	RunCheck
+;
+; Test item already in list
+; ENTRY	Reg C holds length of item
+; EXIT	Carry set if item found
+;	Reg HL points to item if found
+;
+SearchItem:
+	ld	hl,(TOPptr)	; Get pointer
+	ex	de,hl
+	ld	hl,TOP		; Set base
+SrcItm.Loop:
+	ld	a,h
+	cp	d		; Test end reached
+	jp	nz,SrcItm.NotSame
+	ld	a,l
+	cp	e
+SrcItm.NotSame:
+	ret	nc		; .. new item
+	ld	a,(hl)		; Get length
+	and	ItmMask
+	sub	c		; Compare to item searched for
+	jp	nz,SrcItm.Next
+	push	bc
+	push	de
+	push	hl
+	ld	de,$BUFF
+	push	bc
+	ld	bc,ItmLink+1	; Point to item
+	add	hl,bc
+	pop	bc
+SrcItm.Src:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jp	nz,SrcItm.Differ
+	inc	hl
+	inc	de
+	dec	c		; Test done
+	jp	nz,SrcItm.Src
+SrcItm.Differ:
+	pop	hl
+	pop	de
+	pop	bc
+	jp	nz,SrcItm.Next	; Test found
+	scf			; .. indicate it
+	ret
+SrcItm.Next:
+	push	bc
+	ld	a,(hl)
+	and	ItmMask		; Get length
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; Point to next
+	ld	c,ItmLink+1
+	add	hl,bc		; .. don't forget overhead
+	pop	bc
+	jp	SrcItm.Loop	; .. test next
+;
+; Put item into the list
+; ENTRY	Reg C holds length of item
+;
+InsertItem:
+	call	SearchItem	; Get address of item
+	jp	nc,NewItem	; .. unknown, so put into
+	push	bc
+FindLinkEnd:
+	ld	de,LinkOff
+	add	hl,de		; Point to linkage
+	push	hl
+	call	GetLink		; Get linkage
+	pop	de
+	ld	a,l
+	or	h		; Test zero
+	jp	nz,FindLinkEnd
+	ld	hl,(TOPptr)	; Get pointer
+	ex	de,hl
+	ld	(hl),e		; .. save into linkage
+	inc	hl
+	ld	(hl),d
+	pop	bc
+	ld	c,0		; .. force only top set
+	jp	NewItem
+NewItem:
+	ld	hl,(TOPptr)	; Get pointer
+	ld	a,b
+	cp	StrtItm		; Test reference
+	ld	a,c
+	jp	z,Itm.NoRef
+	or	REFbit		; .. indicate definition
+Itm.NoRef:
+	ld	(hl),a		; Set length+bit
+	inc	hl
+	ex	de,hl
+	ld	hl,(LineNr)	; Get current line
+	ex	de,hl
+	ld	(hl),e		; Set into list
+	inc	hl
+	ld	(hl),d
+	xor	a
+	inc	hl
+	ld	(hl),a		; Clear linkage
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	a,c
+	or	a
+	jp	z,InsertEnd
+	ld	de,$BUFF	; Get source
+InsertPack:
+	ld	a,(de)
+	ld	(hl),a		; Unpack label
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,InsertPack
+InsertEnd:
+	ld	(TOPptr),hl	; Set new pointer
+	ret
+;
+; Print decimal number
+; ENTRY	Reg HL holds number to be converted
+;
+PrDec:
+	call	CnvDec		; Convert to decimal
+	ld	a,(DecLen)	; Get digits
+	ld	c,a
+	ld	a,DecDig
+	sub	c		; Test lenght
+	or	a
+	jp	z,PrDecNoBlnk
+	ld	b,a
+PrDecBlnk:
+	ld	a,' '
+	call	Put		; .. give leading blanks
+	dec	b
+	jp	nz,PrDecBlnk
+PrDecNoBlnk:
+	ld	de,$BUFF	; Init number buffer
+PrDecLoop:
+	ld	a,(de)
+	call	Put		; .. put number to file
+	inc	de
+	dec	c
+	jp	nz,PrDecLoop
+	ret
+;
+; Convert hex to decimal
+; ENTRY	Reg HL holds number to be converted
+;
+CnvDec:
+	ld	bc,-10		; Init divisor
+	push	hl
+	xor	a
+	ld	(DecLen),a	; Init digit count
+	ld	hl,$BUFF
+	ld	(DECptr),hl	; Init pointer
+	pop	hl
+CnvDecCal:
+	ld	d,b		; Init -1
+	ld	e,b
+CnvDecLoop:
+	add	hl,bc		; Subtract tens
+	inc	de
+	jp	c,CnvDecLoop
+	push	hl		; .. till < 0
+	ex	de,hl
+	ld	a,h		; Test remainder
+	or	l
+	call	nz,CnvDecCal	; Convert
+	ld	a,'9'+1
+	pop	bc
+	add	a,c		; Make ASCII
+	push	hl
+	ld	hl,(DECptr)
+	ld	(hl),a		; .. save digit
+	inc	hl
+	ld	(DECptr),hl
+	ld	a,(DecLen)
+	inc	a		; Bump count
+	ld	(DecLen),a
+	pop	hl
+	ret
+;
+; Got end of source file, process reference
+;
+EOF.Source:
+	ld	hl,(TOPptr)	; Get current pointer
+	ex	de,hl		; .. as new base
+	ld	c,e
+	ld	b,d
+	ld	hl,TOP		; Get base
+ScanList:
+	ld	a,(hl)
+	and	ItmMask		; Get naked length
+	or	a
+	jp	z,ZeroScan	; .. test item in it
+	push	af
+	ld	a,l
+	ld	(de),a		; Set pointer into current
+	inc	de
+	ld	a,h
+	ld	(de),a
+	inc	de
+	pop	af
+	add	a,l		; Add length
+	ld	l,a
+	ld	a,h
+	adc	a,0
+	ld	h,a
+ZeroScan:
+	ld	a,ItmLink+1
+	add	a,l		; Add linkage
+	ld	l,a
+	ld	a,h
+	adc	a,0
+	ld	h,a
+	cp	b		; Test list scanned
+	jp	c,ScanList
+	ld	a,l
+	cp	c
+	jp	c,ScanList
+	ex	de,hl
+	ld	(CurAdrPtr),hl	; Set top of addresses
+	ld	(TopAdrPtr),hl
+SortLoop:
+	ld	hl,(TOPptr)	; Get end pointer
+	call	CompPtr		; Compare against current
+	jp	nc,BegWrite	; .. end reached
+SortNext:
+	ld	d,h		; Copy address
+	ld	e,l
+	inc	de		; Bump to next
+	inc	de
+	ex	de,hl
+	push	de
+	call	CompPtr		; Test more
+	pop	de
+	ex	de,hl
+	jp	nc,EndList	; .. no
+	push	hl
+	push	de
+	call	CompItem	; Compare items
+	pop	de
+	pop	hl
+	call	c,SwapItem	; Swap items if equal
+	inc	hl		; .. next pair
+	inc	hl
+	jp	SortNext
+EndList:
+	ld	hl,(CurAdrPtr)	; Get pointer
+	dec	hl		; .. fix for previous address
+	dec	hl
+	ld	(CurAdrPtr),hl
+	jp	SortLoop
+;
+; Compare current address
+; ENTRY	Reg HL holds limit address
+; EXIT	Zero set if equal
+;	Carry set if limit address .LT. current
+;
+CompPtr:
+	ex	de,hl
+	ld	hl,(CurAdrPtr)	; Get current pointer
+	ex	de,hl
+	ld	a,h
+	cp	d
+	ret	nz
+	ld	a,l
+	cp	e
+	ret
+;
+; Compare items
+; ENTRY	Regs HL and DE point to item
+; EXIT	Carry set if 2nd item less 1st one
+;
+CompItem:
+	call	GetLink		; Get 1st pointer
+	ex	de,hl
+	call	GetLink		; .. and 2nd one
+	ex	de,hl
+	ld	a,(hl)
+	and	ItmMask
+	ld	b,a		; Get 1st length
+	ld	a,(de)
+	and	ItmMask
+	ld	c,a		; .. get 2nd length
+	push	bc
+	ld	b,0
+	ld	c,ItmLink+1
+	add	hl,bc		; Skip linkage
+	ex	de,hl
+	add	hl,bc		; .. on both
+	ex	de,hl
+	pop	bc
+CompNext..:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	ret	nz
+	dec	b		; Test end of 1st
+	ret	z
+	dec	c		; Test end of 2nd
+	scf
+	ret	z
+	inc	hl		; .. bump
+	inc	de
+	jp	CompNext..
+;
+; Get linkage from list
+; ENTRY	Reg HL points to link field
+; EXIT	Reg HL holds address of link field
+;
+GetLink:
+	ld	a,(hl)		; Get address
+	inc	hl
+	ld	h,(hl)		; .. into reg HL
+	ld	l,a
+	ret
+;
+; Swap items
+; ENTRY	Regs HL and DE point to address items
+;
+SwapItem:
+	ld	c,(hl)		; Get 1st address
+	inc	hl
+	ld	b,(hl)
+	push	bc
+	dec	hl
+	ld	a,(de)		; Unpack 2nd into 1st
+	ld	(hl),a
+	inc	de
+	inc	hl
+	ld	a,(de)
+	ld	(hl),a
+	pop	bc
+	ld	a,b
+	ld	(de),a		; Unpack 1st into 2nd
+	dec	de
+	ld	a,c
+	ld	(de),a
+	dec	hl
+	ret
+;
+; End of address list reached -- Start writing to file
+;
+BegWrite:
+	call	NewPage		; Set new page
+	ld	hl,(TopAdrPtr)
+	ld	(CurAdrPtr),hl	; Re-init top of address list
+	ld	hl,(TOPptr)	; Init pointer
+	dec	hl
+	dec	hl
+	push	hl
+GetNewItem:
+	pop	hl		; Get base
+	inc	hl
+	inc	hl
+	call	CompPtr		; Test end reached
+	jp	nc,EndWrite	; .. go close
+	push	hl
+	call	GetLink		; Get address
+GetNewRef:
+	ld	a,(hl)		; Get control
+	push	af
+	and	ItmMask
+	ld	c,a		; .. extarct length
+	inc	hl
+	ld	e,(hl)		; Fetch the referenced line
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(RefLine),hl	; .. save
+	ex	de,hl
+	inc	hl
+	ld	e,(hl)		; Fetch linkage
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(LinkItem),hl	; .. save
+	ex	de,hl
+	inc	hl
+	ld	a,c
+	or	a		; Test definition
+	jp	z,SkipDefLine	; .. no
+	xor	a
+	ld	(ListCol),a	; Init column
+	call	NewLine		; .. bump line
+PutItmChar:
+	ld	a,(hl)
+	call	Put		; Print symbol
+	dec	c
+	inc	hl
+	jp	nz,PutItmChar
+SkipDefLine:
+	call	NewColumn	; .. next column
+	ld	hl,(RefLine)
+	call	PrDec		; Print def/ref line number
+	pop	af		; Get code
+	or	a		; Test definition
+	jp	p,SkipDefIndicator
+	ld	a,'#'
+	call	Put		; .. indicate it
+SkipDefIndicator:
+	ld	hl,(LinkItem)	; Get linkage
+	ld	a,h		; .. test more
+	or	l
+	jp	z,GetNewItem
+	jp	GetNewRef
+;
+; Give new page for the listing
+;
+NewPage:
+	ld	a,1
+	ld	(ListRow),a	; Init line count
+	ld	(ListCol),a	; .. and column
+	call	NewLine		; Give new line
+	ld	a,ff
+	jp	Put
+;
+; Give new line for the listing
+;
+NewLine:
+	ld	a,(ListRow)	; Bump line count
+	inc	a
+	cp	MaxRow
+	ld	(ListRow),a
+	call	nc,NewPage	; New page if filled
+	ld	a,cr		; .. give CR
+	call	Put
+	ld	a,lf		; .. and LF
+	jp	Put
+;
+; Give new column for the listing
+;
+NewColumn:
+	ld	a,(ListCol)	; Test max columns
+	cp	MaxCol
+	jp	c,ColInRange
+	call	NewLine		; Give new line
+	xor	a
+ColInRange:
+	inc	a		; Bump column
+	ld	(ListCol),a
+	ld	a,tab		; Give tab
+	jp	Put
+;
+; End of listing -- Close the files
+;
+EndWrite:
+	call	NewPage		; Get last form feed
+	call	CloseWR		; Close output file
+	call	CloseRD		; Close input  file
+	jp	CREF.cold	; Restart CREF80
+;
+LineNr:
+	dw	0		; Current line number
+$BUFF:
+	ds	32
+DecLen:
+	db	0
+DECptr:
+	dw	0
+TOPptr:
+	dw	0
+LocalStk:
+	dw	0		; Original : 2822h
+CurAdrPtr:
+	dw	0
+TopAdrPtr:
+	dw	0
+LinkItem:
+	dw	0
+ListRow:
+	db	0		; Line count
+ListCol:
+	db	0		; Column count
+RefLine:
+	dw	0
+Mode:
+	db	0		; Mode word
+topTPA:	
+	dw	0
+Ext.flg:
+	db	0		; 0 = '.' found in file name
+Cmd.Mode:
+	db	0		; 0 = command mode, else run
+NoDestName:
+	db	0		; 0 = no destination file
+DstDrv:
+	db	0		; Destination drive
+Flg.???:
+	db	0
+L.option:			; 00 = No LIST
+	db	0		; 01 = File found, 'L' /L found
+Exec.Mode:
+	db	0		; 01 = Run mode
+?.option:
+	db	0
+TypeMode:
+	db	0		; 0 = .PRN as destination
+Run.Mode:
+	db	0		; 0 = intern command, else CCP
+Flg.???1:
+	db	0
+Flg.???2:
+	db	0
+Flg.???3:
+	db	0
+ColLST:
+	db	0		; Column count for printer
+FCB.???:
+	ds	33		; %%%% Mysterious FCB
+FCB.OUT:
+	ds	33
+FCB.IN:
+	ds	33
+ExecAdr:
+FCB.TMP:
+	ds	12
+;
+	db	'REL'
+$$CRF:
+	db	'CRF'
+$$PRN:
+	db	'PRN'
+??Bfp:
+	dw	0
+??DMA:
+	ds	??.buf
+WrBfp:
+	ds	2
+WrDMA:
+	ds	Wr.buf
+RdBfp:	
+	ds	2
+RdDMA:
+	ds	Rd.buf
+ConLine:
+	db	.ConLen
+	ds	.Conlen+1
+ConPtr:
+	dw	0
+$CMD.ERR:
+	db	'?Command error',0
+$OPN.ERR:
+	db	'?File not found',0
+$MAK.ERR:
+	db	'?Can''t enter file',0
+;
+; Print string on console
+; ENTRY	Reg HL points to string closed by zero
+;
+string:
+	ld	a,(hl)		; Get character
+	and	NoMSB
+	ret	z		; .. end if zero
+	call	conout		; .. else type
+	inc	hl
+	jp	string
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!! ERROR MESSAGE INTERFACE !!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+CommandErr:
+	ld	hl,$CMD.ERR	; Command line error
+	jp	ERR.Strg
+OpenErr:
+	ld	hl,$OPN.ERR	; File found error
+	jp	ERR.Strg
+MakeErr:
+	ld	hl,$MAK.ERR	; File creation error
+ERR.Strg:
+	call	string		; .. give error
+	jp	ReEnter		; .. restart
+;
+; ********************
+; * Cold start entry *
+; ********************
+;
+; ENTRY	Reg HL holds execution address
+;
+CREF80:
+	ld	(ExecAdr),hl	; Save address
+	ld	hl,(TPAtop)	; Get top
+	dec	hl
+	ld	sp,hl		; .. as stack
+	dec	hl
+	dec	hl
+	ld	(topTPA),hl	; Set new top
+	ld	hl,(ExecAdr)
+	push	hl		; Set return to real computing
+	ld	a,(Run.Mode)	; Test more to do
+	or	a
+	jp	nz,OS
+	ld	(Cmd.Mode),a	; Set command mode
+ReEnter:
+	ld	hl,(topTPA)
+	ld	sp,hl
+	call	RdConsole	; Read from console
+	ld	a,(ConLine+2)	; Test empty line
+	cp	cr
+	jp	z,ReEnter
+	xor	a
+	ld	(ColLST),a	; Clear column
+	ld	(L.option),a	; .. and /L option
+	ld	(Flg.???2),a
+	ld	(Flg.???1),a
+	ld	(TypeMode),a	; Set .PRN
+	ld	(?.option),a
+	ld	(Flg.???3),a
+	inc	a
+	ld	(Exec.Mode),a	; Set run mode
+	ld	(Flg.???),a
+	ld	bc,CommandErr	; Set return on error
+	push	bc
+	xor	a
+	ld	(Mode),a	; Clear mode word
+	xor	a
+	ld	(?.option),a
+	call	Parse		; Parse destination file
+	ret	c
+	ld	de,$$PRN
+	ld	a,(TypeMode)	; Test .PRN
+	or	a
+	jp	z,..PRN
+	ld	de,$$CRF
+..PRN:
+	call	SetExtension	; Set default extension
+	ld	de,FCB.TMP+1
+	ld	a,(FCB.TMP)
+	ld	(DstDrv),a	; Save drive
+	ld	a,(de)
+	sub	' '
+	ld	(NoDestName),a	; Set flag
+	jp	nz,FileDefined
+	ld	a,(Mode)	; Get mode
+	add	a,01000000b	; .. add bit
+	ld	(Mode),a
+FileDefined:
+	push	hl
+	ld	hl,FCB.OUT	; Unpack to output file
+	call	CopyFCB		; Copy FCB
+	pop	hl
+	ld	a,c
+	cp	'='		; Test assignment
+	scf
+	ret	nz		; .. should be
+	call	Parse		; Parse source file
+	cp	cr
+	scf
+	ret	nz		; Should be end of line
+	ld	de,$$CRF
+	call	SetExtension	; Set .CRF as default
+	ld	de,FCB.TMP
+	ld	a,(de)		; Get device code
+	inc	de
+	or	a
+	jp	m,LegalSRC	; .. OK on character device
+	ld	a,(de)
+	cp	' '		; Test name
+	scf
+	ret	z		; .. should be
+LegalSRC:
+	push	hl
+	ld	hl,FCB.IN
+	call	CopyFCB		; Set source file
+	pop	hl
+	ld	a,(Mode)	; Get mode
+	add	a,a
+	ld	hl,FCB.???
+	call	c,Move		; Set FCB if set
+	add	a,a
+	ld	hl,FCB.OUT
+	push	af
+	ld	a,(TypeMode)	; Test .PRN
+	or	a
+	jp	z,PRN.OK	; .. yes
+	ld	de,FCB.OUT+..Fext
+	ld	bc,$$CRF
+	ld	a,.Fext
+Set..Ext:
+	push	af
+	ld	a,(bc)		; Unpack extension
+	ld	(de),a
+	inc	de
+	inc	bc
+	pop	af
+	dec	a
+	jp	nz,Set..Ext
+PRN.OK:
+	pop	af
+	call	c,Move		; Move to destination if none
+	ld	a,(L.option)	; Test /L
+	or	a
+	jp	nz,LST.OK	; .. file found
+	ld	a,(NoDestName)	; Test destination file
+	or	a
+	jp	nz,LST.OK
+	ld	a,(DstDrv)	; Get destination drive
+LST.OK:
+	ld	(L.option),a	; .. set /L
+	ld	c,.getdsk
+	call	BDOS		; Get current disk
+	push	af
+	ld	c,.resdsk
+	call	BDOS		; Reset disk system
+	pop	af
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Log disk
+	xor	a
+	ld	(DMA),a
+	call	Reset		; Reset source
+	call	Rewrite		; Rewrite destination
+	pop	hl		; Clean stack
+	ld	hl,(topTPA)
+	inc	hl
+	inc	hl
+	ld	a,(Exec.Mode)
+	ld	(Cmd.Mode),a	; Set run mode
+	ld	b,a
+	ret
+;
+; Move FCB
+; ENTRY	Reg HL holds FCB to be moved into
+;
+Move:
+	push	af
+	ld	de,FCB.TMP	; Set source
+	ld	c,.Fname+1	; .. and length
+	ld	a,(hl)
+	or	a		; Test any in FCB
+	jp	nz,FixMove
+	ld	a,(de)		; Test device code
+	or	a
+	jp	m,FixMove
+DoMove:
+	ld	a,(de)
+	ld	(hl),a		; .. unpack
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,DoMove
+NoPut:
+	pop	af
+	ret
+FixMove:
+	dec	c		; Fix count
+	inc	hl		; .. and pointer
+	inc	de
+	jp	DoMove
+;
+; Copy FCB
+; ENTRY	Reg DE points to temporary FCB
+;	Reg HL points to FCB
+;
+CopyFCB:
+	dec	de
+	ld	b,.Flen+1
+FCB.Copy:
+	ld	a,(de)		; Unpack FCB
+	ld	(hl),a
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,FCB.Copy
+	ret
+;
+; Set extension on empty field
+; ENTRY	Reg DE points to extension default
+;
+SetExtension:
+	ld	a,(Ext.flg)	; Test dot found
+	or	a
+	ret	z		; .. exit if so
+	push	hl
+	ld	hl,FCB.TMP+..Fext
+	ld	a,(hl)		; Test extension found
+	cp	' '
+	jp	nz,SetExt.End
+	ld	b,.Fext		; Set count
+SetExt.Loop:	
+	ld	a,(de)
+	and	NoMSB
+	ld	(hl),a		; Unpack extension
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,SetExt.Loop
+SetExt.End:
+	pop	hl
+	ret
+;
+; Parse FCB or device
+; EXIT	Accu holds last character read
+;	Carry set on end of line
+;
+Parse:
+	call	GetCmdChar	; Get string
+	cp	':'		; Test drive delimiter
+	scf
+	ld	a,0		; .. set default drive
+	jp	nz,Parse.NoDrv
+	ld	a,b
+	or	a		; Test string before
+	jp	z,Parse		; .. no, so retry
+	ex	de,hl
+	call	Chk.ConLin	; Check character
+	ld	c,a
+	ld	a,b
+	dec	a		; Test drive
+	ld	a,c
+	jp	nz,Parse.NoFile
+	cp	'Z'+1		; Test legal drive
+	ret	nc
+	cp	'A'
+	ret	c
+	sub	'A'-1		; Make hex
+	ex	de,hl
+Parse.NoDrv:
+	ld	(FCB.TMP),a	; Set drive
+	call	nc,GetCmdChar
+	ld	a,b
+	cp	.Flen		; Test valid length
+	jp	c,Parse.LenOK
+	ld	b,.Flen		; .. truncate
+Parse.LenOK:
+	push	bc
+	ex	de,hl
+	push	de
+	ld	de,FCB.TMP+1	; Set temporary FCB
+	inc	b
+Parse.FileMove:
+	dec	b
+	jp	z,Parse.FileEnd	; Test done
+	call	Chk.ConLin
+	ld	(de),a		; Fill FCB
+	inc	de
+	jp	Parse.FileMove
+Parse.NoFile:
+	cp	'T'		; Test TTY
+	jp	nz,Parse.LST
+	call	Chk.ConLin
+	cp	'T'
+	scf
+	ret	nz
+	call	Chk.ConLin
+	cp	'Y'
+	scf
+	ret	nz
+	sbc	a,a
+	ex	de,hl
+	or	a		; Set -1 as device
+	jp	Parse.NoDrv
+Parse.LST:
+	cp	'L'		; Test LST
+	jp	nz,Parse.RDR
+	call	Chk.ConLin
+	cp	'S'
+	scf
+	ret	nz
+	call	Chk.ConLin
+	cp	'T'
+	scf
+	ret	nz
+	ld	a,-2		; Set -2 as device
+	ex	de,hl
+	or	a
+	jp	Parse.NoDrv
+Parse.RDR:			; Test RDR
+	cp	'R'
+	scf
+	ret	nz
+	call	Chk.ConLin
+	cp	'D'
+	scf
+	ret	nz
+	cp	'R'
+	scf
+	ret	nz
+	ld	a,-2		; Set -2 as device
+	ex	de,hl
+	or	a
+	jp	Parse.NoDrv
+Parse.FileEnd:
+	pop	hl
+	pop	bc
+	ld	a,.Flen-1
+	sub	b		; Test file filled
+	jp	c,Parse.NoBlank
+	ex	de,hl
+Parse.Blank:
+	ld	(hl),' '	; Blank rest of FCB
+	inc	hl
+	dec	a
+	jp	p,Parse.Blank
+	ex	de,hl
+Parse.NoBlank:
+	ld	a,c
+	ld	b,0
+	sub	'.'
+	ld	(Ext.flg),a	; Get extension flag
+	call	z,GetCmdChar	; .. skip if dot
+	ex	de,hl
+	push	de
+	ld	de,FCB.TMP+..Fext
+	ld	a,b		; Test valid extension length
+	cp	.Fext+1
+	jp	c,Parse.ExtOK
+	ld	b,.Fext		; Truncate
+Parse.ExtOK:
+	inc	b
+Parse.ExtLoop:
+	dec	b		; Test done
+	jp	z,Parse.Exit
+	call	Chk.ConLin
+	ld	(de),a		; .. get extension
+	inc	de
+	jp	Parse.ExtLoop
+Parse.Exit:
+	pop	hl
+	xor	a
+	inc	a
+	ld	(L.option),a	; Init /L
+Parse.Option:
+	ld	a,c
+	sub	'/'		; Test option follows
+	or	a
+	ld	a,c
+	ret	nz
+	call	Chk.ConLin	; Get it
+	cp	'L'		; Check LIST otion
+	scf
+	ret	nz		; .. only valid
+	ld	(L.option),a	; Set 'L'
+	call	Chk.ConLin
+	ld	c,a
+	jp	Parse.Option	; .. loop
+;
+; Get valid string from command line
+; ENTRY	Reg HL points to command line
+; EXIT	Reg HL updated, reg DE holds start value
+;	Reg B holds length of string
+;	Accu and reg C hold 1st invalid character
+;
+GetCmdChar:
+	ld	b,0		; Clear count
+	push	hl
+GetCC.loop:
+	call	Chk.ConLin	; Get character
+	cp	'Z'+1		; Check alphabetical
+	jp	nc,GetCC.exit
+	cp	'0'		; .. and numeric
+	jp	c,GetCC.exit
+	cp	'A'
+	jp	nc,GetCC.bump
+	cp	'9'+1
+	jp	nc,GetCC.exit
+GetCC.bump:
+	inc	b		; Bump count
+	jp	GetCC.loop
+GetCC.exit:
+	ld	c,a		; Save character
+	pop	de
+	ret
+;
+; Read line from console
+; -- try CCP command line input 1st
+;
+RdConsole:
+	push	bc
+	push	de
+	ld	hl,DMA		; Get default buffer
+	ld	a,(hl)		; Get length of input
+	ld	(hl),0		; .. clear
+	or	a
+	ld	b,a		; Set count
+RdLin.skp:
+	jp	z,RdLin.empty	; Test end
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	jp	nz,RdLin.NoBlnk	; Skip blanks
+	dec	b
+	jp	RdLin.skp
+RdLin.NoBlnk:
+	ld	de,ConLine+1	; Set real buffer
+	ld	a,b		; Get remaining length
+	dec	hl
+	inc	b
+RdLin.Unpack:
+	ld	(de),a		; Unpack buffer
+	inc	de
+	inc	hl
+	dec	b		; Test end
+	jp	z,RdLin.Packed
+	ld	a,(hl)
+	jp	RdLin.Unpack
+RdLin.Packed:
+	ld	(Run.Mode),a	; Set run mode
+	jp	RdLin.End
+RdLin.empty:
+	xor	a
+	ld	(Run.Mode),a	; Set mode
+	ld	a,(Cmd.Mode)	; Test command mode
+	or	a
+	jp	nz,RdLin.NoComm
+	call	crlf
+	ld	a,'*'
+	call	conout		; .. indicate it
+RdLin.NoComm:
+	ld	c,.getlin
+	ld	de,ConLine
+	call	BDOS		; Read line
+	ld	a,lf
+	call	conout
+RdLin.End:
+	pop	de
+	pop	bc
+	ld	a,(ConLine+1)	; Get length of input
+	ld	hl,ConLine+2
+	push	hl
+	ld	(ConPtr),hl	; Set buffer
+	add	a,l
+	ld	l,a
+	ld	a,0
+	adc	a,h
+	ld	h,a
+	ld	(hl),cr		; Close end
+	inc	hl
+	ld	a,lf
+	ld	(hl),a
+	pop	hl
+	ld	a,(Cmd.Mode)	; Test command mode
+	or	a
+	jp	nz,RdLin.Exit
+	push	hl
+	ld	hl,ConLine+2	; Init buffer
+RdLin.UPPloop:
+	ld	a,(hl)		; Test ready
+	cp	cr
+	jp	z,RdLin..Exit
+	sub	'a'
+	jp	c,RdLin.NoUPP
+	cp	'z'-'a'+1
+	jp	nc,RdLin.NoUPP
+	add	a,'A'		; Convert to UPPER
+	ld	(hl),a
+RdLin.NoUPP:
+	inc	hl
+	jp	RdLin.UPPloop
+RdLin..Exit:
+	pop	hl
+RdLin.Exit:
+	ret
+;
+; Check line
+; ENTRY	Reg HL points to line
+; EXIT	Accu holds character
+;	Carry set on end
+;
+Chk.ConLin:	
+	ld	a,(hl)
+	inc	hl
+	cp	' '
+	jp	z,Chk.ConLin	; Skip blank
+	cp	lf
+	jp	z,Chk.ConLin	; .. and LF
+	cp	cr		; Check CR
+	jp	nz,Chk.LinEOF
+	inc	hl
+	ld	(ConPtr),hl	; Set new buffer
+	ret
+;
+; Put character to console
+;
+PutCON:
+	pop	af
+;
+; Output character to console
+; ENTRY	Accu holds character
+;
+conout:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	c,.conout
+	and	NoMSB
+	ld	e,a		; Put to reg E
+	call	BDOS		; .. output
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	or	a
+	ret
+;
+; Get character from console
+; EXIT	Accu holds character
+;	Carry set on EOF
+;
+GetCON:
+	push	hl
+	ld	hl,(ConPtr)	; Get buffer
+	dec	hl
+	ld	a,(hl)
+	and	NoMSB
+	cp	lf		; Test new line
+	inc	hl
+	call	z,RdConsole	; Read new line
+	inc	hl
+	ld	(ConPtr),hl	; Bump buffer
+	dec	hl
+Rd.get:
+	ld	a,(hl)		; Get character
+	pop	hl
+Chk.LinEOF:
+	cp	eof		; Test EOF
+	scf			; Set carry if so
+	ret	z
+	or	a		; .. else reset
+	ret
+;
+; Give new line to console
+;
+crlf:
+	ld	a,cr		; CR
+	call	conout
+	ld	a,lf		; .. LF
+	jp	conout
+;
+; Rewrite destination file
+;
+Rewrite:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,WrDMA
+	ld	hl,0
+	ld	(WrBfp),hl	; Init buffer pointer
+	ld	hl,FCB.OUT
+	ld	a,(L.option)	; Get /L
+	jp	.Rewrite
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%%% NEVER CALLED ROUTINE %%%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+??????1:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,??DMA
+	ld	hl,0
+	ld	(??Bfp),hl	; Init buffer pointer
+	ld	hl,FCB.???	; Get FCB
+	ld	a,(?.option)	; Get /??
+;
+; Rewrite file
+; ENTRY	Reg DE points to disk buffer
+;	Reg HL points to FCB
+;	Accu holds flag
+;
+.Rewrite:
+	or	a
+	jp	z,NoRewrite	; Test option enabled
+	push	hl
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	pop	hl
+	ld	a,(hl)		; Test character device
+	or	a
+	jp	m,NoRewrite	; .. skip
+	call	PrepFCB		; Prepare FCB
+	push	de
+	ld	c,.delete
+	call	BDOS		; Delete existing file
+	pop	de
+	push	de
+	ld	c,.make
+	call	BDOS		; .. create new one
+	inc	a
+	jp	z,MakeErr	; .. oops, not possible
+	pop	hl
+.Reset:
+	call	PrepFCB
+	ld	c,.open
+	call	BDOS		; Find file
+	inc	a
+	jp	z,OpenErr	; .. oops, not on board
+NoRewrite:
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Reset source file
+;
+Reset:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,Rd.buf
+	ld	(RdBfp),hl	; Init read pointer
+	ld	de,RdDMA
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	hl,FCB.IN
+	ld	a,(hl)
+	or	a
+	jp	m,NoRewrite	; Test character device
+	jp	.Reset		; .. execute restting
+;
+; Prepare file for resetting and rewriting
+; ENTRY	Reg HL points to FCB
+;
+PrepFCB:
+	push	hl
+	push	de
+	ld	de,.ex		; Point to extend
+	add	hl,de
+	xor	a
+	ld	d,.clr
+PrepClr:
+	ld	(hl),a		; Clear bytes
+	inc	hl
+	dec	d
+	jp	nz,PrepClr
+	ld	de,.cr-.ex-.clr
+	add	hl,de		; Point to current record
+	ld	(hl),a		; .. clear it, too
+	pop	hl
+	pop	de
+	ret
+;
+; Close source file
+;
+CloseRD:
+	push	af
+	push	de
+	ld	de,FCB.IN
+	ld	a,(de)		; Test character device
+	or	a
+	jp	m,SkipClose
+	push	bc
+	push	hl
+	push	de
+	ld	de,RdDMA
+	ld	c,.setdma
+	call	BDOS		; Reset disk buffer
+	pop	de
+	LD.BC
+FClose:
+	push	bc
+	push	hl
+	ld	c,.close
+	call	BDOS		; .. close file
+	pop	hl
+	pop	bc
+SkipClose:
+	pop	de
+	pop	af
+	ret
+;
+; Close destination file
+;
+CloseWR:
+	push	af
+	ld	a,(L.option)	; Test /L option
+	or	a
+	jp	z,NoPut
+	push	de
+	ld	a,(FCB.OUT)	; Get device
+	inc	a
+	jp	z,SkipClose	; Skip console
+	jp	m,CloseLST	; .. close list
+	ld	a,cr		; Give new line
+	call	Put
+	ld	a,lf
+	call	Put
+	ld	a,eof		; .. and EOF
+	call	Put
+	push	hl
+	ld	hl,(WrBfp)	; Get buffer pointer
+	ld	de,WrDMA
+	push	bc
+	ld	bc,FCB.OUT
+	call	CloseBuff	; Close last buffer
+	ld	de,WrDMA
+	ld	c,.setdma
+	call	BDOS		; Reset disk buffer
+	pop	bc
+	pop	hl
+	ld	de,FCB.OUT
+	jp	FClose		; .. close
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%%% NEVER CALLED ROUTINE %%%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+??????2:
+	push	af
+	ld	a,(?.option)
+	or	a
+	jp	z,NoPut
+	push	de
+	ld	a,(FCB.???)	; Test device
+	or	a
+	jp	m,SkipClose
+	ld	a,eof
+	call	??Put
+	push	hl
+	ld	hl,(??Bfp)
+	ld	de,??DMA
+	push	bc
+	ld	bc,FCB.???	; Get FCB
+	call	CloseBuff
+	ld	de,??DMA
+	ld	c,.setdma
+	call	BDOS
+	pop	bc
+	pop	hl
+	ld	de,FCB.???	; Get FCB
+	jp	FClose
+;
+; Close buffer
+; ENTRY	Reg DE points to disk buffer
+;	Reg BC points to FCB
+;	Reg HL holds  buffer pointer
+;
+CloseBuff:
+	ld	a,h		; Test any in buffer
+	or	l
+	ret	z		; .. no
+	ld	a,l
+	and	NoMSB		; Test range
+	jp	z,BuffNoFix
+	add	a,reclng	; Add record
+BuffNoFix:
+	rla			; Get remainder
+	rla
+	and	3
+	add	hl,hl		; Double count
+	add	a,h		; .. add remaining
+	ld	h,b		; Copy FCB
+	ld	l,c
+	jp	Wr.Loop		; Fall in write loop
+;
+; Close LST device
+;
+CloseLST:
+	ld	a,cr		; Give new line
+	call	Put
+	ld	a,lf
+	call	Put
+	ld	a,ff		; .. and page
+	call	Put
+	pop	de
+	pop	af
+	ret
+;
+; Put character to selected device
+; ENTRY	Accu holds character to be put
+;
+Put:
+	push	af
+	ld	a,(L.option)	; Test /L option
+	or	a
+	jp	z,NoPut
+	ld	a,(FCB.OUT)	; Get device
+	inc	a
+	jp	z,PutCON	; Test console
+	jp	m,PutLST	; .. or printer
+	ex	(sp),hl
+	push	hl
+	push	de
+	ld	hl,(WrBfp)	; Get buffer pointer
+	ld	a,h
+	cp	Wr.pag		; Test buffer filled
+	call	z,WrDisk	; Write buffer if so
+	inc	hl
+	ld	(WrBfp),hl	; Bump pointer
+	ld	de,WrDMA-1
+	add	hl,de		; Get real address
+	pop	de
+	pop	af
+	push	af
+	and	NoMSB		; Strip off MSB
+	ld	(hl),a		; .. save into buffer
+	pop	af
+	pop	hl
+	ret
+;
+; Write buffer to disk
+; EXIT	Reg HL holds zero on success
+;
+WrDisk:
+	ld	de,WrDMA	; Init buffer
+	ld	hl,FCB.OUT	; .. and FCB
+	ld	a,Wr.rec	; .. and max records
+Wr.Loop:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	pop	de
+	push	de
+	ld	c,.wrseq
+	call	BDOS		; Write record
+	or	a
+	jp	nz,DiskFull	; Test success
+	pop	de
+	pop	hl
+	ld	bc,reclng
+	add	hl,bc		; Bump buffer
+	ex	de,hl
+	pop	bc
+	pop	af
+	dec	a		; Test done
+	jp	nz,Wr.Loop
+	ld	hl,0		; Get return
+	ret
+??Disk:
+	ld	de,??DMA
+	ld	a,??.rec
+	ld	hl,FCB.???	; Get FCB
+	jp	Wr.Loop		; Fall in write loop
+??Put:
+	push	af
+	ld	a,(?.option)
+	or	a
+	jp	z,NoPut
+	ld	a,(FCB.???)	; Get device
+	or	a
+	jp	m,PutCON
+	ex	(sp),hl
+	push	hl
+	push	de
+	ld	hl,(??Bfp)
+	ld	a,h
+	dec	a
+	call	z,??Disk
+	inc	hl
+	ld	(??Bfp),hl
+	ld	de,??Bfp+1
+	add	hl,de
+	pop	de
+	pop	af
+	ld	(hl),a
+	pop	hl
+	ret
+;
+; Get character from selected device
+; EXIT	Accu holds character
+;	Carry set on EOF
+;
+Get:
+	ld	a,(FCB.IN)	; Get device
+	inc	a
+	jp	z,GetCON	; .. test console
+	jp	m,GetRDR	; .. or reader
+	push	hl
+	push	de
+	ld	hl,(RdBfp)	; Get buffer pointer
+	ld	a,h
+	cp	Rd.pag		; Test buffer to be read
+	call	z,RdDisk	; .. yes, do it
+	inc	hl
+	ld	(RdBfp),hl	; Bump pointer
+	ld	de,RdDMA-1
+	add	hl,de		; Get real address
+	pop	de
+	jp	Rd.get		; Get character
+;
+; Read disk buffer
+; EXIT	Reg HL holds zero
+;
+RdDisk:
+	ld	de,RdDMA	; Init buffer
+	ld	a,Rd.rec	; .. and record counter
+Rd.Loop:
+	push	af
+	push	de
+	push	bc
+	ld	c,.setdma
+	call	BDOS		; Set buffer
+	ld	de,FCB.IN
+	ld	c,.rdseq
+	call	BDOS		; Read record
+	pop	bc
+	pop	de
+	dec	a		; Test EOF
+	jp	z,EOF.read
+	ld	hl,reclng
+	add	hl,de		; Bump buffer
+	ex	de,hl
+	pop	af
+	dec	a		; Test end
+	jp	nz,Rd.Loop
+Rd.End:
+	ld	hl,0		; Set zero
+	ret
+EOF.read:
+	pop	af
+	ld	a,eof
+	ld	(de),a		; Set EOF
+	jp	Rd.End
+;
+; Put character to list device
+;
+PutLST:
+	pop	af		; Get character from stack
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	c,.lstout
+	and	NoMSB		; Strip off MSB
+	ld	e,a		; Save character
+	ld	hl,ColLST
+	cp	' '		; Test normal character
+	jp	nc,PutL.Norm
+	sub	cr		; Test end of line
+	jp	z,PutL.NL
+	inc	a		; Test new page
+	jp	z,PutL.NL
+	ld	a,(hl)
+PutL.NL:
+	dec	a
+	ld	(hl),a
+PutL.Norm:
+	inc	(hl)		; Bump column count
+	ld	a,e
+	cp	tab		; Test tab
+	jp	nz,PutL.NoTab
+PutL.Tab:
+	ld	a,' '		; Put spaces
+	call	Put
+	ld	a,(hl)
+	and	TabCol		; .. till column filled
+	jp	nz,PutL.Tab
+	jp	PutL.End
+PutL.NoTab:
+	call	BDOS		; OS call
+PutL.End:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Get character from reader
+; EXIT	Accu holds character
+;	Carry set on EOF
+;
+GetRDR:
+	push	hl
+	push	de
+	push	bc
+	ld	c,.auxin
+	call	BDOS		; Get character
+	pop	bc
+	pop	de
+	pop	hl
+	cp	eof		; Test EOF
+	scf
+	ret	z
+	or	a
+	ret
+;
+; Tell write error
+;
+DiskFull:
+	ld	hl,$DSK
+	call	string		; Give string
+	pop	de		; Get FCB
+	ld	a,(de)		; Get drive
+	add	a,'A'-1		; Make A..P
+	cp	'A'-1		; Test current
+	jp	nz,DrvDef
+	ld	a,' '		; .. blank current
+DrvDef:
+	call	conout		; Tell disk
+	ld	hl,$FULL
+	call	string		; Give final string
+	call	crlf
+	jp	OS		; Leave CREF80 hard
+$DSK:
+	db	'DISK ',0
+$FULL:
+	db	' FULL',0
+;
+TOP:
+	end
+

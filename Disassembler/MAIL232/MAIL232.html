@@ -1,0 +1,155 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 //EN">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/MAIL232/MAIL232.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:11:17 GMT -->
+<head>
+<title>MAIL 232 Terminal Emulator</title>
+<style type="text/css">
+<!--
+.fn1 {
+      font-size: 75%;
+      position:relative;
+      top:-7px;
+      margin-right:2px;
+      }
+//-->
+</style>
+<meta name="description" content="JOYCE Terminal Emulator">
+<meta name="keywords" content="JOYCE, PCW, CP/M, Terminal Emulator">
+<meta name="author" content="Werner Cirsovius">
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+
+<body background="Terminal.jpg" style="margin-top:1cm">
+
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+
+<div>
+
+<table width="80%" align="center" bgcolor="#CCDFE6" cellpadding="10"><tr><td>
+
+<div align="center">
+<img src="mail232.gif" />
+</div>
+
+<div align="center"><h1>MAIL 232 Terminal Emulator</h1></div>
+
+<div lang="de">
+Nach dem Einbau der seriellen Schnittstelle <a href="../../Interface/Interface.html">CPS256</a> habe ich das JOYCE-Programm <code>MAIL232</code> als Terminal Emulator genutzt.
+Mir gefiel die Menuesteuerung sehr gut und zum Lesen damaliger Mailboxes, auch Bulletin Board System (BBS) genannt, war das Programm optimal <a href="#1" class="fn1">1</a><a name="1t"></a>.
+<p></p>
+Eines Tages hatte ich das Programm aufgerufen, eine Baud-Rate von 300&nbsp;Bd gew&auml;hlt und eine Verbindung hergestellt.
+Nach dem Lesen einiger Nachrichten wollte ich eine Datei &uuml;berspielen, wof&uuml;r ich zun&auml;chst <code>MAIL232</code> beenden musste, um eben die Diskette f&uuml;r diese Datei zu suchen, allerdings ohne die Verbindung abzubrechen.
+<p></p>
+Nach dem erneuten Aufruf von <code>MAIL232</code> bekam ich keinen Kontakt mehr, obwohl die Verbindung weiterhin bestand.
+Es stellte sich heraus, dass die Baud-Rate auf dem standardm&auml;&szlig;igen Wert von 9600&nbsp;Bd eingestellt war!
+<p></p>
+Es steht eine XBIOS-Routine zur Verf&uuml;gung, die die aktuelle Baud-Rate ermitteln kann.
+<code>MAIL232</code> war aber fest auf die Rate von 9600&nbsp;Bd verdrahtet.
+<p></p>
+Bei der Untersuchung mit einem Debugger fand ich
+</div>
+<div lang="en">
+After fitting the serial interface <a href="../../Interface/Interface.html">CPS256</a> I used the JOYCE program <code>MAIL232</code> as a terminal emulator.
+I liked the menu control very much and the program was very good for reading mail boxes at that time, also called Bulletin Board System (BBS) <a href="#1" class="fn1">1</a><a name="1t"></a>.
+<p></p>
+One day I invoked the program selecting a Baud rate of 300&nbsp;Bd and I established a connection.
+After reading a few news I wanted to upload a file.
+I had to search for it stopping <code>MAIL232</code> but without breaking the connection.
+<p></p>
+After invoking <code>MAIL232</code> again I did not get contact although the modem indicated an established connection.
+Playing around I found out that the default Baud rate of 9600&nbsp;Bd was selected!
+<p></p>
+An XBIOS routine for determining the current Baud rate does exist.
+But the rate of 9600&nbsp;Bd was hard-wired in <code>MAIL232</code> .
+<p></p>
+Analyzing the program using a debugger I found
+</div>
+
+<ol>
+<li><span lang="de">eine Tabelle, in die der Baud-Wert eingetragen war,</span><span lang="en">a table the Baud value was stored into,</span></li>
+<li><span lang="de">am Anfang von MAIL232 die Anweisung <code>CALL xxxx</code>.</span><span lang="en">a <code>CALL xxxx</code> instruction at the beginning of <code>MAIL232</code>.</span></li>
+</ol>
+
+<div lang="de">
+Hier reichte also ein Patch, der
+</div>
+<div lang="en">
+Here it was adequate for a patch that
+</div>
+
+<ol>
+<li><span lang="de">die Baud-Rate ausliest und in die Werte-Tabelle eintr&auml;gt,</span><span lang="en">reads the Baud rate and stores it into the corresponding table,</span></li>
+<li><span lang="de">die <code>CALL</code>-Adresse umbiegt auf die neue Routine direkt hinter <code>MAIL232</code>.</span><span lang="en">changes the <code>CALL</code> address to a new routine directly behind <code>MAIL232</code>.</span></li>
+</ol>
+
+<div lang="de">
+Nach dem Einspielen dieses Patches blieb dann nach Unterbrechung von <code>MAIL232</code> zwar die Verbindung bestehen, allerdings zeigte <code>MAIL232</code> im Menue immer noch die standardm&auml;&szlig;igen 9600&nbsp;Bd.
+Bei weiterer Untersuchung fand ich, dass es einen zweiten Tabelleneintrag gab, der nicht mit dem ersten Eintrag synchronisiert war.
+<p></p>
+Nach der Erweiterung des Patches, um auch den zweiten Eintrag richtig darzustellen, war das Ergebnis so wie gew&uuml;nscht.
+</div>
+<div lang="en">
+After inputting the patch the connection stays intact interrupting <code>MAIL232</code>.
+But the menu still displayed the default Baud rate of 9600&nbsp;Bd.
+A second analysis showed another table entry which was not synchronized with the first one.
+<p></p>
+Adding some more code leaded to the result as requested.
+</div>
+<p></p>
+
+<hr />
+
+<div lang="de">
+Der <a href="MAIL232P-MAC.txt">Patch</a> liegt vor f&uuml;r die Version 1.2 von <code>MAIL232.COM</code>.
+Bei anderen Versionen m&uuml;ssen Adressen m&ouml;glicherweise angepasst werden.
+Nach dem Assemblieren kann der Patch dann aktiviert werden, z.B. mit dem Programm <a href="../../Assembler/ARCTOOLS/MLOAD/MLOAD.html"><code>MLOAD.COM</code></a>.
+Der Vollst&auml;ndigkeit halber findet sich <a href="MAIL232-MAC.txt">hier</a> die disassemblierte Version von <code>MAIL232.COM</code>.
+</div>
+<div lang="en">
+Find the patch for <code>MAIL232.COM</code> version 1.2 <a href="MAIL232P-MAC-en.txt">here</a>.
+Maybe the code must be adjusted for other versions.
+After assembling the code must be installed.
+A good program for doing that is <a href="../../Assembler/ARCTOOLS/MLOAD/MLOAD.html"><code>MLOAD.COM</code></a>.
+For the sake of completeness find the disassembled version of <code>MAIL232.COM</code> <a href="MAIL232-MAC-en.txt">here</a>.
+</div>
+
+<hr />
+
+<font size="-1">
+<table>
+<tr><td valign="top"><b><a name="1">1.</a></b></td><td valign="top">
+<div lang="de">
+F&uuml;r die &Uuml;bertragung von Dateien eigneten sich Protokolle wie XMODEM oder KERMIT besser.
+Hier eine Beschreibung des Protokolls f&uuml;r MAIL232: <a href="https://www.chiark.greenend.org.uk/~jacobn/cpm/ift.html">Intelligent File Transfer protocol</a>
+(Das im Text angegebene Programm zum Senden war auch im <i><b>Schneider</b> CPS8256 Benutzerhandbuch</i> <a href="HexCodeSeite.gif">abgebildet</a>,
+<a href="SEND-HEX.txt">hier</a> als HEX-Dump.
+Das im Text der Webseite erw&auml;hnte Programm unterscheidet sich an einer Stelle, die gemeinsame Quelle findet sich <a href="SEND-MAC.txt">hier</a>)
+</div>
+<div lang="en">
+File transfer protocols such as XMODEM or KERMIT are more popular.
+Find here a description of the protocol used by MAIL232: <a href="https://www.chiark.greenend.org.uk/~jacobn/cpm/ift.html">Intelligent File Transfer protocol</a>
+(The program describeb there was also <a href="HexCodeSeite.gif">published</a> in the German <i><b>Schneider</b> CPS8256 Benutzerhandbuch</i>,
+<a href="SEND-HEX.txt">here</a> as HEX dump.
+Both programs differ slightly at one point, find the common source <a href="SEND-MAC.txt">here</a>)
+</div>
+<a href="#1t"><img width="10" height="11" src="../../../../gif/back.gif" /></a></td></tr>
+</table>
+</font>
+
+</td></tr></table>
+
+</div>
+
+</body>
+
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/MAIL232/MAIL232.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:11:17 GMT -->
+</html>

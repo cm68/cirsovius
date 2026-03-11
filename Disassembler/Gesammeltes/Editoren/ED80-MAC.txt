@@ -1,0 +1,5309 @@
+	title	ED80 - FSE editor
+	name	('ED80')
+
+; DASMed HiSoft editor ED80.COM - DASMed by W.Cirsovius
+
+; Call ED80 by
+
+;	ED80 {filename} {line_number}
+
+; First parameter is always the file to be edited. If filename
+; is defined, the optional second parameter is that line
+; number the editor will jump to
+
+	.z80
+	aseg
+	org	0100h
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+
+.rdrin	equ	 3
+.punout	equ	 4
+.lstout	equ	 5
+.condir	equ	 6
+.resdsk	equ	13
+.logdsk	equ	14
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdrec	equ	20
+.wrrec	equ	21
+.create	equ	22
+.rename	equ	23
+.ROvec	equ	29
+
+OSerr	equ	255
+
+_get	equ	-1
+
+_CIN	equ	6
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_DIR	equ	16
+
+FCBlen	equ	 34
+reclng	equ	128
+
+null	equ	00h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+esc	equ	1bh
+DEL	equ	7fh
+sot	equ	-1
+
+NOMSB	equ	01111111b
+
+MAXCOL	equ	80
+MAXVROW	equ	24
+
+l0000	equ	00h
+l0001	equ	01h
+l0003	equ	03h
+l0004	equ	04h
+l0008	equ	08h
+l000f	equ	0fh
+l0021	equ	21h
+
+l0080	equ	80h
+l00ff	equ	0ffh
+
+lffff	equ	0ffffh
+
+	jr	l013e
+
+	dw	l21f7		; Pointer to delimiter table
+	jp	l01d0
+;
+	db	'ED80 (C) HiSoft 1985. Please buy don''t steal'
+;
+;
+;
+l0133:
+	call	l0219
+	call	l07e0
+	call	l0d48
+	jr	l0133
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&
+; && Cold start of ED80 &&
+; &&&&&&&&&&&&&&&&&&&&&&&&
+;
+l013e:
+	ld	a,(l2227)	; Get base row
+	ld	(l20cd),a	; Init row
+	inc	a
+	ld	(l20cb),a
+	ld	a,(l2228)	; Get base column
+	ld	(l20ca),a	; Init column
+	ld	a,(l2229)	; Get upper right column
+	ld	hl,l20ca
+	add	a,(hl)		; Add to base column
+	dec	a
+	ld	(l20c9),a	; Set for max column
+	ld	a,(l222a)	; Get max viewable lines
+	ld	hl,l20cb
+	add	a,(hl)
+	sub	3
+	ld	(l20cc),a
+	inc	a
+	ld	(l20ce),a	; Set row
+;
+; Restart of ED80
+;
+l0169:
+	ld	sp,(TPATOP)	; Get top of memory for stack
+	ld	hl,0
+	add	hl,sp		; Copy it
+	dec	h		; Let some page for stack
+	ld	(l20c7),hl	; Save as top of memory
+	ld	(l216f),hl
+	ld	hl,l0080	; Init CCP line
+	xor	a
+	ld	c,(hl)
+	ld	b,a
+	add	hl,bc		; Point to end
+	inc	hl
+	ld	(hl),a		; Close line
+	ld	hl,l0080+2	; Init start of CCP parameter
+	ld	de,(l2180)	; Fetch address of CCP copy
+	push	de
+	ld	a,b
+	or	c		; Test any in line
+	jr	nz,l0191	; Yeap
+	ld	c,1		; Set at least a NULL
+	ld	(hl),null
+l0191:
+	ldir			; Unpack CCP line
+	pop	de
+	ld	bc,(l2223)	; Get bottom of text
+	push	bc
+	ld	hl,(l20c7)	; Get top of memory
+	sbc	hl,bc		; Calculate free memory
+	ld	b,h
+	ld	c,l
+	pop	hl		; Get start of memory
+	push	hl
+	ex	de,hl
+	call	l0b55		; Read data into memory
+	pop	hl
+	cp	2		; Test out of memory
+	jr	nz,l01b1
+	dec	a		; Set error 1
+	call	l04e3		; Process error
+	jr	l0216		; Exit to CP/M
+l01b1:
+	dec	hl		; Get first address
+	ld	(hl),sot	; Mark start of text
+	inc	hl
+	ld	(l216d),de	; Save top of data
+	xor	a
+	ld	(de),a		; Mark end of data
+	ld	a,(l2239)	; Get ??? flag
+	or	a		; Test set
+	jr	z,l01d0		; Nope
+	ld	hl,l224b
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	nz,l01cd
+	call	l227c
+	scf
+l01cd:
+	call	nc,l0790
+l01d0:
+	ld	ix,l20cf	; Init status word
+	xor	a
+	ld	(ix+0),a
+	ld	(ix+1),a
+	ld	(ix+2),a
+	set	1,(ix+0)
+	ld	(l216c),a
+	ld	hl,l0001
+	ld	(l2166),hl
+	ld	a,(l20ca)	; Get column
+	ld	c,a
+	ld	a,(l20cb)
+	ld	b,a
+	ld	hl,(l2223)	; Get bottom of text
+	ld	d,h
+	ld	e,l
+	ld	(l2171),hl
+	jp	l0133
+l01fe:
+	ld	a,(l223a)
+	or	a
+	jr	z,l0213
+	ld	hl,l2250
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	nz,l0210
+	call	l227e
+	scf
+l0210:
+	call	nc,l0790
+l0213:
+	call	l0778		; Clear screen
+l0216:
+	jp	l0b54		; Exit to CP/M
+;
+;
+;
+l0219:
+	push	hl
+	ld	hl,l20cf
+	bit	1,(hl)
+	jr	z,l0226
+	call	l03fe
+	jr	l0247
+l0226:
+	bit	6,(ix+2)
+	jr	z,l0235
+	call	l0312
+	bit	3,(hl)
+	jr	nz,l0239
+	jr	l0242
+l0235:
+	bit	3,(hl)
+	jr	z,l023e
+l0239:
+	call	l03a4
+	jr	l0247
+l023e:
+	bit	6,(hl)
+	jr	z,l0247
+l0242:
+	push	de
+	call	l0257
+	pop	de
+l0247:
+	call	l045c
+	call	l0751		; Position cursor to row=B and column=C
+	res	1,(hl)
+	res	3,(hl)
+	res	6,(ix+2)
+	pop	hl
+	ret
+;
+;
+;
+l0257:
+	push	hl
+	push	bc
+	ld	a,(l20ca)	; Get column
+	ld	c,a
+	call	l0751		; Position cursor to row=B and column=C
+	ld	a,(l216c)
+	or	a
+	jr	z,l028f
+	ld	h,a
+l0267:
+	ld	a,(l222e)
+	ld	l,a
+l026b:
+	ld	a,(l222d)
+	ld	b,a
+l026f:
+	ld	a,(de)
+	inc	de
+	cp	tab
+	jr	z,l0289
+	cp	cr
+	jr	z,l02d2
+	cp	'A'-'@'
+	call	c,l02da
+	jr	c,l02d2
+	cp	' '
+	jr	nc,l0287
+	dec	b
+	jr	z,l0289
+l0287:
+	djnz	l026f
+l0289:
+	dec	l
+	jr	nz,l026b
+	dec	h
+	jr	nz,l0267
+l028f:
+	ld	a,(de)
+	inc	de
+	cp	cr
+	call	z,l02fa
+	jr	z,l02d2
+	cp	'A'-'@'
+	call	c,l0309
+	jr	c,l02d2
+	cp	tab
+	jr	nz,l02b1
+	call	l0de9
+	call	l079a
+	call	l07ac		; Put <Accu> blanks to console
+	add	a,c
+	ld	c,a
+	dec	c
+	jr	l02be
+l02b1:
+	cp	' '
+	jr	c,l02e8
+	cp	80h
+	jr	c,l02bb
+	ld	a,'?'
+l02bb:
+	call	l07cf		; Put to console
+l02be:
+	inc	c
+	ld	a,(l20c9)	; Get max column
+	cp	c
+	jr	nc,l028f
+l02c5:
+	ld	a,(de)
+	inc	de
+	cp	1
+	call	c,l02da
+	jr	c,l02d2
+	cp	cr
+	jr	nz,l02c5
+l02d2:
+	push	af
+	call	l0324
+	pop	af
+	pop	bc
+	pop	hl
+	ret
+l02da:
+	bit	6,(ix+0)
+	ret	nz
+	push	hl
+	ld	hl,(l216d)	; Get top of data
+	or	a
+	sbc	hl,de
+	pop	hl
+	ret
+l02e8:
+	ld	b,a
+	ld	a,'^'
+	call	l07cf		; Put to console
+	inc	c
+	ld	a,(l20c9)	; Get max column
+	cp	c
+	jr	c,l02c5
+	ld	a,b
+	add	a,'@'
+	jr	l02bb
+l02fa:
+	push	af
+	ld	a,(l2225)
+l02fe:
+	or	a
+	jr	nz,l0303
+	ld	a,' '
+l0303:
+	inc	c
+	call	l07cf		; Put to console
+	pop	af
+	ret
+l0309:
+	call	l02da
+	push	af
+	ld	a,(l2226)
+	jr	l02fe
+;
+;
+;
+l0312:
+	push	bc
+	ld	a,(l20ce)	; Get row
+	ld	b,a
+	ld	a,(l20c9)	; Get max column
+	ld	c,a
+	call	l0751		; Position cursor to row=B and column=C
+	pop	bc
+	ld	a,lf
+	jp	l07cf		; Put to console
+l0324:
+	ld	a,(l2165)
+	or	a
+	ret	z
+	ld	b,a
+	bit	1,(ix+0)
+	jr	nz,l0355
+	ld	a,(l20c9)	; Get max column
+	cp	c
+	jr	c,l0355
+	ld	hl,l2246	; Position to erase to end of line control
+	ld	a,(hl)		; Get length
+	or	a		; Test defined
+	jr	z,l0347		; Nope
+	ld	b,a		; Set length
+l033e:
+	inc	hl
+	ld	a,(hl)
+	call	l07cf		; Put control to console
+	djnz	l033e
+	jr	l0355
+l0347:
+	ld	a,(l20c9)	; Get max column
+	cp	c
+	jr	c,l0355
+	ld	a,' '
+	call	l07cf		; Put blanks to console
+	inc	c
+	djnz	l0347
+l0355:
+	xor	a
+	ld	(l2165),a
+	ret
+l035a:
+	push	de
+	push	bc
+	ld	a,(l20ca)	; Get column
+	ld	c,a
+	dec	de
+	ld	a,(de)
+	inc	de
+	or	a
+	jr	z,l0383
+l0366:
+	ld	a,(de)
+	or	a
+	jr	z,l0383
+	cp	cr
+	jr	z,l0383
+	cp	tab
+	jr	nz,l037a
+	call	l0de9
+	add	a,c
+	ld	c,a
+	dec	c
+	jr	l037f
+l037a:
+	cp	' '
+	jr	nc,l037f
+	inc	c
+l037f:
+	inc	c
+	inc	de
+	jr	l0366
+l0383:
+	inc	c
+	ld	a,(l20ca)	; Get column
+	neg
+	add	a,c
+	ld	c,a
+	ld	a,(l216c)
+	or	a
+	ld	b,a
+	ld	a,c
+	jr	z,l03a1
+	call	l0ef1
+	ld	e,a
+	xor	a
+l0398:
+	add	a,e
+	djnz	l0398
+	neg
+	add	a,c
+	jr	c,l03a1
+	xor	a
+l03a1:
+	pop	bc
+	pop	de
+	ret
+l03a4:
+	push	hl
+	push	de
+	push	bc
+	call	l035a
+	ld	c,a
+	ld	a,(l222d)
+	add	a,c
+	dec	a
+	ld	(l2165),a
+	dec	b
+	ld	de,(l1fbb)
+	call	l0e1d
+	call	l0257
+l03be:
+	call	l044f		; Get from console
+	jr	nz,l03fa	; Got character
+	call	l035a
+	ld	c,a
+	push	de
+	call	l0e0e
+	call	l035a
+	pop	de
+	sub	c
+	jr	nc,l03d3
+	xor	a
+l03d3:
+	ld	(l2165),a
+	inc	b
+	ld	hl,(l1fbb)
+	or	a
+	sbc	hl,de
+	jr	nz,l03ef
+	bit	6,(ix+2)
+	jr	z,l03ea
+	ld	a,0ffh
+	ld	(l2165),a
+l03ea:
+	call	l0442
+	jr	l03f2
+l03ef:
+	call	l0257
+l03f2:
+	jr	c,l03fa
+	ld	a,(l20cc)
+	cp	b
+	jr	nz,l03be
+l03fa:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l03fe:
+	call	l044f		; Get from console
+	ret	nz		; Got character
+	push	hl
+	push	de
+	push	bc
+	push	af
+	call	l0778		; Clear screen
+	ld	de,(l2171)
+	ld	a,(l20cb)
+	ld	b,a
+	ld	c,0
+l0413:
+	call	l044f		; Get from console
+	jr	nz,l043d	; Got character
+	ld	hl,l20cf
+	bit	6,(hl)
+	res	3,(hl)
+	jr	z,l0431
+	ld	hl,(l1fbb)
+	xor	a
+	sbc	hl,de
+	jr	nz,l0431
+	cp	c
+	jr	nz,l0431
+	call	l0442
+	jr	l0434
+l0431:
+	call	l0257
+l0434:
+	jr	c,l043d
+	inc	b
+	ld	a,(l20cc)
+	cp	b
+	jr	nc,l0413
+l043d:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0442:
+	inc	c
+	ld	de,(l1fc0)
+	call	l0257
+	ld	de,(l1fbd)
+	ret
+;
+; Get state of console or character - Z set says no character
+;
+l044f:
+	push	hl
+	ld	hl,l1fba
+	ld	a,_get
+	call	l07cf		; Get from to console
+	ld	(hl),a		; Store character
+	pop	hl
+	or	a		; Get state
+	ret
+;
+;
+;
+l045c:
+	push	hl
+	push	de
+	push	bc
+	ld	a,(l20ca)	; Get column
+	neg
+	add	a,c
+	inc	a
+	ld	(l2162),a
+	ld	a,(l20cf)
+	bit	1,a
+	jr	nz,l0494
+	ld	hl,l20d1
+	bit	6,(hl)
+	jr	z,l047c
+	call	l04ab
+	jr	l0494
+l047c:
+	bit	0,(hl)
+	res	0,(hl)
+	call	nz,l04fb
+	bit	1,(hl)
+	res	1,(hl)
+	call	nz,l0603
+l048a:
+	call	l04cb
+	call	l0552
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l0494:
+	call	l0552
+	ld	hl,l20d1
+	call	l04fb
+	call	l0681
+	call	l0603
+	call	l0650
+	call	l063f
+	jr	l048a
+;
+;
+;
+l04ab:
+	ld	a,(l20cd)	; Get row
+	ld	b,a
+	ld	a,(l20ca)	; Get column
+	ld	c,a
+	call	l0751		; Position cursor to row=B and column=C
+	ld	hl,l2246	; Position to erase to end of line control
+	ld	a,(hl)		; Get length
+	inc	hl
+	or	a		; Test defined
+	jp	nz,l0790	; Yeap
+	ld	a,(l2229)	; Get upper right column
+	jp	l07ac		; Put blanks to console
+l04c5:
+	ld	a,(l222f)
+	jp	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+l04cb:
+	ld	a,(l20d0)
+	or	a
+	jr	z,l04d9
+	ld	(ix+1),0
+	set	2,(hl)
+	jr	l04de
+l04d9:
+	bit	2,(hl)
+	res	2,(hl)
+	ret	z
+l04de:
+	push	af
+	call	l04c5
+	pop	af
+l04e3:
+	set	1,(hl)
+	ld	hl,l11a3-2
+	inc	a
+l04e9:
+	inc	hl
+	inc	hl
+	dec	a
+	jr	nz,l04e9
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+l04f2:
+	ld	a,(l222b)
+	ld	b,a
+	call	l06dc
+	scf
+	ret
+l04fb:
+	push	hl
+	ld	a,(l2236)
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	bit	4,(hl)
+	jr	nz,l0529
+	ld	b,ll053f
+	ld	hl,l053f
+	call	l06dc		; Tell free
+	ld	hl,(l216f)	; Get current top of memory
+	ld	de,(l216d)	; Get top of data
+	sbc	hl,de
+	call	l0698		; Tell free space
+	bit	2,(ix+0)
+	ld	a,' '
+	jr	z,l0524
+	ld	a,'*'
+l0524:
+	call	l07cf		; Put to console
+	pop	hl
+	ret
+l0529:
+	ld	b,ll0544
+	ld	hl,l0544
+	call	l06dc		; Tell block
+	ld	hl,(l20c7)	; Get top of memory
+	ld	de,(l216f)	; Get current top of memory
+	sbc	hl,de
+	call	l0698		; Tell blocks
+	pop	hl
+	ret
+;
+l053f:
+	db	'FREE:'
+ll053f	equ	$-l053f
+l0544:
+	db	'BLOCK:'
+ll0544	equ	$-l0544
+;
+;
+;
+l054a:
+	ld	c,a
+	ld	a,(l2229)	; Get upper right column
+	cp	MAXCOL
+	ld	a,c
+	ret
+;
+;
+;
+l0552:
+	ld	a,(l2230)
+	ld	de,(l2166)
+	jr	nc,l056c
+	call	l054a
+	jr	nc,l056c
+	bit	2,(ix+2)
+	ret	nz
+	push	af
+	call	l0603
+	pop	af
+	jr	l0587
+l056c:
+	ld	hl,(l216a)
+	bit	1,(ix+0)
+	jr	nz,l0587
+	bit	6,(ix+2)
+	jr	nz,l0587
+	or	a
+	sbc	hl,de
+	jr	z,l059b
+	add	a,5
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	jr	l0592
+l0587:
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	ld	b,ll05fe
+	ld	hl,l05fe
+	call	l06dc		; Tell line
+l0592:
+	ex	de,hl
+	ld	(l216a),hl
+	ld	b,0		; Clear digit count
+	call	l069e		; Print number
+l059b:
+	call	l05dc
+	call	l054a
+	ld	a,(l2231)
+	jr	nc,l05ac
+	bit	2,(ix+2)
+	jr	z,l05c8
+l05ac:
+	bit	6,(ix+2)
+	jr	nz,l05c8
+	bit	1,(ix+0)
+	jr	nz,l05c8
+	ld	de,(l2168)
+	or	a
+	sbc	hl,de
+	ret	z
+	add	hl,de
+	add	a,4
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	jr	l05d5
+l05c8:
+	push	hl
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	ld	b,ll05fa
+	ld	hl,l05fa
+	call	l06dc		; Tell column
+	pop	hl
+l05d5:
+	ld	(l2168),hl
+	ld	b,h		; Set digit count
+	jp	l06a4		; Print number
+l05dc:
+	ld	a,(l2162)
+	ld	c,a
+	ld	a,(l216c)
+	or	a
+	jr	z,l05f1
+	ld	b,a
+	call	l0ef1
+	ld	h,a
+	xor	a
+l05ec:
+	add	a,h
+	jr	c,l05f6
+	djnz	l05ec
+l05f1:
+	add	a,c
+	ld	h,0
+	ld	l,a
+	ret	nc
+l05f6:
+	ld	hl,l00ff
+	ret
+;
+l05fa:
+	db	'COL:'
+ll05fa	equ	$-l05fa
+l05fe:
+	db	'LINE:'
+ll05fe	equ	$-l05fe
+;
+;
+;
+l0603:
+	push	hl
+	ld	a,(l2232)
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	ld	hl,l20cf
+	bit	4,(hl)		; Test change
+	jr	z,l0618		; Nope
+	ld	b,ll0639
+	ld	hl,l0639
+	jr	l0628		; Tell change
+l0618:
+	bit	0,(hl)		; Test I/Auto
+	jr	z,l0623		; Nope
+	ld	b,ll062d
+	ld	hl,l062d
+	jr	l0628		; Tell I/Auto
+l0623:
+	ld	b,ll0633
+	ld	hl,l0633	; Tell insert
+l0628:
+	call	l06dc
+	pop	hl
+	ret
+;
+l062d:
+	db	'I/AUTO'
+ll062d	equ	$-l062d
+l0633:
+	db	'INSERT'
+ll0633	equ	$-l0633
+l0639:
+	db	'CHANGE'
+ll0639	equ	$-l0639
+;
+;
+;
+l063f:
+	ld	a,(l2237)
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	push	hl
+	ld	hl,(l2180)	; Fetch address of CCP copy
+	ld	b,0eh
+	call	l06dc
+	pop	hl
+	ret
+l0650:
+	push	hl
+	ld	a,(l2233)
+	call	l0671
+	ld	a,(l222c)
+	ld	b,a
+	push	bc
+	ld	hl,l20d2
+	call	l06dc
+	ld	a,(l2234)
+	call	l0671
+	pop	bc
+	ld	hl,l2114
+	call	l06dc
+	pop	hl
+	ret
+l0671:
+	push	bc
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	pop	bc
+	ld	a,' '
+	call	l07cf		; Put to console
+	ld	a,'$'
+	call	l07cf
+	ret
+;
+;
+;
+l0681:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	a,(l2235)
+	call	l073e		; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+	ld	hl,l086e
+	ld	b,6
+	call	l06dc		; Print control string
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Print number in HL in range 0..99999
+;
+l0698:
+	ld	de,-10000
+	call	l06bf
+;
+; Print number in HL in range 0..9999
+;
+l069e:
+	ld	de,-1000
+	call	l06bf
+;
+; Print number in HL in range 0..999
+;
+l06a4:
+	ld	de,-100
+	call	l06bf
+	ld	e,-10
+	call	l06bf
+	ld	e,-1
+	call	l06bf
+	ld	hl,l20d1
+	res	3,(hl)
+	ld	a,b
+	or	a		; Test leading blanks to be printed
+	ret	z		; Nope
+	jp	l07ac		; Put blanks to console
+;
+; Print quotient HL DIV DE if not leading zero
+;
+l06bf:
+	ld	a,'0'-1		; Init quotient
+l06c1:
+	add	hl,de		; Divide value
+	inc	a		; Advance quotient
+	jr	c,l06c1
+	sbc	hl,de
+	cp	'0'		; Test zero
+	push	hl
+	ld	hl,l20d1
+	jr	nz,l06d6	; Nope
+	bit	3,(hl)		; Test early typed
+	jr	nz,l06d6	; Yeap
+	inc	b		; Advanve leading blank count
+	pop	hl
+	ret
+l06d6:
+	set	3,(hl)		; Indicate character typed
+	pop	hl
+	jp	l07cf		; Put to console
+;
+; Print string ^HL with length in reg B
+;
+l06dc:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test early end
+	jr	nz,l06e4	; Nope
+	ld	a,' '		; Map to blank
+	dec	hl		; Fix pointer
+
+
+
+
+
+
+
+l06e4:
+	call	l0701
+	cp	7fh
+	jr	nz,l06f4
+l06eb:
+	ld	a,0fbh
+	add	a,b
+	ld	b,a
+	jr	c,l06fe
+	ld	b,0
+	ret
+l06f4:
+	cp	esc
+	jr	z,l06eb
+	cp	' '
+	jr	nc,l06fe
+	dec	b
+	ret	z
+l06fe:
+	djnz	l06dc
+	ret
+l0701:
+	push	af
+	cp	DEL		; Test DEL.ETE
+	jr	nz,l0710
+	push	hl
+	ld	hl,l0738	; Tell it
+l070a:
+	call	l0973
+	pop	hl
+	pop	af
+	ret
+l0710:
+	jr	c,l0716
+	ld	a,'?'
+	jr	l072d
+l0716:
+	cp	esc		; Test esc.ape
+	jr	nz,l0720
+	push	hl
+	ld	hl,l0732	; Tell it
+	jr	l070a
+l0720:
+	cp	' '
+	jr	nc,l072d
+	ld	a,'^'
+	call	l07cf		; Put to console
+	pop	af
+	push	af
+	add	a,'@'
+l072d:
+	call	l07cf		; Put to console
+	pop	af
+	ret
+;
+l0732:
+	db	'[ESC]',null
+l0738:
+	db	'[DEL]',null
+;
+; Position cursor to row=l20cd (Accu bit 7=0) or l20ce (Accu bit 7=1) and column=l2228+Accu
+;
+l073e:
+	bit	7,a		; Test bit
+	res	7,a		; Clear it
+	ld	c,a		; Set as base column
+	ld	a,(l20cd)	; Get row 1
+	jr	z,l074b
+	ld	a,(l20ce)	; Get row 2
+l074b:
+	ld	b,a		; Set row
+	ld	a,(l2228)	; Get base column
+	add	a,c		; Add column
+	ld	c,a
+;
+; Position cursor to row=B and column=C
+;
+l0751:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	hl,l223c	; Point to base of cursor setting
+	ld	a,(hl)		; Get length
+	inc	hl
+	or	a		; Test definde
+	jr	nz,l0762	; Yeap
+	call	l227a
+	jr	l0776
+l0762:
+	call	l0790
+	ld	a,(l223b)
+	or	a		; Test direction
+	jr	z,l076e		; Got col - row
+	ld	a,b		; Change for row - col
+	ld	b,c
+	ld	c,a
+l076e:
+	ld	a,c		; Get row
+	call	l07cf		; Put to console
+	ld	a,b		; Get column
+	call	l07cf		; Put to console
+l0776:
+	jr	l078b
+;
+; Clear screen
+;
+l0778:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	hl,l2241	; Point to clear screen control
+	ld	a,(hl)		; Get length
+	inc	hl
+	or	a		; Test defined
+	jr	nz,l0788	; Yeap
+	call	l2278
+	scf
+l0788:
+	call	nc,l0790
+l078b:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l0790:
+	ld	d,a
+l0791:
+	ld	a,(hl)
+	inc	hl
+	call	l07cf		; Put to console
+	dec	d
+	jr	nz,l0791
+	ret
+l079a:
+	push	bc
+	push	af
+	dec	a
+	add	a,c
+	ld	c,a
+	ld	a,(l20c9)	; Get max column
+	sub	c
+	jr	nc,l07a9
+	ld	c,a
+	pop	af
+	add	a,c
+	push	af
+l07a9:
+	pop	af
+	pop	bc
+	ret
+;
+; Put Accu blanks to console
+;
+l07ac:
+	or	a		; Test any to be printed
+	ret	z		; Nope
+	push	af
+	push	bc
+	ld	b,a		; Set count
+l07b1:
+	ld	a,' '
+	call	l07cf		; Put blank console
+	djnz	l07b1
+	pop	bc
+	pop	af
+	ret
+;
+; Get character from console thru BIOS
+;
+l07bb:
+	push	ix
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l07da	; Set return address
+	push	hl
+	ld	hl,(OS+1)	; Get BIOS base
+	ld	a,_CIN
+	add	a,l		; Add vector
+	ld	l,a
+	jr	nc,l07ce
+	inc	h
+l07ce:
+	jp	(hl)		; Get character
+;
+; Do direct console I/O
+;
+l07cf:
+	push	ix
+	push	hl
+	push	de
+	push	bc
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Get or put character/state
+l07da:
+	pop	bc
+	pop	de
+	pop	hl
+	pop	ix
+	ret
+;
+;
+;
+l07e0:
+	push	hl
+	push	de
+	push	bc
+	ld	(l215c),bc
+	ld	hl,l086e
+	ld	(l2162),hl	; Init sequence pointer
+	set	5,(ix+0)
+	ld	hl,(l2255)	; Fetch index
+	ld	de,l2255	; Fetch base
+	add	hl,de		; Point to start of key table
+	ld	bc,l0000
+l07fb:
+	call	l089f		; Get character
+	bit	5,(ix+0)
+	jr	z,l081a
+	bit	2,(ix+2)
+	jr	z,l081a
+	push	af
+	push	bc
+	push	hl
+	call	l1817
+	ld	bc,(l215c)
+	call	l0751		; Position cursor to row=B and column=C
+	pop	hl
+	pop	bc
+	pop	af
+l081a:
+	ld	e,a		; Save character
+	cp	(hl)		; Compare
+	jr	z,l083b		; Match
+	bit	5,(ix+0)
+	jr	nz,l084b
+	bit	6,a
+	jr	nz,l082c
+	bit	5,a
+	jr	nz,l0838
+l082c:
+	and	1fh
+	cp	(hl)
+	jr	z,l083b
+	set	6,a
+	cp	(hl)
+	jr	z,l083b
+	set	5,a
+l0838:
+	cp	(hl)
+	jr	nz,l084b
+l083b:
+	ld	a,e
+	call	l08e4
+	res	5,(ix+0)
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	z,l0867
+	inc	c
+	jr	l07fb
+l084b:
+	ld	a,e
+	bit	5,(ix+0)
+	jr	z,l0873
+l0852:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	nz,l0852
+	ld	a,(hl)
+	or	a
+	jr	z,l0868
+	ld	a,e
+	ld	c,0
+	inc	b
+	jr	l081a
+l0861:
+	scf
+	call	l08e4
+	jr	l086a
+l0867:
+	ld	e,b
+l0868:
+	ld	a,e
+l0869:
+	or	a
+l086a:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l086e:
+	ds	5
+l0873:
+	push	af
+	ld	a,c
+	push	af
+	ld	d,h
+	ld	e,l
+l0878:
+	pop	af
+	ld	c,a
+	push	af
+l087b:
+	dec	de
+	ld	a,(de)
+	or	a
+	jr	nz,l087b
+	inc	de
+l0881:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	nz,l0881
+	ld	a,(hl)
+	or	a
+	jr	z,l089a
+	inc	b
+l088b:
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,l0878
+	inc	hl
+	inc	de
+	dec	c
+	jr	nz,l088b
+	pop	af
+	ld	c,a
+	pop	af
+	jp	l081a
+l089a:
+	pop	af
+	pop	af
+	jp	l0861
+;
+; Get character
+;
+l089f:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l1fba
+	ld	a,(hl)		; Get current character
+	or	a		; Test any there
+	jr	z,l08ae		; Nope
+	scf
+	set	1,(ix+0)
+l08ae:
+	call	nc,l07bb	; Get character from console
+	bit	5,(ix+0)
+	jr	z,l08cd
+	ld	hl,l2238
+	cp	(hl)		; Test new line
+	jr	z,l08d1		; Yeap
+	ld	hl,l2257
+	cp	(hl)		; Test ^P
+	jr	nz,l08cd
+	call	l07bb		; Get character from console
+	pop	bc
+	pop	de
+	pop	hl
+	ex	(sp),hl
+	pop	hl
+	jr	l0869
+l08cd:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l08d1:
+	set	1,(ix+0)
+	pop	hl
+	pop	hl
+	pop	hl
+	pop	hl
+	call	l090c
+	pop	bc
+	pop	de
+	pop	hl
+	ex	(sp),hl
+	pop	hl
+	jp	l0133
+;
+;
+;
+l08e4:
+	bit	5,(ix+0)
+	push	hl
+	jr	z,l08f4
+	ld	hl,l086e
+	xor	(hl)
+	inc	hl
+	or	(hl)
+	jr	z,l090a
+	ld	a,e
+l08f4:
+	ld	hl,(l2162)	; Get sequence pointer
+	ld	(hl),a		; Store character
+	inc	hl
+	ld	(hl),null	; Close input
+	ld	(l2162),hl	; Save sequence pointer
+	call	l0681
+	push	bc
+	ld	bc,(l215c)
+	call	l0751		; Position cursor to row=B and column=C
+	pop	bc
+l090a:
+	pop	hl
+	ret
+;
+;
+;
+l090c:
+	ld	hl,l2216
+	call	l0bf4		; Parse file
+	ld	c,.open
+	call	l0d15		; Open file
+	inc	a		; Test found
+	jr	z,l093f		; Nope
+	ld	b,1
+l091c:
+	call	l0778		; Clear screen
+	ld	a,(l222a)	; Get max viewable lines
+	ld	c,a
+l0923:
+	call	l0969
+	cp	1ah
+	jp	z,l09d8
+	cp	0ah
+	jr	nz,l093a
+	dec	c
+	jr	nz,l093a
+	call	l07bb		; Get character from console
+	cp	cr
+	jr	nz,l091c
+	ret
+l093a:
+	call	l07cf		; Put to console
+	jr	l0923
+l093f:
+	call	l0778		; Clear screen
+	ld	hl,l094b
+l0945:
+	call	l0973
+	jp	l07bb		; Get character from console
+l094b:
+	db	'Help file not found',null
+l095f:
+	ld	a,cr
+	call	l07cf		; Put to console
+	ld	a,lf
+	jp	l07cf
+l0969:
+	djnz	l0970
+	call	l0bb8		; Read record from file
+	ld	b,reclng
+l0970:
+	ld	a,(hl)
+	inc	hl
+	ret
+;
+; Put zero closed string ^HL to console
+;
+l0973:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	ret	z
+	call	l07cf		; Put to console
+	jr	l0973
+;
+;
+;
+l097c:
+	call	l0bc9		; Init FCB and position string to first non-blank
+	inc	de
+	ld	hl,l0c80
+	ld	b,2
+	call	l0be6		; Find colon
+	jr	nz,l0995	; Nope
+	push	de
+	inc	de
+	ld	hl,l0c82
+	ld	bc,ll0c82
+	ldir
+	pop	de
+l0995:
+	dec	de
+	call	l0c00		; Parse ambiguous file name
+	ret	c		; Invalid
+	call	l0778		; Clear screen
+	ld	a,(l0d26)
+	or	a
+	jr	nz,l09a7
+	ld	a,(l0004)
+	inc	a
+l09a7:
+	add	a,'@'
+	ld	(l215e),a
+	ld	a,(l2229)	; Get upper right column
+	rrca
+	rrca
+	rrca
+	rrca
+	and	0fh
+	ld	(l215c),a
+	ld	c,.srcfrs
+	ld	b,a
+	jr	l09bf
+l09bd:
+	ld	c,.srcnxt
+l09bf:
+	call	l0d15		; Search file
+	cp	OSerr		; Test success
+	jr	z,l09d8		; No more
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	ld	hl,l0080
+	add	a,l
+	ld	l,a
+	jr	nc,l09d3
+	inc	h
+l09d3:
+	call	l09e3
+	jr	l09bd
+l09d8:
+	call	l095f
+	ld	hl,l0a26
+	call	l0945
+	or	a
+	ret
+l09e3:
+	push	hl
+	ld	c,0bh
+l09e6:
+	inc	hl
+	res	7,(hl)
+	dec	c
+	jr	nz,l09e6
+	pop	hl
+	push	bc
+	ld	a,(l215c)
+	cp	b
+	ld	a,(l215e)
+	call	z,l07cf		; Put to console
+	ld	de,l20f3
+	push	de
+	ld	a,':'
+	ld	(de),a
+	inc	de
+	ld	a,' '
+	ld	(de),a
+	inc	de
+	inc	hl
+	ld	bc,l0008
+	ldir
+	ld	a,'.'
+	ld	(de),a
+	inc	de
+	ld	bc,l0003
+	ldir
+	ld	a,' '
+	ld	(de),a
+	pop	hl
+	ld	b,0fh
+	call	l06dc
+	pop	bc
+	dec	b
+	ret	nz
+	ld	a,(l215c)
+	ld	b,a
+	jp	l095f
+l0a26:
+	db	'Hit a key',null
+;
+; Delete file
+;
+l0a30:
+	call	l0bc9		; Init FCB and position string to first non-blank
+	call	l0c00		; Parse ambiguous file name
+	ret	c		; Invalid
+	ld	c,.delete
+	jr	l0a7a		; Delete file
+;
+; Rename file - Return 1 in Accu if not successfully
+;
+l0a3b:
+	push	hl
+	call	l0bf4		; Parse file
+	jr	c,l0a83		; Invalid
+	ld	de,l0d26+.drv+.nam
+	ld	hl,l0a91
+	call	l0be0		; Test already .BAK
+	jr	z,l0a83		; Invalid f so
+	push	de
+	ld	c,.srcfrs
+	call	l0d15		; Find file
+	inc	a		; Test found
+	pop	de
+	pop	bc
+	ret	z		; End if not found
+	push	bc
+	push	de
+	call	l0cdf		; Clear software write protection
+	pop	de
+	call	l0a87		; Set .BAK
+	ld	c,.delete
+	call	l0d15		; Delete file
+	pop	hl
+	call	l0bf4		; Parse file
+	ld	de,l0d26+_DIR
+	ld	hl,l0d26
+	xor	a
+	ld	(de),a		; Clear drive
+	ld	bc,.drv+.nam
+	ldir			; Unpack name
+	call	l0a87		; Set .BAK
+	ld	c,.rename	; Rename file
+l0a7a:
+	call	l0d15		; Do BDOS call
+	inc	a		; Test success
+	ld	a,1
+	ret	z		; Nope
+	xor	a
+	ret
+l0a83:
+	pop	hl
+	ld	a,1		; Indicate error
+	ret
+;
+; Set extension .BAK
+;
+l0a87:
+	ex	de,hl
+	ld	(hl),'B'
+	inc	hl
+	ld	(hl),'A'
+	inc	hl
+	ld	(hl),'K'
+	ret
+;
+l0a91:
+	db	'BAK'
+;
+; Map wildcard ^HL for B characters
+;
+l0a94:
+	ld	a,(hl)		; Get character
+	cp	'*'		; Test wildcard
+	jr	z,l0a9d		; Yeap
+	inc	hl		; Fix pointer
+	djnz	l0a94
+	ret
+l0a9d:
+	ld	(hl),'?'	; Expand wildcard
+	inc	hl
+	djnz	l0a9d
+	ret
+;
+; Write data ^DE to output with length in reg BC to device ^HL
+;
+l0aa3:
+	push	bc
+	push	de
+	call	l0bc9		; Init FCB and position string to first non-blank
+	ld	hl,l0c79
+	call	l0be4		; Test PUN:
+	jr	z,l0b13
+	ld	hl,l0c75
+	call	l0be4		; Test LST:
+	jr	z,l0b22
+	call	l0bf7		; Parse file
+	jp	c,l0b7e		; Error
+	call	l0cdf		; Clear software write protection
+	ld	c,.delete
+	call	l0d15		; Delete file
+	ld	c,.create
+	call	l0d15		; Create new one
+	inc	a		; Test success
+	pop	hl		; Get back buffer
+	pop	bc		; Get back length
+	push	hl
+	add	hl,bc		; Point to last character
+	ld	a,(hl)		; Get it
+	ld	(hl),eof	; Overwrite it
+	pop	de		; Get bck buffer
+	push	af		; Save last character
+	push	hl		; Save end of buffer
+	jr	z,l0aef		; Cannot create file
+	ld	hl,l0080	; Init buffer
+	ld	b,reclng+1	; Set length
+l0add:
+	ld	a,(de)		; Get character from buffer
+	inc	de
+l0adf:
+	djnz	l0af3
+	ld	c,a
+	push	bc
+	call	l0b40		; Write record to file
+	pop	bc
+	ld	a,c
+	ld	hl,l0080
+	ld	b,reclng
+	jr	z,l0af3		; Success
+l0aef:
+	ld	a,2
+	jr	l0b0b
+l0af3:
+	ld	(hl),a		; Put into disk buffer
+	inc	hl
+	cp	cr		; Test end of line
+	jr	z,l0b0f		; Yeap, append line feed
+	cp	eof		; Test end of file
+	jr	nz,l0add	; Nope
+	call	l0b40		; Write record to file
+	jr	nz,l0aef	; Error
+	ld	c,.close
+	call	l0d15		; Close file
+	inc	a		; Verify success
+	jr	z,l0aef		; Nope
+	xor	a
+l0b0b:
+	pop	hl		; Get back end of buffer
+	pop	bc		; Get back last character
+	ld	(hl),b		; Restore it
+	ret
+l0b0f:
+	ld	a,lf
+	jr	l0adf		; Append line feed
+;
+; Found device PUN:
+;
+l0b13:
+	ld	d,.punout
+	pop	hl		; Get back buffer
+	pop	bc		; Get back length
+	call	l0b2b		; Put to device
+	ld	e,eof
+	ld	c,d		; Get BDOS code
+	call	l0d18		; Write EOF
+	xor	a		; Set success
+	ret
+;
+; Found device LST:
+;
+l0b22:
+	ld	d,.lstout
+	pop	hl		; Get back buffer
+	pop	bc		; Get back length
+	call	l0b2b		; Put to device
+	xor	a		; Set success
+	ret
+;
+; Write buffer ^HL to device in reg D with length in reg BC
+;
+l0b2b:
+	push	bc		; Save length
+	ld	c,d		; Get BDOS code
+	ld	e,(hl)		; Get characte
+	inc	hl
+l0b2f:
+	call	l0d18		; Write character
+	ld	a,e
+	ld	e,lf
+	cp	cr		; Test end of line
+	jr	z,l0b2f		; Append line feed if so
+	pop	bc
+	dec	bc		; Count down
+	ld	a,b
+	or	c		; Test all written
+	jr	nz,l0b2b	; Nope
+	ret
+;
+; Write record to file
+;
+l0b40:
+	push	de
+	ld	c,.wrrec
+	call	l0d15		; Write a record
+	or	a		; Build success flag
+	pop	de
+	ret
+;
+; Test control character
+;
+;  Z NC - New line
+;  Z  C - End of file
+; NZ NC - Normal character
+;
+l0b49:
+	and	NOMSB		; No hi bit
+	cp	lf		; Test new line
+	ret	z
+	cp	eof		; Test end of file
+	scf
+	ret	z
+	ccf
+	ret
+;
+; Exit to CP/M
+;
+l0b54:
+	rst	0
+;
+; Read data into memory ^DE, max length in reg BC
+;
+; Return code:
+;
+; 0 : End of file, normal end
+; 1 : Invalid name of file or file not found
+; 2 : On memory full
+;
+l0b55::
+	push	bc		; Save length
+	push	de		; Save buffer
+	call	l0bc9		; Init FCB and position string to first non-blank
+	ld	hl,l0c7d
+	call	l0be4		; Test RDR:
+	jr	nz,l0b79	; Nope
+;
+; Read data from RDR:
+;
+	pop	de
+	pop	bc
+l0b64:
+	ld	c,.rdrin
+	call	l0d18		; Get character from RDR:
+	call	l0b49		; Test character
+	jr	c,l0bb6		; End of file
+	jr	z,l0b64		; End of line
+	ld	(de),a		; Unpack character
+	inc	de
+	dec	bc		; Count down
+	ld	a,b
+	or	c		; Test no more room
+	jr	nz,l0b64
+	jr	l0bb2
+;
+; Read data from file
+;
+l0b79:
+	call	l0bf7		; Parse file
+	jr	nc,l0b83	; Ok
+l0b7e:
+	ld	a,1		; Return error
+	pop	de
+	pop	bc
+	ret
+l0b83:
+	ld	c,.open
+	call	l0d15		; Open file
+	inc	a		; Test success
+	jr	z,l0b7e		; File not found
+	pop	de		; Get buffer
+	pop	bc		; Get length
+	push	de
+	ex	de,hl
+	add	hl,bc		; Point to last address
+	pop	de
+	ld	bc,-reclng
+	add	hl,bc		; Make wihin record boundary
+l0b95:
+	push	hl
+	call	l0bb8		; Read record from file
+	ld	b,reclng
+l0b9b:
+	ld	a,(hl)		; Get character
+	and	NOMSB		; Less attribute
+	inc	hl
+	cp	lf		; Ignore line feed
+	jr	z,l0ba9
+	cp	eof		; Test end of file
+	jr	z,l0bb5
+	ld	(de),a		; Unpack
+	inc	de
+l0ba9:
+	djnz	l0b9b
+	pop	hl
+	or	a
+	sbc	hl,de		; Test still free space
+	add	hl,de
+	jr	nc,l0b95	; Yeap
+l0bb2:
+	ld	a,2		; Return end of memory
+	ret
+l0bb5:
+	pop	hl
+l0bb6:
+	xor	a		; Set success
+	ret
+;
+; Read record from file
+;
+l0bb8:
+	push	de
+	push	bc
+	ld	c,.rdrec
+	call	l0d15		; Read record
+	or	a		; Test end of file
+	pop	bc
+	pop	de
+	ld	hl,l0080
+	ret	z		; Not end
+	ld	(hl),eof	; Force end
+	ret
+;
+; Init FCB and position string ^HL to first non-blank to ^DE
+;
+l0bc9:
+	push	bc
+	push	hl
+	ld	de,l0d26
+	ld	bc,FCBlen
+	ld	hl,l0c8f
+	ldir			; Init FCB
+	pop	de		; Get back string
+l0bd7:
+	ld	a,(de)		; Get character
+	cp	' '		; Test blank
+	inc	de
+	jr	z,l0bd7		; Yeap, skip it
+	dec	de		; Fix pointer
+	pop	bc
+	ret
+;
+; Compare three bytes ^DE:^HL - Z set says match
+;
+l0be0:
+	ld	b,3
+	jr	l0be6
+;
+; Compare four bytes ^DE:^HL - Z set says match
+;
+l0be4:
+	ld	b,4
+;
+; Compare B bytes ^DE:^HL - Z set says match
+;
+l0be6:
+	push	de
+l0be7:
+	ld	a,(de)		; Get character
+	call	l0c86		; Convert to UPPER case
+	sub	(hl)		; Test match
+	jr	nz,l0bf2	; Nope
+	inc	hl
+	inc	de
+	djnz	l0be7		; Go thru entire string
+l0bf2:
+	pop	de
+	ret
+;
+; Parse file - C set on error
+;
+l0bf4:
+	call	l0bc9		; Init FCB and position string to first non-blank
+l0bf7:
+	call	l0c15		; Parse unambiguous file name
+	ret	c		; Invalid
+	ld	a,c		; Get last character
+	or	a		; Verify end
+	ret	z
+	scf			; Else invalid
+	ret
+;
+; Parse ambiguous file name - C set on error
+;
+l0c00:
+	call	l0c2c		; Parse file
+	ld	a,1
+	ret	c		; Error
+	ld	hl,l0d26+.drv
+	ld	b,.nam
+	call	l0a94		; Map wildcard in name
+	ld	b,.ext
+	call	l0a94		; Map wildcard in extension
+	or	a
+	ret
+;
+; Parse unambiguous file name - C set on error
+;
+l0c15:
+	call	l0c2c		; Parse file
+	ret	c		; Error
+	ld	c,a		; Save character
+	ld	hl,l0d26+.drv
+	ld	b,.nam+.ext
+l0c1f:
+	ld	a,(hl)		; Get character
+	cp	'?'		; Filer wild card
+	scf
+	ret	z		; Error if any
+	cp	'*'
+	scf
+	ret	z
+	djnz	l0c1f
+	or	a		; Set success
+	ret
+;
+; Parse file - C set on error
+;
+l0c2c:
+	ex	de,hl
+	ld	de,l0d26	; Init FCB
+	ld	c,(hl)		; Get possible drive character
+	inc	hl
+	ld	a,(hl)		; Get next character
+	cp	':'		; Test drive delimiter
+	jr	nz,l0c46	; Nope
+	ld	a,c
+	call	l0c86		; Convert to UPPER case
+	inc	hl
+	sub	'A'-1		; Make binary
+	ret	c		; Invalid
+	cp	'P'+1-'A'	; Verify correct range
+	ccf
+	ret	c
+	ld	(de),a
+	jr	l0c47
+l0c46:
+	dec	hl		; Fix pointer
+l0c47:
+	ld	b,.nam		; Set name
+l0c49:
+	inc	de
+	call	l0cb1		; Test delimiter
+	jr	z,l0c6f		; Yeap
+	jr	c,l0c5b		; Got '.'
+	ld	(de),a		; Unpack character
+	djnz	l0c49
+	call	l0cb1		; Test delimiter
+	ret	z		; Yeap
+	ccf
+	ret	c		; Should be '.'
+	inc	b
+l0c5b:
+	inc	de		; Position to extension
+	djnz	l0c5b
+	ld	b,.ext
+l0c60:
+	call	l0cb1		; Test delimiter
+	ret	z		; Yeap
+	ret	c		; Invalid on second '.'
+	ld	(de),a		; Unpack character
+	inc	de
+	djnz	l0c60
+	call	l0cb1		; Test delimiter
+	ret	z		; Yeap
+	scf			; Invalid if other
+	ret
+l0c6f:
+	ld	c,a		; Save character
+	ld	a,.nam-1
+	cp	b		; C if invalid empty FCB
+	ld	a,c
+	ret
+;
+l0c75:
+	db	'LST:'
+l0c79:
+	db	'PUN:'
+l0c7d:
+	db	'RDR'
+l0c80:
+	db	':',null
+l0c82:
+	db	'*.*',null
+ll0c82	equ	$-l0c82
+;
+; Convert character to UPPER case
+;
+l0c86:
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; Convert
+	ret
+;
+l0c8f:
+	db	0,'           '
+	ds	FCBlen-(.drv+.nam+.ext)
+;
+; Find delimiter - C set on '.', Z set on delimiter
+;
+l0cb1:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'.'		; Test extension delimiter
+	jr	z,l0ccd		; Yeap
+	call	l0c86		; Convert to UPPER case
+	cp	' '+1		; Test valid character
+	jr	c,l0ccb		; Nope
+	push	hl
+	push	bc
+	ld	hl,l0cd0
+	ld	bc,ll0cd0
+	cpir			; Find delimiter (N)Z, NC
+	pop	bc
+	pop	hl
+	ret
+l0ccb:
+	cp	a		; Set NZ, NC
+	ret
+l0ccd:
+	or	a		; Set NZ
+	scf			; Set C
+	ret
+;
+l0cd0:
+	db	'<>,;:=[]_%|()/\'
+ll0cd0	equ	$-l0cd0
+;
+; Clear software write protection
+;
+l0cdf:
+	ld	a,(l0d26)
+	push	af
+	ld	c,.ROvec
+	push	ix
+	call	BDOS		; Get R/O vector
+	pop	ix
+	pop	af
+	push	hl
+	or	a
+	jr	nz,l0cf5
+	ld	a,(l0004)	; Fetch current drive
+	inc	a
+l0cf5:
+	ld	b,a
+	ld	hl,l0000
+	scf
+l0cfa:
+	adc	hl,hl
+	djnz	l0cfa
+	pop	de
+	ld	a,e
+	and	l
+	jr	nz,l0d06
+	ld	a,d
+	and	h
+	ret	z
+l0d06:
+	ld	a,(l0004)
+	push	af
+	ld	c,.resdsk
+	call	l0d18		; Reset disk system
+	pop	af
+	ld	e,a
+	ld	c,.logdsk
+	jr	l0d18		; Log disk
+;
+; Do BDOS call with standard FCB
+;
+l0d15:
+	ld	de,l0d26	; Load standard FCB
+;
+; Do BDOS call
+;
+l0d18:
+	push	ix
+	push	hl
+	push	de
+	push	bc
+	call	BDOS		; Do BDOS call
+	pop	bc
+	pop	de
+	pop	hl
+	pop	ix
+	ret
+;
+l0d26:
+	ds	FCBlen
+;
+;
+;
+l0d48:
+	jp	c,l1175
+	bit	5,(ix+0)
+	jr	nz,l0d67
+	push	hl
+	push	de
+	ld	hl,l2191
+	add	a,a
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	pop	de
+	ex	(sp),hl
+	cp	43*2		;;86	;;'V'
+	call	c,l1369
+	ret
+l0d67:
+	or	a
+	ret	z
+	ld	(l2162),a
+	call	l129b
+	jp	c,l116d
+	bit	4,(ix+0)	; Test change
+	jr	z,l0d8a		; Nope
+	ld	a,(hl)
+	or	a
+	ret	z
+	cp	cr
+	ret	z
+	cp	tab
+	jr	nz,l0d90
+	ld	a,(l222d)
+	ld	(l2165),a
+	jr	l0d90
+l0d8a:
+	call	l133a
+	jp	c,l1171
+l0d90:
+	ld	a,(l2162)
+	ld	(hl),a
+	inc	hl
+	cp	0dh
+	call	z,l0d9d
+	jp	l0e57
+l0d9d:
+	call	l1369
+	ld	d,h
+	ld	e,l
+	ld	a,(l20cc)
+	cp	b
+	jr	nz,l0dac
+	call	l0f41
+	dec	b
+l0dac:
+	inc	b
+	set	3,(ix+0)
+	scf
+	call	l0f4e
+	call	l129b
+	ld	a,(l20cf)
+	bit	0,a		; Test auto indent
+	ret	z		; Nope
+	bit	4,a		; Test change
+	ret	nz		; Yeap
+	push	de
+	push	bc
+	ld	de,(l1fbb)
+	call	l0e1d
+l0dca:
+	call	l0ddb
+	jr	nc,l0dd8
+	push	af
+	call	l133a
+	pop	af
+	ld	(hl),a
+	inc	hl
+	jr	l0dca
+l0dd8:
+	pop	bc
+	pop	de
+	ret
+l0ddb:
+	ld	a,(de)
+	inc	de
+	cp	' '
+	jr	z,l0de7
+	cp	tab
+	jr	z,l0de7
+	or	a
+	ret
+l0de7:
+	scf
+	ret
+l0de9:
+	push	hl
+	push	bc
+	ld	a,(l20ca)	; Get column
+	neg
+	add	a,c
+	ld	c,0
+	or	a
+	jr	z,l0e05
+	ld	l,a
+	ld	a,(l222d)
+	ld	h,a
+l0dfb:
+	ld	a,l
+l0dfc:
+	sub	h
+	jr	z,l0e05
+	jr	nc,l0dfc
+	inc	l
+	inc	c
+	jr	l0dfb
+l0e05:
+	ld	a,c
+	or	a
+	pop	bc
+	pop	hl
+	ret	nz
+	ld	a,(l222d)
+	ret
+l0e0e:
+	dec	de
+	ld	a,(de)
+	inc	de
+	jr	l0e18
+l0e13:
+	ld	a,(de)
+	inc	de
+	cp	cr
+	ret	z
+l0e18:
+	cp	'A'-'@'
+	jr	nc,l0e13
+	ret
+l0e1d:
+	dec	de
+	ld	a,(de)
+	cp	sot
+	jr	z,l0e2e
+l0e23:
+	dec	de
+	ld	a,(de)
+	cp	sot
+	jr	z,l0e2e
+	cp	cr
+	jr	nz,l0e23
+	scf
+l0e2e:
+	inc	de
+	ret
+l0e30:
+	push	de
+	ld	de,(l2171)
+	call	l0e1d
+	ld	(l2171),de
+	pop	de
+	ret
+l0e3e:
+	push	de
+	ld	de,(l2171)
+	call	l0e0e
+	ld	(l2171),de
+	pop	de
+	ret
+l0e4c:
+	push	de
+	ld	de,(l2223)	; Get bottom of text
+	or	a
+	sbc	hl,de
+	add	hl,de
+	pop	de
+	ret
+l0e57:
+	push	hl
+	push	de
+	push	bc
+	or	a
+	sbc	hl,de
+	ld	b,l
+	ld	a,(l20ca)	; Get column
+	ld	c,a
+	ld	h,d
+	ld	l,e
+	ld	e,0
+	ld	a,b
+	or	a
+	jr	z,l0e8e
+l0e6a:
+	ld	a,(hl)
+	cp	tab
+	jr	nz,l0e77
+	call	l0de9
+	dec	a
+	add	a,c
+	ld	c,a
+	jr	l0e7c
+l0e77:
+	cp	' '
+	jr	nc,l0e7c
+	inc	c
+l0e7c:
+	inc	hl
+	inc	c
+	ld	a,(l20c9)	; Get max column
+	cp	c
+	jr	nc,l0e8c
+	inc	e
+	call	l0ef1
+	neg
+	add	a,c
+	ld	c,a
+l0e8c:
+	djnz	l0e6a
+l0e8e:
+	ld	a,c
+	pop	bc
+	ld	c,a
+	ld	a,e
+	ld	hl,l216c
+	cp	(hl)
+	ld	(hl),a
+	jr	z,l0e9d
+	set	1,(ix+0)
+l0e9d:
+	pop	de
+	pop	hl
+	ret
+l0ea0:
+	push	bc
+	ld	a,(l216c)
+	or	a
+	jr	z,l0eaf
+	ld	b,a
+l0ea8:
+	call	l0ef1
+	add	a,c
+	ld	c,a
+	djnz	l0ea8
+l0eaf:
+	ld	a,(l20ca)	; Get column
+	push	af
+	neg
+	add	a,c
+	inc	a
+	ld	b,a
+	pop	af
+	ld	c,a
+	ld	h,d
+	ld	l,e
+l0ebc:
+	ld	a,(hl)
+	cp	cr
+	jr	z,l0eef
+	or	a
+	jr	z,l0eef
+	cp	tab
+	jr	nz,l0ee2
+	call	l0de9
+	push	af
+	add	a,c
+	ld	c,a
+	dec	c
+	pop	af
+	push	af
+	cp	b
+	jr	c,l0eda
+	pop	af
+	jr	z,l0eef
+	inc	hl
+	jr	l0eef
+l0eda:
+	pop	af
+	neg
+	add	a,b
+	ld	b,a
+	inc	b
+	jr	l0eea
+l0ee2:
+	cp	' '
+	jr	nc,l0eea
+	inc	c
+	dec	b
+	jr	z,l0eef
+l0eea:
+	inc	c
+	inc	hl
+	djnz	l0ebc
+	dec	hl
+l0eef:
+	pop	bc
+	ret
+l0ef1:
+	push	hl
+	ld	a,(l222e)
+	ld	l,a
+	ld	a,(l222d)
+	ld	h,a
+	xor	a
+l0efb:
+	add	a,h
+	dec	l
+	jr	nz,l0efb
+	pop	hl
+	ret
+l0f01:
+	ld	a,(hl)
+	cp	cr
+	inc	hl
+	call	z,l0f13
+	dec	hl
+	ret
+l0f0a:
+	dec	hl
+	ld	a,(hl)
+	cp	cr
+	call	z,l0f26
+	inc	hl
+	ret
+l0f13:
+	call	l1369
+	call	l0e1d
+	or	a
+	call	l0f4e
+	ld	a,(l20cb)
+	cp	b
+	jp	z,l0f39
+	dec	b
+	ret
+l0f26:
+	call	l1369
+	call	l0e0e
+	scf
+	call	l0f4e
+	ld	a,(l20cc)
+	cp	b
+	jp	z,l0f41
+	inc	b
+	ret
+l0f39:
+	call	l0e30
+	set	1,(ix+0)
+	ret
+l0f41:
+	call	l0e3e
+	ld	a,0ffh
+	ld	(l2165),a
+	set	6,(ix+2)
+	ret
+l0f4e:
+	push	hl
+	ld	hl,(l2166)
+	jr	c,l0f56
+	dec	hl
+	dec	hl
+l0f56:
+	inc	hl
+	ld	(l2166),hl
+	pop	hl
+	ret
+l0f5c:
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	l0e1d
+	push	hl
+	ex	de,hl
+	ld	de,(l2223)	; Get bottom of text
+	ld	bc,l0000
+	jr	l0f70
+l0f6d:
+	call	l0e0e
+l0f70:
+	or	a
+	sbc	hl,de
+	add	hl,de
+	inc	bc
+	jr	nz,l0f6d
+	ld	(l2166),bc
+	ex	de,hl
+	pop	hl
+	ld	a,(l222a)	; Get max viewable lines
+	srl	a
+l0f82:
+	dec	a
+	ld	b,a
+	push	af
+	push	de
+	push	hl
+	ld	hl,(l2223)	; Get bottom of text
+	or	a
+	sbc	hl,de
+	pop	hl
+	jr	z,l0f9a
+l0f90:
+	call	l0e1d
+	jr	nc,l0f99
+	djnz	l0f90
+	jr	l0f9a
+l0f99:
+	dec	b
+l0f9a:
+	ld	(l2171),de
+	pop	de
+	pop	af
+	sub	b
+	ld	b,a
+	ld	a,(l20cb)
+	add	a,b
+	ld	b,a
+	set	1,(ix+0)
+	jp	l0e57
+l0fae:
+	push	hl
+	ld	hl,l21f7	; Point to delimiter table
+l0fb2:
+	push	af
+	ld	a,(hl)
+	or	a
+	jr	z,l0fbf
+	pop	af
+	cp	(hl)
+	inc	hl
+	jr	nz,l0fb2
+	pop	hl
+	scf
+	ret
+l0fbf:
+	pop	af
+	pop	hl
+	xor	a
+	ret
+l0fc3:
+	sbc	hl,de
+	add	hl,de
+	ret	nz
+	push	hl
+	push	de
+	ld	hl,(l1fbb)
+	ld	de,(l2223)	; Get bottom of text
+	sbc	hl,de
+	pop	de
+	pop	hl
+	ret	z
+	push	hl
+	push	de
+	ld	hl,(l1fbb)
+	ld	d,h
+	ld	e,l
+	call	l0e1d
+	call	l1041
+	pop	de
+	pop	hl
+	jr	nc,l0fe9
+	xor	a
+	scf
+	ret
+l0fe9:
+	call	l0f13
+	push	hl
+	ld	hl,(l1fbb)
+	dec	hl
+	ld	(hl),' '
+	ex	(sp),hl
+	call	l129b
+	ex	(sp),hl
+	ld	(hl),cr
+	set	1,(ix+0)
+	pop	hl
+	xor	a
+	inc	a
+	ret
+l1002:
+	ld	a,(hl)
+	or	a
+	ret	z
+	cp	0dh
+	ret	nz
+	push	hl
+	push	de
+	ld	hl,(l1fbd)
+	ld	d,h
+	ld	e,l
+	call	l0e0e
+	call	l1041
+	pop	de
+	pop	hl
+	jr	nc,l101c
+	xor	a
+	scf
+	ret
+l101c:
+	call	l1369
+	push	hl
+	push	de
+	call	l0e0e
+	ld	h,d
+	ld	l,e
+	pop	de
+	dec	hl
+	ld	a,(hl)
+	or	a
+	jr	z,l102e
+	ld	(hl),' '
+l102e:
+	ex	(sp),hl
+	call	l129b
+	ex	(sp),hl
+	ld	a,(hl)
+	or	a
+	jr	z,l1039
+	ld	(hl),0dh
+l1039:
+	set	1,(ix+0)
+	pop	hl
+	xor	a
+	inc	a
+	ret
+l1041:
+	or	a
+	sbc	hl,de
+	jr	nc,l104d
+	ld	a,l
+	cpl
+	ld	l,a
+	ld	a,h
+	cpl
+	ld	h,a
+	inc	hl
+l104d:
+	ld	a,(l1fbf)
+	add	a,l
+	ld	l,a
+	jr	nc,l1055
+	inc	h
+l1055:
+	push	hl
+	ld	hl,(l1fc2)
+	ld	de,(l1fc0)
+	sbc	hl,de
+	pop	de
+	sbc	hl,de
+	ret
+l1063:
+	ld	a,(l1fbf)
+	ld	de,(l1fc0)
+	add	a,e
+	ld	e,a
+	jr	nc,l106f
+	inc	d
+l106f:
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	ex	de,hl
+	ld	d,h
+	ld	e,l
+	ret
+l1079:
+	push	hl
+	ld	hl,(l1fc0)
+l107d:
+	dec	de
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	z,l1098
+	ld	a,(de)
+	call	l0fae
+	jr	c,l107d
+l108a:
+	dec	de
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	z,l1098
+	ld	a,(de)
+	call	l0fae
+	jr	nc,l108a
+	inc	de
+l1098:
+	pop	hl
+	ret
+l109a:
+	inc	bc
+	ld	a,(bc)
+	or	a
+	ret	z
+	cp	cr
+	ret	z
+	call	l0fae
+	jr	nc,l109a
+l10a6:
+	inc	bc
+	ld	a,(bc)
+	or	a
+	ret	z
+	cp	cr
+	ret	z
+	call	l0fae
+	jr	c,l10a6
+	ret
+l10b3:
+	push	hl
+	or	a
+	sbc	hl,de
+	ld	a,(l1fbf)
+	sub	l
+	ld	(l1fbf),a
+	pop	hl
+	ret
+l10c0:
+	push	hl
+	push	de
+	ld	de,l217a
+	call	l1fad
+	ex	de,hl
+	dec	hl
+	or	a
+	sbc	hl,de
+	jr	nc,l10d9
+	ld	hl,l217d
+	call	l1fa0
+	or	a
+	sbc	hl,de
+	ccf
+l10d9:
+	pop	de
+	pop	hl
+	jp	c,l1181
+l10de:
+	ld	a,(l217a)
+	inc	a
+	scf
+	jp	z,l1179
+	ld	a,(l217d)
+	inc	a
+	scf
+	jp	z,l117d
+	push	hl
+	push	de
+	push	bc
+	call	l1100
+	or	a
+	ex	de,hl
+	sbc	hl,de
+	pop	bc
+	pop	de
+	pop	hl
+	ccf
+	jp	c,l1185
+	ret
+l1100:
+	ld	de,l217a
+	call	l1fad
+	ld	hl,l217d
+	call	l1fa0
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	inc	bc
+	add	hl,de
+	ret
+l1114:
+	ld	a,b
+	cpl
+	ld	b,a
+	ld	a,c
+	cpl
+	ld	c,a
+	inc	bc
+l111b:
+	ld	(l2175),bc
+	ld	(l2173),hl
+	push	hl
+	push	de
+	push	bc
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	l0e1d
+	ld	a,0ffh
+	ld	hl,l2177
+	ld	b,3
+l1132:
+	push	bc
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	dec	hl
+	dec	hl
+	ex	de,hl
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	ex	de,hl
+	jr	nz,l1142
+	ld	(hl),a
+l1142:
+	inc	hl
+	inc	hl
+	inc	hl
+	pop	bc
+	djnz	l1132
+	ld	b,3
+	ld	hl,l2177
+	or	a
+l114e:
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	hl,(l2173)
+	sbc	hl,de
+	jr	z,l115c
+	jr	nc,l1161
+l115c:
+	ld	hl,(l2175)
+	add	hl,de
+	ex	de,hl
+l1161:
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	inc	hl
+	inc	hl
+	djnz	l114e
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l116d:
+	ld	a,1
+	jr	l119f
+l1171:
+	ld	a,2
+	jr	l119f
+l1175:
+	ld	a,3
+	jr	l119f
+l1179:
+	ld	a,4
+	jr	l119f
+l117d:
+	ld	a,5
+	jr	l119f
+l1181:
+	ld	a,6
+	jr	l119f
+l1185:
+	ld	a,7
+	jr	l119f
+l1189:
+	ld	a,8
+	jr	l119f
+l118d:
+	ld	a,9
+	jr	l119f
+l1191:
+	ld	a,0ah
+	jr	l119f
+l1195:
+	ld	a,0bh
+	jr	l119f
+l1199:
+	ld	a,0ch
+	jr	l119f
+l119d:
+	ld	a,0dh
+l119f:
+	ld	(l20d0),a
+	ret
+l11a3:
+	dw	l11bf
+	dw	l11c0
+	dw	l11ce
+	dw	l11df
+	dw	l11f1
+	dw	l1206
+	dw	l1219
+	dw	l122d
+	dw	l1242
+	dw	l124f
+	dw	l125d
+	dw	l1269
+	dw	l127c
+	dw	l1291
+l11bf:
+	db	0
+l11c0:
+	db	'Out of memory',null
+l11ce:
+	db	'Line is too long',null
+l11df:
+	db	'Undefined command',null
+l11f1:
+	db	'Block start unmarked',null
+l1206:
+	db	'Block end unmarked',null
+l1219:
+	db	'Invalid destination',null
+l122d:
+	db	'Block marks reversed',null
+l1242:
+	db	'No such line',null
+l124f:
+	db	'Block too big',null
+l125d:
+	db	'Marker lost',null
+l1269:
+	db	'No block in buffer',null
+l127c:
+	db	'No file/Bad filename',null
+l1291:
+	db	'Disc full',null
+l129b:
+	or	a
+	bit	6,(ix+0)
+	ret	nz
+	push	hl
+	push	de
+	call	l0e0e
+	pop	hl
+	push	hl
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	push	hl
+	ld	hl,(l1fc2)
+	ld	de,(l1fc0)
+	or	a
+	sbc	hl,de
+	pop	de
+	sbc	hl,de
+	jr	nc,l12c3
+	pop	de
+	pop	hl
+	ex	(sp),hl
+	pop	hl
+	jp	l1171
+l12c3:
+	ld	de,(l216d)	; Get top of data
+	ld	hl,(l216f)	; Get current top of memory
+	or	a
+	sbc	hl,de
+	ld	de,(l1fc0)
+	add	hl,de
+	ld	de,(l1fc2)
+	sbc	hl,de
+	pop	de
+	pop	hl
+	jr	nc,l12f4
+	bit	2,(ix+0)
+	ret	z
+	call	l1a0a
+	scf
+	ret	nz
+	res	2,(ix+0)
+	push	hl
+	ld	hl,(l20c7)	; Get top of memory
+	ld	(l216f),hl	; Set as current top of memory
+	pop	hl
+	jr	l129b
+l12f4:
+	push	bc
+	ld	bc,l0000
+	call	l111b
+	pop	bc
+	or	a
+	sbc	hl,de
+	push	hl
+	set	6,(ix+0)
+	ld	(l1fbb),de
+	push	de
+	call	l0e0e
+	ld	(l1fbd),de
+	pop	hl
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ld	a,l
+	ld	(l1fbf),a
+	pop	hl
+	ld	a,l
+	ld	hl,(l1fc0)
+	push	hl
+	add	a,l
+	ld	l,a
+	jr	nc,l1324
+	inc	h
+l1324:
+	push	hl
+	push	bc
+	ld	hl,(l1fbb)
+	ld	de,(l1fc0)
+	ld	a,(l1fbf)
+	ld	b,0
+	ld	c,a
+	ldir
+	pop	bc
+	pop	hl
+	pop	de
+	or	a
+	ret
+l133a:
+	push	de
+	push	bc
+	push	hl
+	ld	a,(l1fbf)
+	ld	hl,(l1fc0)
+	ld	b,0
+	ld	c,a
+	add	hl,bc
+	ld	de,(l1fc2)
+	sbc	hl,de
+	scf
+	jr	z,l1365
+	inc	a
+	ld	(l1fbf),a
+	ld	hl,(l1fc2)
+	pop	de
+	push	de
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	add	hl,de
+	ld	d,h
+	ld	e,l
+	dec	hl
+	lddr
+	xor	a
+l1365:
+	pop	hl
+	pop	bc
+	pop	de
+	ret
+l1369:
+	bit	6,(ix+0)
+	ret	z
+	push	bc
+	or	a
+	sbc	hl,de
+	push	hl
+	res	6,(ix+0)
+	ld	hl,(l1fbd)
+	ld	de,(l1fbb)
+	sbc	hl,de
+	ld	a,(l1fbf)
+	push	af
+	ld	d,0
+	ld	e,a
+	ex	de,hl
+	sbc	hl,de
+	jr	z,l1392
+	call	nc,l13a9
+	call	c,l13d1
+l1392:
+	pop	af
+	ld	b,0
+	ld	c,a
+	ld	hl,(l1fc0)
+	ld	de,(l1fbb)
+	push	de
+	ldir
+	pop	de
+	pop	hl
+	add	hl,de
+	pop	bc
+	set	0,(ix+2)
+	ret
+l13a9:
+	ld	de,(l216d)	; Get top of data
+	push	de
+	add	hl,de
+	ld	d,h
+	ld	e,l
+	ld	(l216d),de	; Set top of data
+	pop	hl
+	push	hl
+	inc	hl
+	ld	bc,(l1fbd)
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	ld	a,b
+	or	c
+	ret	z
+	lddr
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	add	hl,de
+	inc	hl
+	call	l1114
+	or	a
+	ret
+l13d1:
+	ld	de,(l1fbd)
+	push	de
+	add	hl,de
+	ld	d,h
+	ld	e,l
+	pop	bc
+	push	bc
+	ld	hl,(l216d)	; Get top of data
+	inc	hl
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	ld	a,b
+	or	c
+	jr	z,l13f4
+	push	hl
+	ldir
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	pop	hl
+	call	l1114
+l13f4:
+	dec	de
+	ld	(l216d),de	; Set top of data
+	ret
+l13fa:
+	set	5,(ix+0)
+	ld	a,9
+	jp	l0d48
+l1403:
+	call	l0e4c
+	ret	z
+	dec	hl
+	call	l0f01
+	jr	l146c
+l140d:
+	ld	a,(hl)
+	or	a
+	ret	z
+	inc	hl
+	call	l0f0a
+	jr	l146c
+l1416:
+	dec	hl
+	ld	a,(hl)
+	cp	cr
+	inc	hl
+	jr	nz,l1423
+	dec	hl
+	call	l0f13
+	jr	l1440
+l1423:
+	call	l0e4c
+	jr	z,l1440
+	dec	hl
+	ld	a,(hl)
+	cp	cr
+	jr	z,l143f
+	call	l0fae
+	jr	c,l1423
+l1433:
+	call	l0e4c
+	jr	z,l1440
+	dec	hl
+	ld	a,(hl)
+	call	l0fae
+	jr	nc,l1433
+l143f:
+	inc	hl
+l1440:
+	jr	l146c
+l1442:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	ret	z
+	cp	cr
+	ret
+l1449:
+	ld	a,(hl)
+	or	a
+	jr	z,l146c
+	cp	cr
+	jr	nz,l1457
+	inc	hl
+	call	l0f26
+	jr	l146c
+l1457:
+	call	l1442
+	jr	z,l146b
+	call	l0fae
+	jr	nc,l1457
+l1461:
+	call	l1442
+	jr	z,l146b
+	call	l0fae
+	jr	c,l1461
+l146b:
+	dec	hl
+l146c:
+	jp	l0e57
+l146f:
+	call	l0e4c
+	ret	z
+l1473:
+	dec	hl
+	ld	a,(hl)
+	cp	cr
+	jr	z,l1481
+	call	l0e57
+	call	l0de9
+	jr	nz,l1473
+l1481:
+	call	l0f01
+	jr	l146c
+l1486:
+	ld	a,(hl)
+	or	a
+	ret	z
+	cp	cr
+	inc	hl
+	jr	z,l14a0
+	dec	hl
+l148f:
+	inc	hl
+	ld	a,(hl)
+	cp	cr
+	jr	z,l14a0
+	or	a
+	jr	z,l14a0
+	call	l0e57
+	call	l0de9
+	jr	nz,l148f
+l14a0:
+	call	l0f0a
+	jr	l146c
+l14a5:
+	ld	h,d
+	ld	l,e
+	jr	l146c
+l14a9:
+	push	de
+	call	l0e0e
+	dec	de
+	ld	h,d
+	ld	l,e
+	pop	de
+	jr	l146c
+l14b3:
+	push	hl
+	ld	h,d
+	ld	l,e
+	call	l0e4c
+	pop	hl
+	ret	z
+	call	l0f13
+l14be:
+	jp	l0ea0
+l14c1:
+	push	de
+	call	l0e0e
+	pop	de
+	ret	c
+	call	l0f26
+	jr	l14be
+l14cc:
+	ld	hl,(l2171)
+	ld	d,h
+	ld	e,l
+	ld	a,(l20cb)
+	ld	c,a
+	ld	a,b
+	sub	c
+	or	a
+	jr	z,l14e0
+l14da:
+	call	l0f4e
+	dec	a
+	jr	nz,l14da
+l14e0:
+	ld	a,(l20cb)
+	ld	b,a
+	jr	l151a
+l14e6:
+	ld	a,(l20cb)
+	ld	c,a
+	ld	a,b
+	sub	c
+	or	a
+	jr	z,l14f5
+l14ef:
+	call	l0f4e
+	dec	a
+	jr	nz,l14ef
+l14f5:
+	ld	a,(l20cb)
+	ld	b,a
+	ld	de,(l2171)
+l14fd:
+	call	l0e0e
+	push	af
+	scf
+	call	l0f4e
+	pop	af
+	inc	b
+	jr	c,l150f
+	ld	a,(l20cc)
+	cp	b
+	jr	nc,l14fd
+l150f:
+	dec	b
+	ld	h,d
+	ld	l,e
+	dec	hl
+	call	l0e1d
+	or	a
+	call	l0f4e
+l151a:
+	jp	l0e57
+l151d:
+	push	hl
+	ld	hl,(l2171)
+	call	l0e4c
+	pop	hl
+	ret	z
+	ld	a,(l222a)	; Get max viewable lines
+	ld	l,a
+	dec	l
+	dec	l
+	dec	l
+l152d:
+	call	l0e1d
+	call	l0e30
+	push	af
+	or	a
+	call	l0f4e
+	pop	af
+	jr	c,l1541
+	call	l0ea0
+	jp	l0f5c
+l1541:
+	dec	l
+	jr	nz,l152d
+l1544:
+	set	1,(ix+0)
+	jp	l0ea0
+l154b:
+	set	1,(ix+0)
+	ld	a,(l222a)	; Get max viewable lines
+	ld	l,a
+	dec	l
+	dec	l
+	dec	l
+l1556:
+	call	l0e3e
+	call	l0e0e
+	jr	nc,l1567
+	call	l0e1d
+	call	l0ea0
+	jp	l0f5c
+l1567:
+	scf
+	call	l0f4e
+	dec	l
+	jr	nz,l1556
+	jr	l1544
+l1570:
+	call	l0e4c
+	ret	z
+	set	1,(ix+0)
+	ld	hl,l0001
+	ld	(l2166),hl
+	ld	hl,(l2223)	; Get bottom of text
+	ld	d,h
+	ld	e,l
+	ld	(l2171),hl
+	ld	a,(l20cb)
+	ld	b,a
+	jp	l0e57
+l158d:
+	ld	bc,lffff
+l1590:
+	inc	bc
+	call	l0e0e
+	jr	nc,l1590
+	ld	hl,(l2166)
+	add	hl,bc
+	ld	(l2166),hl
+	ld	h,d
+	ld	l,e
+	dec	hl
+	call	l0e1d
+	ld	a,(l222a)	; Get max viewable lines
+	dec	a
+	dec	a
+	jp	l0f82
+l15ab:
+	or	a
+	sbc	hl,de
+	ld	a,l
+	add	hl,de
+	ld	(bc),a
+	inc	bc
+	ld	a,e
+	ld	(bc),a
+	inc	bc
+	ld	a,d
+	ld	(bc),a
+	ret
+l15b8:
+	ld	a,(hl)
+	cp	0ffh
+	jr	nz,l15c1
+	pop	hl
+	jp	l1191
+l15c1:
+	pop	de
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	add	a,e
+	ld	l,a
+	ld	h,d
+	jr	nc,l15cc
+	inc	h
+l15cc:
+	jp	l0f5c
+l15cf:
+	push	bc
+	ld	bc,l2177
+	call	l15ab
+	pop	bc
+	ret
+l15d8:
+	push	hl
+	ld	hl,l2177
+	jr	l15b8
+l15de:
+	bit	6,(ix+0)
+	jr	z,l15fa
+	ld	de,(l1fbb)
+	ld	hl,l20cf
+	res	6,(hl)
+	set	1,(hl)
+	ld	a,(l2229)	; Get upper right column
+	ld	(l2165),a
+l15f5:
+	ld	h,d
+	ld	l,e
+	jp	l0e57
+l15fa:
+	bit	7,(ix+0)
+	ret	z
+	ld	a,(l1fbf)
+	push	hl
+	ld	hl,(l216d)	; Get top of data
+	add	a,l
+	ld	l,a
+	jr	nc,l160b
+	inc	h
+l160b:
+	push	de
+	ld	de,(l216f)	; Get current top of memory
+	or	a
+	sbc	hl,de
+	pop	de
+	bit	2,(ix+0)
+	pop	hl
+	jr	c,l1630
+	jp	z,l116d
+	call	l1a0a
+	ret	nz
+	push	hl
+	res	2,(ix+0)
+	ld	hl,(l20c7)	; Get top of memory
+	ld	(l216f),hl	; Set as current top of memory
+	pop	hl
+	jr	l15fa
+l1630:
+	ld	hl,l20cf
+	set	6,(hl)
+	set	1,(hl)
+	ld	(l1fbb),de
+	ld	(l1fbd),de
+	ld	de,(l1fc0)
+	push	hl
+	ld	a,(l1fbf)
+	add	a,e
+	ld	l,a
+	ld	h,d
+	jr	nc,l164d
+	inc	h
+l164d:
+	dec	hl
+	ld	(hl),cr
+	pop	hl
+	call	l1369
+	jr	l15f5
+l1656:
+	ld	a,(l20cf)
+	xor	1
+	jr	l1662
+l165d:
+	ld	a,(l20cf)
+	xor	10h
+l1662:
+	ld	(l20cf),a
+	set	1,(ix+2)
+	ret
+l166a:
+	ld	a,(l20d1)
+	xor	10h
+	set	0,a
+	ld	(l20d1),a
+	ret
+l1675:
+	push	bc
+	ld	bc,l217a
+	call	l15ab
+	pop	bc
+	ret
+l167e:
+	ld	a,(hl)
+	or	a
+	push	af
+	jr	nz,l168a
+	dec	hl
+	ld	a,(hl)
+	cp	cr
+	call	z,l0e1d
+l168a:
+	push	bc
+	ld	bc,l217d
+	call	l15ab
+	pop	bc
+	pop	af
+	ret	nz
+	ld	a,(hl)
+	inc	hl
+	cp	cr
+	ret	nz
+	ld	d,h
+	ld	e,l
+	ret
+l169c:
+	push	hl
+	ld	hl,l217a
+	jr	l16a6
+l16a2:
+	push	hl
+	ld	hl,l217d
+l16a6:
+	jp	l15b8
+l16a9:
+	push	hl
+	push	bc
+	ld	b,0ah
+	ld	hl,l16bd
+	call	l06dc
+	call	l07bb		; Get character from console
+	res	5,a
+	cp	'Y'
+	pop	bc
+	pop	hl
+	ret
+l16bd:
+	db	'Sure?     '
+l16c7:
+	ld	a,bs
+	call	l07cf		; Put to console
+	ld	a,' '
+	call	l07cf
+	ld	a,bs
+	jp	l07cf
+l16d6:
+	set	1,(ix+0)
+	ld	b,a
+	ld	a,(l20ca)	; Get column
+	ld	c,a
+	push	hl
+	push	bc
+	call	l0751		; Position cursor to row=B and column=C
+	ld	hl,l11bf
+	ld	a,(l2229)	; Get upper right column
+	ld	b,a
+	call	l06dc
+	pop	bc
+	ld	a,(l222f)
+	ld	c,a
+	ld	a,(l2228)	; Get base column
+	add	a,c
+	ld	c,a
+	call	l0751		; Position cursor to row=B and column=C
+	pop	hl
+	jp	l04f2
+l16ff:
+	push	hl
+	push	bc
+	ld	a,(l20cb)
+	ld	hl,l1764
+	call	l16d6
+	call	l04c5
+	ld	b,0eh
+	ld	hl,l171b
+	call	l06dc
+	call	l16a9
+	pop	bc
+	pop	hl
+	ret
+l171b:
+	db	'Abandon text: '
+l1729:
+	call	l16ff
+l172c:
+	jp	z,l01fe
+	or	a
+	ret	nz
+l1731:
+	ld	hl,l1ab5
+	ld	(hl),0
+	call	l1a59
+	jr	z,l172c
+	ld	de,l0080
+	ld	a,0fh
+	ld	(de),a
+	inc	de
+	ld	a,' '
+	ld	(de),a
+	inc	de
+	ld	bc,l000f
+	push	bc
+	ldir
+	pop	bc
+	jp	l0169		; Restart
+;
+l1750:
+	db	'^U to abort command',null
+l1764:
+	db	'See manual for details',null
+l177b:
+	ld	a,1
+	jr	l1780
+l177f:
+	xor	a
+l1780:
+	ld	(l2162),a
+	push	hl
+	push	de
+	push	bc
+	ld	hl,(l2180)	; Fetch address of CCP copy
+	ld	de,l1ab5
+	jr	l1791
+l178e:
+	ld	(de),a
+	inc	de
+	inc	hl
+l1791:
+	ld	a,(hl)
+	or	a
+	jr	nz,l178e
+	ld	(de),a
+	ld	a,(l20cb)
+	ld	hl,l1750
+	push	af
+	call	l16d6
+	pop	af
+	inc	a
+	inc	hl
+	call	l16d6
+	res	5,(ix+2)
+	call	l1a59
+	jr	z,l17e9
+	ld	a,(l2162)
+	or	a
+	push	hl
+	push	de
+	push	bc
+	call	nz,l0a3b	; Rename file
+	pop	bc
+	pop	de
+	pop	hl
+	or	a
+	call	nz,l1199
+	jr	nz,l17e9
+	push	hl
+	ld	hl,(l216d)	; Get top of data
+	ld	de,(l2223)	; Get bottom of text
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	pop	hl
+	call	l0aa3		; Write data ^DE to output with length in reg BC to device ^HL
+	or	a
+	jr	nz,l17e0
+	bit	5,(ix+2)
+	jp	nz,l1731
+	jp	l01fe
+l17e0:
+	dec	a
+	call	z,l1199
+	jr	z,l17e9
+	call	l119d
+l17e9:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l17ed:
+	push	hl
+	call	l1826
+	ld	a,h
+	or	l
+	jr	nz,l17f7
+	pop	hl
+	ret
+l17f7:
+	push	bc
+	push	de
+	ld	b,h
+	ld	c,l
+	ld	de,(l2223)	; Get bottom of text
+l17ff:
+	dec	bc
+	ld	a,b
+	or	c
+	jr	z,l180f
+	call	l0e0e
+	jr	nc,l17ff
+	pop	de
+	pop	bc
+	pop	hl
+	jp	l1189
+l180f:
+	pop	bc
+	pop	bc
+	pop	bc
+	ld	h,d
+	ld	l,e
+	jp	l0f5c
+l1817:
+	ld	hl,l20d1
+	set	2,(hl)
+	call	l04cb
+	set	2,(ix+2)
+	jp	l04c5
+l1826:
+	push	de
+	push	bc
+	call	l1817
+	ld	b,0ch
+	ld	hl,l1890
+	call	l06dc
+	ld	b,4
+	ld	hl,l188b
+	ld	a,'-'
+	ld	(l2160),a
+l183d:
+	inc	b
+l183e:
+	call	l07bb		; Get character from console
+	call	l1ace
+	jr	z,l185c
+	cp	cr
+	jr	z,l1868
+	sub	'0'
+	cp	9+1
+	jr	nc,l183e
+	dec	b
+	jr	z,l183d
+	ld	(hl),a
+	inc	hl
+	add	a,'0'
+	call	l07cf		; Put to console
+	jr	l183e
+l185c:
+	ld	a,b
+	cp	5
+	jr	z,l183e
+	dec	hl
+	inc	b
+	call	l16c7
+	jr	l183e
+l1868:
+	ld	(hl),0ffh
+	ld	hl,l0000
+	ld	a,b
+	cp	5
+	jr	z,l1888
+	ld	de,l188b
+l1875:
+	ld	a,(de)
+	inc	de
+	cp	0ffh
+	jr	z,l1888
+	add	hl,hl
+	push	hl
+	add	hl,hl
+	add	hl,hl
+	pop	bc
+	add	hl,bc
+	add	a,l
+	ld	l,a
+	jr	nc,l1875
+	inc	h
+	jr	l1875
+l1888:
+	pop	bc
+	pop	de
+	ret
+l188b:
+	ds	5
+l1890:
+	db	'Go to line: '
+l189c:
+	call	l10c0
+	ret	c
+	call	l1ec7
+	jp	z,l116d
+	call	l1ede
+	jp	l1958
+l18ac:
+	call	l10c0
+	ret	c
+	push	hl
+	push	de
+	push	bc
+	call	l1100
+	ld	hl,(l216d)	; Get top of data
+	add	hl,bc
+	ld	de,(l20c7)	; Get top of memory
+	ex	de,hl
+	sbc	hl,de
+	pop	bc
+	pop	de
+	pop	hl
+	jp	c,l118d
+	push	hl
+	call	l1100
+	ld	(l2162),bc
+	pop	hl
+	push	hl
+	ld	a,(l217a)
+	push	af
+	call	l111b
+	pop	af
+	ld	(l217a),a
+	ld	de,(l216d)	; Get top of data
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	inc	bc
+	add	hl,de
+	ld	de,(l2162)
+	push	hl
+	add	hl,de
+	ld	d,h
+	ld	e,l
+	ld	(l216d),de	; Set top of data
+	pop	hl
+	lddr
+	ld	bc,(l2162)
+	pop	de
+	push	de
+	ld	hl,l217a
+	call	l1fa0
+	ldir
+	dec	de
+	ld	h,d
+	ld	l,e
+	inc	de
+	call	l0e1d
+	call	l167e
+	pop	hl
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	l0e1d
+	call	l1675
+	jp	l0f5c
+l191c:
+	call	l10de
+	ret	c
+	call	l1ec7
+	jr	nz,l1929
+	call	l1a0a
+	ret	nz
+l1929:
+	call	l1ede
+	ld	hl,(l217b)
+	jp	l0f5c
+l1932:
+	bit	2,(ix+0)
+	jp	z,l1195
+	push	hl
+	push	de
+	ld	hl,(l20c7)	; Get top of memory
+	push	hl
+	ld	de,(l20c5)
+	or	a
+	sbc	hl,de
+	inc	hl
+	ld	de,(l216d)	; Get top of data
+	add	hl,de
+	pop	de
+	jr	c,l1953
+	ex	de,hl
+	dec	hl
+	sbc	hl,de
+l1953:
+	pop	de
+	pop	hl
+	jp	c,l118d
+l1958:
+	push	hl
+	ld	hl,(l20c7)	; Get top of memory
+	ld	bc,(l20c5)
+	ld	(l215c),bc
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	inc	bc
+	pop	hl
+	push	hl
+	call	l111b
+	ld	hl,(l216f)	; Get current top of memory
+	ld	de,(l216d)	; Get top of data
+	ld	(l215e),de
+	or	a
+	sbc	hl,de
+	ld	(l2162),hl
+	ex	de,hl
+	pop	de
+	push	de
+	sbc	hl,de
+	inc	hl
+	ld	(l2160),hl
+l1989:
+	ld	hl,(l2162)
+	ld	de,(l215c)
+	push	de
+	push	hl
+	add	hl,de
+	dec	hl
+	ld	de,(l20c7)	; Get top of memory
+	jr	c,l199e
+	sbc	hl,de
+	jr	c,l19aa
+l199e:
+	pop	hl
+	ex	de,hl
+	pop	de
+	push	de
+	or	a
+	sbc	hl,de
+	inc	hl
+	ld	(l2162),hl
+	push	hl
+l19aa:
+	pop	hl
+	ld	de,(l215e)
+	add	hl,de
+	ld	(l215e),hl
+	ex	de,hl
+	ld	bc,(l2160)
+	lddr
+	ld	(l2173),de
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	bc,(l2162)
+	pop	hl
+	ldir
+	ld	(l215c),hl
+	dec	hl
+	ld	de,(l20c7)	; Get top of memory
+	or	a
+	sbc	hl,de
+	jr	nz,l1989
+	ld	hl,(l215e)
+	ld	(l216d),hl	; Set top of data
+	ld	de,(l20c5)
+	or	a
+	sbc	hl,de
+	jr	c,l19f1
+	res	2,(ix+0)
+	ld	hl,(l20c7)	; Get top of memory
+	ld	(l216f),hl	; Set as current top of memory
+	ld	(l20c5),hl
+l19f1:
+	ld	hl,(l2173)
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	l0e1d
+	call	l167e
+	pop	hl
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	l0e1d
+	call	l1675
+	jp	l0f5c
+l1a0a:
+	push	hl
+	push	bc
+	call	l04c5
+	ld	b,0fh
+	ld	hl,l1a21
+	call	l06dc
+	set	2,(ix+2)
+	call	l16a9
+	pop	bc
+	pop	hl
+	ret
+l1a21:
+	db	'Abandon block: '
+l1a30:
+	call	l10de
+	ret	c
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l1ab5
+	ld	(hl),0
+	call	l1a59
+	jr	z,l1a55
+	push	hl
+	call	l1100
+	pop	hl
+	call	l0aa3		; Write data ^DE to output with length in reg BC to device ^HL
+	or	a
+	jr	z,l1a55
+	dec	a
+	call	z,l1199
+	jr	z,l1a55
+	call	l119d
+l1a55:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l1a59:
+	push	bc
+	call	l1817
+	ld	b,0ah
+	ld	hl,l1ac4
+	call	l06dc
+	ld	b,0eh
+	ld	a,'-'
+	ld	(l2160),a
+	ld	hl,l1ab5
+l1a6f:
+	ld	a,(hl)
+	or	a
+	jr	z,l1a7a
+	dec	b
+	inc	hl
+	call	l07cf		; Put to console
+	jr	l1a6f
+l1a7a:
+	inc	b
+l1a7b:
+	call	l07bb		; Get character from console
+	call	l1ace
+	jr	z,l1a9b
+	cp	'U'-'@'
+	jr	z,l1ab3
+	cp	cr
+	jr	z,l1aab
+	cp	' '
+	jr	c,l1a7b
+	jr	z,l1aa7
+	dec	b
+	jr	z,l1a7a
+	ld	(hl),a
+	call	l07cf		; Put to console
+	inc	hl
+	jr	l1a7b
+l1a9b:
+	ld	a,b
+	cp	0fh
+	jr	z,l1a7b
+	dec	hl
+	inc	b
+	call	l16c7
+	jr	l1a7b
+l1aa7:
+	set	5,(ix+2)
+l1aab:
+	ld	(hl),0
+	ld	hl,l1ab5
+	ld	a,b
+	sub	0fh
+l1ab3:
+	pop	bc
+	ret
+l1ab5:
+	ds	l000f
+l1ac4:
+	db	'Filename: '
+l1ace:
+	push	hl
+	push	bc
+	push	af
+	ld	hl,(l2255)	; Fetch index
+	ld	bc,l2255	; Fetch base
+	add	hl,bc		; Point to start of key table
+	ld	a,(l2160)
+	ld	b,a
+l1adc:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	nz,l1adc
+	djnz	l1adc
+	pop	af
+	cp	(hl)
+	pop	bc
+	pop	hl
+	ret
+l1ae8:
+	push	hl
+	push	de
+	push	bc
+	ld	(l215c),hl
+	ld	hl,l1ab5
+	ld	(hl),0
+	call	l1a59
+	jp	z,l1b83
+	push	hl
+	res	2,(ix+0)
+	ld	hl,(l20c7)	; Get top of memory
+	ld	de,(l216d)	; Get top of data
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	ld	hl,(l215c)
+	call	l111b
+	ld	d,h
+	ld	e,l
+	push	bc
+	ld	hl,(l216d)	; Get top of data
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	inc	bc
+	ld	(l2162),bc
+	add	hl,de
+	push	de
+	ld	de,(l20c7)	; Get top of memory
+	ld	(l216d),de	; Set top of data
+	ld	(l216f),de	; Set as current top of memory
+	lddr
+	inc	de
+	ld	(l215e),de
+	pop	de
+	pop	bc
+	ld	a,b
+	or	c
+	jr	z,l1b59
+	pop	hl
+	call	l0b55		; Read data into memory ^DE, max length in reg BC
+	dec	a		; Test invalid file
+	jr	z,l1b4f		; Yeap
+	dec	a		; Test out of memory
+	jr	z,l1b54		; Yeap
+	set	1,(ix+0)
+	ld	(l215c),de
+	jr	l1b5c
+l1b4f:
+	call	l1199
+	jr	l1b5c
+l1b54:
+	call	l118d
+	jr	l1b5c
+l1b59:
+	call	l116d
+l1b5c:
+	ld	de,(l215c)
+	ld	hl,(l215e)
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	add	hl,de
+	call	l1114
+	ld	bc,(l2162)
+	ldir
+	dec	de
+	ld	(l216d),de	; Set top of data
+	ld	hl,(l215c)
+	ld	d,h
+	ld	e,l
+	inc	de
+	call	l0e1d
+	call	l167e
+l1b83:
+	pop	bc
+	pop	de
+	pop	hl
+	call	l1675
+	jp	l0f5c
+l1b8c:
+	push	hl
+	push	de
+	push	bc
+	ld	a,(l2233)
+	ld	hl,l20d2
+	ld	(l2162),hl
+	call	l1c01
+	ld	(l215c),a
+	jr	c,l1bc7
+	ld	a,(l2234)
+	ld	hl,l2114
+	ld	(l2162),hl
+	call	l1c01
+	ld	(l215e),a
+	jr	c,l1bc7
+	call	l1ce0
+	ld	a,(l215a)
+	ld	hl,l2158
+	sub	(hl)
+	ld	hl,l2156
+	ld	(hl),a
+	xor	a
+	bit	7,(hl)
+	jr	z,l1bc5
+	dec	a
+l1bc5:
+	inc	hl
+	ld	(hl),a
+l1bc7:
+	pop	bc
+	pop	de
+	pop	hl
+	ret	c
+l1bcb:
+	call	l1bf9
+	ret	z
+	inc	hl
+	call	l1d01
+	dec	hl
+	ret	c
+	inc	hl
+	jr	l1bf6
+l1bd8:
+	call	l1bf9
+	ret	z
+	call	l1d01
+	ret	c
+	call	l1d36
+	call	l1d01
+	jr	l1bf6
+l1be8:
+	call	l1bf9
+	ret	z
+	call	l1d01
+	jr	c,l1bf6
+	call	l1d36
+	jr	nc,l1be8
+l1bf6:
+	jp	l0f5c
+l1bf9:
+	ld	a,(hl)
+	or	a
+	ret	z
+	ld	a,(l2158)
+	or	a
+	ret
+l1c01:
+	ld	c,a
+l1c02:
+	call	l1cc5
+	ld	(l215e),hl
+	res	1,e
+l1c0a:
+	push	hl
+	push	bc
+	ld	a,c
+	call	l0671
+	ld	a,(l222c)
+	ld	b,a
+	ld	hl,(l215e)
+	call	l06dc
+	ld	a,c
+	call	l0671
+	pop	bc
+	pop	hl
+	bit	1,e
+	jr	z,l1c2a
+	dec	hl
+	ld	a,(hl)
+	inc	hl
+	call	l0701
+l1c2a:
+	res	0,e
+l1c2c:
+	call	l07bb		; Get character from console
+	ld	b,a
+	push	hl
+	ld	hl,l2257
+	cp	(hl)		; Test ^P
+	pop	hl
+	jr	nz,l1c3e
+	bit	0,e
+	set	0,e
+	jr	z,l1c2c
+l1c3e:
+	bit	0,e
+	jr	z,l1c4a
+	cp	'?'
+	jr	nz,l1c71
+	ld	b,80h
+	jr	l1c71
+l1c4a:
+	ld	a,'-'
+	ld	(l2160),a
+	ld	a,b
+	call	l1ace
+	jr	z,l1c9b
+	ld	a,'+'
+	ld	(l2160),a
+	ld	a,b
+	call	l1ace
+	jr	z,l1c97
+	ld	a,b
+	cp	12h
+	jr	z,l1c02
+	cp	15h
+	jr	z,l1c92
+	cp	cr
+	jr	z,l1c8f
+	cp	' '
+	jr	c,l1c2c
+l1c71:
+	bit	1,e
+	jr	z,l1c7b
+	ld	a,d
+	cp	' '
+	ld	a,b
+	jr	z,l1c2c
+l1c7b:
+	ld	(hl),a
+	inc	hl
+	inc	d
+	ld	(hl),0
+	call	l0701
+	bit	1,e
+	jp	nz,l1c2a
+	ld	d,1
+	set	1,e
+	jp	l1c0a
+l1c8f:
+	xor	a
+	ld	a,d
+	ret
+l1c92:
+	call	l0650
+	scf
+	ret
+l1c97:
+	ld	b,9
+	jr	l1c71
+l1c9b:
+	bit	1,e
+	jp	z,l1c2c
+	ld	a,d
+	or	a
+	jp	z,l1c2c
+	dec	hl
+	dec	d
+	call	l16c7
+	ld	a,(hl)
+	ld	(hl),0
+	ld	b,4
+	cp	1bh
+	jr	z,l1cbd
+	cp	7fh
+	jr	z,l1cbd
+	ld	b,1
+	cp	' '
+	jr	nc,l1cc2
+l1cbd:
+	call	l16c7
+	djnz	l1cbd
+l1cc2:
+	jp	l1c2a
+l1cc5:
+	ld	hl,(l2162)
+	ld	de,l0021
+	ex	de,hl
+	add	hl,de
+	ex	de,hl
+	push	bc
+	ld	bc,l0021
+	ldir
+	pop	bc
+	push	hl
+	ld	d,0ffh
+l1cd8:
+	ld	a,(hl)
+	inc	hl
+	inc	d
+	or	a
+	jr	nz,l1cd8
+	pop	hl
+	ret
+l1ce0:
+	ld	hl,l20f3
+	ld	de,l20d2
+	ld	bc,l0021
+	push	bc
+	ldir
+	pop	bc
+	ld	d,h
+	ld	e,l
+	ld	hl,l2135
+	ldir
+	ld	a,(l215c)
+	ld	(l2158),a
+	ld	a,(l215e)
+	ld	(l215a),a
+	ret
+l1d01:
+	push	de
+	push	bc
+	push	hl
+	dec	hl
+l1d05:
+	ld	de,l20d2
+l1d08:
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	z,l1d2c
+	ld	a,(de)
+	cp	80h
+	jr	z,l1d15
+	cp	(hl)
+	jr	nz,l1d08
+l1d15:
+	push	hl
+l1d16:
+	inc	hl
+	inc	de
+	ld	a,(de)
+	or	a
+	jr	z,l1d31
+	ld	a,(hl)
+	or	a
+	jr	z,l1d2b
+	ld	a,(de)
+	cp	80h
+	jr	z,l1d16
+	cp	(hl)
+	jr	z,l1d16
+	pop	hl
+	jr	l1d05
+l1d2b:
+	pop	hl
+l1d2c:
+	pop	hl
+	pop	bc
+	pop	de
+	ccf
+	ret
+l1d31:
+	pop	hl
+	ex	(sp),hl
+	scf
+	jr	l1d2c
+l1d36:
+	push	de
+	push	bc
+	push	af
+	ld	(l2162),hl
+	ld	bc,(l2156)
+	ld	hl,(l216d)	; Get top of data
+	add	hl,bc
+	ld	de,(l216f)	; Get current top of memory
+	or	a
+	sbc	hl,de
+	jr	nc,l1da4
+	ld	a,b
+	or	c
+	jr	z,l1d8c
+	ld	hl,(l216d)	; Get top of data
+	push	hl
+	add	hl,bc
+	ld	(l216d),hl	; Set top of data
+	ld	hl,(l2162)
+	ld	de,(l2158)
+	add	hl,de
+	call	l111b
+	bit	7,b
+	jr	z,l1d7c
+	add	hl,bc
+	ld	d,h
+	ld	e,l
+	or	a
+	sbc	hl,bc
+	ex	(sp),hl
+	pop	bc
+	push	bc
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	inc	bc
+	pop	hl
+	ldir
+	jr	l1d8c
+l1d7c:
+	ex	de,hl
+	pop	hl
+	push	bc
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	inc	bc
+	add	hl,de
+	pop	de
+	ex	de,hl
+	add	hl,de
+	ex	de,hl
+	lddr
+l1d8c:
+	ld	hl,(l2162)
+	ld	de,l2114
+	ex	de,hl
+	ld	bc,(l215a)
+	ld	a,b
+	or	c
+	jr	z,l1d9d
+	ldir
+l1d9d:
+	ld	h,d
+	ld	l,e
+	pop	af
+	pop	bc
+	pop	de
+	or	a
+	ret
+l1da4:
+	call	l116d
+	ld	hl,(l2162)
+	pop	af
+	pop	bc
+	pop	de
+	scf
+	ret
+l1daf:
+	xor	a
+	jr	l1db4
+;
+;
+;
+l1db2:
+	ld	a,1
+l1db4:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	hl,l1ab5
+	ld	(hl),0
+	call	l1a59
+	jr	z,l1dd9
+	pop	af
+	push	af
+	or	a
+	jr	z,l1dcc
+	call	l097c
+	jr	l1dcf
+l1dcc:
+	call	l0a30		; Delete file
+l1dcf:
+	dec	a		; Test error
+	call	z,l1199		; Yeap
+	jr	z,l1dd9
+	set	1,(ix+0)
+l1dd9:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l1dde:
+	xor	a
+	jr	l1dee
+l1de1:
+	xor	a
+	jr	l1df5
+l1de4:
+	ld	a,1
+	jr	l1dee
+l1de8:
+	ld	a,1
+	jr	l1df5
+l1dec:
+	ld	a,2
+l1dee:
+	ld	(l2164),a
+	jr	l1e30
+l1df3:
+	ld	a,2
+l1df5:
+	ld	(l2164),a
+	call	l129b
+	jp	c,l116d
+	call	l0fc3
+	jr	nz,l1e07
+	jp	c,l1171
+	ret
+l1e07:
+	push	bc
+	push	de
+	call	l1063
+	ld	a,(l2164)
+	cp	1
+	jr	z,l1e1c
+	jr	c,l1e19
+	pop	de
+	push	de
+	jr	l1e1f
+l1e19:
+	dec	de
+	jr	l1e1f
+l1e1c:
+	call	l1079
+l1e1f:
+	call	l10b3
+	push	de
+	ldir
+	pop	hl
+	pop	de
+	pop	bc
+	ld	a,0ffh
+	ld	(l2165),a
+	jp	l0e57
+l1e30:
+	call	l129b
+	jp	c,l116d
+	call	l1002
+	jr	nz,l1e3f
+	jp	c,l1171
+	ret
+l1e3f:
+	push	hl
+	push	de
+	push	bc
+	ld	d,h
+	ld	e,l
+	ld	b,h
+	ld	c,l
+	ld	hl,(l1fc0)
+	ld	a,(l1fbf)
+	add	a,l
+	ld	l,a
+	jr	nc,l1e51
+	inc	h
+l1e51:
+	ld	a,(l2164)
+	cp	1
+	jr	c,l1e5f
+	jr	z,l1e62
+	ld	b,h
+	ld	c,l
+	dec	bc
+	jr	l1e65
+l1e5f:
+	inc	bc
+	jr	l1e65
+l1e62:
+	call	l109a
+l1e65:
+	push	bc
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	inc	bc
+	pop	hl
+	call	l10b3
+	ldir
+	pop	bc
+	pop	de
+	pop	hl
+	ld	a,0ffh
+	ld	(l2165),a
+	jp	l0e57
+l1e7d:
+	call	l12f4
+	push	bc
+	ld	hl,l20cf
+	res	6,(hl)
+	set	7,(hl)
+	set	1,(hl)
+	ld	de,(l1fbb)
+	push	de
+	ld	hl,(l216d)	; Get top of data
+	inc	hl
+	ld	bc,(l1fbd)
+	push	bc
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	ld	a,b
+	or	c
+	jr	nz,l1ea4
+	inc	bc
+	dec	hl
+l1ea4:
+	push	hl
+	push	de
+	ex	de,hl
+	sbc	hl,de
+	ld	de,(l216d)	; Get top of data
+	add	hl,de
+	ld	(l216d),hl
+	pop	de
+	pop	hl
+	push	bc
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	add	hl,de
+	dec	hl
+	call	l1114
+	inc	hl
+	pop	bc
+	ldir
+	pop	de
+	pop	bc
+	jp	l0ea0
+l1ec7:
+	push	hl
+	push	de
+	ld	hl,(l20c7)	; Get top of memory
+	ld	de,(l216d)	; Get top of data
+	or	a
+	sbc	hl,de
+	ld	a,h
+	or	a
+	ld	(l2162),hl
+	ld	(l215c),a
+	pop	de
+	pop	hl
+	ret
+l1ede:
+	push	hl
+	ld	de,l217d
+	call	l1fad
+	or	a
+	sbc	hl,de
+	push	af
+	call	l1100
+	pop	af
+	pop	hl
+	jr	c,l1ef2
+	sbc	hl,bc
+l1ef2:
+	push	hl
+	ld	a,(l215c)
+	or	a
+	jp	z,l1f86
+	set	2,(ix+0)
+	ld	de,l217d
+	call	l1fad
+	ld	(l215c),de
+	ld	hl,(l20c7)	; Get top of memory
+	ld	(l215e),hl
+	ld	hl,(l216d)	; Get top of data
+	or	a
+	sbc	hl,de
+	ld	(l2160),hl
+l1f17:
+	ld	hl,(l215c)
+	ld	de,(l2162)
+	or	a
+	sbc	hl,de
+	push	af
+	ld	de,l217a
+	call	l1fad
+	pop	af
+	jr	c,l1f30
+	or	a
+	sbc	hl,de
+	jr	nc,l1f3a
+l1f30:
+	ld	hl,(l215c)
+	or	a
+	sbc	hl,de
+	inc	hl
+	ld	(l2162),hl
+l1f3a:
+	ld	hl,(l215c)
+	ld	de,(l215e)
+	ld	bc,(l2162)
+	push	hl
+	lddr
+	ld	(l215c),hl
+	ld	(l215e),de
+	pop	de
+	ex	de,hl
+	inc	hl
+	inc	de
+	ld	bc,(l2160)
+	push	de
+	ldir
+	pop	hl
+	dec	de
+	push	de
+	ld	de,l217a
+	call	l1fad
+	or	a
+	sbc	hl,de
+	pop	hl
+	jr	nz,l1f17
+	ld	(l216d),hl	; Set top of data
+	ld	hl,(l215e)
+	ld	(l216f),hl	; Set as current top of memory
+	inc	hl
+	ld	(l20c5),hl
+l1f76:
+	call	l1100
+	call	l1114
+	xor	a
+	dec	a
+	ld	(l217a),a
+	ld	(l217d),a
+	pop	hl
+	ret
+l1f86:
+	call	l1100
+	push	hl
+	push	de
+	ex	de,hl
+	ld	hl,(l216d)	; Get top of data
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	pop	de
+	pop	hl
+	inc	hl
+	ldir
+	dec	de
+	ld	(l216d),de	; Set top of data
+	jr	l1f76
+l1fa0:
+	ld	a,(hl)
+	push	de
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	h,d
+	add	a,e
+	ld	l,a
+	pop	de
+	ret	nc
+	inc	h
+	ret
+l1fad:
+	ld	a,(de)
+	push	hl
+	ex	de,hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	add	a,e
+	ld	e,a
+	ret	nc
+	inc	d
+	ret
+l1fba:
+	db	0		; Current character
+l1fbb:
+	db	0,0
+l1fbd:
+	db	0,0
+l1fbf:
+	db	0
+l1fc0:
+	dw	l1fc5
+l1fc2:
+	dw	l20c5-1
+	db	0ffh
+l1fc5:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+l20c5:
+	db	0,0
+l20c7:
+	dw	0		; Top of memory
+l20c9:
+	db	0		; Max column
+l20ca:
+	db	0		; Current column
+l20cb:
+	db	0
+l20cc:
+	db	0
+l20cd:
+	db	0		; Cursor row 1
+l20ce:
+	db	0		; Cursor row 2
+;
+; Status word
+;
+l20cf:
+	db	0
+l20d0:
+	db	0
+l20d1:
+	db	0
+l20d2:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0
+l20f3:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0
+l2114:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0
+l2135:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0
+l2156:
+	db	0,0
+l2158:
+	db	0,0
+l215a:
+	db	0,0
+l215c:
+	db	0,0
+l215e:
+	db	0,0
+l2160:
+	db	0,0
+l2162:
+	db	0,0
+l2164:
+	db	0
+l2165:
+	db	0
+l2166:
+	db	1,0
+l2168:
+	db	0,0
+l216a:
+	db	0,0
+l216c:
+	db	0
+l216d:
+	dw	0		; Top of data
+l216f:
+	dw	0		; Current top of memory
+l2171:
+	db	0,'#'
+l2173:
+	db	0,0
+l2175:
+	db	0,0
+l2177:
+	db	0ffh,0,0
+l217a:
+	db	0ffh
+l217b:
+	db	0,0
+l217d:
+	db	0ffh,0,0
+l2180:
+	dw	l2182
+l2182:
+	ds	15
+l2191:
+	dw	l1db2		;  0
+	dw	l1403		;  1
+	dw	l1403		;  2
+	dw	l140d		;  3
+	dw	l1416		;  4
+	dw	l1449		;  5
+	dw	l146f		;  6
+	dw	l1486		;  7
+	dw	l14a5		;  8
+	dw	l14a9		;  9
+	dw	l14b3		; 10
+	dw	l14c1		; 11
+	dw	l14cc		; 12
+	dw	l14e6		; 13
+	dw	l151d		; 14
+	dw	l154b		; 15
+	dw	l1570		; 16
+	dw	l158d		; 17
+	dw	l17ed		; 18
+	dw	l169c		; 19
+	dw	l16a2		; 20
+	dw	l165d		; 21
+	dw	l166a		; 22
+	dw	l1675		; 23
+	dw	l167e		; 24
+	dw	l189c		; 25
+	dw	l18ac		; 26
+	dw	l191c		; 27
+	dw	l1932		; 28
+	dw	l1a30		; 29
+	dw	l1ae8		; 30
+	dw	l15cf		; 31
+	dw	l15d8		; 32
+	dw	l1b8c		; 33
+	dw	l1bcb		; 34
+	dw	l1bd8		; 35
+	dw	l1be8		; 36
+	dw	l1729		; 37
+	dw	l177f		; 38
+	dw	l177b		; 39
+	dw	l1daf		; 40
+	dw	l1e7d		; 41
+	dw	l1656		; 42
+	dw	l13fa		; 43
+	dw	l15de		; 44
+	dw	l1de1		; 45
+	dw	l1dde		; 46
+	dw	l1de8		; 47
+	dw	l1de4		; 48
+	dw	l1df3		; 49
+	dw	l1dec		; 50
+l21f7::
+	db	cr,tab,' "()[]{}=+-*/<>^;:,#$&\',null
+;
+	db	0,0,0,0,0
+l2216:
+	db	'ED80.HLP',0,0,0,0,0
+l2223:
+	dw	l230c		; Bottom of text
+l2225:
+	db	0
+l2226:
+	db	0
+l2227:
+	db	' '		; Base row
+l2228:
+	db	' '		; Base column
+l2229:
+	db	MAXCOL		; Upper right column
+l222a:
+	db	MAXVROW		; Max viewable rows
+l222b:
+	db	1dh
+l222c:
+	db	' '
+l222d:
+	db	8
+l222e:
+	db	2
+l222f:
+	db	'2'
+l2230:
+	db	10h
+l2231:
+	db	1ah
+l2232:
+	db	')'
+l2233:
+	db	8bh
+l2234:
+	db	0adh
+l2235:
+	db	'"'
+l2236:
+	db	80h
+l2237:
+	db	0
+l2238:
+	db	lf
+l2239:
+	db	0
+l223a:
+	db	0
+l223b:
+	db	1
+l223c:
+	db	2,esc,'Y',0,0		; Base of cursor setting
+l2241:
+	db	4,esc,'E',esc,'H'	; Clear screen control
+l2246:
+	db	2,esc,'K',0,0		; Erase to end of line control
+l224b:
+	db	0,0,0,0,0
+l2250:
+	db	0,0,0,0,0
+l2255:
+	dw	l2281-l2255
+l2257:
+	db	'P'-'@'
+;
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+l2278:
+	db	0,0
+l227a:
+	db	0,0
+l227c:
+	db	0,0
+l227e:
+	db	0,0
+;
+	db	0
+l2281::
+	db	'K'-'@','F',null
+	db	'S'-'@',null
+	db	'H'-'@',null
+	db	'D'-'@',null
+	db	'A'-'@',null
+	db	'F'-'@',null
+	db	'O'-'@','S',null
+	db	'O'-'@','D',null
+	db	'Q'-'@','S',null
+	db	'Q'-'@','D',null
+	db	'E'-'@',null
+	db	'X'-'@',null
+	db	'O'-'@','E',null
+	db	'O'-'@','X',null
+	db	'R'-'@',null
+	db	'C'-'@',null
+	db	'Q'-'@','R',null
+	db	'Q'-'@','C',null
+	db	'O'-'@','G',null	
+	db	'Q'-'@','B',null
+	db	'Q'-'@','K',null
+	db	'V'-'@',null
+	db	'O'-'@','F',null
+	db	'K'-'@','B',null
+	db	'K'-'@','K',null
+	db	'K'-'@','V',null
+	db	'K'-'@','C',null
+	db	'K'-'@','Y',null
+	db	'O'-'@','P',null
+	db	'K'-'@','W',null
+	db	'K'-'@','R',null
+	db	'K'-'@','0',null
+	db	'Q'-'@','0',null
+	db	'Q'-'@','F',null
+	db	'L'-'@',null
+	db	'O'-'@','L',null
+	db	'O'-'@','A',null
+	db	'K'-'@','Q',null
+	db	'O'-'@','Q',null
+	db	'K'-'@','X',null
+	db	'K'-'@','J',null
+	db	'Y'-'@',null
+	db	'O'-'@','I',null
+	db	tab,null
+	db	'O'-'@','R',null
+	db	DEL,null
+	db	'G'-'@',null
+	db	'O'-'@','T',null
+	db	'T'-'@',null
+	db	'Q'-'@',DEL,null
+	db	'Q'-'@','Y',null
+	db	null,null
+;
+; <<<<< BOTOOM OF TEXT >>>>>
+;
+l230c:
+	db	0fh,'D',0,11h
+	db	'S',0,11h,'D',0,'|',0,'~',0
+	db	1eh,0,1fh,0,5,0,18h,0,12h,0
+	db	3,0,17h,0,1ah,0,0ch,0,11h,'B'
+	db	0,11h,'K',0,16h,0,2,0,0bh,'B'
+	db	0,0bh,'E',0,0bh,'M',0,0bh,'C'
+	db	0,0bh,'Y',0,0bh,'P',0,0bh,'W'
+	db	0,0bh,'R',0,0bh,'0',0,11h,'0'
+	db	0,4,0,6,0,13h,0,1,0,0bh,'Q'
+	db	0,0bh,'S',0,0,0fh,'A',0,0bh
+	db	'Q',0,0fh,'Q',0,0bh,'X',0,0bh
+	db	'J',0,19h,0,0fh,'I',0,9,0,0fh
+	db	'R',0,7fh,0,7,0,0fh
+
+	end
+

@@ -1,0 +1,970 @@
+;
+;
+;
+l3f18:
+	push	hl
+	push	bc
+	jr	nc,l3f96
+	ld	de,(TxtEnd)	; Get end
+	push	de
+	push	de
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ex	(sp),hl
+	or	a
+	sbc	hl,bc
+	jp	nc,l3ed9
+	ld	e,l
+	ld	d,h
+	push	de
+	call	DispLeft	; Test enough room
+	pop	de
+	pop	bc
+	inc	bc
+	pop	hl
+	ld	(TxtEnd),de	; Set end
+	ld	a,b
+l3f3c:
+	sub	HIGH _SavLen
+	jr	c,l3f4d
+	ld	b,a
+l3f41:
+	push	bc
+	ld	bc,_SavLen
+	lddr			; Move down
+	pop	bc
+	call	PollIn		; Get character
+	jr	l3f3c
+l3f4d:
+	ld	a,c
+	or	b
+	jr	z,l3f53
+	lddr
+l3f53:
+	pop	bc
+	pop	hl
+	ex	de,hl
+	inc	de
+	ld	hl,(MemStrPtr)	; Get start of block pointer
+	call	l3f8e
+	ld	(MemStrPtr),hl	; .. set it
+	ld	hl,(MemEndPtr)	; Get end of block pointer
+	call	l3f8e
+	ld	(MemEndPtr),hl	; .. set it
+	ld	hl,(ScrBeg)	; Get start of screen address
+	call	l3f8e
+	ld	(ScrBeg),hl	; .. set it
+	ld	hl,(CurMemPtr)	; Get text pointer
+	call	l3f8e
+	ld	(CurMemPtr),hl	; .. set it
+	ld	hl,(EdtBlkPtr)
+	call	l3f8e
+	ld	(EdtBlkPtr),hl
+	ld	hl,(EdtCurPtr)
+	call	l3f8e
+	ld	(EdtCurPtr),hl
+	ret
+;
+;
+;
+l3f8e:
+	call	CmpAdr		; Compare addresses
+	ret	c		; .. HL<DE
+	or	a
+	sbc	hl,bc		; Subtract
+	ret
+;
+;
+;
+l3f96:
+	push	hl
+	add	hl,bc
+	push	hl
+	ld	de,(TxtEnd)	; Get end
+	inc	de
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ld	c,l
+	ld	b,h
+	pop	hl
+	pop	de
+	ld	a,b
+l3fa7:
+	sub	HIGH _SavLen
+	jr	c,l3fb8
+	ld	b,a
+	push	bc
+	ld	bc,_SavLen
+	ldir			; Move up
+	pop	bc
+	call	PollIn		; Get character
+	jr	l3fa7
+l3fb8:
+	ld	a,c
+	or	b
+	jr	z,l3fbf
+	ldir
+	dec	de
+l3fbf:
+	ld	(TxtEnd),de	; Set end
+	jr	l3f53
+;
+;
+;
+l3fc5:
+	push	hl
+	ld	de,(BlkStrPtr)	; Get start pointer
+	call	MinAdr		; Get MIN
+	bit	_BlkBeg,(iy+_BlkSta)
+	jr	z,l3fd6		; .. skip if no start of block
+	ld	(BlkStrPtr),hl	; .. set it
+l3fd6:
+	pop	hl
+	bit	_BlkEnd,(iy+_BlkSta)
+	ret	z		; .. exit if no end of block
+	ld	de,(BlkEndPtr)	; Get end pointer
+	call	MinAdr		; Get MIN
+	ld	(BlkEndPtr),hl	; .. set it
+	ret
+;
+;
+;
+l3fe7:
+	ld	de,EDLine	; Get base
+	ld	a,(@ScrCol)	; Get screen width
+	dec	a
+	ld	c,a
+	or	a
+	sbc	hl,de
+	ld	a,l
+	sub	(iy)
+	jr	c,l4012
+	cp	c
+	jr	c,l400e
+	sub	c
+	inc	a
+	add	a,(iy)
+	ld	(EditPSW),a
+	ld	a,(@ScrCol)	; Get screen width
+	dec	a
+	dec	a
+	ld	(ED.Col),a	; Set column to end
+	jp	l3762
+l400e:
+	ld	(ED.Col),a	; Save current column
+	ret
+l4012:
+	add	a,(iy)
+	ld	(EditPSW),a
+	ld	(iy+_EdCol),0	; Clear column
+	jp	l3762
+;
+;
+;
+l401f:
+	bit	_LB,(iy+_Video)
+	ret	z
+	ld	hl,(ScrBeg)	; Get start of screen
+	ld	de,(TxtBeg)	; .. and start
+	call	MinAdr		; Get MIN
+	ex	de,hl
+	ld	(ScrBeg),hl	; .. set MAX for screen
+	ld	bc,1
+	ld	de,(CurMemPtr)	; Get text pointer
+	call	CmpAdr		; Compare addresses
+	jp	z,l40da		; .. same
+	jr	c,l4086		; .. HL < Current_Pointer
+l4041:
+	ld	de,(CurMemPtr)	; Get current pointer
+	call	CmpAdr		; Compare addresses
+	jr	z,l4055		; .. same
+	call	PrevEOL		; Adjust to previous EOL
+	inc	bc
+	ld	a,c
+	or	a
+	call	z,PollIn	; Get character
+	jr	l4041
+l4055:
+	ld	(ScrBeg),hl	; Set start of screen
+	ld	(iy+_EdRow),1	; Set 1st row
+	set	0,(iy+14)
+	ld	a,b
+	or	a
+	jr	nz,.ResetRow	; Reset row
+	ld	a,(@ScrRow)	; Get screen height
+	dec	a
+	cp	c
+	jr	c,.ResetRow	; Reset row
+	dec	c
+	@XY	_First,_StLin+1
+	call	ExecXY
+	dec	c
+	push	af
+	inc	c
+l407b:
+	call	insline
+	dec	c
+	jr	nz,l407b
+	pop	af
+	ret	z
+.ResetRow:
+	jp	ResetRow	; Reset row
+l4086:
+	ld	de,(CurMemPtr)	; Get current pointer
+	call	CmpAdr		; Compare addresses
+	jr	z,l409a		; .. same
+	call	NextEOL		; Adjust for next end of line
+	inc	bc
+	ld	a,c
+	or	a
+	call	z,PollIn	; Get character
+	jr	l4086
+l409a:
+	ld	a,b
+	or	a
+	jr	nz,l40de
+	ld	a,(@ScrRow)	; Get screen height
+	dec	a
+	ld	e,a
+	ld	a,c
+	sub	e
+	ld	d,a
+	inc	d
+	jr	c,l40da
+	dec	d
+	jr	nz,l40b3
+	bit	0,(iy+21)
+	jp	nz,l4103
+l40b3:
+	inc	d
+	sub	e
+	jr	nc,l40de
+	ld	a,(Ed..Row)
+	sub	d		; Test row
+	jr	c,l40de
+	jr	z,l40de
+	ld	(Ed..Row),a	; .. save new
+	ld	hl,(ScrBeg)	; Get start of screen
+	ld	b,d
+	push	de
+l40c7:
+	call	NextEOL		; Adjust for next end of line
+	push	hl
+	call	.DelLine	; Delete line
+	pop	hl
+	djnz	l40c7
+	ld	(ScrBeg),hl	; Set start of screen
+	pop	de
+l40d5:
+	dec	e
+	ld	(iy+_EdRow),e	; Set row
+	ret
+l40da:
+	ld	(iy+_EdRow),c	; Set row
+	ret
+l40de:
+	ld	hl,(ScrBeg)	; Get start of screen
+	dec	bc
+	ld	a,(@ScrRow)	; Get screen height
+	sub	3
+	ld	e,a
+	ld	a,c
+	sub	e
+	ld	c,a
+	jr	nc,l40ee
+	dec	b
+l40ee:
+	call	NextEOL		; Adjust for next end of line
+	dec	bc
+	ld	a,c
+	or	b
+	jr	nz,l40ee
+	ld	(ScrBeg),hl	; Set start of screen
+	call	ResetRow	; Reset row
+	set	0,(iy+14)
+	jp	l401f
+l4103:
+	call	l40d5
+	ld	a,(Ed..Row)	; Get row
+	ld	l,a
+	ld	a,(@ScrRow)	; Get sceen height
+	cp	l		; .. compare
+	ld	a,l
+	jr	z,l4117
+	dec	a
+	jr	z,l4117
+	ld	(Ed..Row),a	; .. set new row
+l4117:
+	ld	hl,(ScrBeg)	; Get start of screen
+	call	NextEOL		; Adjust for next end of line
+	ld	(ScrBeg),hl	; .. set it
+	call	.DelLine	; Delete line
+	ld	a,(@ScrRow)	; Get screen height
+	dec	a
+	jp	l3bbc
+;
+; Find delimiter
+; ENTRY	Reg HL points to current text
+; EXIT	Carry set if delimiter found
+;
+FndDelim:
+	ld	de,(DelimP)	; Load table
+Fnd.Delim:
+	ld	a,(de)		; Test end of table
+	or	a
+	ret	z		; .. yeap
+	cp	(hl)		; Compare
+	jr	z,GotDelim	; .. found
+	inc	de
+	jr	Fnd.Delim
+GotDelim:
+	scf			; Set result
+	ret
+;
+;
+;
+l4139:
+	push	af
+	ld	a,(ED.Row)	; Get row
+	cp	(iy+_Ed.Row)	; .. compare
+	jr	nc,l4145
+	ld	(Ed..Row),a	; Set new row
+l4145:
+	pop	af
+	ret
+;
+; Reset row
+;
+ResetRow:
+	ld	(iy+_Ed.Row),1	; Set first row
+	ret
+;
+; Adjust pointer for inserting characters
+; ENTRY	Reg BC holds number of characters to be inserted
+;
+MakeRoom:
+	ex	de,hl
+	bit	_BlkBeg,(iy+_BlkSta)
+	jr	z,l415f		; .. skip if no start of block
+	ld	hl,(BlkStrPtr)	; Get start pointer
+	call	CmpAdr		; Compare addresses
+	jr	c,l415f		; .. Start_Of_Block <DE
+	add	hl,bc		; .. add offset
+	ld	(BlkStrPtr),hl	; .. set it
+l415f:
+	bit	_BlkEnd,(iy+_BlkSta)
+	jr	z,l4171		; .. skip if no end of block
+	ld	hl,(BlkEndPtr)	; Get end pointer
+	call	CmpAdr		; Compare addresses
+	jr	c,l4171		; .. End_Of_Block < DE
+	add	hl,bc		; .. add offset
+	ld	(BlkEndPtr),hl	; .. set it
+l4171:
+	ex	de,hl
+	ret
+;
+;
+;
+l4173:
+	push	hl
+	ld	bc,-1
+	call	MakeRoom	; Delete one character
+	ex	de,hl
+	ld	hl,EDLine+_LinLen-1
+	or	a
+	sbc	hl,de
+	jr	z,l418a		; .. same
+	ld	c,l
+	ld	b,h
+	ld	l,e
+	ld	h,d
+	inc	hl
+	ldir			; .. unpack
+l418a:
+	ld	hl,EDLine+_LinLen-1
+	ld	(hl),' '	; .. clear last entry
+	pop	hl
+	ret
+;
+; Get minimum of two addresses
+; ENTRY	Reg HL holds 1st address
+;	Reg DE holds 2nd address
+; EXIT	Regs swapped if 1st >= 2nd
+;
+MinAdr:
+	call	CmpAdr		; Compare addresses
+	ret	c		; .. 1st < 2nd
+	ex	de,hl		; .. swap
+	ret
+;
+;
+;
+l4197:
+	call	EdCursor	; Set current cursor
+	ld	a,(@ScrCol)	; Get screen width
+	dec	a
+	sub	(iy+_EdCol)	; Subtract current column
+	ld	hl,(CurEdPtr)	; Get current pointer
+	ld	b,a
+	set	0,(iy+16)
+	call	l3c41
+	res	0,(iy+16)
+	ret
+;
+; Adjust for next end of line
+; ENTRY	Reg HL holds current pointer
+; EXIT	Reg HL holds pointer to next line
+;	Carry set if pointer behind end address
+;
+NextEOL:
+	push	bc
+	ex	de,hl
+	ld	hl,(TxtEnd)	; Get end
+	dec	hl
+	or	a
+	sbc	hl,de		; .. get difference
+	ld	b,h
+	ld	c,l
+	inc	bc
+	ex	de,hl
+	ld	d,h
+	ld	e,l
+	jr	c,N.EOL.ex	; Out of text
+	ld	a,lf		; Find new line
+	cpir
+	jp	po,N.EOL.ex	; .. none there
+	or	a
+	pop	bc
+	ret
+N.EOL.ex:
+	scf			; Set out of text
+	ex	de,hl
+	pop	bc
+	ret
+;
+; Adjust for previous end of line
+; ENTRY	Reg HL holds current pointer
+; EXIT	Reg HL holds pointer to previous line
+;	Carry set if pointer below start address
+;
+PrevEOL:
+	push	bc
+	ld	c,l		; Save pointer
+	ld	b,h
+	ld	a,lf
+	call	FixBeg		; Check against start
+	jr	c,P.EOL.ex	; .. yeap
+P.EOL.src:
+	call	FixBeg		; .. check again
+	jr	z,P.EOL.strt	; .. it's the start
+	jr	c,P.EOL.ex	; .. below start
+	cp	(hl)		; Find LF
+	jr	nz,P.EOL.src	; .. nope
+	inc	hl
+P.EOL.strt:
+	pop	bc
+	ret
+P.EOL.ex:
+	ld	h,b		; Restore pointer
+	ld	l,c
+	pop	bc
+	ret
+;
+; Adjust pointer for inserting one character
+;
+RoomForOne:
+	push	hl
+	ld	bc,1
+	call	MakeRoom	; Insert one character
+	ld	de,EDLine+_LinLen-1
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Get difference
+	dec	hl
+	ld	c,l
+	ld	b,h
+	ld	de,EDLine+_LinLen-2
+	ld	l,e
+	ld	h,d
+	dec	hl
+	ld	a,c
+	or	b		; Test any
+	jr	z,l420c
+	push	de
+	lddr			; .. move characters
+	pop	hl
+	ld	(hl),' '	; Clear character
+l420c:
+	pop	hl
+	ret
+;
+; Position cursor and give immediate string
+; ENTRY	Reg H holds column
+;	Reg L holds row
+;
+CtrlStrXY:
+	call	ExecXY		; Set cursor
+CtrlStrJ:
+	jp	CtrlStr
+;
+; ##################################################
+; >>> Redirected console out during edit session <<<
+; ##################################################
+;
+New.Conout:
+	pop	hl
+	ex	(sp),hl
+	bit	_LB,(iy+_Video)
+	jr	z,l4220
+	push	hl
+Old.Conout:
+	call	$-$		; -->> Overwritten
+l4220:
+	ld	a,(l4543)
+	sub	2
+	ld	(l4543),a
+	ret	nz
+	jr	.PollIn		; Get character
+;
+; Clear look ahead buffer
+;
+ClrAhead:
+	ld	hl,(QueCur)
+	ld	(QueNew),hl	; .. set empty
+	ret
+;
+; Poll character from input
+;
+PollIn:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	call	.PollIn		; Get it
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Poll character from input - no reg preserved
+;
+.PollIn:
+	ld	hl,(QueNew)	; Get pointer
+	call	ChkAhead	; .. bump and check it
+	ld	de,(QueCur)	; Get current
+	ex	de,hl
+	sbc	hl,de		; Test same
+	ex	de,hl
+	ret	z		; .. yeap, no room
+	push	hl
+	push	ix
+	push	iy
+	call	xconstat	; Get state of console
+	pop	iy
+	pop	ix
+	pop	hl
+	ret	z		; .. none there
+	call	StatChk		; Get character
+	ld	(hl),a		; .. save
+	ld	(QueNew),hl	; .. set new
+	ret
+;
+; Bump and check ahead pointer
+; ENTRY	Reg HL holds current pointer
+; EXIT	Reg HL holds position within the queue
+;
+ChkAhead:
+	inc	hl		; Bump pointer
+	ld	de,Ahead+_Ahead
+	or	a
+	ex	de,hl
+	sbc	hl,de		; Test against top
+	ex	de,hl
+	ret	nz		; .. not the same
+	ld	hl,Ahead	; Return start of queue
+	ret
+;
+; Get character from console
+;
+EDCharIn:
+	push	hl
+	push	de
+	ld	de,(QueCur)
+	ld	hl,(QueNew)
+	or	a
+	sbc	hl,de		; Test look ahead buffer
+	ex	de,hl
+	jr	z,ECI.Kb	; .. empty, get from console
+	call	ChkAhead	; Get pointer
+	ld	a,(hl)		; .. fetch character
+	ld	(QueCur),hl	; .. set new position
+	jr	ECI.ex
+ECI.Kb:
+	call	StatChk		; Get from keyboard
+ECI.ex:
+	pop	de
+	pop	hl
+	ret
+;
+; Test look ahead buffer empty
+; EXIT	Zero set if so
+;
+IsAheadEmpty:
+	push	hl
+	push	de
+	ld	de,(QueCur)
+	ld	hl,(QueNew)
+	or	a
+	sbc	hl,de		; Test same
+	pop	de
+	pop	hl
+	ret
+;
+; Get character from keyboard
+; EXIT	Accu holds key in range 00..1F, 20..7F
+;	or control in range     80..FF
+;
+StatChk:
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	call	.StatChk
+	pop	iy
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+.StatChk:
+	call	XBIOS		; Get key # and state
+	dw	KM.GET
+	jr	nc,.StatChk	; .. none
+	call	SpecKey		; Test special
+	jr	z,.StatChk
+	ld	(KeyNum),bc
+	call	XBIOS		; Get key
+KM.XLT:
+	dw	$
+	ld	(KeyChar),a
+	call	CtrlKey		; Test control key
+	jr	z,GotCtrl	; .. yeap
+	ld	a,(KeyChar)
+	ret
+GotCtrl:
+	ld	a,(KeyStat)	; Get state
+	add	a,a		; Test ALT
+	ld	hl,ALTtab
+	ld	bc,ALTlen
+	ld	de,ALToff
+	jr	c,GetKey	; .. yeap
+	and	11000000b	; Test shift
+	ld	hl,SHFtab
+	ld	bc,SHFlen
+	ld	de,SHFoff
+	jr	nz,GetKey
+	ld	hl,NormTab
+	ld	bc,NormLen
+	ld	de,NormOff
+GetKey:
+	ld	a,(KeyNum)
+	cpir			; .. find key
+	jr	nz,.StatChk	; .. nope
+	ex	de,hl
+	add	hl,bc		; Get real index
+	ld	a,l
+	set	_MB,a		; .. set bit
+	ret
+;
+; Find key index from table
+; EXIT	Zero set if found
+;	Reg BC holds index
+;
+CtrlKey:
+	ld	a,(KeyNum)
+	ld	hl,CtrTab
+	ld	bc,CtrLen
+	cpir			; Find key
+	ret
+;
+; Find key index from table
+; ENTRY	Reg C holds key number
+; EXIT	Zero set if found
+;
+SpecKey:
+	push	bc
+	ld	a,c
+	ld	hl,SpecTab
+	ld	bc,SpcLen
+	cpir			; Find key
+	pop	bc
+	ret
+;
+MSGbase:
+	dw	TOP
+$DMY.ARG:
+	db	eof
+;
+; %%%%%%%%%%%%%%%%%%%%%
+; %%% Control table %%%
+; %%%%%%%%%%%%%%%%%%%%%
+;
+CtrTab:
+SHFtab:
+NormTab:
+	db	13,4,15,6,16,23,68,5,12
+ALTtab:
+	db	14,79,10,20
+SHFlen	equ	$-SHFtab
+	db	7,3
+ALTlen	equ	$-ALTtab
+	db	18,78,72,76,75,11,0,2,8,77
+NormLen	equ	$-NormTab
+	db	1,66,73
+CtrLen	equ	$-CtrTab
+NormOff	equ	0
+SHFoff	equ	NormLen
+ALToff	equ	SHFlen+NormLen
+;
+; Special key table
+; Holds SHIFT, ALT and EXTRA
+;
+SpecTab:
+	db	70,21,80,74
+SpcLen	equ	$-SpecTab
+;
+; Delimiter table
+;
+AllDelim:
+	db	'<>,[].*+-/$:=(){}^#'''
+BlnkDelim:
+	db	' ',eot
+;
+; Editor control table
+;
+CtrlTab:
+@CRep1	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.SRCREP
+	dw	ED.END
+	dw	ED.WRBLK
+	dw	ED.RDBLK+@MSB
+@Copy	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.CPYBLK+@MSB
+@Canc	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.VISBLK
+	dw	ED.MRKEND
+@CDEL	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.LCHDEL+@MSB
+@NL	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.INSRT+@MSB
+@CR	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.NL
+@Move	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.MOVBLK+@MSB
+@Recal	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.RECCUR
+	dw	ED.FIND
+@LnDEL	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.LINDEL+@MSB
+	dw	ED.LDWN
+	dw	ED.LUP
+	dw	ED.PDWN
+@CWRgt	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.WRGT
+	dw	ED.TAB+@MSB
+	dw	ED.MRKBEG
+@CDell	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.CCHDEL+@MSB
+@CRgt	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.CRGT
+@CLft	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.CLFT
+	dw	ED.TXTEND
+	dw	ED.LEND
+;
+	dw	ED.REPLC
+	dw	ED.DELBLK+@MSB
+	dw	ED.PGLAST
+	dw	ED.PG1ST
+	dw	ED.PUP
+@CWLft	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.WLFT
+	dw	ED.AUTOTAB
+	dw	ED.MRKWRD
+	dw	ED.RWRDEL+@MSB
+	dw	ED.BLKEND
+	dw	ED.BLKBEG
+	dw	ED.TXTBEG
+	dw	ED.LBEG
+;
+	dw	ED.RESLIN+@MSB
+	dw	ED.INST
+@CRep2	equ	($-CtrlTab) / 2 + MSB
+	dw	ED.SRCREP
+	dw	ED.LENDEL+@MSB
+	dw	ED.SDWN
+	dw	ED.SUP
+;
+KeyNum:
+	db	0
+KeyStat:
+	db	0
+KeyChar:
+	db	0
+;
+; Pointer table
+;
+; !!! Following bytes must be contigous !!!
+;
+CurMemPtr:
+	dw	0		; Real memory address of text
+				; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+				; --> Start of data for OVERLAY
+				; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+CurEdPtr:
+	dw	EDLine		; Current edit line
+EdtBlkPtr:
+	dw	0
+l4456:
+	dw	EDLine
+EdtCurPtr:
+	dw	0
+l445a:
+	dw	EDLine
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+QueCur:
+	dw	Ahead
+QueNew:
+	dw	Ahead
+MemStrPtr:
+	dw	0		; Real start of block address
+MemEndPtr:
+	dw	0		; Real end of block address
+BlkStrPtr:
+	dw	2
+BlkEndPtr:
+	dw	2
+l4468:
+	dw	0
+ScrBeg:
+	dw	0		; Real start of screen adress
+;
+; The editor status block
+;
+_Ed.Row	equ	9
+;
+EditPSW:
+	db	0		; + 0
+	db	0		; + 1
+l446e:
+	db	1		; + 2
+Rel.Col:
+	db	1		; + 3 : Relative column
+ED.Col:
+	db	0		; + 4 : Current column
+ED.Row:
+	db	1		; + 5 : Current row
+ED.Ins:
+	db	0		; + 6 : Insertion flag
+	db	1		; + 7 : Video bit
+NewFlg:
+	db	0		; + 8 : Change on control
+Ed..Row:
+	db	1		; + 9 : Another row
+l4476:
+	db	0		; +10
+	db	0		; +11
+l4478:
+	db	0		; +12
+ED.Ind:
+	db	0		; +13 : Indention flag
+	db	1		; +14
+	db	1		; +15
+	db	0		; +16
+FndStat:
+	db	0		; +17 : Find status bits
+FndFlg:
+	db	0		; +18 : 0 Find, -1 Replace
+ChgFlg:
+	db	FALSE		; +19 : Text change flag
+ED.Blk:
+	db	0		; +20 : Block flag
+	db	0		; +21
+EDChCnt:
+	db	3		; +22 : Control character count
+EDChar:
+	db	0,0,0		; Max control characters
+;
+l4486:
+	dw	0
+SrcEndPtr:
+	dw	0
+FndCnt:
+	dw	0		; Find and replace counter
+l448c:
+	dw	0
+l448e:
+	dw	0
+;
+; Find buffer
+;
+$FndItm:
+	db	30,0
+	ds	30+1
+;
+; Replace buffer
+;
+$RplItm:
+	db	30,0
+	ds	30+1
+;
+; Option buffer
+;
+$OptBuf:
+	db	10,0
+	ds	10+1
+;
+; Filename buffer
+;
+$BlkBuf:
+	db	15,0
+	ds	15+1
+;
+FilFlg:
+	db	FALSE		; Indicate file defined
+CmpMode:
+	db	_Memory		; Default memory
+CmpStrt:
+	dw	strtprg		; Compiler start address
+AvailRAM:
+	dw	0
+;
+; MAIN file
+;
+MFCB:
+	ds	FCBlen
+;
+; WORK file
+;
+WFCB:
+	ds	FCBlen
+;
+MSGFlg:
+	db	0		; TURBO.MSG flag
+CompFlg:
+	db	0		; 0 requires compiling
+l4543:
+	db	0
+TxtBeg:
+	dw	TOP		; Start of text
+TxtEnd:
+	dw	TOP		; End of text
+TopMem:
+	dw	0		; Top of free memory
+

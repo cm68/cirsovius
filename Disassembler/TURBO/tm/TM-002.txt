@@ -1,0 +1,904 @@
+;
+; Execute selected command
+; ENTRY	Accu holds selection
+;	Reg HL points to key table
+;	Reg DE points to execution table
+;	Reg B  holds length of table
+; EXIT	Carry set if key not found
+;	Reg HL holds execution address
+;
+DoCmd:
+	cp	(hl)		; Compare
+	jr	z,FndCmd	; .. found
+	inc	hl		; Skip key
+	inc	de		; .. and address
+	inc	de
+	djnz	DoCmd		; .. try more
+	scf			; .. set no success
+	ret
+FndCmd:
+	ex	de,hl
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl		; .. swap reg
+	ret
+;
+; >>> Command tables <<<
+;
+M.Menue:
+IF	@@GERMAN
+	db	'LNAHEKSR'
+IF	@@EXEC
+	db	'U'
+ENDIF	;@@EXEC
+	db	'IBO'
+ELSE
+	db	'LUWMECRS'
+IF	@@EXEC
+	db	'X'
+ENDIF	;@@EXEC
+	db	'DQO'
+ENDIF	;@@GERMAN
+MMClen	equ	$-M.Menue
+;
+S.Menue:
+IF	@@GERMAN
+	db	'SCHAEGKFB'
+ELSE
+	db	'MCHSEULFQ'
+ENDIF	;@@GERMAN
+SMClen	equ	$-S.Menue
+;
+M.Table:
+	dw	M.LOG
+	dw	M.USER
+	dw	M.WORK
+	dw	M.MAIN
+	dw	M.EDIT
+	dw	M.COMPILE
+	dw	M.RUN
+	dw	M.SAVE
+IF	@@EXEC
+	dw	M.EXECUTE
+ENDIF	;@@EXEC
+	dw	M.DIR
+	dw	M.QUIT
+	dw	M.OPTIONS
+;
+S.Table:
+	dw	S.MEM
+	dw	S.COM
+	dw	S.CHN
+	dw	S.START
+	dw	S.END
+	dw	S.UNLIMIT
+	dw	S.LIMIT
+	dw	S.FIND
+	dw	S.QUIT
+;
+; Give disk error message and restart
+;
+COMP.Ferr:
+	call	String
+IF	@@GERMAN
+	db	'Diskette oder Verzeichnis voll',eot
+ELSE
+	db	'Disk or directory full',eot
+ENDIF	;@@GERMAN
+	call	ESCape		; Get escape
+	jp	ReEntMain	; .. re-enter TURBO
+;
+; Tell run-time error found
+;
+ErrorAt:
+	call	String
+IF	@@GERMAN
+	db	'Fehlerposition in Laufzeit ',eot
+ELSE
+	db	'Run-time error position ',eot
+ENDIF	;@@GERMAN
+	ret
+;
+; Init TURBO on entry
+;
+TURBOInit:
+	ld	hl,(BDOS+1)	; Get top of memory available
+	pop	bc
+	ld	sp,hl		; .. into stack
+	push	bc
+	ld	de,-TopSpc
+	add	hl,de
+	ld	(TopMem),hl	; Set top
+	ld	hl,WrkLine	; Line input as top of memory
+	ld	bc,0		; {$C-, $U-}
+	call	IniPrg		; .. init it
+	call	CrtInit		; Init terminal
+	call	LowVideo	; .. set attribute
+	jp	NormVideo
+IF	@@EXEC
+;
+; Return from OVERLAY
+;
+OVL.Ret:
+	call	TURBOInit	; Re-Init TURBO
+	ld	a,(CompFlg)
+	push	af		; Save flag
+	ld	a,(MSGFlg)
+	or	a
+	call	nz,Ld.MSG	; Load TURBO.MSG if requested
+	call	IniSession	; Clear a bit
+	call	WFCBhere	; Test work file there
+	call	nz,DoIniLoad	; .. yeap, load it
+	ld	a,(CmpMode)
+	dec	a		; Test compile to memory
+	jr	z,IniGo		; .. yeap
+	pop	af
+	ld	(CompFlg),a	; Restore flg
+IniGo:
+	jp	ReEntMain	; Re-enter TURBO
+ENDIF	;@@EXEC
+;
+; Get line from keyboard
+; EXIT	Reg DE points to 1st non blank
+;
+StrGet:
+	call	String
+	db	': ',eot
+	call	RdLine		; Get line
+	call	NL		; .. close it
+	ld	de,WrkLine	; Get start of line
+Str.Get:
+	ld	a,(de)
+	cp	eof
+	ret	z		; End on EOL
+	cp	' '
+	ret	c		; .. or other control
+	ret	nz		; Skip blanks
+	inc	de
+	jr	Str.Get
+;
+; Display selection arrow
+; ENTRY	Accu holds state
+;
+CompArrow:
+	dec	a		; Count down
+	jr	nz,CompBlnk	; .. not this one
+	call	CtrlStr		; Display arrow
+_Arr:
+IF	@@GERMAN
+	db	'kompilieren -> '
+ELSE
+	db	'compile -> '
+ENDIF	;@@GERMAN
+_ArrLen	equ	$-_Arr
+	db	eot
+	ret
+CompBlnk:
+	ld	b,_ArrLen
+Blank:
+	call	String
+	db	' ',eot		; .. give a bit blanks
+	djnz	Blank
+	ret
+;
+; Display CCP arrow
+; ENTRY	Accu holds state
+;
+BuffArrow:
+	cpl
+	and	1		; Test state
+	ld	b,_ArBLen
+	jr	z,Blank		; .. not this one
+	call	CtrlStr		; Display arrow
+_BArr:
+IF	@@GERMAN
+	db	'CCP Puffer -> '
+ELSE
+	db	'CCP buffer -> '
+ENDIF	;@@GERMAN
+_ArBLen	equ	$-_BArr
+	db	eot
+	ret
+;
+; Init a bit and load work file into memory
+;
+DoIniLoad:
+	ld	hl,LdErrExit
+	ld	(LoadExit+1),hl	; Redirect errors
+IniLoad:
+	ld	hl,PrcTooBig
+	ld	(NoMemLoad+1),hl
+	call	IniSession	; Clear a bit
+	ld	de,WFCB		; Set FCB
+;
+; Load text file
+; ENTRY	Reg DE points to FCB
+; EXIT	Reg HL points to  end  of memory
+;
+DoLoad:
+	ld	hl,(TxtBeg)	; Get start
+	ld	(MemStrPtr),hl	; Set start of block
+	ld	(MemEndPtr),hl	; .. end of block
+	ld	(CurMemPtr),hl	; .. text pointer
+	ld	(EdtBlkPtr),hl
+	ld	(EdtCurPtr),hl
+	ld	(ScrBeg),hl	; .. start of screen
+	ld	bc,(TopMem)	; Get top
+	call	LoadFile	; .. load file
+	ld	(hl),cr		; Close last line
+	inc	hl
+	ld	(TxtEnd),hl	; Set top
+	ret
+;
+; Load a file
+; ENTRY	Reg BC holds last available address
+;	Reg DE holds FCB
+;	Reg HL holds start address
+; EXIT	Reg HL holds end address
+;
+LoadFile:
+	push	hl
+	push	bc
+	push	de
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Laden ',eot
+ELSE
+	db	'Loading ',eot
+ENDIF	;@@GERMAN
+	call	PrFCB		; Print file
+	ld	de,FCB
+	call	ClrFCB		; Prepare FCB for opening
+	pop	hl
+	ld	bc,FCBlen
+	ldir			; Copy FCB
+	ld	c,.Open
+	call	FBDOS		; Find file
+FileLoad:
+	push	af
+	ld	de,TmpBuff
+	call	SetDMA		; Set disk buffer
+	pop	af
+	pop	bc
+	pop	hl
+	inc	a		; Test any record
+	jr	z,LoadExit	; .. nope
+	ld	(LastAdr),bc	; .. set top
+NxtRecord:
+	ld	bc,(LastAdr)
+	dec	b
+	or	a
+	sbc	hl,bc		; Test room in memory
+	add	hl,bc
+NoMemLoad:
+	jp	nc,$-$		; *** REDIRECTED ***
+	push	hl
+	ld	c,.RdSeq
+	call	FBDOS		; Read record
+	pop	hl
+	or	a
+	ret	nz
+	ld	de,TmpBuff	; Load buffer base
+	ld	b,RecLng	; .. and length
+CopyLoad:
+	ld	a,(de)		; Scan for EOF
+	cp	-1
+	ret	z
+	and	NoMSB
+	cp	eof
+	ret	z
+	ld	(hl),a		; .. unpack
+	inc	hl
+	inc	de
+	djnz	CopyLoad
+	jr	NxtRecord
+LoadExit:
+	jp	$-$		; *** REDIRECTED ***
+;
+; Tell file not found
+;
+NotFound:
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Datei nicht gefunden',eot
+ELSE
+	db	'File not found',eot
+ENDIF	;@@GERMAN
+.ESCape:
+	jp	ESCape		; Get escape
+;
+; Process file not found error
+;
+LdErrExit:
+	call	NotFound	; .. tell not found
+	jr	ResLoading	; .. reset load task
+;
+; Process new file display
+;
+TellNew:
+	call	String		; .. tell new one
+	db	cr,lf
+IF	@@GERMAN
+	db	'Neue Datei',eot
+ELSE
+	db	'New File',eot
+ENDIF	;@@GERMAN
+	inc	hl
+	push	hl
+	ld	hl,1000
+	call	Delay		; Display one second
+	pop	hl
+	ret
+;
+; Tell file too big
+;
+TooBig:
+	ld	hl,(TxtEnd)	; Get address
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Datei zu gro~',eot
+ELSE
+	db	'File too big',eot
+ENDIF	;@@GERMAN
+	jr	.ESCape
+;
+; Process file too big error
+;
+PrcTooBig:
+	call	TooBig		; Tell file too big
+ResLoading:
+	xor	a
+	ld	(WFCB+1),a	; Indicate no file
+	jp	ReEntMain	; .. re-enter
+;
+; Save work file if any change performed
+;
+DoSave:
+	db	skip
+;
+; Force saving work file if any change performed
+;
+ForceSave:
+	xor	a
+	ex	af,af'
+	ld	a,(ChgFlg)	; Test to be saved
+	or	a
+	ret	z		; .. nope
+	ex	af,af'
+	or	a		; Test force
+	jp	z,M.SAVE	; .. yeap
+	call	String
+IF	@@GERMAN
+	db	'Arbeitsdatei ',eot
+ELSE
+	db	'Workfile ',eot
+ENDIF	;@@GERMAN
+	call	PrWFCB		; Print name of file
+	call	String
+IF	@@GERMAN
+	db	' nicht gesichert. Sichern',eot
+ELSE
+	db	' not saved. Save',eot
+ENDIF	;@@GERMAN
+	xor	a
+	ld	(ChgFlg),a	; Clear change flag
+	call	YesNoNL		; Ask for saving
+	call	nz,M.SAVE	; .. yeap
+	ret
+;
+; Clear standard FCB
+;
+ClrSFCB:
+	ld	de,FCB		; Get FCB
+;
+; Clear FCB
+; ENTRY	Reg DE points to FCB
+;
+ClrFCB:
+	push	de
+	ld	hl,_ex
+	add	hl,de
+	ld	(hl),0		; Clear extent
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	bc,FCBlen-_ex-1
+	ldir			; .. and rest of FCB
+	pop	de
+	ret
+;
+; Load a file into memory
+;
+InstallFile:
+	call	WFCBhere	; Test work file here
+	call	z,GetFN		; .. no, get it
+	call	MFCBhere	; Test main file here
+Inst.Same:
+	ld	hl,WFCB		; Load FCB
+	jr	nz,Inst.Cmp	; .. got main file
+	call	GetFN		; Get file
+	jr	Inst.Beg
+Inst.Cmp:
+	call	CmpFCB		; Test same files
+	jr	z,Inst.Same	; .. yes, get another
+	call	ForceSave	; Force saving
+	ld	hl,PrcTooBig	; Redirect errors
+	ld	(NoMemLoad+1),hl
+	ld	hl,LdErrExit
+	ld	(LoadExit+1),hl
+	ld	de,MFCB		; Load FCB
+	push	de
+	call	DoLoad		; Load file
+	ld	a,.TRUE
+	pop	hl
+Inst.Beg:
+	ld	(FilFlg),a	; Set flag
+	ld	de,FFCB
+	ld	bc,FCBlen
+	ldir			; Copy FCB
+	xor	a
+	ld	(CmpTyp),a	; Clear type
+	ld	hl,(BDOS+1)
+	ld	(DataEnd),hl	; Set top of memory
+;
+; Get start of code
+; EXIT	Reg HL holds address
+;
+GetCodeBeg:
+	ld	hl,(TxtEnd)
+	ld	(hl),eof	; Close text
+	inc	hl
+	ld	(CodeBeg),hl	; Set as start of code
+	ret
+;
+; Get CCP parameter
+;
+GetCCP:
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Eingabe Kommandoparameter'
+ELSE
+	db	'Enter command parameter'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+	call	StrGet		; Get string
+	ld	b,MaxParams	; Set max
+	ld	hl,CCPbuf+1
+	ld	c,0
+CpyCCP:
+	ld	a,(de)
+	cp	eof		; Test end of input
+	jr	z,GotCCP
+	call	DoUPcase
+	ld	(hl),a		; .. unpack
+	inc	hl
+	inc	de
+	inc	c
+	djnz	CpyCCP
+GotCCP:
+	ld	(hl),eot	; .. close line
+	ld	a,c
+	ld	(CCPbuf),a	; .. set length
+	ret
+$TURBO:
+	_TURBO
+;
+; Load TURBO.MSG
+;
+Ld.MSG:
+	ld	hl,(MSGbase)
+	ld	(TxtBeg),hl	; Set start
+	ld	de,$TURBO	; Set name
+	ld	a,'M'
+	ld	hl,'S'+'G'*256
+	call	PrepFile	; Open file
+	ld	(MSGFlg),a	; Set result
+	call	z,ESCape	; .. not here
+	jr	z,No.MSG
+	ld	hl,NotFound	; Redirect errors
+	ld	(LoadExit+1),hl
+	ld	hl,TooBig
+	ld	(NoMemLoad+1),hl
+	ld	de,FCB
+	call	DoLoad		; Load message file
+No.MSG:
+	ld	hl,(TxtEnd)
+	ld	(hl),eof	; Set end
+	inc	hl
+	ld	(TxtBeg),hl	; .. and start
+	ret
+IF	@@EXEC
+;
+; Load TURBO.OVR
+;
+Ld.OVR:
+	call	DoSave		; Save work file
+	ld	de,$TURBO	; Set name
+	ld	a,'O'
+	ld	hl,'V'+'R'*256
+	call	PrepFile	; Prepare .OVR file
+	ret	z		; .. not there
+	ld	de,@OVLADR-RecLng
+..LdOVR:
+	ld	hl,RecLng
+	add	hl,de
+	push	hl
+	ex	de,hl
+	call	SetDMA		; Set disk buffer
+	ld	c,.RdSeq
+	call	FBDOS		; Read record
+	pop	de
+	or	a		; .. until end of file
+	jr	z,..LdOVR
+	ret
+ENDIF	;@@EXEC
+;
+; Set wildcard on empty FCB
+; ENTRY	Reg HL points to FCB part
+;	Reg B  holds length
+;
+SetWild:
+	ld	a,(hl)
+	cp	' '		; Test blank
+	ret	nz		; .. nope
+..SetWild:
+	ld	(hl),'?'	; .. force wild card
+	inc	hl
+	djnz	..SetWild
+	ret
+;
+; Get YES or NO selection
+; EXIT	Zero set if NO
+;
+YesNo:
+	call	String
+	db	' (',_YES,'/N)? ',eot
+wtyn:
+	call	StatChk		; Get selection
+	call	DoUPcase
+	cp	_YES
+	jr	z,yes
+	cp	'N'
+	jr	nz,wtyn
+yes:
+	call	ChrPutCon
+	sub	'N'
+	ret
+;
+; Get YES or NO selection and new line
+; EXIT	Zero set if NO
+;
+YesNoNL:
+	call	YesNo
+	push	af
+	call	NL
+	pop	af
+	ret
+;
+; Set .BAK extension
+;
+SetBAK:
+	ld	hl,FCB+_ext
+	ld	(hl),'B'	; .. do it
+	inc	hl
+	ld	(hl),'A'
+	inc	hl
+	ld	(hl),'K'
+	ret
+;
+; Prepare file for extension .PAS
+;
+SetPAS:
+	ld	a,'P'
+	ld	hl,'A'+'S'*256
+;
+; Prepare file for extension
+; ENTRY	Reg DE points to command line
+;	Accu, Reg H and Reg L hold default extension
+;
+SetExt:
+	push	af
+	push	hl
+	push	de
+	ld	c,FALSE
+	call	Parse		; Parse file
+	xor	a
+	ld	(IOResult),a	; Clear I/O
+	pop	ix
+	pop	hl
+	pop	af
+	call	TstExt		; Test extension set
+	ld	a,(FCB)
+	or	a		; Test default drive
+	ret	nz
+	push	de
+	call	RetDsk		; Get logged disk
+	inc	a
+	ld	(FCB),a		; .. into FCB
+	pop	de
+	ret
+;
+; Test extension set
+; ENTRY	Reg IX points to name string
+; ENTRY	Accu, Reg H and Reg L hold default extension
+;
+TstExt:
+	ld	c,a
+	ld	a,(FCB+_ext)	; Test extension here
+	cp	' '
+	ret	nz		; .. yeap
+TstDot:
+	ld	a,(ix)		; Find delimiter
+	inc	ix
+	cp	'.'
+	ret	z		; .. yeap
+	cp	' '+1
+	jr	nc,TstDot
+	ld	a,c
+	ld	(FCB+_ext),a	; Force extension
+	ld	(FCB+_ext+1),hl
+	ret
+;
+; Test work file defined
+; EXIT	Zero flag set indicates not defined
+;
+WFCBhere:
+	ld	a,(WFCB+1)	; Get file name
+	or	a
+	ret
+;
+; Get file
+;
+GetFN:
+	call	WFCBhere	; Test work file defined
+	jr	nz,GF.Wdef	; .. yeap
+	call	MFCBhere	; Test main file defined
+	jr	nz,GF.Mdef	; .. yeap
+	call	M.WORK		; Load name
+	jr	GF.Wdef
+GF.Mdef:
+	ld	de,WFCB
+	ld	hl,MFCB
+	ld	bc,FCBlen
+	ldir			; Copy main to work
+	ld	a,.TRUE
+	ld	(FilFlg),a	; Indicate file request
+GF.Wdef:
+	ld	a,(FilFlg)	; Test file requested
+	or	a
+	ret	z		; .. nope
+	call	ForceSave	; Force saving on change
+	jp	DoIniLoad	; Load file
+;
+; Test main file defined
+; EXIT	Zero flag set indicates not defined
+;
+MFCBhere:
+	ld	a,(MFCB+1)	; Get file name
+	or	a
+	ret
+;
+; Test same main file and work file
+; EXIT	Zero set if equal
+;
+CmpFCB:
+	ld	de,WFCB
+	ld	hl,MFCB
+	ld	b,1+Fname+Fext
+..CmpFCB:
+	ld	a,(de)
+	sub	(hl)		; Compare
+	ret	nz		; .. not same
+	inc	de
+	inc	hl
+	djnz	..CmpFCB
+	ret
+;
+; Prepare some values
+;
+IniSession:
+	ld	hl,(TxtBeg)	; Get start
+	ld	(hl),' '	; .. clear it
+	inc	hl
+	ld	(TxtEnd),hl	; .. save pointer
+	xor	a
+	ld	(ChgFlg),a	; Clear text change flsg
+	ld	(FilFlg),a	; .. and file flag
+IniPart:
+	xor	a
+	ld	(CompFlg),a	; Force compile
+	ret
+;
+; Convert numeric string to hex byte
+;
+CnvHex:
+	ld	hl,0
+numdhloop:
+	ld	a,(de)
+	call	DoUPcase
+	sub	'0'
+	ret	c
+	cp	10
+	jr	c,numdec
+	sub	'F'-'A'+2
+	cp	10
+	ret	c
+	cp	15+1
+	ret	nc
+numdec:
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	or	l
+	ld	l,a
+	inc	de
+	jr	numdhloop
+;
+; Print user area
+;
+PrUser:
+	ld	a,_Get
+	call	LogUsr		; Get user area
+	cp	10		; .. test range
+	jr	c,USR.LT.10
+	sub	10
+	push	af
+	ld	a,'1'		; Give tens
+	call	ChrPutCon
+	pop	af
+USR.LT.10:
+	add	a,'0'		; Make ASCII
+	call	ChrPutCon
+	ret
+;
+; Print name of workfile
+;
+PrWFCB:
+	ld	de,WFCB		; Get FCB
+;
+; Print name of file
+; ENTRY	Reg DE points to FCB
+;
+PrFCB:
+	inc	de
+	ld	a,(de)		; Get name
+	dec	de
+	or	a		; Test defined
+	ret	z		; .. nope
+	ld	a,(de)
+	add	a,'A'-1		; Make ASCII
+	cp	'A'-1
+	call	nz,ChrPutCon	; Print on not default
+	ld	a,':'
+	call	nz,ChrPutCon
+	ld	b,Fname+Fext
+PF.loop:
+	inc	de
+	ld	a,(de)		; Get file
+	and	NoMSB		; .. without MSB
+	cp	' '
+	call	nz,ChrPutCon	; Print non blank
+	ld	a,b
+	cp	Fext+1
+	ld	a,'.'
+	call	z,ChrPutCon	; Give delimiter
+	djnz	PF.loop
+	ret
+;
+; Prepare file for reading
+; ENTRY	Reg DE points file name
+;	Accu, Reg H and Reg L hold default extension
+; EXIT	Zero flag set if not found
+;
+TPA.Dsk:
+	db	0
+LogDisk:
+	db	0
+PrepFile:
+	call	SetExt		; Set requested extension
+	ld	hl,FCB
+	call	FOpen		; Open file
+	ret	nz		; .. done
+	ld	a,(LogDisk)
+	cp	(hl)		; Test on log disk
+	ld	(hl),a
+	call	nz,FOpen	; .. re-open if not same
+	ld	a,(TPA.Dsk)
+	cp	(hl)		; Test on TPA disk
+	ld	(hl),a
+	call	nz,FOpen	; .. re-open if not same
+	ret	nz		; .. found
+	ld	(hl),0		; .. reset default
+	ex	de,hl
+;
+; Tell file not found
+; ENTRY	Reg DE points to FCB
+;
+NotFCBFnd:
+	call	PrFCB		; Print file
+	call	String
+IF	@@GERMAN
+	db	' nicht gefunden',eot
+ELSE
+	db	' not found',eot
+ENDIF	;@@GERMAN
+	xor	a		; .. indicate error
+	ret
+;
+; Open standard FCB
+; EXIT	Zero flag set indicates file not found
+;
+FOpen:
+	push	de
+	push	hl
+	ld	c,.Open
+	call	FBDOS		; Find file
+	pop	hl
+	pop	de
+	inc	a		; Set result
+	ret
+;
+; Print formatted integer
+; ENTRY	Reg HL holds number
+;
+PrFixInt:
+	ld	de,-5		; Set limit
+	jr	..PrInt
+;
+; Print integer
+; ENTRY	Reg HL holds number
+;
+PrInt:
+	ld	de,-1		; Set no limit
+..PrInt:
+	push	ix
+	push	iy
+	push	hl
+	push	de
+	call	Input		; Set I/O
+	pop	hl
+	call	WrInt		; .. print
+	pop	iy
+	pop	ix
+	ret
+;
+; Wait for RETURN as ESCAPE
+;
+ESCape:
+	push	af
+	call	String
+IF	@@GERMAN
+	db	'. <RETURN> dr}cken',eot
+ELSE
+	db	'. Press <RETURN>',eot
+ENDIF	;@@GERMAN
+WtESC:
+	call	StatChk		; Get character
+	cp	cr		; Test RETURN
+	jr	nz,WtESC	; .. wait
+	pop	af
+	ret
+;
+; Give control
+; ENTRY	Accu holds character
+;
+SpecChar:
+	cp	maxASCII+1	; Test special
+	call	c,LowVideo	; .. no
+	call	nc,NormVideo	; ..yes, set
+	and	noMSB		; Strip off MSB
+	jp	ChrConOut	; .. print
+;
+; Output immediate string to console
+;
+CtrlStr:
+	push	hl
+	ld	hl,SpecChar
+	jp	..String	; Set vector
+

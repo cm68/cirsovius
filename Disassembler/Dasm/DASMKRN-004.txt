@@ -1,0 +1,878 @@
+;
+; %%%%%%%%%%%%%%%%%%%%%%%
+; %% FILE I/O ROUTINES %%
+; %%%%%%%%%%%%%%%%%%%%%%%
+;
+; Set up the file control block.
+; Set default on wild card found
+;
+setFCB:
+	ld	a,(File)	;File open?
+	or	a		;0 if not
+	jp	nz,cant
+	ld	a,(inbuf.3)	;Get second letter
+	cp	' '		;Error if just <sp>
+	jp	z,what
+	ld	de,.parse
+	ld	c,parse
+	call	BDOS		;Parse file
+	ld	a,l
+	and	h		;Test error
+	inc	a
+	jp	z,what
+	ld	hl,FCBnam
+	call	IsWild?		;Test wild card
+	ex	de,hl
+	ld	hl,FCBsav
+	jr	z,wild.card
+	ex	de,hl
+	jr	..FCB		;Set default
+wild.card:
+	ld	a,(hl)		;Check default here
+	cp	' '
+	jp	z,what
+..FCB:
+	ld	bc,.name
+	ldir			;Set default
+	ret
+.parse:
+	dw	inbuf.2		;First character place
+	dw	FCB		;FCB
+;
+; Test wild card in FCB
+; ENTRY	Reg HL points to name field of FCB
+; EXIT	Zero set if wildcard found
+;
+IsWild?:
+	push	hl
+	ld	bc,.name
+	ld	a,'?'
+	cpir			; .. search
+	pop	hl
+	ret
+;
+; Print name of file
+; HL holds name of file pointer on entry
+;
+pr.file:
+	ld	b,.name		;8 chars
+	jp	prnt
+;
+; Set the file type to that pted to by HL
+;
+fixtyp:
+	xor	a
+	ld	(FCBext),a	;zero the extent byte
+	push	bc
+	ld	de,FCBtype
+	ld	bc,.ext		;Set extension
+	ldir
+	pop	bc
+	ret
+;
+; Read number from disk file (1st hex digit in A on entry)
+; Value returned in DE
+;
+num1:
+	ld	de,0		;Init number to zero
+lup1:
+	cp	' '		;Done if <sp>
+	ret	z	
+	cp	eof		;Error if eof
+	jp	z,error1
+	call	num.get		;Get digit
+	call	get
+	cp	eof
+	jr	nz,lup1
+	jp	error1
+;
+; Expand an address in DE to ASCII chars and save on disk
+;
+expnd:
+	ld	a,d
+	call	putByte		;Write high byte to disk
+	ld	a,e		;... then low byte
+putByte:
+	push	af
+	call	hinib		;High of low-order byte
+	call	put
+	pop	af		;Low of low-order byte
+	call	lonib
+	jp	put
+;
+; Attempt to open another file while MAC/ASM file already opened
+;
+cant:
+	call	pstrng
+	db	'++ No File Accessed Permitted '
+	db	'until ',etx,' Closed ++',null
+	jp	getcmd.NL
+;
+; EOF encountered too soon
+;
+error1:
+	call	pstrng
+	db	'++ Unexpected EOF ++',null
+	jp	getcmd.NL
+;
+; Open a file for reading
+;
+reset::
+	push	hl
+	ld	hl,OSdma+reclen
+	ld	(dmaptr),hl	;Set dma pointer to force read
+	call	clr.FCB		;Set next record field to 0
+	call	exist		;File found?
+	pop	hl
+	ret	nz		;Ret if so
+	call	pstrng		;Error if not
+	db	'  File Not Found',cr,lf,null
+	ex	(sp),hl		;Save hl on stack
+	pop	hl		;Restore hl
+	ret
+;
+; Find file - zero set indicates not found
+;
+exist:
+	ld	de,FCB		;Pt to FCB
+	ld	c,.open		;Open the file
+	call	BDOS
+	inc	a		;Fix result
+	ret
+;
+; Read next byte from DMA buffer and return it in A
+;
+get:
+	push	hl		;Save hl
+	ld	hl,(dmaptr)	;Pt to next byte
+	ld	a,h
+	or	a		;Beyond end of buffer?
+	jr	z,notread	;If not, then get the byte
+	push	bc		;Save bc, de
+	push	de
+	call	rd.rec		;Read record
+	pop	de		;Restore regs
+	pop	bc
+	ld	hl,OSdma	;Pt to first byte of buffer
+	jr	nz,error	;Error if eof encountered
+notread:
+	ld	a,(hl)		;Get next char in a
+	inc	hl		;Pt to char after
+	ld	(dmaptr),hl	;Set ptr for later use
+	pop	hl		;Restore hl
+	ret
+error:
+	cp	3
+	jr	c,rddma0
+	call	pstrng
+	db	'++ Unexpected EOF ++',null
+	jp	getcmd.NL
+;
+; At EOF ... set ^Z as response char from read
+;
+rddma0:
+	ld	(hl),eof
+	jr	notread
+;
+; Open file pted to by FCB for output
+;
+rewrite::
+	push	hl
+	ld	de,FCB		;Erase it first
+	ld	c,.delete
+	call	BDOS
+	ld	de,FCB		;Now create it
+	ld	c,.make
+	call	BDOS
+	inc	a		;Error in creating it?
+	jp	z,what		;Say so (no room in dir)
+	call	clr.FCB
+	ld	hl,OSdma	;Set dma address
+	ld	(dmaptr),hl
+	pop	hl
+	ret
+;
+; Reset current record and extent of file
+;
+clr.FCB:
+	xor	a
+	ld	(FCBcr),a	;Set record field to zero
+	ld	(FCBex),a	;And extent
+	ret
+;
+; Write the next record to open file
+;
+nxtrcrd:
+	call	wr.rec		;Write record
+	jr	nz,wrterr	;Test error
+	ld	de,FCB		;Close the file
+	ld	c,.close
+	call	BDOS
+	inc	a		;Error in closing?
+	ret	nz
+	call	pstrng		;Say so if so
+	db	'++ Close Error ++',null
+	jp	getcmd.NL
+;
+; An error occurred during a write record attempt
+;
+wrterr:
+	call	pstrng
+	db	'++ Write Error ++',null
+	jp	getcmd.NL
+;
+; Write new line to disk
+;
+putNL:
+	ld	a,cr		;Write new line chars
+	call	put
+	ld	a,lf
+;
+; Write into the DMA buffer and write to disk when it fills
+; char to write passed in A
+;
+put:
+	push	hl
+	ld	hl,(dmaptr)	;Get ptr
+	ld	(hl),a		;Store next char
+	inc	l		;Pt to next
+	ld	(dmaptr),hl	;Set next dma
+	pop	hl
+	ret	nz		;If l reached zero, buffer was full; ret if nz
+	push	bc		;Write record to disk and reinit dma ptr
+	push	de
+	push	hl
+	call	wr.rec
+	jr	nz,wrterr	;Error?
+	ld	hl,OSdma	;Reset dma ptr
+	ld	(dmaptr),hl
+PopRegs:
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Get size of file into reg HL and Accu
+;
+filsiz:
+	ld	c,f.size	;Size command
+	call	OS.IO		;Get it
+	ld	hl,(FCBrrn)	;Get RRN
+	ld	a,(FCBrrn+2)
+	ret
+;
+; Read random record into current buffer - RRN in reg HL
+;
+rd.rrn:
+	ld	(CFCB+RRN),hl	;Set RRN
+	xor	a
+	ld	(CFCB+RRN+2),a
+	ld	c,rd.rnd	;Read command
+	ld	de,CFCB		;.COM file FCB
+	jr	..OS.IO
+;
+; Read sequential record into current buffer
+;
+rd.rec:
+	ld	c,rd.seq	;Read command
+	jr	OS.IO
+;
+; Write record from current buffer
+;
+wr.rec:
+	ld	c,wr.seq	;Write command
+OS.IO:
+	ld	de,FCB		;Standard FCB
+..OS.IO:
+	call	BDOS
+	or	a		;Error?
+	ret
+;
+; (Here special entry for FCB extension)
+; (DE points to extension searched for)
+;
+chkFCB:
+	ld	hl,FCBtype	;Check file type
+	ld	c,.ext		;Always same length
+;
+; Return with zero if strings (DE) and (HL) match
+; length is (C)
+;
+chkstg:
+	ld	a,(de)		;Get char
+	cp	(hl)		;Compare
+	ret	nz		;No match
+	inc	de		;Pt to next
+	inc	hl
+	dec	c		;Count down
+	jr	nz,chkstg
+	ret
+;
+; %%%%%%%%%%%%%%%
+; %% UTILITIES %%
+; %%%%%%%%%%%%%%%
+;
+; Get YES or NO (=any character)
+; Return zero if Yes
+;
+yes:
+	call	chin		;Get character
+	cp	'Y'
+	ret
+;
+; Input a single char in A via the BDOS and
+; CAPITALIZE it; follow with <CRLF>
+;
+chin:
+	ld	c,con.in	;Get char from con:
+	call	BDOS
+	call	UpCase		;Capitalize
+	push	af
+	call	crlf
+	pop	af
+	ret
+;
+; Count down 'ecnt' and output <CRLF> on zero
+;
+spcrlf:
+	ld	a,(ecnt)	;Get count
+	dec	a
+	ld	(ecnt),a
+	ret	nz
+	call	crlf		;New line
+;
+; Init 'ecnt'
+;
+iecnt:
+	ld	a,4		;Set 4 entries
+	ld	(ecnt),a
+	ret
+;
+; This routine will
+; print comments
+; like this
+;
+bksl:
+	call	crlf		;New line
+	dec	b		;Dec char count
+nwln:
+	scf	
+nwln0:
+	ld	a,TRUE		;Enable writing
+	ld	(wrtenab),a
+	call	c,semi		;Output semi before new comment
+	xor	a
+	or	b		;Check char count for done
+	ret	z		;Done if zero chars left
+cntcmt:
+	inc	hl		;Pt to next char
+	ld	a,(hl)		;Get it
+	cp	'\'		;New line?
+	jr	z,bksl
+	call	cout		;Print char
+	djnz	cntcmt		;Decrement count
+	ret
+;
+; Print parameters of control table
+;
+ctlst:
+	call	pstrng		;Print the start and end of control table
+	db	'CTLTBL = ',null
+	ld	hl,(ctl.root)
+	call	pvalue
+	ld	hl,(ctl.heap)
+pval.NL:
+	call	pvalue		;Print the value 0ffffh
+	jp	crlf
+;
+; Print the status message of the symbol comments facility
+;
+cmntst:
+	call	pstrng		;Print the status of symbol comments
+	db	'Symbol Comments are O',null
+	ld	a,(xcsw)
+	or	a
+	ld	a,'N'
+	jr	nz,cmtst1
+	ld	a,'F'
+	call	cout
+cmtst1:
+	call	cout
+	jp	crlf
+;
+; Compare Regs HL:DE for room check
+; EXIT	: Carry set if enough room
+;	  Reg HL fixed for gap if carry reset
+;
+cmp.HL.DE:
+	push	hl
+	or	a
+	sbc	hl,de		;Test room
+	pop	hl
+	ret	c
+	dec	d
+	ld	l,0		;Set page boundary
+	inc	h
+	ld	a,10h
+	add	a,h		;Set gap
+	ld	h,a
+	ret
+;
+; Place a new entry into the control table
+; A=type of entry (B, E, I, K, S, W) and DE=address
+;
+ftctl0:
+	push	hl		;Save regs
+	push	de		;New address
+	push	af		;New type
+	call	schctl		;Find entry in control table
+	dec	hl		;Pt to type of previous control entry
+	jr	c,ftctl1	;If carry, we didn't match
+	inc	hl		;Pt to type of current entry which matches
+	inc	hl
+	inc	hl
+ftctl1:
+	pop	af		;Get new type and
+	pop	de		;... address
+	cp	(hl)		;Do our types match?
+	pop	hl		;Restore hl
+	ret	z		;No change if they do
+;
+; Place a new entry into the control table
+;
+ftctl:
+	ld	(opctp),a	;Save type of entry
+	call	schctl		;Scan for a match
+	ld	a,(opctp)	;Get type of entry
+	jp	c,place		;No match, so entry must be added
+;
+; Match of address, so simply change control mode at that point
+;
+	cp	'K'		;Kill symbol?
+	jr	z,delctl
+	call	leg.opc		;Test legal code
+;
+; Read a new control mode
+; Entry form is:
+;	DW address
+;	DB control mode
+;
+rnctl:
+	inc	hl		;Address is same
+	inc	hl		;Pt to control mode
+	ld	(hl),a		;Only set new control mode
+	ret
+;
+; Delete the entry from the control table
+;
+delctl:
+	ex	de,hl		;De pts to entry to delete
+	ld	hl,3
+	add	hl,de		;Hl pts to next entry
+	ex	de,hl		;De pts to next entry, hl pts to entry to delete
+;
+; Copy control table down
+;
+cmpct:
+	ld	a,(hl)		;Check for end of control table
+	inc	hl
+	and	(hl)		;Address is 0ffffh if end
+	dec	hl
+	inc	a		;A=0 means address is 0ffffh
+	jr	z,pnthll
+	ld	bc,3		;Not at end -- copy 3 bytes down and continue
+	ex	de,hl		;Hl pts to source, de to dest
+	ldir			;Copy the 3 bytes
+	ex	de,hl		;De pts to next entry, hl pts to entry to delete
+	jr	cmpct		;Continue copy operation
+;
+; Copy complete
+;
+pnthll:
+	ld	hl,(ctl.heap)
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	(ctl.heap),hl	;Set new top
+	call	ctlst		;Print control table information
+	jp	getcmd
+;
+; Place an entry into the control table
+; On entry, HL pts to entry to insert before
+;
+place:
+	cp	'K'		;Error if kill
+	jp	z,what
+	call	leg.opc		;Test legal code
+;
+; Place entry into control table
+; A=type, DE=address, HL=addr of entry to insert before
+;
+lglctl:
+	push	de		;Save address
+	push	hl		;Save address of entry to insert before
+	ld	hl,(ctl.root)	;Pt to front of table
+;
+; Loop to the end of the table
+;
+lp2end:
+	ld	a,(hl)		;Check for 0ffffh at end of table
+	inc	hl
+	and	(hl)		;A=0ffh if so
+	inc	hl		;Pt to curr control type
+	inc	hl		;Pt to next control address
+	inc	a		;A=0 and zero flag set if at end
+	jr	nz,lp2end	;Continue until at end of table
+	ld	d,h		;De=hl=ptr to new last table entry loc
+	ld	e,l
+	inc	hl		;Pt to entry after last entry in table
+	inc	hl
+	inc	hl		;Hl pts to new last table entry location
+	ex	de,hl		;De pts to new, hl pts to old
+	pop	bc		;Bc=address of entry to insert before
+	push	hl
+	ld	hl,(comst)
+	dec	hl
+	sbc	hl,de		;Test room
+	pop	hl
+	jp	c,nomem		;;what		;.. no
+;
+; Expand the table by 3 places until the proper place is reached
+;
+exptbl:
+	dec	hl		;Back up
+	dec	de
+	ld	a,(hl)		;Copy previous byte into new table location
+	ld	(de),a
+	ld	a,l		;Are we at entry to insert before?
+	cp	c
+	jr	nz,exptbl	;Continue if not
+	ld	a,h		;Check high bytes
+	cp	b
+	jr	nz,exptbl
+	pop	de		;De=new entry address, hl=address to insert at
+	ld	(hl),e		;Place new entry address into table
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	a,(opctp)	;Place new entry type into table
+	ld	(hl),a
+	ld	hl,(ctl.heap)
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	(ctl.heap),hl	;Set new top
+	ret
+;
+; Test legal code BEWISH
+;
+leg.opc:
+	cp	'I'		;Instruction?
+	ret	z
+	cp	'W'		;DW?
+	ret	z
+	cp	'H'		;DB Hex?
+	ret	z
+	cp	'B'		;DB?
+	ret	z
+	cp	'S'		;DS?
+	ret	z
+	cp	'E'		;End of program?
+	ret	z
+	jp	what		;Error if none of these
+;
+; Search ctl tbl for an entry for (DE)
+; On exit, HL pts to low-order byte of control table entry
+; if matched or less than
+;  Match:	C=0
+;  No match:	C=1
+;
+schctl:
+	ld	hl,(ctl.root)	;Pt to table
+;
+; If no match then carry is set
+;
+smore:
+	ld	a,(hl)		;Get low address
+	inc	hl		;Pt to high
+	and	(hl)		;And in high address; if addr=0ffffh, then a=0ffh
+	dec	hl		;Pt to low address
+	inc	a		;If a=0ffh before, now a=0
+	scf			;Set carry flag for error return
+	ret	z		;Return if a=0 (we are at end of table)
+	inc	hl		;Pt to high address
+	ld	a,d		;Get address to compare against
+	cp	(hl)		;Do compare
+	dec	hl		;Pt to low address
+	ret	c		;Return if address is less than table entry
+	jr	nz,nxtry	;Continue if not the same
+	ld	a,e		;Get low address
+	cp	(hl)		;Compare to low address
+	ret	z		;Carry is off and zero is set if complete match
+	ret	c		;Carry is on and zero is not set if target is less
+;
+; Advance to the next table entry
+;
+nxtry:
+	inc	hl		;Pt to high address
+	inc	hl		;Pt to type of next control entry
+	inc	hl		;Pt to low address of next entry in table
+	jr	smore		;Continue
+;
+; Dump control table from address in DE
+;
+cdump:
+	call	schctl		;Find entry in control table >= address in de
+	jr	cdump2
+;
+; Dump entire control table
+;
+cdump1:
+	ld	hl,(ctl.root)	;Pt to first entry in control table
+cdump2:
+	call	brkchk		;Check for abort
+	ld	e,(hl)		;Get address of control entry in de
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,d		;Check for end of table
+	and	e		;End if de=0ffffh
+	inc	a		;Set a to 0 if so
+	jr	nz,moredmp
+	call	crlf		;Done, so output new line and print control info
+	call	ctlst
+	jp	getcmd
+;
+; Dump control table entry to user
+;
+moredmp:
+	push	de
+	push	hl
+	call	symsch		;Search for a symbol whose value = address in de
+	jr	c,ahead		;Skip if not found
+;
+; Print a symbol since it was found
+; Symbol pted to by HL
+;
+	call	iecnt		;Init ecnt
+	call	crlf		;New line
+	call	prnt		;Output chars of symbol
+	ld	a,':'		;Output colon after symbol
+	call	cout
+;
+; Output control table entry
+;
+ahead:
+	pop	hl		;Get ptr to control mode
+	pop	de		;Get address of entry
+	call	space		;2 <sp>s
+	call	space
+	ex	de,hl		;Address in hl
+	call	pvalue		;Print value of address
+	ld	a,'='		;Print delimiters
+	call	cout
+	ld	a,' '
+	call	cout
+	ex	de,hl		;Restore hl as ptr to control mode
+	ld	a,(hl)		;Get control mode letter
+	call	cout		;Print it
+	call	space		;<sp> out
+	call	space
+	call	spcrlf		;Output new line occasionally
+	inc	hl		;Pt to next control table entry
+	jr	cdump2
+;
+; Check for a comment at the address in DE
+; Match: Carry is off (NC condition)
+;
+cmchk:
+	ld	hl,(comst)	;Pt to start of comment table
+cmchk1:
+	ld	a,(hl)		;Check address for 0ffffh
+	inc	hl
+	and	(hl)
+	dec	hl
+	inc	a		;A=0 if so
+	scf			;Prep for error return
+	ret	z		;Not found if a=0
+	inc	hl		;Pt to address high
+	ld	a,d		;Get target address in de
+	cp	(hl)		;Compare against that stored
+	dec	hl		;Pt to address low
+	jr	nz,nxtc		;If not a match, continue
+	ld	a,e		;Compare low bytes
+	cp	(hl)
+	ret	z		;There is a comment at this address, so carry=1
+nxtc:
+	inc	hl		;Pt to char count
+	inc	hl
+	ld	a,(hl)		;Get char count
+	call	AddA		;Skip to next comment
+	inc	hl		;Pt to low byte of next comment
+	jr	cmchk1
+;
+; Dump comment table from a given address forward
+;
+onecmt:
+	call	cmchk		;Find comment refd in de
+	jr	lstagn
+;
+; Dump entire comment table
+;
+lstcmt:
+	ld	hl,(comst)	;Pt to first comment
+lstagn:
+	call	brkchk		;Check for abort
+	ld	e,(hl)		;Get address of comment in de
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,d		;Check for 0ffffh as end of table
+	and	e
+	inc	a		;A=0 if so
+	jp	z,getcmd	;Done if so
+	ex	de,hl		;Value in hl
+	call	pvalue		;Print it
+	ex	de,hl		;Value in de, ptr to comment char count in hl
+	ld	a,';'		;print semicolon before comment
+	call	cout
+	ld	b,(hl)		;Get char count in b
+	inc	hl		;Pt to comment char
+	call	prnt		;Print it
+	call	crlf		;New line
+	jr	lstagn		;Continue
+;
+; Delete an existing comment whose address is in DE
+; HL pts to cmt table
+;
+delcmt:
+	ld	a,(hl)		;Check for end of comment table
+	inc	hl
+	and	(hl)
+	inc	a		;A=0 if at end
+	ret	z
+	push	de		;Save address to delete
+	ld	de,(comst)
+	inc	de
+	push	hl
+	sbc	hl,de		;Test start of list
+	ld	b,h		;Get amount to be moved
+	ld	c,l
+	pop	hl
+	push	af
+	ld	d,h		;Save address of current comment in de
+	ld	e,l
+	dec	de		;Pt to address in current comment
+	dec	de
+	inc	hl		;Pt to char count of current comment
+	ld	a,(hl)		;Get it in a
+	call	AddA		;Skip to next comment
+	ex	de,hl
+	pop	af		;Test start
+	jr	z,NoCmtMove
+;
+; Copy comments
+;
+	lddr
+NoCmtMove:
+	inc	de
+	ld	(comst),de	;Set new start
+	pop	de
+	ret
+;
+; Insert comment at <DE> at buffer <HL> on base <BC>
+;
+InsCmt:
+	push	hl		;Save ptr to next char
+	push	bc		;Save base
+	call	cmchk		;Check for comment already at address in de
+	call	nc,delcmt	;If so, first delete existing comment
+	pop	bc		;Get back base
+	pop	hl		;Get back ptr
+;
+; Add comment to comment table
+;
+	ld	a,(hl)		;Check for any text
+	cp	cr		;If none, old comment is just deleted
+	jp	z,getcmd
+	push	hl
+	push	de		;Save address
+	sbc	hl,bc		;Get length of comment
+	dec	bc
+	ld	a,(bc)		;Get length of line
+	sub	l
+	ld	c,a
+	ld	b,0
+	ld	hl,(comst)	;Get start of comments
+	sbc	hl,bc		;Get new top
+	dec	hl
+	dec	hl
+	dec	hl
+	push	hl
+	ld	de,(ctl.heap)
+	sbc	hl,de		;Test room
+	jp	c,nomem		;;what
+;
+; Save text of comment
+;
+	pop	hl		;Get top
+	ld	(comst),hl
+	pop	de		;Get address
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),c		;Set length
+	inc	hl
+	ex	de,hl
+	pop	hl
+	ldir			;Unpack
+	ret
+;
+; Handle symbols for the disassembler; address in 'pc'
+; If a symbol exixts at this address, print it
+;
+hsym:
+	push	de
+	push	hl
+	ld	a,TRUE		;Enable disk output
+	ld	(wrtenab),a
+	ld	hl,(pc)		;Get address of pc
+	ex	de,hl		;... in de
+	call	symsch		;Look for symbol
+	jp	c,resume	;Goto resume if no symbol
+	ld	c,b		;Get char count of symbol into c
+	push	hl		;Save ptr to it
+;
+; Check to see that symbol contains no + or -
+; Don't print if it does
+;
+hsym0:
+	call	IsOff?		;Check offset
+	jr	z,hsym1
+	inc	hl		;Pt to next
+	dec	c		;Continue to end of symbol
+	jr	nz,hsym0
+	pop	hl		;Pt to symbol
+	call	prnt		;Print the symbol
+	ld	a,':'		;.. and a following colon
+	call	cout
+	call	pdertn		;Print the address as a comment (adr in de)
+	call	crlf		;New line
+	push	hl		;Continue
+hsym1:
+	pop	hl
+resume:
+	xor	a		;Print address of pc on crt
+	ld	(wrtenab),a	;.. but not into the file
+	call	space		;<sp> over
+	call	space
+	ld	hl,(pc)		;Print pc value
+	call	pvalue
+	ld	a,TRUE		;Reenable write of mnemonic
+	ld	(wrtenab),a
+	call	.tab		;Tab for following mnemonic
+	pop	hl
+	pop	de
+	ret
+

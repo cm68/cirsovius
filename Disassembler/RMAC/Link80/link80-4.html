@@ -1,0 +1,770 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-4.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>Data Representation and Interface Conventions</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center><b><u><font size=+2>4. DATA REPRESENTATION AND INTERFACE CONVENTIONS</font></u></b></center>
+
+<p><br>
+<br>
+<p>This section describes the layout of memory used by various Digital
+Research language processors so that the programmer can properly interface
+assembly language routines with high level language programs and the PL/I-80
+runtime subroutine library. A set of standard subroutine interface conventions
+is also given so that programs produced by various programmers and language
+processors can be conveniently interfaced.
+<br>&nbsp;
+<p><a NAME="4.1"></a><b><u><font size=+1>4.1. Representation of Data Elements</font></u></b>
+<p>The internal memory representation of data items is presented below.
+<br>&nbsp;
+<p><a NAME="4.1.1"></a><b><u>4.1.1. Pointers, and Entry and Label Variables</u></b>
+<p>Variables which provide access to memory addresses are stored as two
+contiguous bytes, with the low order byte stored first in memory. Pointer,
+Entry, and Label data items appear graphically as shown below:
+<br>&nbsp;
+<blockquote><tt>+----+----+</tt>
+<br><tt>| LS | MS |</tt>
+<br><tt>+----+----+</tt></blockquote>
+
+<p><br>where "LS" denotes the least significant half of the address, and
+"MS" denotes the most significant portion. Note that MS is the "page address,"
+where each memory page is 256 bytes, and LS is the address within the page.
+<br>&nbsp;
+<p><a NAME="4.1.2"></a><b><u>4.1.2. Fixed Binary Data Format</u></b>
+<p>Simple single and double byte signed integer values are stored in Fixed
+Binary format. Two modes are used, depending upon the precision of the
+data item. Fixed Binary values with precision 1-7 are stored as single
+byte values, while data items with precision 8-15 are stored in a word
+(double byte) location. As with other 8080, 8085, and Z-80 items, the least
+significant byte of multi-byte storage appears first in memory. All Fixed
+Binary data is represented in two's complement form, allowing single byte
+values in the range -128 to +127, and word values in the range -32768 to
++32767. The values 0, 1, and -1 are shown graphically below, where each
+boxed value represents a byte of memory, with the low order byte appearing
+before the high order byte:
+<br>&nbsp;
+<blockquote><tt>Fixed Binary(7)&nbsp;&nbsp;&nbsp;&nbsp; Fixed Binary(15)</tt>
+<br><tt>&nbsp;&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt>
+<br><tt>&nbsp;&nbsp; | 00 |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 00 | 00 |</tt>
+<br><tt>&nbsp;&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt><tt></tt>
+<p><tt>Fixed Binary(7)&nbsp;&nbsp;&nbsp;&nbsp; Fixed Binary(15)</tt>
+<br><tt>&nbsp;&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt>
+<br><tt>&nbsp;&nbsp; | 01 |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 01 | 00 |</tt>
+<br><tt>&nbsp;&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt><tt></tt>
+<p><tt>Fixed Binary(7)&nbsp;&nbsp;&nbsp;&nbsp; Fixed Binary(15)</tt>
+<br><tt>&nbsp;&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt>
+<br><tt>&nbsp;&nbsp; | FE |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| FE | FF |</tt>
+<br><tt>&nbsp;&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt></blockquote>
+
+<br>&nbsp;
+<p><a NAME="4.1.3"></a><b><u>4.1.3. Bit Data Representation</u></b>
+<p>Bit String data, like the Fixed Binary items shown above, are represented
+in two forms, depending upon the declared precision. Bit Strings of length
+1-8 are stored in a single byte, while Bit Strings of length 9-16 occupy
+a word (double byte) value. Bit values are left justified in the word,
+with "don't care" bits to the right when the precision is not exactly 8
+or 16 bits. The least significant byte of a word value is stored first
+in memory. The Bit String constant values '1'b, 'A0'b4, and '1234'b4 are
+stored as shown below
+<br>&nbsp;
+<blockquote><tt>&nbsp; Bit(8)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Bit(16)</tt>
+<br><tt>&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt>
+<br><tt>&nbsp; | 80 |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 00 | 80 |</tt>
+<br><tt>&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt><tt></tt>
+<p><tt>&nbsp; Bit(8)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Bit(16)</tt>
+<br><tt>&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt>
+<br><tt>&nbsp; | AO |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 00 | AO |</tt>
+<br><tt>&nbsp; +----+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt><tt></tt>
+<p><tt>&nbsp; Bit(8)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Bit(16)</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt>
+<br><tt>&nbsp;&nbsp; N/A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 34 | 12 |</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++----+----+</tt></blockquote>
+
+<p><a NAME="4.1.4"></a><b><u>4.1.4. Character Data Representation</u></b>
+<p>Two forms of character data are stored in memory, depending upon the
+declaration. Fixed character strings, declared as CHAR(n) without the VARYING
+attribute, occupy n contiguous bytes of storage with the first string character
+stored lowest in memory. Character strings declared with the VARYING attribute
+are prefixed by the character string length, ranging from 0 to 254. The
+length of the area reserved for a CHAR(n) VARYING is n+l. Note that in
+either case, n cannot exceed 254. The string constant
+<br>&nbsp;
+<blockquote><tt>'Walla Walla Wash'</tt></blockquote>
+
+<p><br>is stored in a CHAR(20) fixed character string as
+<br>&nbsp;
+<blockquote><tt>+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</tt>
+<br><tt>|W|a|l|l|a| |W|a|l|l|a| |W|a|s|h| | | | |</tt>
+<br><tt>+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</tt></blockquote>
+
+<p><br>This same string is stored in a CHAR(20) VARYING data area as
+<br>&nbsp;
+<blockquote><tt>+--+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</tt>
+<br><tt>|10|W|a|l|l|a| |W|a|l|l|a| |W|a|s|h|?|?|?|?|</tt>
+<br><tt>+--+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</tt></blockquote>
+
+<p><br>where "10" is the (hexadecimal) string length, and "?" represents
+undefined character positions.
+<br>&nbsp;
+<p><a NAME="4.1.5"></a><b><u>4.1.5.Fixed Decimal Data Representation</u></b>
+<p>Decimal data items are stored in packedBCD form, using nine's complement
+data representation. The least significant BCD pair is stored first in
+memory, with one BCD digit position reserved for the sign. Positive numbers
+have a 0 sign, while negative numbers have a 9 in the high order sign digit
+position. The number of bytes occupied by a decimal number depends upon
+its declared precision. Given a decimal number with precision p, the number
+of bytes reserved is the integer part of
+<br>&nbsp;
+<blockquote><tt>(P + 2) / 2</tt></blockquote>
+
+<p><br>where p varies between 1 and 15, resulting in a minimum of 1 byte
+and a maximum of 8 bytes to hold a decimal data item. Given a decimal number
+field of precision 5, the numbers 12345 and -2 are represented as shown
+below:
+<br>&nbsp;
+<blockquote><tt>+--+--+--+&nbsp;&nbsp; +--+--+--+</tt>
+<br><tt>|45|23|01|&nbsp;&nbsp; |98|99|99|</tt>
+<br><tt>+--+--+--+&nbsp;&nbsp; +--+--+--+</tt></blockquote>
+
+<br>&nbsp;
+<p><a NAME="4.1.6"></a><b><u>4.1.6. Floating Point Binary Representation</u></b>
+<p>Floating Point Binary numbers are stored in four consecutive byte locations,
+no matter what the declared precision. The number is stored with a 24 bit
+mantissa, which appears first in memory, followed by an 3-bit exponent.
+Following data storage conventions, the least significant byte of the mantissa
+is stored first in memory. The floating point number is normalized so that
+the most significant bit of the mantissa is "1" for non-zero numbers. A
+zero mantissa is represented by an exponent byte of 00. Since the most
+significant bit of the mantissa must be "1" for non-zero values, this bit
+position is replaced by the mantissa sign. The binary exponent byte is
+biased by 80 (hexadecimal) so that 81 represents an exponent of 1 while
+7F represents an exponent of -1. The Floating Point Binary value 1.5 has
+the representation shown below:
+<br>&nbsp;
+<blockquote><tt>+--+--+--+--+</tt>
+<br><tt>|00|00|40|81|</tt>
+<br><tt>+--+--+--+--+</tt></blockquote>
+
+<p><br>Note that in this case, the mantissa takes the bit stream form
+<br>&nbsp;
+<blockquote><tt>0100 0000 0000 0000 0000 0000</tt></blockquote>
+
+<p><br>which indicates that the mantissa sign is positive. Setting the
+(assumed) high order bit to "1" produces the mantissa bit stream
+<br>&nbsp;
+<blockquote><tt>1100 0000 0000 0000 0000 0000</tt></blockquote>
+
+<p><br>Since the exponent 81 has a bias of 80, the binary exponent is 1,
+resulting in the binary value
+<br>&nbsp;
+<blockquote><tt>1100 0000 0000 0000 0000 0000</tt></blockquote>
+
+<p><br>or, equivalently, 1.5 in a decimal base.
+<br>&nbsp;
+<p><a NAME="4.1.7"></a><b><u>4.1.7. File Constant Representation</u></b>
+<p>Each file constant in a PL/I-80 program occupies 32 contiguous bytes,
+followed by a variable length field of 0 to 14 additional bytes. The fields
+of a file constant are all implementation dependent and subject to change
+without notice.
+<br>&nbsp;
+<p><a NAME="4.2"></a><b><u><font size=+1>4.2. Layout of Aggregate Storage</font></u></b>
+<p>PL/I-80 data items are contiguous in memory with no filler bytes. Bit
+data is always stored unaligned. Arrays are stored in row-major order,
+with the first subscript running slowest and the last subscript running
+fastest. The RMAC COMMON statement is used to share data with PL/I-80 programs
+which declare data using the EXTERNAL attribute. The following PL/I-80
+program is used as an example:
+<br>&nbsp;
+<blockquote><tt>declare</tt>
+<br><tt>&nbsp; a (10) bit(8) external,</tt>
+<br><tt>&nbsp; 1 b external,</tt>
+<br><tt>&nbsp;&nbsp;&nbsp; 2 c bit(8),</tt>
+<br><tt>&nbsp;&nbsp;&nbsp; 2 d fixed binary(15),</tt>
+<br><tt>&nbsp;&nbsp;&nbsp; 2 e (0:2,0:1) fixed;</tt></blockquote>
+
+<p><br>The following RMAC COMMON areas share data areas with the program
+containing the declaration given above.
+<br>&nbsp;
+<blockquote><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; common /a/</tt>
+<br><tt>x:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+1</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; common /b/</tt>
+<br><tt>c:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+1</tt>
+<br><tt>d:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+2</tt>
+<br><tt>e00:&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2</tt>
+<br><tt>e01:&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2</tt>
+<br><tt>e10:&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2</tt>
+<br><tt>e11:&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2</tt>
+<br><tt>e20:&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2</tt>
+<br><tt>e21:&nbsp;&nbsp;&nbsp; ds&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2</tt></blockquote>
+
+<p><br>where the labels e00, e01, e21 correspond to the PL/I-80 subscripted
+variable locations e (0, 0), e(0, 1), . . . , e (2, 1).
+<br>&nbsp;
+<p><a NAME="4.3"></a><b><u><font size=+1>4.3. General Parameter Passing
+Conventions</font></u></b>
+<p>Communication between high-level and assembly language routines can
+be performed using the PL/I-80 general-purpose parameter passing mechanism
+described below. Specifically, upon entry to a PL/I-80 or assembly language
+routine, the HL register pair gives the address of a vector of pointer
+values which, in turn, lead the the actual parameter values. This situation
+is illustrated in the diagram below, where the address fields are assumed
+as shown for this example:
+<br>&nbsp;
+<blockquote><tt>&nbsp;&nbsp; HL&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Parm Address&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Actual Parameters</tt>
+<br><tt>+------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; +----------------+</tt>
+<br><tt>| 1000 |&nbsp;&nbsp;&nbsp;&nbsp; 1000: | 2000 |&nbsp;&nbsp;&nbsp;
+2000: |&nbsp; parameter #1&nbsp; |</tt>
+<br><tt>+------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; +----------------+</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 3000 |&nbsp;&nbsp;&nbsp; 3000: |&nbsp; parameter #2&nbsp; |</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; +----------------+</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 4000 |&nbsp;&nbsp;&nbsp; 4000: |&nbsp; parameter #3&nbsp; |</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; +----------------+</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+. . .&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+. . .</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; +----------------+</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+| 5000 |&nbsp;&nbsp;&nbsp; 5000: | last parameter |</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
++------+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; +----------------+</tt></blockquote>
+
+<p><br>The number of parameters, and the parameter length and type is determined
+implicitly by agreement between the calling program and called subroutine.
+<p>Consider the following situation, for example. Suppose a PL/I-80 prog
+ram uses a considerable number of floating point divide operations, where
+each division is by a power of two. Suppose also that the loop where the
+divisions occur is speed-critical, and thus an assembly language subroutine
+will be used to perform the division. The assembly language routine will
+simply decrement the binary exponent for the floating point number for
+each power of two in the division, effectively performing the divide operations
+without the overhead of unpacking, performing the general division operation,
+and repacking the result. During the division, however, the assembly language
+routine could produce underflow. Thus, the assembly language routine will
+have to signal the UNDERFLOW condition if this occurs.
+<p>The programs which perform this function are given on the following
+pages. The DTEST program, listed first, tests the division operation. The
+external entry DIV2 is the assembly language subroutine that performs the
+division, and is defined on line 4 with two parameters: a fixed(7) and
+a floating point binary value. The test value 100 is stored into "f" on
+each loop at line 9, and is passed to the DIV2 subroutine on line 10. Each
+time DIV2 is called, the value of f is changed to f/(2**i) and printed
+using a PUT statement. At the point of call, DIV2 receives a list of two
+addresses, corresponding to the two parameters i and f, used in the computation.
+<p>The assembly language subroutine, called DIV2, is listed next. Upon
+entry, the value of i is loaded to the accumulator, and the HL pair is
+set to point to the exponent field of the input floating point number.
+If the exponent is zero, DIV2 returns immediately since the resulting value
+is zero. Otherwise, the subroutine loops at the label "dby2" while counting
+down the exponent as the power of two diminishes to zero. If the exponent
+reaches zero during this counting process, an UNDERFLOW signal is raised.
+<p>The call to "?signal" within DIV2 demonstrates the assembly language
+set-up for parameters which use the general-purpose interface. The ?signal
+subroutine is a part of the PL/I-80 subroutine library (PLILIB.IRL) . The
+HL register pair is set to the signal parameter list, denoted by "siglst."
+The signal parameter list, in turn, is a vector of four addresses which
+lead to the signal code "sigcode," the signal subcode "sigsub," the file
+name indicator "sigfil" (not used here), and the auxiliary message "sigaux"
+which is the last parameter. The auxiliary message is used to provide additional
+information to the operator when the error takes place. The signal subroutine
+prints the message until either the string length is exhausted (32, in
+this case) or a binary 00 is encountered in the string.
+<p>The (abbreviated) output from this test program is shown following the
+assembly language listing. Note that the loop counter i becomes negative
+when it reaches 128, but the processing within the DIV2 subroutine treats
+this value as an unsigned magnitude value, thus the underflow occurs when
+i reaches -123.
+<br>
+<br>
+<br>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: DTEST
+
+L: List Source Program
+
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+PL/I-80 V1.0, COMPILATION OF: DTEST
+
+   1 a 0000 dtest:
+   2 a 0006     proc options(main);
+   3 c 0006     dcl
+   4 c 0006         div2 entry(fixed(7),float),
+   5 c 0006         i fixed(7),
+   6 c 0006         f float;
+   7 c 0006 
+   8 c 0006         do i = 0 by 1;
+   9 c 000A         f = 100;
+  10 c 0015         call div2(i,f);
+  11 c 001B         put skip list('100 / 2 **',i,'=',f);
+  12 c 0063         end;
+  13 a 0063     end dtest;
+
+CODE SIZE = 0063
+DATA AREA = 0018
+END  COMPILATION
+
+
+                        public  div2
+                        extrn   ?signal
+                ;       entry:
+                ;               p1 -> fixed(7) power of two
+                ;               p2 -> floating point number
+                ;       exit:
+                ;               p1 -> (unchanged)
+                ;               p2 -> p2 / (2**p1)
+                div2:                   ;HL = .low(.p1)
+ 0000 5E                mov     e,m     ;low(.p1)
+ 0001 23                inx     h       ;HL = .high(.p1)
+ 0002 56                mov     d,m     ;DE = .p1
+ 0003 23                inx     h       ;HL = .low(p2)
+ 0004 1A                ldax    d       ;a = p1 (power of two)
+ 0005 5E                mov     e,m     ;low(.p2)
+ 0006 23                inx     h       ;HL = .high(.p2)
+ 0007 56                mov     d,m     ;DE = .p2
+ 0008 EB                xchg            ;HL = .p2
+                ;
+                ;       A = power of 2, HL = .low byte of fp num
+ 0009 23                inx     h       ;to middle of mantissa
+ 000A 23                inx     h       ;to high byte of mantissa
+ 000B 23                inx     h       ;to exponent byte
+ 000C 34                inr     m
+ 000D 35                dcr     m       ;p2 already zero?
+ 000E C8                rz              ;return if so
+                dby2:   ;divide by two
+ 000F B7                ora     a       ;counted power of 2 to zero?
+ 0010 C8                rz              ;return if so
+ 0011 3D                dcr     a       ;count power of two down
+ 0012 35                dcr     m       ;count exponent down
+ 0013 C20F00            jnz     dby2    ;loop again if no underflow
+                ;
+                ;underflow occurred, signal underflow condition
+ 0016 210000            lxi     h,siglst;signal parameter list
+ 0019 CD0000            call    ?signal ;signal underflow
+ 001C C9                ret             ;normally, no return
+                ;
+                        dseg
+ 0000 0800      siglst: dw      sigcod  ;address of signal code
+ 0002 0900              dw      sigsub  ;address of subcode
+ 0004 0A00              dw      sigfil  ;address of file code
+ 0006 0C00              dw      sigaux  ;address of aux message
+                ;       end of parameter vector, start of params
+ 0008 03        sigcod: db      3       ;03 = underflow
+ 0009 80        sigsub: db      128     ;arbitrary subcode for id
+ 000A 0000      sigfil: dw      0000    ;no associated file name
+ 000C 0E00      sigaux: dw      undmsg  ;0000 if no aux message
+ 000E 20556E6465undmsg: db      32,'Underflow in Divide by Two',0
+ 002A                   end
+
+
+A>b:dtest
+
+100 / 2 **       0 =  1.000000E+02
+100 / 2 **       1 =  5.000000E+01
+100 / 2 **       2 =  2.500000E+01
+100 / 2 **       3 =  1.250000E+01
+100 / 2 **       4 =  0.625000E+01
+100 / 2 **       5 =  3.125000E+00
+100 / 2 **       6 =  1.562500E+00
+100 / 2 **       7 =  0.781250E+00
+100 / 2 **       8 =  3.906250E-01
+100 / 2 **       9 =  1.953125E-01
+100 / 2 **      10 =  0.976562E-01
+100 / 2 **      11 =  4.882812E-02
+100 / 2 **      12 =  2.441406E-02
+100 / 2 **      13 =  1.220703E-02
+100 / 2 **      14 =  0.610351E-02
+100 / 2 **      15 =  3.051757E-03
+100 / 2 **      16 =  1.525878E-03
+100 / 2 **      17 =  0.762939E-03
+100 / 2 **      18 =  3.814697E-04
+100 / 2 **      19 =  1.907348E-04
+100 / 2 **      20 =  0.953674E-04
+100 / 2 **      21 =  4.768371E-05
+100 / 2 **      22 =  2.384185E-05
+100 / 2 **      23 =  1.192092E-05
+100 / 2 **      24 =  0.596046E-05
+100 / 2 **      25 =  2.980232E-06
+100 / 2 **      26 =  1.490116E-06
+100 / 2 **      27 =  0.745058E-06
+100 / 2 **      28 =  3.725290E-07
+100 / 2 **      29 =  1.862645E-07
+100 / 2 **      30 =  0.931322E-07
+100 / 2 **      31 =  4.656612E-08
+100 / 2 **      32 =  2.328306E-08
+100 / 2 **      33 =  1.164153E-08
+100 / 2 **      34 =  0.582076E-08
+100 / 2 **      35 =  2.910383E-09
+100 / 2 **      36 =  1.455191E-09
+100 / 2 **      37 =  0.727595E-09
+100 / 2 **      38 =  3.637978E-10
+100 / 2 **      39 =  1.818989E-10
+100 / 2 **      40 =  0.909494E-10
+100 / 2 **      41 =  4.547473E-11
+100 / 2 **      42 =  2.273736E-11
+100 / 2 **      43 =  1.136868E-11
+100 / 2 **      44 =  0.568434E-11
+100 / 2 **      45 =  2.842170E-12
+100 / 2 **      46 =  1.421085E-12
+100 / 2 **      47 =  0.710542E-12
+100 / 2 **      48 =  3.552713E-13
+100 / 2 **      49 =  1.776356E-13
+100 / 2 **      50 =  0.888178E-13
+100 / 2 **      51 =  4.440892E-14
+100 / 2 **      52 =  2.220446E-14
+100 / 2 **      53 =  1.110223E-14
+100 / 2 **      54 =  0.555111E-14
+100 / 2 **      55 =  2.775557E-15
+100 / 2 **      56 =  1.387778E-15
+100 / 2 **      57 =  0.693889E-15
+100 / 2 **      58 =  3.469446E-16
+100 / 2 **      59 =  1.734723E-16
+100 / 2 **      60 =  0.867361E-16
+100 / 2 **      61 =  4.336808E-17
+100 / 2 **      62 =  2.168404E-17
+100 / 2 **      63 =  1.084202E-17
+100 / 2 **      64 =  0.542101E-17
+100 / 2 **      65 =  2.710505E-18
+100 / 2 **      66 =  1.355252E-18
+100 / 2 **      67 =  0.677626E-18
+100 / 2 **      68 =  3.388131E-19
+100 / 2 **      69 =  1.694065E-19
+100 / 2 **      70 =  0.847032E-19
+100 / 2 **      71 =  4.235164E-20
+100 / 2 **      72 =  2.117582E-20
+100 / 2 **      73 =  1.058791E-20
+100 / 2 **      74 =  0.529395E-20
+100 / 2 **      75 =  2.646977E-21
+100 / 2 **      76 =  1.323488E-21
+100 / 2 **      77 =  0.661744E-21
+100 / 2 **      78 =  3.308722E-22
+100 / 2 **      79 =  1.654361E-22
+100 / 2 **      80 =  0.827180E-22
+100 / 2 **      81 =  4.135903E-23
+100 / 2 **      82 =  2.067951E-23
+100 / 2 **      83 =  1.033975E-23
+100 / 2 **      84 =  0.516987E-23
+100 / 2 **      85 =  2.584939E-24
+100 / 2 **      86 =  1.292469E-24
+100 / 2 **      87 =  0.646234E-24
+100 / 2 **      88 =  3.231174E-25
+100 / 2 **      89 =  1.615587E-25
+100 / 2 **      90 =  0.807793E-25
+100 / 2 **      91 =  4.038967E-26
+100 / 2 **      92 =  2.019483E-26
+100 / 2 **      93 =  1.009741E-26
+100 / 2 **      94 =  0.504871E-26
+100 / 2 **      95 =  2.524354E-27
+100 / 2 **      96 =  1.262177E-27
+100 / 2 **      97 =  0.631088E-27
+100 / 2 **      98 =  3.155443E-28
+100 / 2 **      99 =  1.577721E-28
+100 / 2 **     100 =  0.788860E-28
+100 / 2 **     101 =  3.944304E-29
+100 / 2 **     102 =  1.972152E-29
+100 / 2 **     103 =  0.986076E-29
+100 / 2 **     104 =  4.930380E-30
+100 / 2 **     105 =  2.465190E-30
+100 / 2 **     106 =  1.232595E-30
+100 / 2 **     107 =  0.616297E-30
+100 / 2 **     108 =  3.081487E-31
+100 / 2 **     109 =  1.540743E-31
+100 / 2 **     110 =  0.770372E-31
+100 / 2 **     111 =  3.851859E-32
+100 / 2 **     112 =  1.925929E-32
+100 / 2 **     113 =  0.962964E-32
+100 / 2 **     114 =  4.814824E-33
+100 / 2 **     115 =  2.407412E-33
+100 / 2 **     116 =  1.203706E-33
+100 / 2 **     117 =  0.601853E-33
+100 / 2 **     118 =  3.009265E-34
+100 / 2 **     119 =  1.504632E-34
+100 / 2 **     120 =  0.752316E-34
+100 / 2 **     121 =  3.761581E-35
+100 / 2 **     122 =  1.880790E-35
+100 / 2 **     123 =  0.940395E-35
+100 / 2 **     124 =  4.701977E-36
+100 / 2 **     125 =  2.350988E-36
+100 / 2 **     126 =  1.175494E-36
+100 / 2 **     127 =  0.587747E-36
+100 / 2 **    -128 =  2.938735E-37
+100 / 2 **    -127 =  1.469367E-37
+100 / 2 **    -126 =  0.734683E-37
+100 / 2 **    -125 =  3.673419E-38
+100 / 2 **    -124 =  1.836709E-38
+100 / 2 **    -123 =  0.918354E-38
+100 / 2 **    -122 =  4.591774E-39
+UNDERFLOW (128), Underflow in Divide by Two
+Traceback: 017F 011B
+End of Execution
+</pre>
+<br>
+<br>
+<br>
+<p><a NAME="4.4"></a><b><u><font size=+1>4.4. Returning Values from Functions</font></u></b>
+<p>As an alternative to returning values through the parameter list, as
+described in the previous section, subroutines can produce function values
+which are returned directly in the registers or on the stack. This section
+shows the general-purpose conventions for returning data as functional
+values.
+<br>&nbsp;
+<p><a NAME="4.4.1"></a><b><u>4.4.1. Returning Pointer, Entry, and Label
+Variables</u></b>
+<p>Variables which provide access to memory addresses occupy a word value,
+as described in the previous section. In the case of Pointer, Entry, and
+Label Variables, the values are returned in the HL register pair. If a
+label variable is returned which can be the target of a GO TO operation,
+it is the responsibility of the subroutine containing the label to restore
+the stack to the proper level when control reaches the label.
+<br>&nbsp;
+<p><a NAME="4.4.2"></a><b><u>4.4.2. Returning Fixed Binary Data</u></b>
+<p>Functions which return Fixed Binary data items do so by leaving the
+result in the A register or HL register pair, depending upon the precision
+of the data item. Fixed Binary data with precision 1-7 are returned in
+A, while precision 8-15 items are returned in HL. It is always safe to
+return the value in HL, with the low order byte copied to the A register,
+so that register A is equal to register L upon return.
+<br>&nbsp;
+<p><a NAME="4.4.3"></a><b><u>4.4.3. Returning Bit String Data</u></b>
+<p>Similar to Fixed Binary data items, Bit String data is returned in the
+A register, or the HL register pair, depending upon the precision of the
+data item. Bit Strings of length 1-8 are returned in A, while precision
+9-16 items are returned in the HL pair. Note that Bit Strings are left
+justified in their fields, so the BIT(1) value "true" is returned in the
+A register as 80 (hexadecimal). Again, it is safe to return a bit value
+in the HL register pair, with a copy of the high order byte in A, so that
+register A is equal to register H upon return.
+<br>&nbsp;
+<p><a NAME="4.4.4"></a><b><u>4.4.4. Returning Character Data</u></b>
+<p>Character data items are returned on the stack, with the length of the
+string in register A, regardless of whether the function has the VARYING
+attribute. The string
+<br>&nbsp;
+<blockquote><tt>'Walla Walla Wash'</tt></blockquote>
+
+<p><br>for example, is returned as shown in the diagram below:
+<br>&nbsp;
+<blockquote><tt>&nbsp; +--+&nbsp;&nbsp;&nbsp; +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</tt>
+<br><tt>A |10|&nbsp;&nbsp;&nbsp; |W|a|l|l|a| |W|a|l|l|a| |W|a|s|h| (low
+stack)</tt>
+<br><tt>&nbsp; +--+&nbsp;&nbsp;&nbsp; +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ^</tt>
+<br><tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SP</tt></blockquote>
+
+<p><br>where register A contains the string length 10 (hexadecimal), and
+the Stack Pointer (SP) addresses the first character in the string.
+<br>&nbsp;
+<p><a NAME="4.4.5"></a><b><u>4.4.5. Returning Fixed Decimal Data</u></b>
+<p>Fixed Decimal data is always returned as a sixteen decimal digit value
+(8 contiguous bytes) in the stack. The low order decimal pair is stored
+lowest in memory (at the "top" of the stack), with the high order digit
+pair highest in memory. The number is represented in nine's complement
+form, and sign-extended through the high order digit position, with a positive
+sign denoted by 0, and a negative sign denoted by 9. The decimal number
+-2, for example, is returned as shown below:
+<br>&nbsp;
+<blockquote><tt>+--+--+--+--+--+--+--+--+</tt>
+<br><tt>|98|99|99|99|99|99|99|99| (low stack)</tt>
+<br><tt>+--+--+--+--+--+--+--+--+</tt>
+<br><tt>&nbsp;^</tt>
+<br><tt>&nbsp;SP</tt></blockquote>
+
+<br>&nbsp;
+<p><a NAME="4.4.6"></a><b><u>4.4.6. Returning Floating Point Numbers</u></b>
+<p>Floating Point numbers are returned as a four-byte sequence at the top
+of the stack, regardless of the declared precision. The low order byte
+of the mantissa is at the top of the stack, followed by the middle byte,
+then the high byte. The fourth byte is the exponent of the number. The
+value 1.5 is returned as shown in the following diagram:
+<br>&nbsp;
+<blockquote><tt>+--+--+--+--+</tt>
+<br><tt>|00|00|40|81| (low stack)</tt>
+<br><tt>+--+--+--+--+</tt>
+<br><tt>&nbsp;^</tt>
+<br><tt>&nbsp;SP</tt>
+<br><tt></tt>&nbsp;</blockquote>
+The sequence
+<br>&nbsp;
+<blockquote><tt>POP D</tt>
+<br><tt>POP B</tt></blockquote>
+
+<p><br>loads the Floating Point value from the stack for manipulation,
+leaving the exponent in B, and the 24-bit mantissa in C, D, and E. The
+result can be placed back into the stack using
+<br>&nbsp;
+<blockquote><tt>PUSH B</tt>
+<br><tt>PUSH D</tt></blockquote>
+
+<p><br>An example of returning a functional value is shown in the two program
+listings which follow. The first program, called FDTEST, is similar to
+the previous floating point divide test, but instead includes an entry
+definition for FDIV2 which is an assembly language subroutine that returns
+the result in the stack. The FDIV2 subroutine is then listed, which resembles
+the previous DIV2 program with some minor changes. First note that the
+input floating point value is loaded into the BCDE registers so that a
+temporary copy can be manipulated which does not affect the input value.
+The exponent field in register B is decremented by the input count, and
+returned on the stack before the PCHL is executed.
+<br>
+<br>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: FDTEST
+
+L: List Source Program
+
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+PL/I-80 V1.0, COMPILATION OF: FDTEST
+
+   1 a 0000 dtest:
+   2 a 0006     proc options(main);
+   3 c 0006     dcl
+   4 c 0006         fdiv2 entry(fixed(7),float)
+   5 c 0006             returns(float),
+   6 c 0006         i fixed(7),
+   7 c 0006         f float;
+   8 c 0006 
+   9 c 0006         do i = 0 by 1;
+  10 c 000A         put skip list('100 / 2 **',i,'=',
+  11 c 0055             fdiv2(i,100));
+  12 c 0055         end;
+  13 a 0055     end dtest;
+
+CODE SIZE = 0055
+DATA AREA = 0018
+END  COMPILATION
+
+
+
+                        public  fdiv2
+                        extrn   ?signal
+                ;       entry:
+                ;               p1 -> fixed(7) power of two
+                ;               p2 -> floating point number
+                ;       exit:
+                ;               p1 -> (unchanged)
+                ;               p2 -> (unchanged)
+                ;       stack:  p2 / (2 ** p1)
+                fdiv2:                  ;HL = .low(.p1)
+ 0000 5E                mov     e,m     ;low(.p1)
+ 0001 23                inx     h       ;HL = .high(.p1)
+ 0002 56                mov     d,m     ;DE = .p1
+ 0003 23                inx     h       ;HL = .low(p2)
+ 0004 1A                ldax    d       ;a = p1 (power of two)
+ 0005 5E                mov     e,m     ;low(.p2)
+ 0006 23                inx     h       ;HL = .high(.p2)
+ 0007 56                mov     d,m     ;DE = .p2
+ 0008 EB                xchg            ;HL = .p2
+                ;
+                ;       A = power of 2, HL = .low byte of fp num
+ 0009 5E                mov     e,m     ;E = low mantissa
+ 000A 23                inx     h       ;to middle of mantissa
+ 000B 56                mov     d,m     ;D = middle mantissa
+ 000C 23                inx     h       ;to high byte of mantissa
+ 000D 4E                mov     c,m     ;C = high mantissa
+ 000E 23                inx     h       ;to exponent byte
+ 000F 46                mov     b,m     ;B = exponent
+ 0010 04                inr     b       ;B = 00?
+ 0011 05                dcr     b       ;becomes 00 if so
+ 0012 CA2A00            jz      fdret   ;to return from float div
+                dby2:   ;divide by two
+ 0015 B7                ora     a       ;counted power of 2 to zero?
+ 0016 CA2A00            jz      fdret   ;return if so
+ 0019 3D                dcr     a       ;count power of two down
+ 001A 05                dcr     b       ;count exponent down
+ 001B C21500            jnz     dby2    ;loop again if no underflow
+                ;
+                ;underflow occurred, signal underflow condition
+ 001E 210000            lxi     h,siglst;signal parameter list
+ 0021 CD0000            call    ?signal ;signal underflow
+ 0024 010000            lxi     b,0     ;clear to zero
+ 0027 110000            lxi     d,0     ;for default return
+                ;
+ 002A E1        fdret:  pop     h       ;recall return address
+ 002B C5                push    b       ;save high order fp num
+ 002C D5                push    d       ;save low order fp num
+ 002D E9                pchl            ;return to calling routine
+                ;
+                        dseg
+ 0000 0800      siglst: dw      sigcod  ;address of signal code
+ 0002 0900              dw      sigsub  ;address of subcode
+ 0004 0A00              dw      sigfil  ;address of file code
+ 0006 0C00              dw      sigaux  ;address of aux message
+                ;       end of parameter vector, start of params
+ 0008 03        sigcod: db      3       ;03 = underflow
+ 0009 80        sigsub: db      128     ;arbitrary subcode for id
+ 000A 0000      sigfil: dw      0000    ;no associated file name
+ 000C 0E00      sigaux: dw      undmsg  ;0000 if no aux message
+ 000E 20556E6465undmsg: db      32,'Underflow in Divide by Two',0
+ 002A                   end
+</pre>
+<br>
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-5.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-3.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-5.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-3.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-4.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+</html>

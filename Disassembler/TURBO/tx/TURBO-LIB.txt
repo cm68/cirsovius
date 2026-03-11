@@ -1,0 +1,639 @@
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+; &&&                                                       &&&
+; &&& Definition file for TURBO PASCAL-80(V3.00A) TURBO.LIB &&&
+; &&& This project was created by DASM the TURBO.COM file   &&&
+; &&& A lot of mods are performed for running this new      &&&
+; &&& program on an AMSTRAD PCW 8xxx CP/M Plus machine      &&&
+; &&&                                                       &&&
+; &&& This project consists of the following files :        &&&
+; &&&	 TR.xxx		The Run-Time Routines         	    &&&
+; &&&	 TM.xxx		The Menue Routines                  &&&
+; &&&	 TE.xxx		The Original Editor Module          &&&
+; &&& or TEN.xxx	The New Editor Module               &&&
+; &&&	 TC.xxx		The Compiler Module                 &&&
+; &&&	 TI.xxx		The Installer Module                &&&
+; &&&                                                       &&&
+; &&& Also required is this file TURBO.LIB                  &&&
+; &&&                                                       &&&
+; &&& NOTE that all code is written in Z80 menmonics        &&&
+; &&&                                                       &&&
+; &&& NOTE too that program requires CP/M 3.x for execution &&&
+; &&&                                                       &&&
+; &&& Modules should be linked by DRs LINK.COM:             &&&
+; &&&                                                       &&&
+; &&& LINK xyz=TR,TM,TE(N),TC,TI[A]      NOTE THE [A]       &&&
+; &&&                                                       &&&
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+;
+FALSE		equ	0
+TRUE		equ	NOT FALSE
+.TRUE		equ	1	; TURBO TRUE
+;
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+; @@ VERY IMPORTANT EQUATES @@
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;
+@OVLADR		equ	9000h	; OVERLAY Start
+_RST		equ	5	; RST 5
+;
+_PRGNAME	macro
+;;		db	'TURBO'
+		db	'TP'
+		endm
+;
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+; @@ LESS IMPORTANT EQUATES @@
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;
+_TURBO		macro
+		_PRGNAME
+		db	eot
+		endm
+
+;
+; #############################################################
+;
+; Compiler control
+;
+; Changing one of the following equates results in re-compiling
+; of one or more modules
+;
+; EQUATE	MODULES TO BE RECOMPILED
+; ++++++	++++++++++++++++++++++++
+;
+; @@GERMAN	TR	TM	TE(N)	TC	TI
+; @@EXEC		TM
+; @@DU		TR	TM		TC
+; @@KEY				[TEN]		TI
+;
+@@GERMAN	equ	FALSE	;; Language English
+;;@@GERMAN	equ	TRUE	;; Language German
+
+@@EXEC		equ	FALSE	;; Do not allow eXecute option
+;;@@EXEC	equ	TRUE	;; Do allow eXecute option
+
+;;@@DU		equ	FALSE	;; Do not support ZCPR DU style
+@@DU		equ	TRUE	;; Do support ZCPR DU style
+
+;;@@KEY		equ	FALSE	;; Use TE  editor
+@@KEY		equ	TRUE	;; Use TEN editor
+;
+; #############################################################
+;
+; PCW screen and clock
+;
+ScrCol		equ	90
+ScrRow		equ	31
+CPUspeed	equ	4	; CPU clock MHz
+
+OS		equ	0000h
+DU		equ	0004h
+BDOS		equ	0005h
+CallDsk		equ	0050h
+FCB		equ	005ch	; Standard FCB
+number		equ	005dh
+CCPbuf		equ	0080h
+DMA		equ	CCPbuf
+TPA		equ	0100h
+
+CPM.OS		equ	030h	; Required OS version
+
+.Conout		equ	  2
+.ConDir		equ	  6
+.String		equ	  9
+.GetLin		equ	 10
+.ConSta		equ	 11
+.Version	equ	 12
+.ResDsk		equ	 13
+.SelDsk		equ	 14
+.Open		equ	 15
+.Close		equ	 16
+.SrcFrs		equ	 17
+.SrcNxt		equ	 18
+.Delete		equ	 19
+.RdSeq		equ	 20
+.WrSeq		equ	 21
+.Make		equ	 22
+.Rename		equ	 23
+.RetDsk		equ	 25
+.SetDMA		equ	 26
+.GetAdr		equ	 27
+.GetDPB		equ	 31
+.UsrCod		equ	 32
+.RdRnd		equ	 33
+.WrRnd		equ	 34
+.FilSiz		equ	 35
+.SetRRN		equ	 36
+.ErrMode	equ	 45
+.DskFre		equ	 46
+.Parse		equ	152
+
+_ext		equ	  9
+_SYS		equ	 10	; SYStem attribute
+_ex		equ	 12
+_rrn		equ	 33
+Fdrv		equ	  1
+Fname		equ	  8
+Fext		equ	  3
+DIRlen		equ	 16
+FCBlen		equ	 36
+
+_ErrCode	equ	-1
+
+@const		equ	 2
+@conin		equ	 3
+@conout		equ	 4
+@list		equ	 5
+@auxout		equ	 6
+@auxin		equ	 7
+@userf		equ	30
+
+..const		equ	(@const-1)*3
+..conin		equ	(@conin-1)*3
+..conout	equ	(@conout-1)*3
+..list		equ	(@list-1)*3
+..auxout	equ	(@auxout-1)*3
+..auxin		equ	(@auxin-1)*3
+..userf		equ	(@userf-1)*3
+
+RecLng		equ	128	; Standard record length
+DirLng		equ	 15	; Length of file entry for DIR
+MaxUsr		equ	 15	; Max user area
+
+_Get		equ	0ffh
+
+eot		equ	00h
+CtrlC		equ	'C'-'@'
+bs		equ	08h
+tab		equ	09h
+lf		equ	0ah
+cr		equ	0dh
+Xoff		equ	'S'-'@'
+CtrlX		equ	'X'-'@'
+eof		equ	1ah
+esc		equ	1bh
+eotx		equ	'$'
+del		equ	7fh
+maxASCII	equ	7fh
+.ESC		equ	0fch
+
+NoMSB		equ	01111111b
+;
+MSB		equ	10000000b
+@MSB		equ	1000000000000000b
+_MB		equ	7
+;
+LSB		equ	00000001b
+_LB		equ	0
+;
+CtrBit		equ	01000000b
+LoMask		equ	00001111b
+
+@RST		equ	_RST SHL 3
+RST		equ	11000111b + @RST
+
+.LD.A		equ	03eh	; LD A,xx
+.LD.B		equ	006h	; LD B,xx
+.LD.BC		equ	001h	; LD BC,xxxx
+.LD.DE		equ	011h	; LD DE,xxxx
+.LD.HL		equ	021h	; LD HL,xxxx
+.LD.SP		equ	031h	; LD SP,xxxx
+.LD@HL		equ	02ah	; LD HL,(xxxx)
+.LD@DE		equ	5bedh	; LD DE,(xxxx)
+.ST@HL		equ	022h	; LD (xxxx),HL
+.ST@A		equ	032h	; LD (xxxx),A
+.INC.HL		equ	023h	; INC HL
+.DEC.HL		equ	02bh	; DEC HL
+.POP.HL		equ	0e1h	; POP HL
+.PUSH.HL	equ	0e5h	; PUSH HL
+.JP		equ	0c3h	; JP addr
+.CALL		equ	0cdh	; CALL addr
+.JPZ		equ	0cah	; JP Z,addr
+.JPC		equ	0dah	; JP C,addr
+.EXX		equ	0d9h	; EXX
+skip		equ	03eh	; Immediate LD A,..
+skip.2		equ	001h	; Immediate LD BC,..
+
+.maxbuf		equ	126	; Max line input
+.maxsamp	equ	 30	; .. max sample input
+.run		equ	  1
+
+StkSpc		equ	 708	; Data space
+TopSpc		equ	1024
+_SavLen		equ	8192
+_LinLen		equ	 127	; Source line length
+_Ahead		equ	  20	; Length of look ahead buffer
+DefWITH		equ	   2	; Default depth of WITH
+DefSTR		equ	  80	; Default length of string
+
+maxint		equ	32767	; Max processed signed integer
+
+_Byte		equ	1
+_Addr		equ	2
+
+_Array		equ	 1
+_Record		equ	 2
+_Set		equ	 3
+_Ptr		equ	 4
+_RecF		equ	 5
+_TxtF		equ	 6
+_UntF		equ	 7
+_String		equ	 8
+_Real		equ	 9
+_Integ		equ	10
+_Bool		equ	11
+_Char		equ	12
+
+_Label		equ	1
+_Const		equ	2
+_Type		equ	3
+_Var		equ	4
+_Proc		equ	5
+_Func		equ	6
+_Overly		equ	7
+_Begin		equ	8
+
+_Norm		equ	0	; Normal compiling
+_NoLIB		equ	1	; Chaining
+_FndErr		equ	2	; Find error
+
+_Memory		equ	1	; Compile to memory
+_File		equ	2	; .. to file
+_Chain		equ	3	; .. to chain file
+
+_M		equ	0	; Bit position
+@M		equ	1	; Bit value
+;
+; File Information Block (FIB) definitions
+;
+IF		@@DU
+$DU$		equ	1
+ELSE
+$DU$		equ	0
+ENDIF		;@@DU
+
+_F_		equ	12		; Start of FCB
+
+FIB.rec		equ	4		; Pointer #records
+FIB.reclen	equ	6		; Pointer record length
+FIB.cur		equ	8		; Pointer current record
+FIB.DU		equ	_F_		; Pointer to DU
+FIB.FCB		equ	_F_+$DU$	; Pointer to FCB
+FIBlen		equ	_F_+FCBlen+$DU$	; FIB length less buffer
+FIB.buff	equ	FIBlen		; Pointer to buffer
+
+FIBtype		equ	00001111b
+
+rd.bit		equ	4
+wr.bit		equ	5
+out.bit		equ	6
+in.bit		equ	7
+
+..in		equ	10000000b
+..out		equ	01000000b
+..read		equ	00010000b
+
+FixRecLen	equ	4	; Fixed record length
+Rec.Wr.bit	equ	0
+Rec.New.bit	equ	1
+Rec.Wr		equ	01b
+Rec.New		equ	10b
+
+RAMdevice	equ	6
+
+sign.bit	equ	10000000b
+sgn.bit		equ	7
+dot.bit		equ	6	; Decimal point
+exps.bit	equ	5	; Sign of exponent
+exp.bit		equ	4	; Exponent
+exp.offset	equ	080h	; Exponents offset
+Exp.One		equ	exp.offset+1
+mant.len	equ	5	; Length of mantissa
+Real.Len	equ	6	; Length of real
+mant.bits	equ	40	; Number of mantissa bits
+bit.len		equ	8	; Number of bits in byte
+sqr.exp		equ	014h	; SQRT exponent fix
+sin.min		equ	06ch	; SIN/COS minimum exponent
+ln.min		equ	067h	; LN minimum exponent
+exp.max		equ	088h	; EXP maximum exponent
+int.max		equ	08fh	; Integer max exponent
+real.dig	equ	24	; Max real digits
+real.field	equ	 7	; Real field size
+real.ASCII	equ	12	; Real ASCII size
+
+set.len		equ	32	; 32*8=256 max set range
+
+heaplen		equ	4	; Heap administration
+heapLOadr	equ	0	; Address location
+heapHIadr	equ	1
+heapLOlen	equ	2	; Length location
+heapHIlen	equ	3
+;
+; Status control offsets and bits
+;
+_BlkSta		equ	 1
+_EdCol		equ	 4
+_EdRow		equ	 5
+_EdIns		equ	 6
+_EdInd		equ	13
+_FndSta		equ	17
+_EdBlk		equ	20
+_EdCh		equ	22
+;
+_BlkBeg		equ	0
+_BlkEnd		equ	1
+;
+; Search options
+;
+_W		equ	0
+_N		equ	1
+_U		equ	2
+_G		equ	3
+_B		equ	4
+IF		@@GERMAN
+_Wchr		equ	'W'
+_Nchr		equ	'K'
+_Uchr		equ	'G'
+_Gchr		equ	'T'
+_Bchr		equ	'R'
+ELSE
+_Wchr		equ	'W'
+_Nchr		equ	'N'
+_Uchr		equ	'U'
+_Gchr		equ	'G'
+_Bchr		equ	'B'
+ENDIF		;@@GERMAN
+;
+; Option selection bits
+;
+_Iopt		equ	00000001b
+_Ropt		equ	00000010b
+_Aopt		equ	00000100b
+_Uopt		equ	00001000b
+_Xopt		equ	00010000b
+_Vopt		equ	00100000b
+_Bopt		equ	01000000b
+_Copt		equ	10000000b
+
+.Iopt		equ	0
+.Ropt		equ	1
+.Aopt		equ	2
+.Uopt		equ	3
+.Xopt		equ	4
+.Vopt		equ	5
+.Bopt		equ	6
+.Copt		equ	7
+;
+; Special PCW values
+;
+TE_ASK		equ	00bfh
+CD_VERS		equ	00e3h
+KM.GET		equ	00dah
+KM.XLTa		equ	1298h		; BIOS 1.4
+KM.XLTb		equ	42fbh		; BIOS 1.8
+KM.XLTc		equ	4242h		; BIOS 1.12
+_PCW		equ	 1
+BIOS_Min.a	equ	 4		; BIOS 1.4
+BIOS_Min.b	equ	 8		; BIOS 1.8
+BIOS_Min.c	equ	12		; BIOS 1.12
+BIOS_Maj	equ	 1
+
+_BIOS$_		macro
+IF		@@GERMAN
+		db	'1.4, 1.8 oder 1.12'
+ELSE
+		db	'1.4, 1.8 or 1.12'
+ENDIF		;@@GERMAN
+		endm
+;
+; TYPE definitions
+;
+_const		equ	2
+_simple		equ	3
+_pointer	equ	4
+;
+LabLen		equ	8	; Length of label ???
+;
+; Error levels
+;
+_BRK		equ	0	; User break
+_IO		equ	1	; I/O error
+_RT		equ	2	; Run time error
+;
+; BREAK error
+;
+_CBRK		equ	1
+;
+; Compiler errors
+;
+_ColExp		equ	  1
+_SemiExp	equ	  2
+_CommaExp	equ	  3
+_LftPar		equ	  4
+_RgtPar		equ	  5
+_EquExp		equ	  6
+_AssExp		equ	  7
+_LftBrack	equ	  8
+_RgtBrack	equ	  9
+_DotExp		equ	 10
+..Exp		equ	 11
+_BEGINexp	equ	 12
+_DOexp		equ	 13
+_ENDexp		equ	 14
+_OFexp		equ	 15
+_SUBexp		equ	 16
+_THENexp	equ	 17
+_D.TOexp	equ	 18
+_BoolExprExp	equ	 20
+_FilVarExp	equ	 21
+_IntCexp	equ	 22
+_IntExprExp	equ	 23
+_IntVexp	equ	 24
+_IntRealCexp	equ	 25
+_IntRealExprExp	equ	 26
+_IntRealVexp	equ	 27
+_PtrVexp	equ	 28
+_RecVexp	equ	 29
+_SimpTexp	equ	 30
+_SimpExpr	equ	 31
+_StrCexp	equ	 32
+_StrExprExp	equ	 33
+_StrVexp	equ	 34
+_TextFilExp	equ	 35
+_TypeExp	equ	 36
+_UntypeExp	equ	 37
+_SimpIexp	equ	 38
+_UndefLab	equ	 40
+_Undef		equ	 41
+_UndefPtr	equ	 42
+_DoubleLab	equ	 43
+_InvType	equ	 44
+_ConstRange	equ	 45
+_IllCASE	equ	 46
+_IllOpers	equ	 47
+_InvResult	equ	 48
+_InvStrLen	equ	 49
+_StrConst	equ	 50
+_InvScalar	equ	 51
+_LimErr		equ	 52
+_ResWrd		equ	 53
+_InvAss		equ	 54
+_StrClen	equ	 55
+_IntCerr	equ	 56
+_IntRerr	equ	 57
+_InvChar	equ	 58
+_ConstErr	equ	 60
+_InvFilPtr	equ	 61
+_StructErr	equ	 62
+_NoTxtErr	equ	 63
+_NoTxtUnt	equ	 64
+_NoUntErr	equ	 65
+_IOinvalid	equ	 66
+_VarFile	equ	 67
+_FileRefErr	equ	 68
+_InvSetOrder	equ	 69
+_SETrange	equ	 70
+_GOTOerr	equ	 71
+_LABELerr	equ	 72
+_UndefFORW	equ	 73
+_INLINEerr	equ	 74
+_InvalABS	equ	 75
+_OvlFORW	equ	 76
+_OvlDirErr	equ	 77
+_FilFndErr	equ	 90
+_EOFerr		equ	 91
+_NoOvl		equ	 92
+_SYSerr1	equ	 93
+_SYSerr2	equ	 96
+_WITHerr	equ	 97
+_MemOverflow	equ	 98
+_CompOverflow	equ	 99
+_FndRTerr	equ	200
+_ABORT		equ	202
+_DskFull	equ	250
+;
+; Run-Time errors
+;
+_FLPovfl	equ	001h
+_DivZero	equ	002h
+_NegSqrt	equ	003h
+_LNerr		equ	004h
+_StrLenErr	equ	010h
+_StrIdx		equ	011h
+_IndxErr	equ	090h
+_RngErr		equ	091h
+_OVLerr		equ	0f0h
+_HeapErr	equ	0ffh
+;
+; Run-Time I/O errors
+;
+_NoIOErr	equ	000h
+_NoFile		equ	001h
+_NoRead		equ	002h
+_NoWrite	equ	003h
+_BlkErr		equ	004h
+_BadAss		equ	005h
+_EmpAss		equ	006h
+_BadDU		equ	007h
+_IllNum		equ	010h
+_IllIO		equ	020h
+_DirErr		equ	021h
+_StdAssErr	equ	022h
+_InvRec		equ	090h
+_SeekEOF	equ	091h
+_IllEOF		equ	099h
+_WrErr		equ	0f0h
+_DirFull	equ	0f1h
+_OvflErr	equ	0f2h
+_NoClose	equ	0ffh
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%
+; %%% Page zero set up %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%
+;
+XConstat	equ	00a0h
+XConin		equ	00a3h
+XConout		equ	00a6h
+XList		equ	00a9h
+XAuxout		equ	00ach
+XAuxin		equ	00afh
+LoadTemp	equ	00b0h
+XConoutx	equ	00b2h
+XConinx		equ	00b5h
+BaseFIB		equ	00b8h
+ConinFIB	equ	00bah
+LstFIB		equ	00bch
+AuxFIB		equ	00beh
+UsrFIB		equ	00c0h
+StdIOdev	equ	00c2h
+HeapPtr		equ	00c4h
+RecurPtr	equ	00c6h
+RandomVal	equ	00c8h
+Base.PC		equ	00cch
+Curr.PC		equ	00ceh
+IOResult	equ	00d0h
+BufLen		equ	00d1h
+TopRam		equ	00d2h
+CurPtr		equ	00d4h
+TopPtr		equ	00d6h
+RunMode		equ	00d8h	; 0=Direct mode
+RestVect	equ	00d9h
+ErrorPtr	equ	00dah	; Pointer to error routine
+OvrDrv		equ	00dch
+CBreak		equ	00ddh	; TRUE means {$C+}
+HeapFre		equ	00deh	; Pointer to 1st free memory
+Video		equ	00e0h
+IOdev		equ	00e2h
+IOpc		equ	00e4h
+OvlRecord	equ	00e6h
+FilIniMode	equ	00e8h
+BlockMode	equ	00e9h
+STR.VAL.par	equ	00eah	; STR and VAL parameter
+VALtype		equ	00ech	; Type of VAL number
+IOdev.sav	equ	00edh	; Save area for FIB
+Scratch		equ	00f0h
+HeapVar		equ	00f2h	; Pointer to variable on heap
+AvailMem	equ	00f4h
+availmax	equ	00f6h
+HeapSav		equ	00f8h
+
+MaxParams	equ	31	; Max parameter in command line
+
+_Flash		equ	2000	; Flash delay
+TPhead		equ	21	; Header code length for ERROR
+
+IF		@@GERMAN
+_YES		equ	'J'
+ELSE
+_YES		equ	'Y'
+ENDIF		;@@GERMAN
+
+@XY		macro	_xval,_yval
+		ld	hl,256*(_xval)+_yval
+		endm
+;
+; Status line positions for editor
+;
+_StLin		equ	 0	; Status line
+_CtrPos		equ	 0	; Control column
+_First		equ	 0	; Left margin
+_YN		equ	15	; Position for YES or NO
+_LinPos		equ	 6	; Position of line
+IF		@@GERMAN
+_LinVal		equ	12	; Value of line
+_ColPos		equ	17	; Position of column
+_ColVal		equ	24	; Value of column
+_InsPos		equ	28	; Position of insert
+_FilPos		equ	46	; File position
+ELSE
+_LinVal		equ	11	; Value of line
+_ColPos		equ	16	; Position of column
+_ColVal		equ	20	; Value of column
+_InsPos		equ	24	; Position of insert
+_FilPos		equ	42	; File position
+ENDIF		;@@GERMAN
+;
+_Video		equ	7	; Status
+_New		equ	8	; Any change
+

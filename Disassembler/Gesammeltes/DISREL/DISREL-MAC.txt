@@ -1,0 +1,4669 @@
+	title	REL-File-Disassembler
+	name	('DISREL')
+
+; DISREL.COM is a .REL file disassembler based on RELDUMP.COM by Ron Fowler.
+
+; It performs a two pass disassembly of .REL files (Microsoft/DRI format)
+; both in 8080 and Z80 opcodes with labeled entry-points.
+
+; Pierre R. Schwob
+; 10/8/84
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+FCB	equ	005ch
+DMA	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.consta	equ	11
+.open	equ	15
+.close	equ	16
+.rdseq	equ	20
+
+reclng	equ	128
+
+OSerr	equ	255
+
+.drv	equ	1
+.nam	equ	8
+
+_EX	equ	12
+_CR	equ	32
+
+bell	equ	07h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+LoMask	equ	00001111b
+
+_PRGNAM	equ	0010b
+_DEFCOM	equ	0101b
+_ENTPNT	equ	0111b
+_EXPLUS	equ	1001b
+_SETLOC	equ	1011b
+_ENDMOD	equ	1110b
+_ENDFIL	equ	1111b
+
+l000b	equ	0bh
+
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	(l35b2),hl	; Save it
+	ld	sp,ll35b2	; Get local stack
+	call	l0a0f		; Give new line
+	call	l012e
+	db	'Rel File Disassembler 10/8/84',eot
+l012e:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	call	l0158
+	db	'Pierre Schwob - PRS Corp.  NY',eot
+l0158:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	call	l0182
+	db	'Based on RELDUMP by R. Fowler',eot
+l0182:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new lines
+	call	l0a0f
+	call	l019a
+	db	'- Pass 1',eot
+l019a:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	call	l01ba
+	db	'Entry-Point search:',eot
+l01ba:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new lines
+	call	l0a0f
+	ld	a,(FCB+.drv+.nam)
+	cp	' '		; Test extension given
+	jp	nz,l01d9	; Yeap
+	ld	hl,'R'+256*'E'	; Set default .REL
+	ld	(FCB+.drv+.nam),hl
+	ld	a,'L'
+	ld	(FCB+.drv+.nam+2),a
+l01d9:
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	(FCB+_EX),a	; Clear extent
+	ld	c,.open
+	ld	de,FCB
+	call	BDOS		; Open file
+	cp	OSerr		; Test success
+	jp	nz,l0200	; Yeap
+	call	l09ea		; Tell error and exit
+	db	'File not found.',eot
+l0200:
+	xor	a
+	ld	(l356a),a
+	ld	(l356b),a
+	ld	(l356c),a
+	ld	(l356d),a
+	ld	(l356e),a	; Clear location counter, lo
+	ld	(l356e+1),a	; Clear location counter, hi
+	ld	(l3570),a	; Clear address, lo
+	ld	(l3570+1),a	; Clear address, hi
+	ld	(l3573),a	; Clear module count
+	ld	(l3574),a	; Clear bit count
+	ld	(l3575),a	; Clear .REL byte
+	ld	(l3576),a	; Clear link item
+	ld	(l3577),a	; Clear another link item
+	ld	(l3578),a
+	ld	(l3579),a	; Set constant
+	ld	(l3572),a
+	ld	a,reclng
+	ld	(l357a),a	; Init file buffer position
+l0236:
+	call	l024d		; Process one item from .REL file
+	jp	c,l03e8		; End of file, enter pass 2
+	call	l049c		; Test abort by user
+	jp	nc,l0236	; Nope
+	call	l09ea		; Tell message and exit
+	db	cr,lf,'done.',eot
+;
+; Process one item from .REL file - Pass 1
+; C set if end of .REL file
+;
+l024d:
+	ld	b,1
+	call	l084c		; Read a bit from .REL file
+	or	a		; Test constant
+	jp	nz,l0265	; Nope
+	ld	hl,l3579
+	ld	(hl),0		; Indicate constant
+	ld	b,8
+	call	l084c		; Read a byte from .REL file
+	call	l09f5		; Increment location counter
+	or	a
+	ret
+;
+; Process address or special link item
+;
+l0265:
+	ld	a,-1
+	ld	(l3579),a	; Indicate no constant
+	ld	b,2
+	call	l084c		; Read two bits from .REL file
+	or	a		; Test link item
+	jp	z,l02d4		; Yeap
+	push	hl
+	ld	hl,(l356e)	; Get location counter
+	inc	hl		; Skip address
+	inc	hl
+	ld	(l356e),hl
+	pop	hl
+l027d:
+	ld	b,8
+	call	l084c		; Read low byte from .REL file
+	ld	(l3570),a	; Save
+	ld	b,8
+	call	l084c		; Read high byte from .REL file
+	ld	(l3570+1),a	; Save
+	ld	a,(l3577)	; Get link item
+	cp	_ENTPNT		; Test entry point
+	jp	nz,l02c0	; Nope
+	ld	hl,(l357b)	; Get heap pointer
+	ld	a,(l3573)	; Get module number
+	ld	(hl),a		; Store it
+	inc	hl
+	inc	hl
+	ld	a,(l3570+1)	; Get hi address byte
+	ld	(hl),a		; Save
+	dec	hl
+	call	l0a1d		; Print ASCII byte
+	ld	a,(l3570)	; Get lo address byte
+	ld	(hl),a
+	inc	hl
+	inc	hl
+	ld	(l357b),hl	; Save new heap pointer
+	call	l0a1d		; Print ASCII byte
+	call	l02b7
+	db	' ',eot
+l02b7:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l02d2
+l02c0:
+	ld	a,(l3577)
+	cp	_SETLOC		; Test set location counter
+	jp	nz,l02d2	; Nope
+	xor	a
+	ld	(l3577),a	; Reset link item
+	ld	hl,(l3570)	; Get address
+	ld	(l356e),hl	; Set location counter
+l02d2:
+	or	a
+	ret
+;
+; Process special link item
+;
+l02d4:
+	ld	b,4
+	call	l084c		; Read link item from .REL file
+	ld	(l3576),a	; Save link item
+	cp	_ENTPNT		; Test entry point
+	jp	nz,l02e7
+	ld	(l3577),a	; Set copy of link item
+	jp	l02ef
+l02e7:
+	cp	_SETLOC		; Test set location counter
+	jp	nz,l02ef
+	ld	(l3577),a	; Set copy of link item
+l02ef:
+	ld	a,(l3576)	; Get link item
+	cp	_ENDFIL		; Test end of file
+	scf
+	ret	z
+	cp	_DEFCOM		; Test range
+	jp	c,l0348
+	call	l034d		; Process address field
+	ld	a,(l3576)	; Get link item
+	cp	_ENDMOD		; Test end of item
+	jp	nz,l0345
+	push	hl
+	call	l0318
+	db	'=========== (',eot
+l0318:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l09ff		; Print location counter
+	call	l0326
+	db	')',eot
+l0326:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new lines
+	call	l0a0f
+	ld	a,(l3573)
+	inc	a		; Advance module count
+	ld	(l3573),a
+	ld	hl,0
+	ld	(l356e),hl	; Clear location counter
+	pop	hl
+	call	l0871		; Read byte from .REL file
+	or	a
+	ret
+l0345:
+	cp	_EXPLUS		; Test range
+	ret	nc		; No name
+l0348:
+	call	l0355		; Read name
+	or	a
+	ret
+;
+; Process AFIELD
+;
+l034d:
+	ld	b,2
+	call	l084c		; Read two bits from .REL file
+	jp	l027d		; Then get value
+;
+; Process BFIELD
+;
+l0355:
+	ld	a,(l3576)	; Get link item
+	cp	_PRGNAM		; Test name of program
+	jp	nz,l036c	; Nope
+	call	l0366
+	db	'     ',eot
+l0366:
+	pop	de
+	ld	c,.string
+	call	BDOS
+l036c:
+	ld	b,3
+	call	l084c		; Read length from .REL file
+	ld	e,a
+	ld	d,a
+	ld	a,8
+	sub	d
+	ld	d,a
+	ld	hl,(l357b)	; Get heap pointer
+l037a:
+	ld	a,e		; Test end of input
+	or	a
+	jp	z,l03a8		; Yeap
+	dec	e
+	ld	b,8
+	call	l084c		; Read name from .REL file
+	push	af
+	ld	a,(l3576)	; Get link item
+	cp	_PRGNAM		; Test name of program
+	jp	nz,l0393
+	pop	af
+	push	af
+	call	l0a35		; Print as ASCII
+l0393:
+	ld	a,(l3577)
+	cp	_ENTPNT		; Test entry point
+	jp	z,l039f		; Yeap
+	pop	af
+	jp	l037a
+l039f:
+	pop	af		; Get name
+	ld	(hl),a		; Unpack into symbol table
+	inc	hl
+	call	l0a35		; Print as ASCII
+	jp	l037a
+l03a8:
+	ld	a,(l3576)	; Get link item
+	cp	_PRGNAM		; Test name of program
+	jp	nz,l03d0
+	call	l03c7
+	db	'  <--- Program name',eot
+l03c7:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+l03d0:
+	ld	a,(l3577)
+	cp	_ENTPNT		; Test entry point
+	ret	nz		; Nope
+l03d6:
+	ld	(hl),' '	; Fill with blanks
+	inc	hl
+	dec	d
+	jp	nz,l03d6
+	ld	(l357b),hl	; Set new heap pointer
+	xor	a
+	ld	(l3577),a	; Clear link item
+	call	l0a0f		; Give new line
+	ret
+;
+; Pass 2
+;
+l03e8:
+	ld	c,.close
+	ld	de,FCB
+	call	BDOS		; Close file
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	(FCB+_EX),a	; Clear extent
+	ld	(l356a),a
+	ld	(l356b),a
+	ld	(l356c),a
+	ld	(l356d),a
+	ld	(l356e),a	; Clear location counter, lo
+	ld	(l356e+1),a	; Clear location counter, hi
+	ld	(l3570),a	; Clear address, lo
+	ld	(l3570+1),a	; Clear address, hi
+	ld	(l3573),a	; Clear module count
+	ld	(l3574),a	; Clear bit count
+	ld	(l3575),a	; Clear .REL byte
+	ld	(l3576),a	; Clear link item
+	ld	(l3577),a	; Clear another link item
+	ld	(l3578),a
+	ld	(l3579),a	; Set constant
+	inc	a
+	ld	(l3572),a
+	ld	a,reclng
+	ld	(l357a),a	; Init file buffer position
+	ld	hl,(l357b)	; Get heap pointer
+	dec	hl
+	ld	(l357d),hl
+	call	l0a0f		; Give new line
+	call	l0443
+	db	'- Pass 2',eot
+l0443:
+	pop	de
+	ld	c,.string
+	call	BDOS		; Tell pass 2
+	call	l0a0f		; Give new line
+	call	l045c
+	db	'Disassembly:',eot
+l045c:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	ld	c,.open
+	ld	de,FCB
+	call	BDOS		; Re-open source file
+	cp	OSerr		; Test on disk
+	jp	nz,l0485	; Yeap
+	call	l09ea		; Tell error and exit
+	db	'File not found.',eot
+l0485:
+	call	l04ae		; Process one item from .REL file
+	jp	c,l0491		; End of disassembly
+	call	l049c		; Test abort by user
+	jp	nc,l0485	; Nope
+l0491:
+	call	l09ea		; Tell message and exit
+	db	cr,lf,'done.',eot
+;
+; Test abort by user
+; C set says abort
+;
+l049c:
+	ld	c,.consta
+	call	BDOS		; Test key pressed
+	or	a
+	ret	z		; Nope
+	ld	c,.conin
+	call	BDOS		; Read key
+	cp	'C'-'@'		; Test abort
+	scf
+	ret	z		; Yeap
+	ccf
+	ret
+;
+; Process one item from .REL file - Pass 2
+; C set if end of .REL file
+;
+l04ae:
+	ld	b,1
+	call	l084c		; Read a bit from .REL file
+	or	a		; Test constant
+	jp	nz,l05b0	; Nope
+	call	l08bc
+	ld	hl,l3579	; Point to type
+	ld	a,(hl)
+	ld	(hl),0		; Set constant
+	or	a		; Test previous a constant
+	jp	z,l04ff		; Yeap
+	ld	a,(l3578)
+	or	a
+	jp	nz,l04ce
+	call	l0a0f		; Give new line
+l04ce:
+	call	l0a0f		; Give new line
+	xor	a
+	ld	(l356a),a
+	ld	(l356b),a
+	ld	a,(l356d)
+	rla
+	jp	nc,l04f1
+	call	l04e4
+	db	';',eot
+l04e4:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	xor	a
+	ld	(l356d),a
+l04f1:
+	call	l04f9
+	db	'ABS:',eot
+l04f9:
+	pop	de
+	ld	c,.string
+	call	BDOS
+l04ff:
+	xor	a
+	ld	(l3578),a
+	ld	b,8
+	call	l084c		; Read a byte from .REL file
+	push	af
+	ld	a,(l356a)
+	cp	0
+	jp	z,l0569
+	ld	a,(l356b)
+	cp	0cbh
+	jp	z,l0537
+	cp	0edh
+	jp	z,l052b
+	cp	0ddh
+	jp	z,l0543
+	cp	0fdh
+	jp	z,l054f
+	jp	l055b
+l052b:
+	pop	af
+	push	af
+	call	l0a1a
+	pop	af
+	call	l0cb2
+	jp	l05a4
+l0537:
+	pop	af
+	push	af
+	call	l0a1a
+	pop	af
+	call	l0c8f
+	jp	l05a4
+l0543:
+	pop	af
+	push	af
+	call	l0a1a
+	pop	af
+	call	l0cd7
+	jp	l05a4
+l054f:
+	pop	af
+	push	af
+	call	l0a1a
+	pop	af
+	call	l0cfc
+	jp	l05a4
+l055b:
+	ld	a,(l356a)
+	dec	a
+	ld	(l356a),a
+	pop	af
+	call	l0a1a
+	jp	l05a4
+l0569:
+	ld	a,(l356d)
+	rla
+	jp	nc,l0582
+	call	l0575
+	db	';',eot
+l0575:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	xor	a
+	ld	(l356d),a
+l0582:
+	call	l0587
+	db	tab,eot
+l0587:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l09ff		; Print location counter
+	call	l0595
+	db	tab,eot
+l0595:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	af
+	push	af
+	call	l0a1a
+	pop	af
+	call	l0c1e
+l05a4:
+	push	af
+	ld	a,(l356a)
+	cp	0
+	call	z,l0a0f		; Give new line
+	pop	af
+	or	a
+	ret
+;
+; Process address or special link item
+;
+l05b0:
+	call	l0a0f		; Give new line
+	call	l0a0f
+	ld	a,-1
+	ld	(l3579),a	; Set no constant
+	call	l05c9
+	db	'REL: type ',eot
+l05c9:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	b,2
+	call	l084c		; Read two bits from .REL file
+	push	af
+	call	l0a1d		; Print ASCII byte
+	pop	af
+	or	a
+	jp	z,l0678
+	dec	a
+	jp	z,l0601
+	dec	a
+	jp	z,l061d
+	call	l05f8
+	db	', com rel, val=',eot
+l05f8:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l0636
+l0601:
+	call	l0614
+	db	', prg rel, val=',eot
+l0614:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l0636
+l061d:
+	call	l0630
+	db	', dat rel, val=',eot
+l0630:
+	pop	de
+	ld	c,.string
+	call	BDOS
+l0636:
+	push	hl
+	ld	hl,(l356e)	; Get location counter
+	inc	hl
+	inc	hl
+	ld	(l356e),hl
+	pop	hl
+l0640:
+	ld	b,8
+	call	l084c		; Read low byte from .REL file
+	ld	(l3570),a	; Save
+	push	af
+	ld	b,8
+	call	l084c		; Read high byte from .REL file
+	ld	(l3570+1),a	; Save
+	call	l0a1d		; Print ASCII byte
+	pop	af
+	call	l0a1d		; Print ASCII byte
+	ld	a,' '
+	call	l0a35		; Print as ASCII
+	push	hl
+	push	af
+	ld	a,(l3577)
+	cp	_SETLOC		; Test set location counter
+	jp	nz,l0674	; Nope
+	xor	a
+	ld	(l3577),a	; Clear link item
+	ld	hl,(l3570)	; Get address
+	ld	(l356e),hl	; Set location counter
+	call	l08bc
+l0674:
+	pop	af
+	pop	hl
+	or	a
+	ret
+;
+; Process special link item
+;
+l0678:
+	call	l0692
+	db	', (special), ctrl fld=',eot
+l0692:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	b,4
+	call	l084c		; Read link item from .REL file
+	ld	(l3576),a	; Get link item
+	cp	_SETLOC		; Test set location counter
+	jp	nz,l06a8
+	ld	(l3577),a	; Set copy of link item
+l06a8:
+	push	af
+	call	l0a1d		; Print ASCII byte
+	call	l06b2
+	db	', ',eot
+l06b2:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	af
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	ld	de,l0a4e
+	add	hl,de		; Position in item field
+	ld	e,(hl)		; Fetch item description
+	inc	hl
+	ld	d,(hl)
+	ld	c,.string
+	call	BDOS
+	ld	a,(l3576)	; Get link item
+	cp	_ENDFIL		; Test end of file
+	scf
+	ret	z
+	push	af
+	call	l0a0f		; Give new line
+	call	l06dd
+	db	'     ',eot
+l06dd:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	af
+	cp	5
+	jp	c,l076b
+	call	l0770
+	ld	a,(l3576)	; Get link item
+	cp	_ENDMOD		; Test end of module
+	jp	nz,l0768
+	push	hl
+	call	l0a0f		; Give new line
+	call	l0a0f
+	call	l098b
+	call	l0a0f		; Give new line
+	call	l0725
+	db	'================================',eot
+l0725:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l074f
+	db	'================================',eot
+l074f:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	a,(l3573)
+	inc	a		; Advance module count
+	ld	(l3573),a
+	ld	hl,0
+	ld	(l356e),hl	; Clear location counter
+	pop	hl
+	call	l0871		; Read byte from .REL file
+	or	a
+	ret
+l0768:
+	cp	_EXPLUS		; Test range
+	ret	nc		; No name
+l076b:
+	call	l082a		; Read name
+	or	a
+	ret
+;
+; Process AFIELD
+;
+l0770:
+	call	l0780
+	db	'a fld type: ',eot
+l0780:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	b,2
+	call	l084c		; Read two bits from .REL file
+	push	af
+	call	l0a1d		; Print ASCII byte
+	call	l0795
+	db	', ',eot
+l0795:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	af
+	or	a
+	jp	z,l080b
+	dec	a
+	jp	z,l07ea
+	dec	a
+	jp	z,l07c9
+	call	l07c0
+	db	'(common rel) value= ',eot
+l07c0:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l0640
+l07c9:
+	call	l07e1
+	db	'(data   rel) value= ',eot
+l07e1:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l0640
+l07ea:
+	call	l0802
+	db	'(prog   rel) value= ',eot
+l0802:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l0640
+l080b:
+	call	l0821
+	db	'(absolute) value= ',eot
+l0821:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	jp	l0640
+;
+; Process BFIELD
+;
+l082a:
+	ld	b,3
+	call	l084c		; Read length from .REL file
+	ld	e,a
+	ld	a,'"'
+	call	l0a35		; Print as ASCII
+l0835:
+	ld	a,e
+	or	a
+	jp	z,l0846
+	dec	e
+	ld	b,8
+	call	l084c		; Read name from .REL file
+	call	l0a35		; Print as ASCII
+	jp	l0835
+l0846:
+	ld	a,'"'
+	call	l0a35		; Print as ASCII
+	ret
+;
+; Read B bits into Accu
+;
+l084c:
+	push	hl
+	push	de
+	xor	a		; Init result
+l084f:
+	call	l085a		; Read a bit
+	rla			; Shift it in
+	dec	b
+	jp	nz,l084f
+	pop	de
+	pop	hl
+	ret
+;
+; Read a bit into Carry
+;
+l085a:
+	push	bc
+	ld	b,a
+	ld	a,(l3574)	; Get bit count
+	or	a		; Test all bits read
+	call	z,l0871		; Read next byte if so
+	dec	a		; Count down
+	ld	(l3574),a
+	ld	a,(l3575)	; Get .REL byte
+	rla			; Shift it
+	ld	(l3575),a
+	ld	a,b
+	pop	bc
+	ret
+;
+; Read a byte into Accu
+;
+l0871:
+	push	bc
+	ld	a,(l357a)	; Get file buffer position
+	cp	reclng		; Test buffer scanned
+	call	z,l0890		; Read next one if so
+	ld	l,a		; Build index
+	ld	h,0
+	inc	a		; Advance position
+	ld	(l357a),a	; save it
+	ld	de,DMA
+	add	hl,de		; Get address in buffer
+	ld	a,(hl)		; Fetch byte
+	ld	(l3575),a	; Save it
+	ld	a,8
+	ld	(l3574),a	; Reset bit count
+	pop	bc
+	ret
+;
+; Read a record from .REL file
+;
+l0890:
+	ld	c,.rdseq
+	ld	de,FCB
+	call	BDOS		; Read record
+	cp	OSerr		; Test success
+	ld	a,0		; Init index
+	ret	nz
+	call	l09ea		; Tell error and exit
+	db	'??? Unexpected end of file.',eot
+;
+;
+;
+l08bc:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,l35b5	; Init heap base
+	ld	a,(l3573)	; Get module count
+	ld	c,a		; Save it
+l08c7:
+	ld	a,c
+	cp	(hl)		; Test same module
+	jp	z,l08de		; Got it
+l08cc:
+	ld	de,l000b
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l357d)
+	or	a
+	sbc	hl,de
+	ex	de,hl
+	jp	nc,l08c7
+	jp	l0986
+l08de:
+	push	hl
+	inc	hl
+	ld	a,(l356e)	; Get low byte of location counter
+	cp	(hl)
+	jp	nz,l08ec
+	inc	hl
+	ld	a,(l356e+1)	; Get high byte of location counter
+	cp	(hl)
+l08ec:
+	pop	hl
+	jp	nz,l08cc
+	ld	(hl),0ffh
+	inc	hl
+	inc	hl
+	inc	hl
+	push	hl
+	ld	a,(l3579)	; Test constant
+	or	a
+	jp	z,l0903		; Yeap
+l08fd:
+	call	l0a0f		; Give new line
+	jp	l090a
+l0903:
+	ld	a,(l356a)
+	or	a
+	jp	nz,l08fd
+l090a:
+	call	l0a0f		; Give new line
+	call	l0912
+	db	';',eot
+l0912:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	call	l0934
+	db	';',tab,tab,'**** ENTRY POINT: ',eot
+l0934:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l09ff		; Print location counter
+	call	l0942
+	db	' ',eot
+l0942:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	hl
+	ld	c,8
+l094b:
+	ld	a,(hl)
+	call	l0a35		; Print as ASCII
+	inc	hl
+	dec	c
+	jp	nz,l094b
+	call	l095d
+	db	' ****',eot
+l095d:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	call	l096b
+	db	';',eot
+l096b:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	a,(l3579)	; Test constant
+	or	a
+	jp	nz,l097b	; Nope
+	call	l0a0f		; Give new line
+l097b:
+	xor	a
+	ld	(l356d),a
+	ld	(l356a),a
+	dec	a
+	ld	(l3578),a
+l0986:
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+l098b:
+	ld	hl,l35b5	; Init heap base
+l098e:
+	ld	a,(l3573)	; Get module count
+	cp	(hl)
+	push	hl
+	call	z,l09a7
+	pop	hl
+	ld	de,l000b
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l357d)
+	or	a
+	sbc	hl,de
+	ex	de,hl
+	jp	nc,l098e
+	ret
+l09a7:
+	push	hl
+	ld	(hl),0ffh
+	call	l09af
+	db	'(',eot
+l09af:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	hl
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	call	l0a1d		; Print ASCII byte
+	dec	hl
+	ld	a,(hl)
+	call	l0a1d		; Print ASCII byte
+	inc	hl
+	inc	hl
+	push	hl
+	call	l09c9
+	db	' ',eot
+l09c9:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	c,8
+	pop	hl
+l09d2:
+	ld	a,(hl)
+	call	l0a35		; Print as ASCII
+	inc	hl
+	dec	c
+	jp	nz,l09d2
+	call	l09e0
+	db	')',eot
+l09e0:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	call	l0a0f		; Give new line
+	ret
+;
+; Print error message and exit to CCP
+;
+; *** May crash on CP/M 3.x ***
+;
+l09ea:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	ld	hl,(l35b2)	; Get back old stack
+	ld	sp,hl
+	ret
+;
+; Increment location counter
+;
+l09f5:
+	push	hl
+	ld	hl,(l356e)	; Get location counter
+	inc	hl		; Increment it
+	ld	(l356e),hl
+	pop	hl
+	ret
+;
+; Print location counter
+;
+l09ff:
+	push	hl
+	push	af
+	ld	hl,(l356e)	; Get location counter
+	ld	a,h
+	call	l0a1d		; Print ASCII byte
+	ld	a,l
+	call	l0a1d		; Print ASCII byte
+	pop	af
+	pop	hl
+	ret
+;
+; Give new line on console
+;
+l0a0f:
+	ld	a,cr
+	call	l0a41		; Simple output
+	ld	a,lf
+	call	l0a41
+	ret
+l0a1a:
+	call	l09f5		; Increment location counter
+;
+; Print byte as ASCII
+;
+l0a1d:
+	push	af		; Save byte
+	rra			; Extract hi bits
+	rra
+	rra
+	rra
+	call	l0a26		; Print as nibble
+	pop	af
+;
+; Print nibble as ASCII
+;
+l0a26:
+	and	00001111b	; Get bits
+	cp	9+1		; Test range
+	jp	c,l0a2f		; It's decimal
+	add	a,'A'-'0'-10	; Map to hex
+l0a2f:
+	add	a,'0'
+	call	l0a35		; Print as ASCII
+	ret
+;
+; Print ASCII character on console
+;
+l0a35:
+	cp	' '		; Test range
+	jp	nc,l0a3c	; Maybe printable
+l0a3a:
+	ld	a,'.'		; Map character
+l0a3c:
+	cp	'~'+1		; Verify printable
+	jp	nc,l0a3a	; Nope
+;
+; Print character on console
+;
+l0a41:
+	push	hl
+	push	de
+	push	bc
+	ld	c,.conout
+	ld	e,a		; Get character
+	call	BDOS		; Print it
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+l0a4e:
+	dw	l0a6e
+	dw	l0a89
+	dw	l0aa4
+	dw	l0abf
+	dw	l0ada
+	dw	l0af5
+	dw	l0b10
+	dw	l0b2b
+	dw	l0b46
+	dw	l0b61
+	dw	l0b7c
+	dw	l0b97
+	dw	l0bb2
+	dw	l0bcd
+	dw	l0be8
+	dw	l0c03
+l0a6e:
+	db	'*      entry symbol      *',eot
+l0a89:
+	db	'*      sel com blk       *',eot
+l0aa4:
+	db	'*      program name      *',eot
+l0abf:
+	db	'* request library search *',eot
+l0ada:
+	db	'*   extension link item  *',eot
+l0af5:
+	db	'*       common size      *',eot
+l0b10:
+	db	'*      chain external    *',eot
+l0b2b:
+	db	'*    define entry point  *',eot
+l0b46:
+	db	'*    external - offset   *',eot
+l0b61:
+	db	'*    external + offset   *',eot
+l0b7c:
+	db	'*    define data size    *',eot
+l0b97:
+	db	'*     set loc counter    *',eot
+l0bb2:
+	db	'*      chain address     *',eot
+l0bcd:
+	db	'*      program size      *',eot
+l0be8:
+	db	'*       end program      *',eot
+l0c03:
+	db	'*       end of file      *',eot
+l0c1e:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	(l356c),a
+	ld	de,l1560
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,de
+	ld	e,(hl)		; Fetch mnemonic pointer
+	inc	hl
+	ld	d,(hl)
+	ld	a,(de)
+	ld	(l356a),a
+	cp	0cbh
+	jp	z,l0c48
+	cp	0edh
+	jp	z,l0c48
+	cp	0ddh
+	jp	z,l0c48
+	cp	0fdh
+	jp	nz,l0c53
+l0c48:
+	ld	(l356b),a
+	ld	a,1
+	ld	(l356a),a
+	jp	l0c6e
+l0c53:
+	call	l0c7b
+	inc	de
+	ld	c,.string
+	call	BDOS		; Print mnemonic
+	ld	a,(l356c)
+	cp	0c9h
+	jp	z,l0c73
+	cp	0c3h
+	jp	z,l0c73
+	cp	18h
+	jp	z,l0c73
+l0c6e:
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+l0c73:
+	ld	a,0ffh
+	ld	(l356d),a
+	jp	l0c6e
+;
+;
+;
+l0c7b:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	call	l0c84
+	db	tab,eot
+l0c84:
+	pop	de
+	ld	c,.string
+	call	BDOS
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l0c8f:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,l1efd
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,de
+	call	l0c7b
+	ld	e,(hl)		; Fetch mnemonic pointer
+	inc	hl
+	ld	d,(hl)
+	ld	c,.string
+	call	BDOS		; Print mnemonic
+	xor	a
+	ld	(l356a),a
+	ld	(l356b),a
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l0cb2:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,l22fc
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,de
+	call	l0c7b
+	ld	e,(hl)		; Fetch mnemonic pointer
+	inc	hl
+	ld	d,(hl)
+	ld	a,(de)
+	ld	(l356a),a
+	inc	de
+	ld	c,.string
+	call	BDOS		; Print mnemonic
+	xor	a
+	ld	(l356b),a
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l0cd7:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,l2735
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,de
+	call	l0c7b
+	ld	e,(hl)		; Fetch mnemonic pointer
+	inc	hl
+	ld	d,(hl)
+	ld	a,(de)
+	ld	(l356a),a
+	inc	de
+	ld	c,.string
+	call	BDOS		; Print mnemonic
+	xor	a
+	ld	(l356b),a
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l0cfc:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,l2f6b
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,de
+	call	l0c7b
+	ld	e,(hl)		; Fetch mnemonic pointer
+	inc	hl
+	ld	d,(hl)
+	ld	a,(de)
+	ld	(l356a),a
+	inc	de
+	ld	c,.string
+	call	BDOS		; Print mnemonic
+	xor	a
+	ld	(l356b),a
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+l0d21:
+	db	0,'NOP',eot
+l0d26:
+	db	2,'LXI  B,',eot
+l0d2f:
+	db	0,'STAX  B',eot
+l0d38:
+	db	0,'INX  B',eot
+l0d40:
+	db	0,'INR  B',eot
+l0d48:
+	db	0,'DCR  B',eot
+l0d50:
+	db	1,'MVI  B,',eot
+l0d59:
+	db	0,'RLC',eot
+l0d5e:
+	db	0,'ex af,af'''
+	db	eot
+l0d69:
+	db	0,'DAD  B',eot
+l0d71:
+	db	0,'LDAX  B',eot
+l0d7a:
+	db	0,'DCX  B',eot
+l0d82:
+	db	0,'INR  C',eot
+l0d8a:
+	db	0,'DCR  C',eot
+l0d92:
+	db	1,'MVI  C,',eot
+l0d9b:
+	db	0,'RRC',eot
+l0da0:
+	db	1,'djnz  ',eot
+l0da8:
+	db	2,'LXI  D,',eot
+l0db1:
+	db	0,'STAX  D',eot
+l0dba:
+	db	0,'INX  D',eot
+l0dc2:
+	db	0,'INR  D',eot
+l0dca:
+	db	0,'DCR  D',eot
+l0dd2:
+	db	1,'MVI  D,',eot
+l0ddb:
+	db	0,'RAL',eot
+l0de0:
+	db	1,'jr  ',eot
+l0de6:
+	db	0,'DAD  D',eot
+l0dee:
+	db	0,'LDAX  D',eot
+l0df7:
+	db	0,'DCX  D',eot
+l0dff:
+	db	0,'INR  E',eot
+l0e07:
+	db	0,'DCR  E',eot
+l0e0f:
+	db	1,'MVI  E,',eot
+l0e18:
+	db	0,'RAR',eot
+l0e1d:
+	db	1,'jrnz  ',eot
+l0e25:
+	db	2,'LXI  H,',eot
+l0e2e:
+	db	2,'SHLD  ',eot
+l0e36:
+	db	0,'INX  H',eot
+l0e3e:
+	db	0,'INR  H',eot
+l0e46:
+	db	0,'DCR  H',eot
+l0e4e:
+	db	1,'MVI  H,',eot
+l0e57:
+	db	0,'DAA',eot
+l0e5c:
+	db	1,'jrz  ',eot
+l0e63:
+	db	0,'DAD  H',eot
+l0e6b:
+	db	2,'LHLD  ',eot
+l0e73:
+	db	0,'DCX  H',eot
+l0e7b:
+	db	0,'INR  L',eot
+l0e83:
+	db	0,'DCR  L',eot
+l0e8b:
+	db	1,'MVI  L,',eot
+l0e94:
+	db	0,'CMA',eot
+l0e99:
+	db	1,'jrnc  ',eot
+l0ea1:
+	db	2,'LXI  SP,',eot
+l0eab:
+	db	2,'STA  ',eot
+l0eb2:
+	db	0,'INX  SP',eot
+l0ebb:
+	db	0,'INR  M',eot
+l0ec3:
+	db	0,'DCR  M',eot
+l0ecb:
+	db	1,'MVI  M,',eot
+l0ed4:
+	db	0,'STC',eot
+l0ed9:
+	db	1,'jrc  ',eot
+l0ee0:
+	db	0,'DAD  SP',eot
+l0ee9:
+	db	2,'LDA  ',eot
+l0ef0:
+	db	0,'DCX  SP',eot
+l0ef9:
+	db	0,'INR  A',eot
+l0f01:
+	db	0,'DCR  A',eot
+l0f09:
+	db	1,'MVI  A,',eot
+l0f12:
+	db	0,'CMC',eot
+l0f17:
+	db	0,'MOV  B,B',eot
+l0f21:
+	db	0,'MOV  B,C',eot
+l0f2b:
+	db	0,'MOV  B,D',eot
+l0f35:
+	db	0,'MOV  B,E',eot
+l0f3f:
+	db	0,'MOV  B,H',eot
+l0f49:
+	db	0,'MOV  B,L',eot
+l0f53:
+	db	0,'MOV  B,M',eot
+l0f5d:
+	db	0,'MOV  B,A',eot
+l0f67:
+	db	0,'MOV  C,B',eot
+l0f71:
+	db	0,'MOV  C,C',eot
+l0f7b:
+	db	0,'MOV  C,D',eot
+l0f85:
+	db	0,'MOV  C,E',eot
+l0f8f:
+	db	0,'MOV  C,H',eot
+l0f99:
+	db	0,'MOV  C,L',eot
+l0fa3:
+	db	0,'MOV  C,M',eot
+l0fad:
+	db	0,'MOV  C,A',eot
+l0fb7:
+	db	0,'MOV  D,B',eot
+l0fc1:
+	db	0,'MOV  D,C',eot
+l0fcb:
+	db	0,'MOV  D,D',eot
+l0fd5:
+	db	0,'MOV  D,E',eot
+l0fdf:
+	db	0,'MOV  D,H',eot
+l0fe9:
+	db	0,'MOV  D,L',eot
+l0ff3:
+	db	0,'MOV  D,M',eot
+l0ffd:
+	db	0,'MOV  D,A',eot
+l1007:
+	db	0,'MOV  E,B',eot
+l1011:
+	db	0,'MOV  E,C',eot
+l101b:
+	db	0,'MOV  E,D',eot
+l1025:
+	db	0,'MOV  E,E',eot
+l102f:
+	db	0,'MOV  E,H',eot
+l1039:
+	db	0,'MOV  E,L',eot
+l1043:
+	db	0,'MOV  E,M',eot
+l104d:
+	db	0,'MOV  E,A',eot
+l1057:
+	db	0,'MOV  H,B',eot
+l1061:
+	db	0,'MOV  H,C',eot
+l106b:
+	db	0,'MOV  H,D',eot
+l1075:
+	db	0,'MOV  H,E',eot
+l107f:
+	db	0,'MOV  H,H',eot
+l1089:
+	db	0,'MOV  H,L',eot
+l1093:
+	db	0,'MOV  H,M',eot
+l109d:
+	db	0,'MOV  H,A',eot
+l10a7:
+	db	0,'MOV  L,B',eot
+l10b1:
+	db	0,'MOV  L,C',eot
+l10bb:
+	db	0,'MOV  L,D',eot
+l10c5:
+	db	0,'MOV  L,E',eot
+l10cf:
+	db	0,'MOV  L,H',eot
+l10d9:
+	db	0,'MOV  L,L',eot
+l10e3:
+	db	0,'MOV  L,M',eot
+l10ed:
+	db	0,'MOV  L,A',eot
+l10f7:
+	db	0,'MOV  M,B',eot
+l1101:
+	db	0,'MOV  M,C',eot
+l110b:
+	db	0,'MOV  M,D',eot
+l1115:
+	db	0,'MOV  M,E',eot
+l111f:
+	db	0,'MOV  M,H',eot
+l1129:
+	db	0,'MOV  M,L',eot
+l1133:
+	db	0,'HLT',eot
+l1138:
+	db	0,'MOV  M,A',eot
+l1142:
+	db	0,'MOV  A,B',eot
+l114c:
+	db	0,'MOV  A,C',eot
+l1156:
+	db	0,'MOV  A,D',eot
+l1160:
+	db	0,'MOV  A,E',eot
+l116a:
+	db	0,'MOV  A,H',eot
+l1174:
+	db	0,'MOV  A,L',eot
+l117e:
+	db	0,'MOV  A,M',eot
+l1188:
+	db	0,'MOV  A,A',eot
+l1192:
+	db	0,'ADD  B',eot
+l119a:
+	db	0,'ADD  C',eot
+l11a2:
+	db	0,'ADD  D',eot
+l11aa:
+	db	0,'ADD  E',eot
+l11b2:
+	db	0,'ADD  H',eot
+l11ba:
+	db	0,'ADD  L',eot
+l11c2:
+	db	0,'ADD  M',eot
+l11ca:
+	db	0,'ADD  A',eot
+l11d2:
+	db	0,'ADC  B',eot
+l11da:
+	db	0,'ADC  C',eot
+l11e2:
+	db	0,'ADC  D',eot
+l11ea:
+	db	0,'ADC  E',eot
+l11f2:
+	db	0,'ADC  H',eot
+l11fa:
+	db	0,'ADC  L',eot
+l1202:
+	db	0,'ADC  M',eot
+l120a:
+	db	0,'ADC  A',eot
+l1212:
+	db	0,'SUB  B',eot
+l121a:
+	db	0,'SUB  C',eot
+l1222:
+	db	0,'SUB  D',eot
+l122a:
+	db	0,'SUB  E',eot
+l1232:
+	db	0,'SUB  H',eot
+l123a:
+	db	0,'SUB  L',eot
+l1242:
+	db	0,'SUB  M',eot
+l124a:
+	db	0,'SUB  A',eot
+l1252:
+	db	0,'SBB  B',eot
+l125a:
+	db	0,'SBB  C',eot
+l1262:
+	db	0,'SBB  D',eot
+l126a:
+	db	0,'SBB  E',eot
+l1272:
+	db	0,'SBB  H',eot
+l127a:
+	db	0,'SBB  L',eot
+l1282:
+	db	0,'SBB  M',eot
+l128a:
+	db	0,'SBB  A',eot
+l1292:
+	db	0,'ANA  B',eot
+l129a:
+	db	0,'ANA  C',eot
+l12a2:
+	db	0,'ANA  D',eot
+l12aa:
+	db	0,'ANA  E',eot
+l12b2:
+	db	0,'ANA  H',eot
+l12ba:
+	db	0,'ANA  L',eot
+l12c2:
+	db	0,'ANA  M',eot
+l12ca:
+	db	0,'ANA  A',eot
+l12d2:
+	db	0,'XRA  B',eot
+l12da:
+	db	0,'XRA  C',eot
+l12e2:
+	db	0,'XRA  D',eot
+l12ea:
+	db	0,'XRA  E',eot
+l12f2:
+	db	0,'XRA  H',eot
+l12fa:
+	db	0,'XRA  L',eot
+l1302:
+	db	0,'XRA  M',eot
+l130a:
+	db	0,'XRA  A',eot
+l1312:
+	db	0,'ORA  B',eot
+l131a:
+	db	0,'ORA  C',eot
+l1322:
+	db	0,'ORA  D',eot
+l132a:
+	db	0,'ORA  E',eot
+l1332:
+	db	0,'ORA  H',eot
+l133a:
+	db	0,'ORA  L',eot
+l1342:
+	db	0,'ORA  M',eot
+l134a:
+	db	0,'ORA  A',eot
+l1352:
+	db	0,'CMP  B',eot
+l135a:
+	db	0,'CMP  C',eot
+l1362:
+	db	0,'CMP  D',eot
+l136a:
+	db	0,'CMP  E',eot
+l1372:
+	db	0,'CMP  H',eot
+l137a:
+	db	0,'CMP  L',eot
+l1382:
+	db	0,'CMP  M',eot
+l138a:
+	db	0,'CMP  A',eot
+l1392:
+	db	0,'RNZ',eot
+l1397:
+	db	0,'POP  B',eot
+l139f:
+	db	2,'JNZ  ',eot
+l13a6:
+	db	2,'JMP  ',eot
+l13ad:
+	db	2,'CNZ  ',eot
+l13b4:
+	db	0,'PUSH  B',eot
+l13bd:
+	db	1,'ADI  ',eot
+l13c4:
+	db	0,'RST  0',eot
+l13cc:
+	db	0,'RZ',eot
+l13d0:
+	db	0,'RET',eot
+l13d5:
+	db	2,'JZ  ',eot
+l13db:
+	db	0cbh,'(bit/opr) ',eot
+l13e7:
+	db	2,'CZ  ',eot
+l13ed:
+	db	2,'CALL  ',eot
+l13f5:
+	db	1,'ACI  ',eot
+l13fc:
+	db	0,'RST  1',eot
+l1404:
+	db	0,'RNC',eot
+l1409:
+	db	0,'POP  D',eot
+l1411:
+	db	2,'JNC  ',eot
+l1418:
+	db	1,'OUT  ',eot
+l141f:
+	db	2,'CNC  ',eot
+l1426:
+	db	0,'PUSH  D',eot
+l142f:
+	db	1,'SUI  ',eot
+l1436:
+	db	0,'RST  2',eot
+l143e:
+	db	0,'RC',eot
+l1442:
+	db	0,'exx',eot
+l1447:
+	db	2,'JC  ',eot
+l144d:
+	db	1,'IN  ',eot
+l1453:
+	db	2,'CC  ',eot
+l1459:
+	db	0ddh,'???-(ix+dis) ',eot
+l1468:
+	db	1,'SBI  ',eot
+l146f:
+	db	0,'RST  3',eot
+l1477:
+	db	0,'RPO',eot
+l147c:
+	db	0,'POP  H',eot
+l1484:
+	db	2,'JPO  ',eot
+l148b:
+	db	0,'XTHL',eot
+l1491:
+	db	2,'CPO  ',eot
+l1498:
+	db	0,'PUSH  H',eot
+l14a1:
+	db	1,'ANI  ',eot
+l14a8:
+	db	0,'RST  4',eot
+l14b0:
+	db	0,'RPE',eot
+l14b5:
+	db	0,'PCHL',eot
+l14bb:
+	db	2,'JPE  ',eot
+l14c2:
+	db	0,'XCHG',eot
+l14c8:
+	db	2,'CPE  ',eot
+l14cf:
+	db	0edh,'???-(z80) ',eot
+l14db:
+	db	1,'XRI  ',eot
+l14e2:
+	db	0,'RST  5',eot
+l14ea:
+	db	0,'RP',eot
+l14ee:
+	db	0,'POP  PSW',eot
+l14f8:
+	db	2,'JP  ',eot
+l14fe:
+	db	0,'DI',eot
+l1502:
+	db	2,'CP  ',eot
+l1508:
+	db	0,'PUSH  PSW',eot
+l1513:
+	db	1,'ORI  ',eot
+l151a:
+	db	0,'RST  6',eot
+l1522:
+	db	0,'RM',eot
+l1526:
+	db	0,'SPHL',eot
+l152c:
+	db	2,'JM  ',eot
+l1532:
+	db	0,'EI',eot
+l1536:
+	db	2,'CM  ',eot
+l153c:
+	db	0fdh,'???-(iy+dis) ',eot
+l154b:
+	db	1,'CPI  ',eot
+l1552:
+	db	0,'RST  7',eot
+l155a:
+	db	0,bell,'???',eot
+l1560:
+	dw	l0d21
+	dw	l0d26
+	dw	l0d2f
+	dw	l0d38
+	dw	l0d40
+	dw	l0d48
+	dw	l0d50
+	dw	l0d59
+	dw	l0d5e
+	dw	l0d69
+	dw	l0d71
+	dw	l0d7a
+	dw	l0d82
+	dw	l0d8a
+	dw	l0d92
+	dw	l0d9b
+	dw	l0da0
+	dw	l0da8
+	dw	l0db1
+	dw	l0dba
+	dw	l0dc2
+	dw	l0dca
+	dw	l0dd2
+	dw	l0ddb
+	dw	l0de0
+	dw	l0de6
+	dw	l0dee
+	dw	l0df7
+	dw	l0dff
+	dw	l0e07
+	dw	l0e0f
+	dw	l0e18
+	dw	l0e1d
+	dw	l0e25
+	dw	l0e2e
+	dw	l0e36
+	dw	l0e3e
+	dw	l0e46
+	dw	l0e4e
+	dw	l0e57
+	dw	l0e5c
+	dw	l0e63
+	dw	l0e6b
+	dw	l0e73
+	dw	l0e7b
+	dw	l0e83
+	dw	l0e8b
+	dw	l0e94
+	dw	l0e99
+	dw	l0ea1
+	dw	l0eab
+	dw	l0eb2
+	dw	l0ebb
+	dw	l0ec3
+	dw	l0ecb
+	dw	l0ed4
+	dw	l0ed9
+	dw	l0ee0
+	dw	l0ee9
+	dw	l0ef0
+	dw	l0ef9
+	dw	l0f01
+	dw	l0f09
+	dw	l0f12
+	dw	l0f17
+	dw	l0f21
+	dw	l0f2b
+	dw	l0f35
+	dw	l0f3f
+	dw	l0f49
+	dw	l0f53
+	dw	l0f5d
+	dw	l0f67
+	dw	l0f71
+	dw	l0f7b
+	dw	l0f85
+	dw	l0f8f
+	dw	l0f99
+	dw	l0fa3
+	dw	l0fad
+	dw	l0fb7
+	dw	l0fc1
+	dw	l0fcb
+	dw	l0fd5
+	dw	l0fdf
+	dw	l0fe9
+	dw	l0ff3
+	dw	l0ffd
+	dw	l1007
+	dw	l1011
+	dw	l101b
+	dw	l1025
+	dw	l102f
+	dw	l1039
+	dw	l1043
+	dw	l104d
+	dw	l1057
+	dw	l1061
+	dw	l106b
+	dw	l1075
+	dw	l107f
+	dw	l1089
+	dw	l1093
+	dw	l109d
+	dw	l10a7
+	dw	l10b1
+	dw	l10bb
+	dw	l10c5
+	dw	l10cf
+	dw	l10d9
+	dw	l10e3
+	dw	l10ed
+	dw	l10f7
+	dw	l1101
+	dw	l110b
+	dw	l1115
+	dw	l111f
+	dw	l1129
+	dw	l1133
+	dw	l1138
+	dw	l1142
+	dw	l114c
+	dw	l1156
+	dw	l1160
+	dw	l116a
+	dw	l1174
+	dw	l117e
+	dw	l1188
+	dw	l1192
+	dw	l119a
+	dw	l11a2
+	dw	l11aa
+	dw	l11b2
+	dw	l11ba
+	dw	l11c2
+	dw	l11ca
+	dw	l11d2
+	dw	l11da
+	dw	l11e2
+	dw	l11ea
+	dw	l11f2
+	dw	l11fa
+	dw	l1202
+	dw	l120a
+	dw	l1212
+	dw	l121a
+	dw	l1222
+	dw	l122a
+	dw	l1232
+	dw	l123a
+	dw	l1242
+	dw	l124a
+	dw	l1252
+	dw	l125a
+	dw	l1262
+	dw	l126a
+	dw	l1272
+	dw	l127a
+	dw	l1282
+	dw	l128a
+	dw	l1292
+	dw	l129a
+	dw	l12a2
+	dw	l12aa
+	dw	l12b2
+	dw	l12ba
+	dw	l12c2
+	dw	l12ca
+	dw	l12d2
+	dw	l12da
+	dw	l12e2
+	dw	l12ea
+	dw	l12f2
+	dw	l12fa
+	dw	l1302
+	dw	l130a
+	dw	l1312
+	dw	l131a
+	dw	l1322
+	dw	l132a
+	dw	l1332
+	dw	l133a
+	dw	l1342
+	dw	l134a
+	dw	l1352
+	dw	l135a
+	dw	l1362
+	dw	l136a
+	dw	l1372
+	dw	l137a
+	dw	l1382
+	dw	l138a
+	dw	l1392
+	dw	l1397
+	dw	l139f
+	dw	l13a6
+	dw	l13ad
+	dw	l13b4
+	dw	l13bd
+	dw	l13c4
+	dw	l13cc
+	dw	l13d0
+	dw	l13d5
+	dw	l13db
+	dw	l13e7
+	dw	l13ed
+	dw	l13f5
+	dw	l13fc
+	dw	l1404
+	dw	l1409
+	dw	l1411
+	dw	l1418
+	dw	l141f
+	dw	l1426
+	dw	l142f
+	dw	l1436
+	dw	l143e
+	dw	l1442
+	dw	l1447
+	dw	l144d
+	dw	l1453
+	dw	l1459
+	dw	l1468
+	dw	l146f
+	dw	l1477
+	dw	l147c
+	dw	l1484
+	dw	l148b
+	dw	l1491
+	dw	l1498
+	dw	l14a1
+	dw	l14a8
+	dw	l14b0
+	dw	l14b5
+	dw	l14bb
+	dw	l14c2
+	dw	l14c8
+	dw	l14cf
+	dw	l14db
+	dw	l14e2
+	dw	l14ea
+	dw	l14ee
+	dw	l14f8
+	dw	l14fe
+	dw	l1502
+	dw	l1508
+	dw	l1513
+	dw	l151a
+	dw	l1522
+	dw	l1526
+	dw	l152c
+	dw	l1532
+	dw	l1536
+	dw	l153c
+	dw	l154b
+	dw	l1552
+l1760:
+	db	'rlc b',eot
+l1766:
+	db	'rlc c',eot
+l176c:
+	db	'rlc d',eot
+l1772:
+	db	'rlc e',eot
+l1778:
+	db	'rlc h',eot
+l177e:
+	db	'rlc l',eot
+l1784:
+	db	'rlc (hl)',eot
+l178d:
+	db	'rlc a',eot
+l1793:
+	db	'rrc b',eot
+l1799:
+	db	'rrc c',eot
+l179f:
+	db	'rrc d',eot
+l17a5:
+	db	'rrc e',eot
+l17ab:
+	db	'rrc h',eot
+l17b1:
+	db	'rrc l',eot
+l17b7:
+	db	'rrc (hl)',eot
+l17c0:
+	db	'rrc a',eot
+l17c6:
+	db	'rl b',eot
+l17cb:
+	db	'rl c',eot
+l17d0:
+	db	'rl d',eot
+l17d5:
+	db	'rl e',eot
+l17da:
+	db	'rl h',eot
+l17df:
+	db	'rl l',eot
+l17e4:
+	db	'rl (hl)',eot
+l17ec:
+	db	'rl a',eot
+l17f1:
+	db	'rr b',eot
+l17f6:
+	db	'rr c',eot
+l17fb:
+	db	'rr d',eot
+l1800:
+	db	'rr e',eot
+l1805:
+	db	'rr h',eot
+l180a:
+	db	'rr l',eot
+l180f:
+	db	'rr (hl)',eot
+l1817:
+	db	'rr a',eot
+l181c:
+	db	'sla b',eot
+l1822:
+	db	'sla c',eot
+l1828:
+	db	'sla d',eot
+l182e:
+	db	'sla e',eot
+l1834:
+	db	'sla h',eot
+l183a:
+	db	'sla l',eot
+l1840:
+	db	'sla (hl)',eot
+l1849:
+	db	'sla a',eot
+l184f:
+	db	'sra b',eot
+l1855:
+	db	'sra c',eot
+l185b:
+	db	'sra d',eot
+l1861:
+	db	'sra e',eot
+l1867:
+	db	'sra h',eot
+l186d:
+	db	'sra l',eot
+l1873:
+	db	'sra (hl)',eot
+l187c:
+	db	'sra a',eot
+l1882:
+	db	'srl b',eot
+l1888:
+	db	'srl c',eot
+l188e:
+	db	'srl d',eot
+l1894:
+	db	'srl e',eot
+l189a:
+	db	'srl h',eot
+l18a0:
+	db	'srl l',eot
+l18a6:
+	db	'srl (hl)',eot
+l18af:
+	db	'srl a',eot
+l18b5:
+	db	'bit 0,b',eot
+l18bd:
+	db	'bit 0,c',eot
+l18c5:
+	db	'bit 0,d',eot
+l18cd:
+	db	'bit 0,e',eot
+l18d5:
+	db	'bit 0,h',eot
+l18dd:
+	db	'bit 0,l',eot
+l18e5:
+	db	'bit 0,(hl)',eot
+l18f0:
+	db	'bit 0,a',eot
+l18f8:
+	db	'bit 1,b',eot
+l1900:
+	db	'bit 1,c',eot
+l1908:
+	db	'bit 1,d',eot
+l1910:
+	db	'bit 1,e',eot
+l1918:
+	db	'bit 1,h',eot
+l1920:
+	db	'bit 1,l',eot
+l1928:
+	db	'bit 1,(hl)',eot
+l1933:
+	db	'bit 1,a',eot
+l193b:
+	db	'bit 2,b',eot
+l1943:
+	db	'bit 2,c',eot
+l194b:
+	db	'bit 2,d',eot
+l1953:
+	db	'bit 2,e',eot
+l195b:
+	db	'bit 2,h',eot
+l1963:
+	db	'bit 2,l',eot
+l196b:
+	db	'bit 2,(hl)',eot
+l1976:
+	db	'bit 2,a',eot
+l197e:
+	db	'bit 3,b',eot
+l1986:
+	db	'bit 3,c',eot
+l198e:
+	db	'bit 3,d',eot
+l1996:
+	db	'bit 3,e',eot
+l199e:
+	db	'bit 3,h',eot
+l19a6:
+	db	'bit 3,l',eot
+l19ae:
+	db	'bit 3,(hl)',eot
+l19b9:
+	db	'bit 3,a',eot
+l19c1:
+	db	'bit 4,b',eot
+l19c9:
+	db	'bit 4,c',eot
+l19d1:
+	db	'bit 4,d',eot
+l19d9:
+	db	'bit 4,e',eot
+l19e1:
+	db	'bit 4,h',eot
+l19e9:
+	db	'bit 4,l',eot
+l19f1:
+	db	'bit 4,(hl)',eot
+l19fc:
+	db	'bit 4,a',eot
+l1a04:
+	db	'bit 5,b',eot
+l1a0c:
+	db	'bit 5,c',eot
+l1a14:
+	db	'bit 5,d',eot
+l1a1c:
+	db	'bit 5,e',eot
+l1a24:
+	db	'bit 5,h',eot
+l1a2c:
+	db	'bit 5,l',eot
+l1a34:
+	db	'bit 5,(hl)',eot
+l1a3f:
+	db	'bit 5,a',eot
+l1a47:
+	db	'bit 6,b',eot
+l1a4f:
+	db	'bit 6,c',eot
+l1a57:
+	db	'bit 6,d',eot
+l1a5f:
+	db	'bit 6,e',eot
+l1a67:
+	db	'bit 6,h',eot
+l1a6f:
+	db	'bit 6,l',eot
+l1a77:
+	db	'bit 6,(hl)',eot
+l1a82:
+	db	'bit 6,a',eot
+l1a8a:
+	db	'bit 7,b',eot
+l1a92:
+	db	'bit 7,c',eot
+l1a9a:
+	db	'bit 7,d',eot
+l1aa2:
+	db	'bit 7,e',eot
+l1aaa:
+	db	'bit 7,h',eot
+l1ab2:
+	db	'bit 7,l',eot
+l1aba:
+	db	'bit 7,(hl)',eot
+l1ac5:
+	db	'bit 7,a',eot
+l1acd:
+	db	'res 0,b',eot
+l1ad5:
+	db	'res 0,c',eot
+l1add:
+	db	'res 0,d',eot
+l1ae5:
+	db	'res 0,e',eot
+l1aed:
+	db	'res 0,h',eot
+l1af5:
+	db	'res 0,l',eot
+l1afd:
+	db	'res 0,(hl)',eot
+l1b08:
+	db	'res 0,a',eot
+l1b10:
+	db	'res 1,b',eot
+l1b18:
+	db	'res 1,c',eot
+l1b20:
+	db	'res 1,d',eot
+l1b28:
+	db	'res 1,e',eot
+l1b30:
+	db	'res 1,h',eot
+l1b38:
+	db	'res 1,l',eot
+l1b40:
+	db	'res 1,(hl)',eot
+l1b4b:
+	db	'res 1,a',eot
+l1b53:
+	db	'res 2,b',eot
+l1b5b:
+	db	'res 2,c',eot
+l1b63:
+	db	'res 2,d',eot
+l1b6b:
+	db	'res 2,e',eot
+l1b73:
+	db	'res 2,h',eot
+l1b7b:
+	db	'res 2,l',eot
+l1b83:
+	db	'res 2,(hl)',eot
+l1b8e:
+	db	'res 2,a',eot
+l1b96:
+	db	'res 3,b',eot
+l1b9e:
+	db	'res 3,c',eot
+l1ba6:
+	db	'res 3,d',eot
+l1bae:
+	db	'res 3,e',eot
+l1bb6:
+	db	'res 3,h',eot
+l1bbe:
+	db	'res 3,l',eot
+l1bc6:
+	db	'res 3,(hl)',eot
+l1bd1:
+	db	'res 3,a',eot
+l1bd9:
+	db	'res 4,b',eot
+l1be1:
+	db	'res 4,c',eot
+l1be9:
+	db	'res 4,d',eot
+l1bf1:
+	db	'res 4,e',eot
+l1bf9:
+	db	'res 4,h',eot
+l1c01:
+	db	'res 4,l',eot
+l1c09:
+	db	'res 4,(hl)',eot
+l1c14:
+	db	'res 4,a',eot
+l1c1c:
+	db	'res 5,b',eot
+l1c24:
+	db	'res 5,c',eot
+l1c2c:
+	db	'res 5,d',eot
+l1c34:
+	db	'res 5,e',eot
+l1c3c:
+	db	'res 5,h',eot
+l1c44:
+	db	'res 5,l',eot
+l1c4c:
+	db	'res 5,(hl)',eot
+l1c57:
+	db	'res 5,a',eot
+l1c5f:
+	db	'res 6,b',eot
+l1c67:
+	db	'res 6,c',eot
+l1c6f:
+	db	'res 6,d',eot
+l1c77:
+	db	'res 6,e',eot
+l1c7f:
+	db	'res 6,h',eot
+l1c87:
+	db	'res 6,l',eot
+l1c8f:
+	db	'res 6,(hl)',eot
+l1c9a:
+	db	'res 6,a',eot
+l1ca2:
+	db	'res 7,b',eot
+l1caa:
+	db	'res 7,c',eot
+l1cb2:
+	db	'res 7,d',eot
+l1cba:
+	db	'res 7,e',eot
+l1cc2:
+	db	'res 7,h',eot
+l1cca:
+	db	'res 7,l',eot
+l1cd2:
+	db	'res 7,(hl)',eot
+l1cdd:
+	db	'res 7,a',eot
+l1ce5:
+	db	'set 0,b',eot
+l1ced:
+	db	'set 0,c',eot
+l1cf5:
+	db	'set 0,d',eot
+l1cfd:
+	db	'set 0,e',eot
+l1d05:
+	db	'set 0,h',eot
+l1d0d:
+	db	'set 0,l',eot
+l1d15:
+	db	'set 0,(hl)',eot
+l1d20:
+	db	'set 0,a',eot
+l1d28:
+	db	'set 1,b',eot
+l1d30:
+	db	'set 1,c',eot
+l1d38:
+	db	'set 1,d',eot
+l1d40:
+	db	'set 1,e',eot
+l1d48:
+	db	'set 1,h',eot
+l1d50:
+	db	'set 1,l',eot
+l1d58:
+	db	'set 1,(hl)',eot
+l1d63:
+	db	'set 1,a',eot
+l1d6b:
+	db	'set 2,b',eot
+l1d73:
+	db	'set 2,c',eot
+l1d7b:
+	db	'set 2,d',eot
+l1d83:
+	db	'set 2,e',eot
+l1d8b:
+	db	'set 2,h',eot
+l1d93:
+	db	'set 2,l',eot
+l1d9b:
+	db	'set 2,(hl)',eot
+l1da6:
+	db	'set 2,a',eot
+l1dae:
+	db	'set 3,b',eot
+l1db6:
+	db	'set 3,c',eot
+l1dbe:
+	db	'set 3,d',eot
+l1dc6:
+	db	'set 3,e',eot
+l1dce:
+	db	'set 3,h',eot
+l1dd6:
+	db	'set 3,l',eot
+l1dde:
+	db	'set 3,(hl)',eot
+l1de9:
+	db	'set 3,a',eot
+l1df1:
+	db	'set 4,b',eot
+l1df9:
+	db	'set 4,c',eot
+l1e01:
+	db	'set 4,d',eot
+l1e09:
+	db	'set 4,e',eot
+l1e11:
+	db	'set 4,h',eot
+l1e19:
+	db	'set 4,l',eot
+l1e21:
+	db	'set 4,(hl)',eot
+l1e2c:
+	db	'set 4,a',eot
+l1e34:
+	db	'set 5,b',eot
+l1e3c:
+	db	'set 5,c',eot
+l1e44:
+	db	'set 5,d',eot
+l1e4c:
+	db	'set 5,e',eot
+l1e54:
+	db	'set 5,h',eot
+l1e5c:
+	db	'set 5,l',eot
+l1e64:
+	db	'set 5,(hl)',eot
+l1e6f:
+	db	'set 5,a',eot
+l1e77:
+	db	'set 6,b',eot
+l1e7f:
+	db	'set 6,c',eot
+l1e87:
+	db	'set 6,d',eot
+l1e8f:
+	db	'set 6,e',eot
+l1e97:
+	db	'set 6,h',eot
+l1e9f:
+	db	'set 6,l',eot
+l1ea7:
+	db	'set 6,(hl)',eot
+l1eb2:
+	db	'set 6,a',eot
+l1eba:
+	db	'set 7,b',eot
+l1ec2:
+	db	'set 7,c',eot
+l1eca:
+	db	'set 7,d',eot
+l1ed2:
+	db	'set 7,e',eot
+l1eda:
+	db	'set 7,h',eot
+l1ee2:
+	db	'set 7,l',eot
+l1eea:
+	db	'set 7,(hl)',eot
+l1ef5:
+	db	'set 7,a',eot
+l1efd:
+	dw	l1760
+	dw	l1766
+	dw	l176c
+	dw	l1772
+	dw	l1778
+	dw	l177e
+	dw	l1784
+	dw	l178d
+	dw	l1793
+	dw	l1799
+	dw	l179f
+	dw	l17a5
+	dw	l17ab
+	dw	l17b1
+	dw	l17b7
+	dw	l17c0
+	dw	l17c6
+	dw	l17cb
+	dw	l17d0
+	dw	l17d5
+	dw	l17da
+	dw	l17df
+	dw	l17e4
+	dw	l17ec
+	dw	l17f1
+	dw	l17f6
+	dw	l17fb
+	dw	l1800
+	dw	l1805
+	dw	l180a
+	dw	l180f
+	dw	l1817
+	dw	l181c
+	dw	l1822
+	dw	l1828
+	dw	l182e
+	dw	l1834
+	dw	l183a
+	dw	l1840
+	dw	l1849
+	dw	l184f
+	dw	l1855
+	dw	l185b
+	dw	l1861
+	dw	l1867
+	dw	l186d
+	dw	l1873
+	dw	l187c
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l1882
+	dw	l1888
+	dw	l188e
+	dw	l1894
+	dw	l189a
+	dw	l18a0
+	dw	l18a6
+	dw	l18af
+	dw	l18b5
+	dw	l18bd
+	dw	l18c5
+	dw	l18cd
+	dw	l18d5
+	dw	l18dd
+	dw	l18e5
+	dw	l18f0
+	dw	l18f8
+	dw	l1900
+	dw	l1908
+	dw	l1910
+	dw	l1918
+	dw	l1920
+	dw	l1928
+	dw	l1933
+	dw	l193b
+	dw	l1943
+	dw	l194b
+	dw	l1953
+	dw	l195b
+	dw	l1963
+	dw	l196b
+	dw	l1976
+	dw	l197e
+	dw	l1986
+	dw	l198e
+	dw	l1996
+	dw	l199e
+	dw	l19a6
+	dw	l19ae
+	dw	l19b9
+	dw	l19c1
+	dw	l19c9
+	dw	l19d1
+	dw	l19d9
+	dw	l19e1
+	dw	l19e9
+	dw	l19f1
+	dw	l19fc
+	dw	l1a04
+	dw	l1a0c
+	dw	l1a14
+	dw	l1a1c
+	dw	l1a24
+	dw	l1a2c
+	dw	l1a34
+	dw	l1a3f
+	dw	l1a47
+	dw	l1a4f
+	dw	l1a57
+	dw	l1a5f
+	dw	l1a67
+	dw	l1a6f
+	dw	l1a77
+	dw	l1a82
+	dw	l1a8a
+	dw	l1a92
+	dw	l1a9a
+	dw	l1aa2
+	dw	l1aaa
+	dw	l1ab2
+	dw	l1aba
+	dw	l1ac5
+	dw	l1acd
+	dw	l1ad5
+	dw	l1add
+	dw	l1ae5
+	dw	l1aed
+	dw	l1af5
+	dw	l1afd
+	dw	l1b08
+	dw	l1b10
+	dw	l1b18
+	dw	l1b20
+	dw	l1b28
+	dw	l1b30
+	dw	l1b38
+	dw	l1b40
+	dw	l1b4b
+	dw	l1b53
+	dw	l1b5b
+	dw	l1b63
+	dw	l1b6b
+	dw	l1b73
+	dw	l1b7b
+	dw	l1b83
+	dw	l1b8e
+	dw	l1b96
+	dw	l1b9e
+	dw	l1ba6
+	dw	l1bae
+	dw	l1bb6
+	dw	l1bbe
+	dw	l1bc6
+	dw	l1bd1
+	dw	l1bd9
+	dw	l1be1
+	dw	l1be9
+	dw	l1bf1
+	dw	l1bf9
+	dw	l1c01
+	dw	l1c09
+	dw	l1c14
+	dw	l1c1c
+	dw	l1c24
+	dw	l1c2c
+	dw	l1c34
+	dw	l1c3c
+	dw	l1c44
+	dw	l1c4c
+	dw	l1c57
+	dw	l1c5f
+	dw	l1c67
+	dw	l1c6f
+	dw	l1c77
+	dw	l1c7f
+	dw	l1c87
+	dw	l1c8f
+	dw	l1c9a
+	dw	l1ca2
+	dw	l1caa
+	dw	l1cb2
+	dw	l1cba
+	dw	l1cc2
+	dw	l1cca
+	dw	l1cd2
+	dw	l1cdd
+	dw	l1ce5
+	dw	l1ced
+	dw	l1cf5
+	dw	l1cfd
+	dw	l1d05
+	dw	l1d0d
+	dw	l1d15
+	dw	l1d20
+	dw	l1d28
+	dw	l1d30
+	dw	l1d38
+	dw	l1d40
+	dw	l1d48
+	dw	l1d50
+	dw	l1d58
+	dw	l1d63
+	dw	l1d6b
+	dw	l1d73
+	dw	l1d7b
+	dw	l1d83
+	dw	l1d8b
+	dw	l1d93
+	dw	l1d9b
+	dw	l1da6
+	dw	l1dae
+	dw	l1db6
+	dw	l1dbe
+	dw	l1dc6
+	dw	l1dce
+	dw	l1dd6
+	dw	l1dde
+	dw	l1de9
+	dw	l1df1
+	dw	l1df9
+	dw	l1e01
+	dw	l1e09
+	dw	l1e11
+	dw	l1e19
+	dw	l1e21
+	dw	l1e2c
+	dw	l1e34
+	dw	l1e3c
+	dw	l1e44
+	dw	l1e4c
+	dw	l1e54
+	dw	l1e5c
+	dw	l1e64
+	dw	l1e6f
+	dw	l1e77
+	dw	l1e7f
+	dw	l1e87
+	dw	l1e8f
+	dw	l1e97
+	dw	l1e9f
+	dw	l1ea7
+	dw	l1eb2
+	dw	l1eba
+	dw	l1ec2
+	dw	l1eca
+	dw	l1ed2
+	dw	l1eda
+	dw	l1ee2
+	dw	l1eea
+	dw	l1ef5
+l20fd:
+	db	0,'in b,(c)',eot
+l2107:
+	db	0,'out (c),b',eot
+l2112:
+	db	0,'sbc hl,bc',eot
+l211d:
+	db	2,'ld (addr),bc ',eot
+l212c:
+	db	0,'neg',eot
+l2131:
+	db	0,'retn',eot
+l2137:
+	db	0,'im 0',eot
+l213d:
+	db	0,'ld i,a',eot
+l2145:
+	db	0,'in c,(c)',eot
+l214f:
+	db	0,'out (c),c',eot
+l215a:
+	db	0,'adc hl,bc',eot
+l2165:
+	db	2,'ld bc,(addr) ',eot
+l2174:
+	db	0,'reti',eot
+l217a:
+	db	0,'ld r,a',eot
+l2182:
+	db	0,'in d,(c)',eot
+l218c:
+	db	0,'out (c),d',eot
+l2197:
+	db	0,'sbc hl,de',eot
+l21a2:
+	db	2,'ld (addr),de ',eot
+l21b1:
+	db	0,'im 1',eot
+l21b7:
+	db	0,'ld a,i',eot
+l21bf:
+	db	0,'in e,(c)',eot
+l21c9:
+	db	0,'out (c),e',eot
+l21d4:
+	db	0,'adc hl,de',eot
+l21df:
+	db	2,'ld de,(addr) ',eot
+l21ee:
+	db	0,'im 2',eot
+l21f4:
+	db	0,'ld a,r',eot
+l21fc:
+	db	0,'in h,(c)',eot
+l2206:
+	db	0,'out (c),h',eot
+l2211:
+	db	0,'sbc hl,hl',eot
+l221c:
+	db	2,'ld (addr),hl ',eot
+l222b:
+	db	0,'rrd',eot
+l2230:
+	db	0,'in l,(c)',eot
+l223a:
+	db	0,'out (c),l',eot
+l2245:
+	db	0,'adc hl,hl',eot
+l2250:
+	db	2,'ld hl,(addr) ',eot
+l225f:
+	db	0,'rld',eot
+l2264:
+	db	0,'sbc hl,sp',eot
+l226f:
+	db	2,'ld (addr),sp ',eot
+l227e:
+	db	0,'in a,(c)',eot
+l2288:
+	db	0,'out (c),a',eot
+l2293:
+	db	2,'ld sp,(addr) ',eot
+l22a2:
+	db	0,'ldi',eot
+l22a7:
+	db	0,'cpi',eot
+l22ac:
+	db	0,'ini',eot
+l22b1:
+	db	0,'outi',eot
+l22b7:
+	db	0,'ldd',eot
+l22bc:
+	db	0,'cpd',eot
+l22c1:
+	db	0,'ind',eot
+l22c6:
+	db	0,'outd',eot
+l22cc:
+	db	0,'ldir',eot
+l22d2:
+	db	0,'cpir',eot
+l22d8:
+	db	0,'inir',eot
+l22de:
+	db	0,'otir',eot
+l22e4:
+	db	0,'lddr',eot
+l22ea:
+	db	0,'cpdr',eot
+l22f0:
+	db	0,'indr',eot
+l22f6:
+	db	0,'otdr',eot
+l22fc:
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l20fd
+	dw	l2107
+	dw	l2112
+	dw	l211d
+	dw	l212c
+	dw	l2131
+	dw	l2137
+	dw	l213d
+	dw	l2145
+	dw	l214f
+	dw	l215a
+	dw	l2165
+	dw	l155a
+	dw	l2174
+	dw	l155a
+	dw	l217a
+	dw	l2182
+	dw	l218c
+	dw	l2197
+	dw	l21a2
+	dw	l155a
+	dw	l155a
+	dw	l21b1
+	dw	l21b7
+	dw	l21bf
+	dw	l21c9
+	dw	l21d4
+	dw	l21df
+	dw	l155a
+	dw	l155a
+	dw	l21ee
+	dw	l21f4
+	dw	l21fc
+	dw	l2206
+	dw	l2211
+	dw	l221c
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l222b
+	dw	l2230
+	dw	l223a
+	dw	l2245
+	dw	l2250
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l225f
+	dw	l155a
+	dw	l155a
+	dw	l2264
+	dw	l226f
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l227e
+	dw	l2288
+	dw	l155a
+	dw	l2293
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l22a2
+	dw	l22a7
+	dw	l22ac
+	dw	l22b1
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l22b7
+	dw	l22bc
+	dw	l22c1
+	dw	l22c6
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l22cc
+	dw	l22d2
+	dw	l22d8
+	dw	l22de
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l22e4
+	dw	l22ea
+	dw	l22f0
+	dw	l22f6
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+l24fc:
+	db	0,'add ix,bc',eot
+l2507:
+	db	0,'add ix,de',eot
+l2512:
+	db	2,'ld ix,dddd ',eot
+l251f:
+	db	2,'ld (addr),ix ',eot
+l252e:
+	db	0,'inx ix',eot
+l2536:
+	db	0,'add ix,ix',eot
+l2541:
+	db	2,'ld ix,(addr) ',eot
+l2550:
+	db	0,'dec ix',eot
+l2558:
+	db	1,'inc (ix+dis) ',eot
+l2567:
+	db	1,'dec (ix+dis) ',eot
+l2576:
+	db	2,'ld (ix+dis),dd ',eot
+l2587:
+	db	0,'add ix,sp',eot
+l2592:
+	db	1,'ld b,(ix+dis) ',eot
+l25a2:
+	db	1,'ld c,(ix+dis) ',eot
+l25b2:
+	db	1,'ld d,(ix+dis) ',eot
+l25c2:
+	db	1,'ld e,(ix+dis) ',eot
+l25d2:
+	db	1,'ld h,(ix+dis) ',eot
+l25e2:
+	db	1,'ld l,(ix+dis) ',eot
+l25f2:
+	db	1,'ld (ix+dis),b ',eot
+l2602:
+	db	1,'ld (ix+dis),c ',eot
+l2612:
+	db	1,'ld (ix+dis),d ',eot
+l2622:
+	db	1,'ld (ix+dis),e ',eot
+l2632:
+	db	1,'ld (ix+dis),h ',eot
+l2642:
+	db	1,'ld (ix+dis),l ',eot
+l2652:
+	db	1,'ld (ix+dis),a ',eot
+l2662:
+	db	1,'ld a,(ix+dis) ',eot
+l2672:
+	db	1,'add a,(ix+dis) ',eot
+l2683:
+	db	1,'adc a,(ix+dis) ',eot
+l2694:
+	db	1,'sub (ix+dis) ',eot
+l26a3:
+	db	1,'sbc a,(ix+dis) ',eot
+l26b4:
+	db	1,'and (ix+dis) ',eot
+l26c3:
+	db	1,'xor (ix+dis) ',eot
+l26d2:
+	db	1,'or (ix+dis) ',eot
+l26e0:
+	db	1,'cp (ix+dis) ',eot
+l26ee:
+	db	2,'[bit opr - (ix+dis)] ',eot
+l2705:
+	db	0,'pop ix',eot
+l270d:
+	db	0,'ex (sp),ix',eot
+l2719:
+	db	0,'push ix',eot
+l2722:
+	db	0,'jp (ix)',eot
+l272b:
+	db	0,'ld sp,ix',eot
+l2735:
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l24fc
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2507
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2512
+	dw	l251f
+	dw	l252e
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2536
+	dw	l2541
+	dw	l2550
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2558
+	dw	l2567
+	dw	l2576
+	dw	l155a
+	dw	l155a
+	dw	l2587
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2592
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l25a2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l25b2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l25c2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l25d2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l25e2
+	dw	l155a
+	dw	l25f2
+	dw	l2602
+	dw	l2612
+	dw	l2622
+	dw	l2632
+	dw	l2642
+	dw	l155a
+	dw	l2652
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2662
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2672
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2683
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2694
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l26a3
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l26b4
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l26c3
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l26d2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l26e0
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l26ee
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2705
+	dw	l155a
+	dw	l270d
+	dw	l155a
+	dw	l2719
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2722
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l272b
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+l2935:
+	db	1,'rlc (ix+dis) ',eot
+l2944:
+	db	1,'rrc (ix+dis) ',eot
+l2953:
+	db	1,'rl (ix+dis) ',eot
+l2961:
+	db	1,'rr (ix+dis) ',eot
+l296f:
+	db	1,'sla (ix+dis) ',eot
+l297e:
+	db	1,'sra (ix+dis) ',eot
+l298d:
+	db	1,'srl (ix+dis) ',eot
+l299c:
+	db	1,'bit 0,(ix+dis) ',eot
+l29ad:
+	db	1,'bit 1,(ix+dis) ',eot
+l29be:
+	db	1,'bit 2,(ix+dis) ',eot
+l29cf:
+	db	1,'bit 3,(ix+dis) ',eot
+l29e0:
+	db	1,'bit 4,(ix+dis) ',eot
+l29f1:
+	db	1,'bit 5,(ix+dis) ',eot
+l2a02:
+	db	1,'bit 6,(ix+dis) ',eot
+l2a13:
+	db	1,'bit 7,(ix+dis) ',eot
+l2a24:
+	db	1,'res 0,(ix+dis) ',eot
+l2a35:
+	db	1,'res 1,(ix+dis) ',eot
+l2a46:
+	db	1,'res 2,(ix+dis) ',eot
+l2a57:
+	db	1,'res 3,(ix+dis) ',eot
+l2a68:
+	db	1,'res 4,(ix+dis) ',eot
+l2a79:
+	db	1,'res 5,(ix+dis) ',eot
+l2a8a:
+	db	1,'res 6,(ix+dis) ',eot
+l2a9b:
+	db	1,'res 7,(ix+dis) ',eot
+l2aac:
+	db	1,'set 0,(ix+dis) ',eot
+l2abd:
+	db	1,'set 1,(ix+dis) ',eot
+l2ace:
+	db	1,'set 2,(ix+dis) ',eot
+l2adf:
+	db	1,'set 3,(ix+dis) ',eot
+l2af0:
+	db	1,'set 4,(ix+dis) ',eot
+l2b01:
+	db	1,'set 5,(ix+dis) ',eot
+l2b12:
+	db	1,'set 6,(ix+dis) ',eot
+l2b23:
+	db	1,'set 7,(ix+dis) ',eot
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2935
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2944
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2953
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2961
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l296f
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l297e
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l298d
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l299c
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l29ad
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l29be
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l29cf
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l29e0
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l29f1
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a02
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a13
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a24
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a35
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a46
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a57
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a68
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a79
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a8a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2a9b
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2aac
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2abd
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2ace
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2adf
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2af0
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2b01
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2b12
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2b23
+	dw	l155a
+l2d34:
+	db	0,'add iy,bc',eot
+l2d3f:
+	db	0,'add iy,de',eot
+l2d4a:
+	db	2,'ld iy,dddd ',eot
+l2d57:
+	db	2,'ld (addr),iy ',eot
+l2d66:
+	db	0,'inx iy',eot
+l2d6e:
+	db	0,'add iy,iy',eot
+l2d79:
+	db	2,'ld iy,(addr) ',eot
+l2d88:
+	db	0,'dec iy',eot
+l2d90:
+	db	1,'inc (iy+dis)',eot
+l2d9e:
+	db	1,'dec (iy+dis)',eot
+l2dac:
+	db	2,'ld (iy+dis),dd ',eot
+l2dbd:
+	db	0,'add iy,sp',eot
+l2dc8:
+	db	1,'ld b,(iy+dis) ',eot
+l2dd8:
+	db	1,'ld c,(iy+dis) ',eot
+l2de8:
+	db	1,'ld d,(iy+dis) ',eot
+l2df8:
+	db	1,'ld e,(iy+dis) ',eot
+l2e08:
+	db	1,'ld h,(iy+dis) ',eot
+l2e18:
+	db	1,'ld l,(iy+dis) ',eot
+l2e28:
+	db	1,'ld (iy+dis),b ',eot
+l2e38:
+	db	1,'ld (iy+dis),c ',eot
+l2e48:
+	db	1,'ld (iy+dis),d ',eot
+l2e58:
+	db	1,'ld (iy+dis),e ',eot
+l2e68:
+	db	1,'ld (iy+dis),h ',eot
+l2e78:
+	db	1,'ld (iy+dis),l ',eot
+l2e88:
+	db	1,'ld (iy+dis),a ',eot
+l2e98:
+	db	1,'ld a,(iy+dis) ',eot
+l2ea8:
+	db	1,'add a,(iy+dis) ',eot
+l2eb9:
+	db	1,'adc a,(iy+dis) ',eot
+l2eca:
+	db	1,'sub (iy+dis) ',eot
+l2ed9:
+	db	1,'sbc a,(iy+dis) ',eot
+l2eea:
+	db	1,'and (iy+dis) ',eot
+l2ef9:
+	db	1,'xor (iy+dis) ',eot
+l2f08:
+	db	1,'or (iy+dis) ',eot
+l2f16:
+	db	1,'cp (iy+dis) ',eot
+l2f24:
+	db	2,'[bit opr - (iy+dis)] ',eot
+l2f3b:
+	db	0,'pop iy',eot
+l2f43:
+	db	0,'ex (sp),iy',eot
+l2f4f:
+	db	0,'push iy',eot
+l2f58:
+	db	0,'jp (iy)',eot
+l2f61:
+	db	0,'ld sp,iy',eot
+l2f6b:
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2d34
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2d3f
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2d4a
+	dw	l2d57
+	dw	l2d66
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2d6e
+	dw	l2d79
+	dw	l2d88
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2d90
+	dw	l2d9e
+	dw	l2dac
+	dw	l155a
+	dw	l155a
+	dw	l2dbd
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2dc8
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2dd8
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2de8
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2df8
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2e08
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2e18
+	dw	l155a
+	dw	l2e28
+	dw	l2e38
+	dw	l2e48
+	dw	l2e58
+	dw	l2e68
+	dw	l2e78
+	dw	l155a
+	dw	l2e88
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2e98
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2ea8
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2eb9
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2eca
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2ed9
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2eea
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2ef9
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2f08
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2f16
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2f24
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2f3b
+	dw	l155a
+	dw	l2f43
+	dw	l155a
+	dw	l2f4f
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2f58
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l2f61
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+l316b:
+	db	1
+	db	'rlc (iy+dis) ',eot
+l317a:
+	db	1,'rrc (iy+dis) ',eot
+l3189:
+	db	1,'rl (iy+dis) ',eot
+l3197:
+	db	1,'rr (iy+dis) ',eot
+l31a5:
+	db	1,'sla (iy+dis) ',eot
+l31b4:
+	db	1,'sra (iy+dis) ',eot
+l31c3:
+	db	1,'srl (iy+dis) ',eot
+l31d2:
+	db	1,'bit 0,(iy+dis) ',eot
+l31e3:
+	db	1,'bit 1,(iy+dis) ',eot
+l31f4:
+	db	1,'bit 2,(iy+dis) ',eot
+l3205:
+	db	1,'bit 3,(iy+dis) ',eot
+l3216:
+	db	1,'bit 4,(iy+dis) ',eot
+l3227:
+	db	1,'bit 5,(iy+dis) ',eot
+l3238:
+	db	1,'bit 6,(iy+dis) ',eot
+l3249:
+	db	1,'bit 7,(iy+dis) ',eot
+l325a:
+	db	1,'res 0,(iy+dis) ',eot
+l326b:
+	db	1,'res 1,(iy+dis) ',eot
+l327c:
+	db	1,'res 2,(iy+dis) ',eot
+l328d:
+	db	1,'res 3,(iy+dis) ',eot
+l329e:
+	db	1,'res 4,(iy+dis) ',eot
+l32af:
+	db	1,'res 5,(iy+dis) ',eot
+l32c0:
+	db	1,'res 6,(iy+dis) ',eot
+l32d1:
+	db	1,'res 7,(iy+dis) ',eot
+l32e2:
+	db	1,'set 0,(iy+dis) ',eot
+l32f3:
+	db	1,'set 1,(iy+dis) ',eot
+l3304:
+	db	1,'set 2,(iy+dis) ',eot
+l3315:
+	db	1,'set 3,(iy+dis) ',eot
+l3326:
+	db	1,'set 4,(iy+dis) ',eot
+l3337:
+	db	1,'set 5,(iy+dis) ',eot
+l3348:
+	db	1,'set 6,(iy+dis) ',eot
+l3359:
+	db	1,'set 7,(iy+dis) ',eot
+
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l316b
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l317a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3189
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3197
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l31a5
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l31b4
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l31c3
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l31d2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l31e3
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l31f4
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3205
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3216
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3227
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3238
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3249
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l325a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l326b
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l327c
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l328d
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l329e
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l32af
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l32c0
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l32d1
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l32e2
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l32f3
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3304
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3315
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3326
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3337
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3348
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l3359
+	dw	l155a
+l356a:
+	db	0
+l356b:
+	db	0
+l356c:
+	db	0
+l356d:
+	db	0
+l356e:				; Location counter
+	dw	0
+l3570:				; Address
+	dw	0
+l3572:
+	db	0
+l3573:				; Module count
+	db	0
+l3574:				; .REL bit count
+	db	0
+l3575:				; .REL byte
+	db	0
+l3576:				; Link item
+	db	0
+l3577:				; Copy of link item
+	db	0
+l3578:
+	db	0
+l3579:				; Indicator for constant byte
+	db	0
+l357a:				; File buffer position
+	db	reclng
+l357b:
+	dw	l35b5
+l357d:
+	dw	l35b5
+;
+	db	0
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l326b
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l327c
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l328d
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+	dw	l155a
+ll35b2	equ	$
+;
+l35b2:
+	dw	0
+	db	0
+l35b5:				; Start of data space
+				;
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0
+
+	end
+

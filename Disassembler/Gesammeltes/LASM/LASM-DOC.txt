@@ -1,0 +1,173 @@
+ 
+
+************************************************************************
+*                                                                      *
+*  10/01/82                 LASM                                       *
+*                                                                      *
+*  LASM is an update of LINKASM, with the minor change that it prints  *
+*  the name of each linked file before it is opened.  This helps track *
+*  progress, and helps find misspelled names.                          *
+*                                                                      *
+*                                               - Ward Christensen     *
+*                                                                      *
+************************************************************************
+
+OVERVIEW:
+
+LASM is based on CP/M assembler 1.0, and is compatible with
+1.0, 1.3, and 1.4 assemblers.  (2.0? Maybe.)
+
+LASM is a rewrite of CP/M 1.0 ASM.COM, incorporating:
+
+* A new pseudo-op code, LINK.
+* Smaller .COM file size (6K vs 8K).
+* Faster execution via larger ASM, HEX, and PRN buffers
+         (about 29% faster with PRN file, about 17% faster without)
+* Corrections to properly handle lower case DB values.
+* Prints the number of source lines read
+* Produces a symbol table for use under SID
+
+The LINK pseudo-op allows a file to "chain" to the next .ASM file,
+thereby allowing very large source files to be processed without
+having to copy them together with PIP.
+
+RESTRICTIONS:
+
+All the linked .ASM files must be on the same disk.
+Nested IFs are not handled (ASM.COM didn't either).  Note that
+you can use IF to conditionally link to the next module:
+
+IF CLOCK
+   LINK CLKCODE
+ENDIF
+;
+IF NOT CLOCK
+   LINK NOCLOCK
+ENDIF
+
+For example, if CLOCK is true, then LINK CLKCODE (i.e., CLKCODE.ASM)
+will take place, and the assembler will never see the ENDIF. This is
+not a problem as the next encountered IF will be handled properly.
+
+USAGE:
+
+LASM is totally compatible with ASM.COM, and you may therefore replace
+Its performance will be better than ASM.COM, and it takes less space on disk
+(6K vs 8K). Execute it just like ASM.COM:
+
+LASM NAME.ABZ
+
+where:  A is the .ASM file disk (A, etc.)
+        B is the .HEX file disk (A, etc., or Z for none)
+        Z is the .PRN file disk (A, B,... or Z for none, X for console)
+
+        The default is the logged in disk for all 3.
+
+If you wish to write a symbol table file, follow the command line
+with the disk to be written to (A, B, ...) then a colon.  For example, to
+assemble MODEM from the A: disk, put the .HEX on the A: disk, send the
+.SYM file to B:, and the listing to the console:
+
+LASM MODEM.AAX B:
+
+To assemble it doing everything on the A: disk (assuming A: is the logged
+in disk):
+
+LASM MODEM A:
+
+The ":" must be specified after the .SYM disk.  The .SYM file is
+"partially" sorted, i.e., all Axxxx then all Bxxxx etc.  SID fully scans
+the symbol table anyway, so sorting is not necessary, so I did this
+quick sort hack just to make it easier for YOU to find a symbol.
+
+
+The LINK pseudo operator takes a single operand: The name of an .ASM
+file to be processed next. For example:
+
+A:TEST1.ASM:
+
+    ORG     100H
+    LXI     H,MSG
+    MVI     C,9
+    CALL    BDOS
+    RET
+
+    LINK    TEST2
+
+----------------
+
+A:TEST2.ASM:
+
+MSG:  DB      'LINKED'
+BDOS: EQU     5
+
+----------------
+
+Then assemble it:
+
+A>LASM TEST1.AZX
+LASM as of 07/06/82
+
+ 0100                   ORG     100H
+
+ 0100 210901            LXI     H,MSG
+ 0103 0E09              MVI     C,9
+ 0105 CD0500            CALL    BDOS
+ 0108 C9                RET
+
+                        LINK    TEST2
+
+ 0109 4C494E4B45MSG:    DB      'LINKED'
+ 0005 =         BDOS:   EQU     5
+010F
+000H USE FACTOR
+8 INPUT LINES READ
+END OF ASSEMBLY
+
+
+Fehlermeldungen
+---------------
+
+D Data Error
+  Datengroesse passt nicht (16-Bit-Wert statt 8-Bit-Operand etc.)
+
+E Expression Error
+  Ausdruck kann nicht ausgewertet werden, z.B. weil Symbol nicht definiert
+
+L Label Error
+  z.B. Label mehrfach definiert
+
+N Not Implemented
+  Der verwendete Befehl wird von ASM und LASM nicht unterstuetzt
+
+O Overflow
+  Ein String ist zu lang oder ein mathematischer Ausdruck zu kompliziert
+
+P Phase Error
+  Im zweiten Durchgang hat ein Label einen anderen Wert als im ersten
+
+R Register Error
+  Das angegebene Register kann bei diesem Befehl nicht auftreten
+
+U Undefined Symbol
+  Ein Symbol ist nicht definiert worden
+
+V Value Error
+  Ein Operand eines Ausdrucks ist falsch angegeben worden
+
+------------------------------------------------------------------------------
+
+LASM erzeugt eine .HEX-Datei. Diese muss noch in eine .COM-Datei umgewandelt
+werden. Hierzu koennen Sie LOAD.COM (CP/M 2.2-Systemdiskette) oder HEXCOM.COM
+(CP/M Plus) verwenden. Alternativ dazu kann man auch MLOAD.COM auf dieser
+Diskette benutzen. In seiner einfachsten Betriebsart arbeitet es wie LOAD und
+HEXCOM, gibt aber genauere Informationen zur Natur der erzeugten Datei:
+
+A>MLOAD datei
+
+Rufen Sie MLOAD ohne Parameter auf, zeigt das Programm weitere Moeglichkeiten
+zur Parameteruebergabe an.
+
+MLOAD ist (C) Ron Fowler. Beachten Sie bitte die genauen Urheberrechts-
+vorschriften zu diesem Programm.
+

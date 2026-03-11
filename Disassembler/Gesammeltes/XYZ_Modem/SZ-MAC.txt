@@ -1,0 +1,4684 @@
+	title	SZ - Send files in X/Y/ZModem protocol
+	name	('SZ')
+
+; DASMed version of SZ.COM
+; By W.Cirsovius
+
+; Copyright Wilfried Schmitten
+
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	equ	0000h
+DU	equ	0004h
+BDOS	equ	0005h
+CCP	equ	0080h
+DMA	equ	0080h
+
+.conin	equ	 1
+.auxin	equ	 3
+.auxot	equ	 4
+.auxist	equ	 7
+.auxost	equ	 8
+.string	equ	 9
+.const	equ	11
+.vers	equ	12
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.retdsk	equ	25
+.setdma	equ	26
+.DPB	equ	31
+.usrcod	equ	32
+.filsiz	equ	35
+.setrrn	equ	36
+.SCB	equ	49
+
+_get	equ	-1
+_setw	equ	-2
+
+?conin	equ	22h
+?conout	equ	24h
+?auxout	equ	28h
+
+CPM3	equ	30h
+
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+NoMSB	equ	01111111b
+LoMask	equ	00001111b
+UPPER	equ	01011111b
+
+ARGC	equ	2
+
+l0200	equ	0200h
+l0400	equ	0400h
+l1021	equ	1021h
+
+l0015	equ	15h
+l0026	equ	26h
+l0028	equ	28h
+l002c	equ	2ch
+l002d	equ	2dh
+l002e	equ	2eh
+
+l0080	equ	80h
+l00ff	equ	0ffh
+
+	jp	l010b		; Skip ZCPR
+;
+	db	'Z3ENV'
+	db	1
+l0109:
+	dw	0
+l010b:
+	ld	sp,l2067	; Get stack
+	ld	hl,(l0109)
+	call	l17c5		; Fix environment
+	ld	c,.vers
+	call	BDOS		; Get OS version
+	cp	CPM3		; Verify CP/M 3.x
+	jp	c,l021e		; Should be
+	ld	de,l0231
+	ld	c,.string
+	call	BDOS		; Give ID
+	call	l01f1		; Get disk and user
+	ld	a,(CCP)		; Test command in line
+	or	a
+	jp	z,l0226		; Nope, so give help
+	ld	hl,(l1f78)	; Get address of token table
+	ld	(hl),ARGC	; Set max argues
+	ld	de,CCP+2	; Load string address
+	ex	de,hl
+	ld	a,TRUE
+	call	l1eab		; Parse string
+	ld	hl,(l1f78)	; Get pointer to arguements
+	inc	hl
+	ld	a,(hl)		; Fetch ARGC
+	or	a
+	jp	z,l0226		; Give help if no argue
+	inc	hl
+	ld	e,(hl)		; Get ARGV[1]
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(de)		; Test option
+	cp	'-'
+	jr	nz,l0157	; Nope
+	call	l03b3		; Set option
+	ld	e,(hl)		; Get ARGV[2]
+	inc	hl
+	ld	d,(hl)
+l0157:
+	ld	a,d		; Test defined
+	or	e
+	jr	z,l0196		; Nope
+	ld	hl,l2003	; Load FCB
+	ex	de,hl
+	call	l15d4		; Parse file
+	ld	hl,l2003
+	xor	a
+	or	(hl)		; Test default disk
+	jr	nz,l016d	; Nope
+	ld	a,(l2001)	; Get disk
+	ld	(hl),a		; Save
+l016d:
+	ld	(l08ad+1),a	; Save disk
+	ld	bc,13
+	add	hl,bc
+	dec	de
+	ldi			; Unpack user
+	ld	de,l2003
+	call	l020c		; Log disk and user
+	or	a		; Test disk available
+	jp	nz,l01e1	; Nope
+	ld	hl,(l1f78)
+	ld	a,(l2002)
+	or	0c0h
+	ld	de,l2003
+	call	l17c9
+	ld	(l08a5+1),hl
+	ld	a,c
+	ld	(l26f7),a
+l0196:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,l036c
+	call	l1e49
+	ld	de,l036c
+	ld	c,.string
+	call	BDOS		; Tell files requested
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	or	a
+	jp	z,l01e1
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	ex	de,hl
+	add	hl,de
+	ld	(l26ef),hl
+	ld	de,(BDOS+1)
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ld	(l26f3),hl
+	ld	hl,0
+	ld	(l26f1),hl
+	ld	(l26f5),hl
+	ld	de,l0385
+	ld	c,.string
+	call	BDOS		; Tell to start local receiver
+	call	l0408
+	call	l0854
+	call	l046a
+l01e1:
+	ld	bc,$-$
+	ld	(l2002),bc
+	ld	de,l2003
+	call	l020c		; Log disk and user
+	jp	OS
+;
+; Fetch callers disk and user area
+;
+l01f1:
+	ld	a,(DU)		; Fetch default drive and user
+	ld	b,a
+	rlca			; .. extract user
+	rlca
+	rlca
+	rlca
+	and	LoMask
+	ld	(l2000),a
+	ld	a,b
+	and	LoMask		; Get disk
+	inc	a
+	ld	(l2001),a	; Save disk
+	ld	hl,(l2000)
+	ld	(l01e1+1),hl
+	ret
+;
+; Log disk and user from FCB
+;
+l020c:
+	ld	a,(de)		; Get disk
+	push	af		; .. save
+	dec	de
+	ld	a,(de)		; Get user
+	ld	e,a
+	ld	c,.usrcod
+	call	BDOS		; Set user
+	pop	af
+	dec	a
+	ld	e,a
+	ld	c,.seldsk
+	jp	BDOS		; .. set disk
+;
+;
+;
+l021e:
+	ld	de,l0259
+	ld	c,.string
+	call	BDOS		; .. tell CP/M 3.x utility
+l0226:
+	ld	de,l026e
+	ld	c,.string
+	call	BDOS		; Give help
+	jp	OS
+;
+l0231:
+	db	'SZ for CP/M 3   V 1.11',cr,lf
+	db	'(C) 92 wshbg',cr,lf,lf,eot
+l0259:
+	db	'sorry, CP/M 3 Tool',cr,lf,eot
+l026e:
+	db	'usage: sz [-?pabcxyz] [du:]fn'
+	db	cr,lf,lf
+	db	' options:'
+	db	cr,lf
+	db	'            ?     this help'
+	db	cr,lf
+	db	'            p     protect File at destination'
+	db	cr,lf
+	db	'            a     append'
+	db	cr,lf
+	db	'            b     receive binary'
+	db	cr,lf
+	db	'            c     convert to local linefeed'
+	db	cr,lf
+	db	'            x,y,z Protokoll'
+	db	cr,lf,eot
+l036c:
+	db	'    File(s) requested',cr,lf,lf,eot
+l0385:
+	db	'start your local X/Y/ZModem receive program'
+	db	cr,lf,eot
+;
+; Set option
+;
+l03b3:
+	push	hl
+	push	de
+l03b5:
+	inc	de
+	ld	a,(de)		; Get character
+	or	a		; .. test end
+	jr	z,l03c7
+	ld	hl,l03ca
+	ld	bc,l03ca.l
+	cpir			; Find in list
+	call	z,l0629		; .. process it
+	jr	l03b5
+l03c7:
+	pop	de
+	pop	hl
+	ret
+l03ca:
+	db	'?PABCXYZ'
+l03ca.l	equ	$-l03ca
+	dw	l03ea		; Z
+	dw	l03e6		; Y
+	dw	l03e2		; X
+	dw	l0402		; C
+	dw	l03fc		; B
+	dw	l03f6		; A
+	dw	l03f0		; P
+	dw	l0226		; ?
+l03e2:
+	ld	a,1
+	jr	l03ec
+l03e6:
+	ld	a,3
+	jr	l03ec
+l03ea:
+	ld	a,4
+l03ec:
+	ld	(l0852),a	; Set protocol
+	ret
+l03f0:
+	ld	a,0ffh
+	ld	(l26eb),a
+	ret
+l03f6:
+	ld	a,0ffh
+	ld	(l26ec),a
+	ret
+l03fc:
+	ld	a,0ffh
+	ld	(l26ee),a
+	ret
+l0402:
+	ld	a,0ffh
+	ld	(l26ed),a
+	ret
+l0408:
+	xor	a
+	ld	(PB.1+1),a	; Set get
+	ld	(PB.2+1),a
+	ld	c,.SCB
+	ld	de,PB.1		; Get AUXOUT vector
+	call	BDOS
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	ld	(l0488),hl
+	ld	c,.SCB
+	ld	de,PB.2
+	call	BDOS		; Get CONOUT vector
+	ld	(l0484),hl
+	ld	de,(l0488)
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	(PB.2+2),hl
+	ld	c,.SCB
+	ld	de,PB.3
+	call	BDOS		; Get CONIN vector
+	ld	(l0486),hl
+	ld	de,(l0488)
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	(PB.3+2),hl	; Set vector
+l0450:
+	ld	a,_setw
+	ld	(PB.2+1),a	; Set set word
+	ld	de,PB.2
+	ld	c,.SCB
+	call	BDOS		; Set CONOUT vector
+	ld	a,_setw
+	ld	(PB.3+1),a	; Set set word
+	ld	de,PB.3
+	ld	c,.SCB		; Set CONIN vector
+	jp	BDOS
+l046a:
+	ld	hl,(l0484)
+	ld	(PB.2+2),hl
+	ld	hl,(l0486)
+	ld	(PB.3+2),hl	; Set vector
+	jr	l0450
+PB.1:
+	db	?auxout,0
+	dw	0
+PB.2:
+	db	?conout,0
+	dw	0
+PB.3:
+	db	?conin,0
+	dw	0
+l0484:
+	dw	0
+l0486:
+	dw	0
+l0488:
+	dw	0
+l048a:
+	ld	a,(l269f)
+	ld	de,l049d
+	call	l1e49
+	ld	de,l049b
+	ld	c,.string
+	jp	BDOS
+l049b:
+	db	cr,lf
+l049d:
+	db	0,0,0,' error(s)',cr,lf,eot
+l04ac:
+	ld	de,l226e
+	ld	hl,l04ed
+	ld	(hl),':'
+	inc	hl
+	xor	a
+	ld	b,0dh
+	call	l1f03
+	inc	de
+	call	l1e26
+	dec	de
+	ld	a,(de)
+	add	a,'@'
+	ld	(l04e9),a
+	dec	de
+	ld	a,(de)
+	ld	de,l04ea
+	call	l1e49
+	ld	hl,l26e3
+	ld	de,l04fc
+	call	l071e
+	ld	(hl),cr
+	inc	hl
+	ld	(hl),lf
+	inc	hl
+	ld	(hl),eot
+	ld	de,l04e7
+	ld	c,.string
+	jp	BDOS
+l04e7:
+	db	cr,lf
+l04e9:
+	db	0
+l04ea:
+	db	0,0,0
+l04ed:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	' '
+l04fc:
+	db	0
+l04fd:
+	db	0,0,0,0,0,0,0,0,0,0,0
+l0508:
+	ld	hl,l26a4
+	ld	de,l051c
+	call	l071e
+	ld	(hl),eot
+	ld	de,l051b
+	ld	c,.string
+	jp	BDOS
+l051b:
+	db	cr
+l051c:
+	db	0,0,0,0,0,0,0,0,0,0
+l0526:
+	ld	de,l0542
+	jr	l052e
+l052b:
+	ld	de,l0533
+l052e:
+	ld	c,.string
+	jp	BDOS
+l0533:
+	db	'File skipped',cr,lf,eot
+l0542:
+	db	'can''t open any file',cr,lf,eot
+l0558:
+	ld	hl,l055f
+	ld	(hl),a
+	inc	hl
+	ld	(hl),c
+	ret
+l055f:
+	db	0
+l0560:
+	db	0
+l0561:
+	or	a
+	ld	hl,(l2067)
+	ld	de,l0200
+	sbc	hl,de
+	jr	z,l0582
+	ld	c,.auxist
+	call	BDOS
+	or	a
+	jr	z,l0582
+	ld	c,.auxin
+	call	BDOS
+	ld	c,a
+	ld	hl,l2067
+	call	l05f5
+	jr	l0561
+l0582:
+	ld	hl,l0560
+	or	(hl)
+	ret	nz
+	ld	hl,(l2067)
+	ld	a,h
+	or	l
+	ret
+l058d:
+	ld	a,(l0560)
+	or	a
+	ld	hl,l2067
+	jp	z,l05d0
+	push	af
+	ld	hl,l0560
+	dec	(hl)
+	dec	hl
+	pop	af
+	ld	a,(hl)
+	ret
+l05a0:
+	ld	c,.auxot
+	ld	e,a
+	jp	BDOS
+l05a6:
+	ld	c,.auxost
+	call	BDOS
+	or	a
+	ret
+l05ad:
+	push	bc
+	ld	b,5fh
+l05b0:
+	push	bc
+	call	l0561
+	pop	bc
+	jr	nz,l05bf
+	call	l05c4
+	djnz	l05b0
+	call	l0561
+l05bf:
+	call	nz,l058d
+	pop	bc
+	ret
+l05c4:
+	push	bc
+	ld	a,4
+	ld	b,0
+l05c9:
+	djnz	l05c9
+	dec	a
+	jr	nz,l05c9
+	pop	bc
+	ret
+l05d0:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,d
+	or	e
+	ret	z
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	de,4
+	add	hl,de
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	add	hl,de
+	ex	(sp),hl
+	inc	de
+	ld	a,e
+	and	0ffh
+	ld	(hl),a
+	inc	hl
+	ld	a,d
+	and	1
+	ld	(hl),a
+	pop	hl
+	ld	a,1
+	or	a
+	ld	a,(hl)
+	ret
+l05f5:
+	or	a
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	hl,l0200
+	sbc	hl,de
+	pop	hl
+	ret	z
+	inc	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	inc	hl
+	inc	hl
+	add	hl,de
+	ex	(sp),hl
+	inc	de
+	ld	a,e
+	and	0ffh
+	ld	(hl),a
+	inc	hl
+	ld	a,d
+	and	1
+	ld	(hl),a
+	pop	hl
+	ld	(hl),c
+	ret
+l061c:
+	ld	hl,l226d
+	ld	b,'%'
+	jr	l0625
+l0623:
+	ld	b,6
+l0625:
+	xor	a
+	jp	l1f03
+;
+;
+;
+l0629:
+	add	hl,bc		; Point behind character table
+	sla	c		; .. double index
+	add	hl,bc		; Fetch routine
+	ld	c,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,c
+	jp	(hl)
+;
+;
+;
+l0632:
+	xor	a
+	push	bc
+	push	de
+	push	hl
+	ld	(hl),a
+	ld	d,h
+	ld	e,l
+	inc	de
+	jr	l0641
+l063c:
+	push	bc
+	push	de
+	push	hl
+	ldi
+l0641:
+	ldi
+	ldi
+	ldi
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l064b:
+	push	hl
+	pop	ix
+	push	de
+	pop	iy
+	ld	a,(ix+3)
+	xor	(iy+3)
+	jp	p,l0660
+	xor	(ix+3)
+l065d:
+	ret	m
+	ccf
+	ret
+l0660:
+	xor	(ix+3)
+	jp	p,l066c
+	call	l066c
+	scf
+	jr	l065d
+l066c:
+	push	bc
+	push	de
+	push	hl
+	ex	de,hl
+	or	a
+	ld	b,4
+l0673:
+	ld	a,(de)
+	sbc	a,(hl)
+	inc	de
+	inc	hl
+	djnz	l0673
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l067d:
+	push	bc
+	push	de
+	push	hl
+	ld	b,4
+l0682:
+	ld	a,(de)
+	xor	(hl)
+	jr	nz,l068a
+	inc	de
+	inc	hl
+	djnz	l0682
+l068a:
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l068e:
+	push	bc
+	push	de
+	push	hl
+	or	a
+	ex	af,af'
+	ld	a,4
+l0695:
+	ex	af,af'
+	ld	a,(de)
+	adc	a,(hl)
+	ld	(bc),a
+	inc	bc
+	inc	de
+	inc	hl
+	ex	af,af'
+	dec	a
+	jr	nz,l0695
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l06a4:
+	push	bc
+	push	de
+	push	hl
+	ex	de,hl
+	or	a
+	ex	af,af'
+	ld	a,4
+l06ac:
+	ex	af,af'
+	ld	a,(de)
+	sbc	a,(hl)
+	ld	(bc),a
+	inc	bc
+	inc	hl
+	inc	de
+	ex	af,af'
+	dec	a
+	jr	nz,l06ac
+	ex	af,af'
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l06bc:
+	push	bc
+	push	hl
+	ld	a,1
+	add	a,(hl)
+	ld	(hl),a
+	jr	nc,l06cd
+	ld	b,3
+l06c6:
+	inc	hl
+	ld	a,0
+	adc	a,(hl)
+	ld	(hl),a
+	djnz	l06c6
+l06cd:
+	pop	hl
+	pop	bc
+	ret
+l06d0:
+	call	l0632
+l06d3:
+	push	bc
+	push	hl
+	ld	a,(hl)
+	sub	1
+	ld	(hl),a
+	ld	b,3
+l06db:
+	inc	hl
+	ld	a,(hl)
+	sbc	a,0
+	ld	(hl),a
+	djnz	l06db
+	pop	hl
+	pop	bc
+	ret
+l06e5:
+	push	bc
+	push	de
+	push	hl
+	ex	de,hl
+	ld	a,4
+l06eb:
+	push	af
+	ld	a,(de)
+	and	(hl)
+	ld	(bc),a
+	inc	bc
+	inc	de
+	inc	hl
+	pop	af
+	dec	a
+	jr	nz,l06eb
+l06f6:
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+	db	0,0cah,9ah,';',0,0e1h,0f5h,5,80h
+	db	96h,98h,0,'@B',0fh,0,0a0h,86h
+	db	1,0,10h,'''',0,0,0e8h,3
+l0714:
+	db	0,0,'d',0,0,0,0ah,0,0,0
+l071e:
+	ld	(l0768+1),de
+	ld	de,l2293
+	call	l063c
+	ld	c,9
+	ld	de,l06f6
+	xor	a
+	ld	(l0763+1),a
+l0731:
+	ld	a,'0'
+	ld	(l075d+1),a
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	ld	b,0ah
+l073c:
+	push	bc
+	ld	hl,l2293
+	ld	bc,l2297
+	call	l06a4
+	pop	bc
+	jr	c,l075d
+	push	de
+	ld	a,(l075d+1)
+	inc	a
+	ld	(l075d+1),a
+l0751:
+	ld	de,l2293
+	ld	hl,l2297
+	call	l063c
+	pop	de
+	djnz	l073c
+l075d:
+	ld	a,'0'
+	cp	'0'
+	jr	nz,l0768
+l0763:
+	ld	a,$-$
+	or	a
+	jr	z,l0775
+l0768:
+	ld	hl,$-$
+	ld	(hl),a
+	inc	hl
+	ld	(l0768+1),hl
+	ld	a,'0'
+	ld	(l0763+1),a
+l0775:
+	dec	c
+	jr	nz,l0731
+	ld	a,(l2293)
+	and	0fh
+	add	a,'0'
+	ld	hl,(l0768+1)
+	ld	(hl),a
+	inc	hl
+	ld	(hl),0
+	ret
+l0787:
+	push	af
+l0788:
+	add	a,$-$
+	ld	(l0788+1),a
+	pop	af
+	ret
+l078f:
+	jr	nz,l0714
+	cp	b
+	db	0edh
+l0793:
+	ex	(sp),hl
+	jr	nz,l0751
+;;	sbc	a,0f5h
+	db	0deh
+l0797:
+	push	af
+l0798:
+	ld	iy,l229f
+	ld	ix,l229b
+	xor	(ix+0)
+	ld	h,0
+	ld	l,a
+	add	hl,hl
+	add	hl,hl
+	ld	b,h
+	ld	c,l
+	add	iy,bc
+	ld	a,(iy+0)
+	xor	(ix+1)
+	ld	(ix+0),a
+	ld	a,(iy+1)
+	xor	(ix+2)
+	ld	(ix+1),a
+	ld	a,(iy+2)
+	xor	(ix+3)
+	ld	(ix+2),a
+	ld	a,(iy+3)
+	ld	(ix+3),a
+	pop	af
+	ret
+l07cf:
+	push	de
+	push	hl
+	ld	hl,(l0798+2)
+	ld	bc,l0400-1
+	add	hl,bc
+	push	hl
+	pop	iy
+	ld	ix,l078f
+	xor	a
+l07e0:
+	push	af
+	ld	hl,-1
+	ld	de,-1
+	xor	e
+	ld	e,a
+	ld	b,8
+l07eb:
+	scf
+	rr	h
+	rr	l
+	rr	d
+	rr	e
+	jr	nc,l080a
+	ld	a,e
+	xor	(ix+0)
+	ld	e,a
+	ld	a,d
+	xor	(ix+1)
+	ld	d,a
+	ld	a,l
+	xor	(ix+2)
+	ld	l,a
+	ld	a,h
+	xor	(ix+3)
+	ld	h,a
+l080a:
+	djnz	l07eb
+	ld	a,h
+	cpl
+	ld	(iy+0),a
+	dec	iy
+	ld	a,l
+	cpl
+	ld	(iy+0),a
+	dec	iy
+	ld	a,d
+	cpl
+	ld	(iy+0),a
+	dec	iy
+	ld	a,e
+	cpl
+	ld	(iy+0),a
+	dec	iy
+	pop	af
+	inc	a
+	jr	nz,l07e0
+	pop	hl
+	pop	de
+	ret
+l082f:
+	push	af
+l0830:
+	ld	hl,$-$
+	ld	de,l1021
+	xor	h
+	ld	h,a
+	ld	b,8
+l083a:
+	add	hl,hl
+	jr	nc,l0843
+	ld	a,h
+	xor	d
+	ld	h,a
+	ld	a,l
+	xor	e
+	ld	l,a
+l0843:
+	djnz	l083a
+	ld	(l0830+1),hl
+	pop	af
+	ret
+l084a:
+	db	00h,04h,00h,00h
+l084e:
+	db	00h,0fch,0ffh,0ffh
+l0852:
+	db	4		; Defaults to ZMODEM
+l0853:
+	db	20h
+l0854:
+	ld	a,(l0852)	; Get mode
+	cp	4		; Test ZMODEM
+	jr	nz,l0860
+	ld	a,3
+	ld	(l0852),a	; Set YMODEM
+l0860:
+	xor	a
+	ld	hl,l269f
+	ld	b,'P'
+	call	l1f03
+	call	l061c
+	call	l07cf
+	ld	hl,l2067
+	call	l0623
+	ld	hl,(l26f3)
+	call	l088a
+	ld	hl,l0400
+	ld	(l26cf),hl
+	call	l08c1
+	jr	c,l0888
+	or	a
+	ret
+l0888:
+	scf
+	ret
+l088a:
+	xor	a
+	ld	c,a
+	ld	b,8
+	ld	a,h
+l088f:
+	rlca
+	set	7,c
+	jr	c,l0898
+	rr	c
+	djnz	l088f
+l0898:
+	ld	a,h
+	and	c
+	ld	h,a
+	ld	l,0
+	ld	(l26f3),hl
+	dec	hl
+	ld	(l26da),hl
+	ret
+l08a5:
+	ld	hl,$-$
+	ld	de,l226d
+	ldi
+l08ad:
+	ld	a,$-$		; Load disk
+	ld	(de),a
+	inc	de
+	ld	bc,11
+	ldir
+	ld	hl,(l08a5+1)
+	ld	bc,16
+	add	hl,bc
+	ld	(l08a5+1),hl
+	ret
+l08c1:
+	xor	a
+	ld	(l26a9),a
+	ld	a,0ffh
+	ld	(l26ae),a
+	ld	a,(l26f7)
+	or	a
+	jr	z,l08f4
+	ld	b,a
+l08d1:
+	push	bc
+	ld	a,b
+	call	l08a5
+	ld	hl,l26dc
+	call	l0632
+	call	l0922
+	push	af
+	cp	5
+	call	z,l052b
+	call	l1c09
+	pop	af
+	pop	bc
+	jr	c,l08f7
+	djnz	l08d1
+	ld	a,(l26d9)
+	or	a
+	jr	nz,l08fe
+l08f4:
+	call	l0526
+l08f7:
+	call	l15a8
+	ld	a,0ffh
+	scf
+	ret
+l08fe:
+	ld	a,(l0852)	; Get mode
+	cp	3		; Test YMODEM
+	jr	c,l0920		; .. XMODEM
+	jr	nz,l091d	; .. ZMODEM
+	xor	a
+	ld	(l26e1),a
+	ld	hl,(l26ef)
+	ld	b,80h
+	call	l1f03
+	ld	hl,l0080
+	ld	(l26e7),hl
+	call	l0ae4
+	xor	a
+l091d:
+	call	nz,l10dd
+l0920:
+	xor	a
+	ret
+l0922:
+	ld	de,l226e
+	call	l1da3
+	ld	de,0
+	srl	h
+	rr	l
+	rr	e
+	ld	d,l
+	ld	l,h
+	ld	h,0
+	ld	(l26e3),de
+	ld	(l26e5),hl
+	ld	hl,l26c3
+	call	l0632
+	ld	de,l226e
+	call	l1bdb
+	jr	z,l094c
+	xor	a
+	ret
+l094c:
+	xor	a
+	ld	(l269f),a
+	ld	a,0
+	ld	(l26d6),a
+	ld	(l26d7),a
+	ld	de,l226e
+	call	l04ac
+	ld	hl,l26d9
+	inc	(hl)
+	call	l0972
+	ret	c
+	cp	5
+	ret	z
+	ld	a,(l0852)	; Get mode
+	cp	4		; Test ZMODEM
+	call	nz,l0a4c	; Nope
+	ret
+l0972:
+	ld	hl,(l26ef)
+	xor	a
+	ld	b,80h
+	call	l1f03
+	ld	de,l226f
+	call	l1e26
+	ld	b,0ch
+l0983:
+	ld	a,(hl)
+	call	l1f10
+	jr	nz,l098c
+	or	' '
+	ld	(hl),a
+l098c:
+	inc	hl
+	djnz	l0983
+	ld	hl,(l26ef)
+	call	l1e9e
+	ld	(hl),0
+	inc	hl
+	ld	de,l26e3
+	ex	de,hl
+	push	de
+	call	l071e
+	pop	de
+	ld	a,(l0852)	; Get mode
+	cp	3		; Test it
+	ccf
+	ret	nc		; Exit XMODEM
+	ld	a,(l26d8)
+	cp	68h
+	call	nz,l09d9
+	ret	c
+	xor	a
+	ld	(l26e1),a
+	ld	a,(l0852)	; Get mode
+	cp	3		; Test YMODEM
+	ld	hl,l0080
+	ld	(l26e7),hl
+	jp	z,l0ae4		; Yeap
+	ld	hl,(l26ef)
+	call	l1e9e
+	inc	hl
+	call	l1e9e
+	ld	de,(l26ef)
+	or	a
+	sbc	hl,de
+	inc	hl
+	ex	de,hl
+	jp	l0c8b
+l09d9:
+	ld	a,(l0852)	; Get mode
+	cp	3		; Test it
+	ld	a,0
+	call	nc,l1204	; Not on XMODEM
+	xor	a
+	ld	(l26e2),a
+	ld	(l26e0),a
+l09ea:
+	ld	b,0ffh
+	call	l15b6
+	ld	(l26e0),a
+	ld	hl,l0a31
+	ld	bc,5
+	cpir
+	jp	z,l0629
+l09fd:
+	ld	a,(l26e0)
+	ld	(l26e2),a
+	jr	l09ea
+l0a05:
+	ld	b,14h
+	call	l15b6
+	ld	(l26e0),a
+	cp	18h
+	jr	nz,l09fd
+	ld	hl,l26e2
+	cp	(hl)
+	jr	nz,l09fd
+	ld	a,0ffh
+	scf
+	ret
+l0a1b:
+	ld	a,10h
+	ld	(l26a9),a
+l0a20:
+	xor	a
+	ret
+l0a22:
+	ld	a,0ffh
+	scf
+	ret
+l0a26:
+	call	l0bf0
+	ret	c
+	ld	a,4
+	ld	(l0852),a	; Set ZMODEM
+	xor	a
+	ret
+l0a31:
+	db	2ah,0feh,43h,15h,18h
+	dw	l0a05
+	dw	l0a20
+	dw	l0a1b
+l0a3c:
+	dw	l0a22
+	dw	l0a26
+l0a40:
+	db	15h,'C',0feh,18h
+l0a44:
+	dw	l0a76
+	dw	l0add
+	dw	l0a7a
+	dw	l0a7f
+l0a4c:
+	xor	a
+	ld	(l26a9),a
+	ld	a,0ffh
+	ld	(l26ae),a
+	ld	hl,l26b7
+	call	l0632
+	ld	hl,l26dc
+	call	l0632
+l0a61:
+	ld	b,0ffh
+	call	l15b6
+	ld	(l26e0),a
+	ld	hl,l0a40
+	ld	bc,4
+	cpir
+	jr	nz,l0a61
+	jp	l0629
+l0a76:
+	ld	a,0ffh
+	scf
+	ret
+l0a7a:
+	ld	a,10h
+	ld	(l26a9),a
+l0a7f:
+	xor	a
+	ld	(l26e1),a
+l0a83:
+	ld	hl,l26e3
+	ld	de,l26b7
+	ld	bc,l26c7
+	call	l06a4
+	ld	hl,l26c7
+	ld	de,l084a
+	call	l064b
+	ld	hl,l0400
+	jr	nc,l0aa0
+	ld	hl,l0080
+l0aa0:
+	ld	(l26e7),hl
+	ld	bc,(l26e7)
+	call	l10a2
+	jr	c,l0add
+	or	a
+	jr	z,l0ab3
+	ld	a,d
+	or	e
+	jr	z,l0ac9
+l0ab3:
+	ld	hl,l26e1
+	inc	(hl)
+	call	l0ae4
+	ret	c
+	ld	hl,l26b7
+	ld	de,l26e7
+	ld	bc,l26b7
+	call	l068e
+	jr	l0a83
+l0ac9:
+	ld	b,5
+l0acb:
+	push	bc
+	ld	a,4
+	call	l12a6
+	ld	b,64h
+	call	l15b6
+	cp	6
+	jr	z,l0ae1
+	pop	bc
+	djnz	l0acb
+l0add:
+	ld	a,0ffh
+	scf
+	ret
+l0ae1:
+	pop	bc
+	xor	a
+	ret
+l0ae4:
+	xor	a
+	ld	(l26e0),a
+	ld	(l269f),a
+l0aeb:
+	ld	a,(l26e0)
+	ld	(l26e2),a
+	ld	hl,l26b7
+	ld	de,l26a4
+	call	l063c
+	call	l0508
+	ld	hl,(l26e7)
+	ld	(l0b33+1),hl
+	ld	a,l
+	cp	80h
+	ld	a,1
+	jr	z,l0b0c
+	ld	a,2
+l0b0c:
+	call	l12a6
+	ld	a,(l26e1)
+	call	l12a6
+	ld	a,(l26e1)
+	cpl
+	call	l12a6
+	call	l12dc
+	ld	ix,(l26ef)
+l0b23:
+	ld	a,(ix+0)
+	call	l0787
+	call	l082f
+	push	ix
+	call	l12a6
+	pop	ix
+l0b33:
+	ld	hl,$-$
+	dec	hl
+	ld	(l0b33+1),hl
+	inc	ix
+	ld	a,h
+	or	l
+	jr	nz,l0b23
+	ld	a,(l26a9)
+	cp	10h
+	jr	z,l0b4c
+	ld	a,(l0788+1)
+	jr	l0b55
+l0b4c:
+	ld	a,(l0830+2)
+	call	l12a6
+	ld	a,(l0830+1)
+l0b55:
+	call	l12a6
+	ld	b,64h
+	call	l15b6
+	ld	(l26e0),a
+	ld	a,(l26e0)
+	ld	hl,l0b9c
+	ld	bc,6
+	cpir
+	jp	z,l0629
+	jp	l0bba
+l0b71:
+	ld	a,(l26e2)
+	cp	18h
+	jp	nz,l0bba
+l0b79:
+	ld	a,0ffh
+	scf
+	ret
+l0b7d:
+	jp	l0bdd
+l0b80:
+	ld	a,(l26ae)
+	cp	0ffh
+	jr	nz,l0b8c
+	ld	a,10h
+	ld	(l26a9),a
+l0b8c:
+	jp	l0bdd
+l0b8f:
+	ld	a,0
+	ld	(l26ae),a
+	xor	a
+	ld	(l269f),a
+	ret
+l0b99:
+	jp	l0bba
+l0b9c:
+	db	18h,0feh,'C',15h,6,0ffh
+	dw	l0b99
+	dw	l0b8f
+	dw	l0b8c
+	dw	l0b80
+	dw	l0b7d
+	dw	l0b71
+l0bae:
+	db	0feh,15h,43h,18h
+	dw	0bd3h
+	dw	0b60h
+	dw	0b60h
+	dw	l0bdd
+l0bba:
+	ld	a,(l26e0)
+	ld	(l26e2),a
+	ld	b,64h
+	call	l15b6
+	ld	(l26e0),a
+	ld	hl,l0bae
+	ld	bc,4
+	cpir
+	jp	z,l0629
+	ld	a,(l26e2)
+	cp	18h
+	jp	z,l0b79
+	jr	l0bba
+l0bdd:
+	ld	hl,l269f
+	inc	(hl)
+	call	l048a
+	ld	a,(l269f)
+	cp	5
+	jp	c,l0aeb
+	ld	a,0ffh
+	scf
+	ret
+l0bf0:
+	ld	a,0bh
+	ld	(l26f8),a
+l0bf5:
+	ld	hl,l26f8
+	dec	(hl)
+	ld	a,0ffh
+	scf
+	ret	z
+	call	l12eb
+	ld	hl,l0c79
+	ld	bc,6
+	cpir
+	jp	z,l0629
+l0c0b:
+	ld	a,6
+	call	l1204
+	jr	l0bf5
+l0c12:
+	ld	hl,l26a0
+	ld	de,l26aa
+	call	l063c
+	ld	a,3
+	call	l1204
+	jr	l0bf5
+l0c22:
+	ld	hl,l26aa
+	call	l0632
+	ld	a,0
+	call	l1204
+	jr	l0bf5
+l0c2f:
+	ld	ix,l26a0
+	ld	a,(ix+3)
+	ld	(l26d4),a
+	and	' '
+	ld	(l26a9),a
+	ld	a,(l26d4)
+	and	'@'
+	ld	(l26d5),a
+	ld	l,(ix+0)
+	ld	h,(ix+1)
+	ld	(l26cb),hl
+	ld	a,h
+	or	l
+	jr	nz,l0c5e
+	ld	a,(l0853)
+	rla
+	rla
+	ld	h,a
+	ld	l,0
+	ld	(l26cb),hl
+l0c5e:
+	ld	hl,l0400
+	ld	(l26cf),hl
+	xor	a
+	ret
+l0c66:
+	ld	a,0ffh
+	scf
+	ret
+l0c6a:
+	ld	ix,l26a0
+	ld	a,(ix+3)
+	cp	12h
+	jp	z,l0bf5
+	jp	l0c0b
+l0c79:
+	db	0eh,12h,1,10h,0feh,0
+	dw	l0c6a
+	dw	l0c66
+	dw	l0c66
+	dw	l0c2f
+	dw	l0c22
+	dw	l0c12
+l0c8b:
+	ld	(l0cd1+1),de
+	ld	hl,l26b7
+	call	l0632
+l0c95:
+	ld	ix,l26aa
+	ld	a,(l26ee)	; Get binary mode
+	cp	0ffh		; Test binary
+	ld	a,1
+	jr	z,l0cac		; Yeap
+	ld	a,(l26ed)	; Get conversion mode
+	cp	0ffh		; Test local LF
+	ld	a,2
+	jr	z,l0cac		; Yeap
+	xor	a
+l0cac:
+	ld	(ix+3),a
+	ld	a,(l26eb)	; Get protect mode
+	cp	0ffh		; Test protected
+	ld	a,7
+	jr	z,l0cc2		; Yeap
+	ld	a,(l26ec)	; Get append mode
+	cp	0ffh		; Test append
+	ld	a,3
+	jr	z,l0cc2		; Yeap
+	xor	a
+l0cc2:
+	ld	(ix+2),a
+	xor	a
+	ld	(ix+1),a
+	ld	(ix+0),a
+	ld	a,4
+	call	l118c
+l0cd1:
+	ld	bc,$-$
+	ld	a,6bh
+	call	l10fd
+l0cd9:
+	call	l12eb
+	ld	hl,l0d2f
+	ld	bc,8
+	cpir
+	jp	z,l0629
+	jr	l0c95
+l0ce9:
+	ld	b,'2'
+	call	l15b6
+	jr	c,l0c95
+	cp	'*'
+	jr	z,l0cd9
+	jr	l0ce9
+l0cf6:
+	ld	a,0ffh
+	scf
+	ret
+l0cfa:
+	jp	l0cd9
+l0cfd:
+	ld	a,5
+	ret
+l0d00:
+	ld	hl,l26b3
+	ld	de,l26fa
+	call	l063c
+	call	l0f8f
+	ret	c
+	ld	hl,l26b3
+	ld	de,l26af
+l0d13:
+	call	l063c
+	ld	de,l26b7
+	call	l063c
+	ld	de,l26bb
+	call	l063c
+	ld	de,l26bf
+	call	l063c
+	ex	de,hl
+	call	l06d3
+	jp	l0d47
+l0d2f:
+	db	1,10h,0feh,7,8,0dh,5,9
+	dw	l0d00
+	dw	l0cfd
+	dw	l0cfa
+	dw	l0cf6
+	dw	l0cf6
+	dw	l0cf6
+	dw	l0cf6
+	dw	l0ce9
+l0d47:
+	xor	a
+l0d48:
+	ld	(l26d3),a
+	ld	(l269f),a
+l0d4e:
+	jp	l0db6
+l0d51:
+	xor	a
+	ld	(l26f9),a
+	ld	a,0ffh
+	call	l0ed1
+l0d5a:
+	ld	hl,l0d6e
+	ld	bc,5
+	cpir
+	jp	z,l0629
+l0d65:
+	ld	a,0ffh
+	scf
+	ret
+l0d69:
+	ld	a,5
+	ret
+l0d6c:
+	xor	a
+	ret
+l0d6e:
+	db	10h,5,3,9,1
+	dw	l0d6c
+l0d75:
+	dw	l0d81
+	dw	l0d7d
+	dw	l0d69
+	dw	l0d65
+l0d7d:
+	xor	a
+	ld	(l269f),a
+l0d81:
+	call	l0561
+	jr	z,l0db6
+	ld	b,0ah
+	call	l15b6
+l0d8b:
+	ld	hl,l0da7
+	ld	bc,5
+	cpir
+	jr	nz,l0d81
+	jp	l0629
+l0d98:
+	ld	a,0
+	call	l0ed1
+	jp	l0d5a
+l0da0:
+	ld	b,64h
+	call	l15b6
+	jr	l0d8b
+l0da7:
+	db	0feh,18h,'*',13h,93h
+	dw	l0da0
+	dw	l0da0
+	dw	l0d98
+	dw	l0d98
+	dw	l0d65
+l0db6:
+	ld	hl,(l26cb)
+	ld	(l26cd),hl
+	ld	hl,l26b7
+	ld	de,l26aa
+	call	l063c
+	ld	a,0ah
+	call	l118c
+l0dca:
+	call	l1042
+	ret	c
+	ld	(l2702),hl
+	ld	a,(l26d6)
+	cp	0ffh
+	jr	nz,l0de0
+	ld	a,68h
+	ld	(l26d8),a
+	jp	l0e16
+l0de0:
+	ld	a,(l26f9)
+	cp	4
+	jr	c,l0def
+l0de7:
+	ld	a,6bh
+	ld	(l26d8),a
+	jp	l0e16
+l0def:
+	ld	hl,l26bb
+	ld	de,l26bf
+	call	l067d
+	jr	z,l0de7
+	ld	hl,(l26cb)
+	ld	a,h
+	or	l
+	jr	z,l0e11
+	ld	hl,(l26cd)
+	ld	de,(l2702)
+	sbc	hl,de
+	ld	(l26cd),hl
+	jr	z,l0de7
+	jr	c,l0de7
+l0e11:
+	ld	a,69h
+	ld	(l26d8),a
+l0e16:
+	ld	a,(l26d8)
+	ld	bc,(l2702)
+	call	l10fd
+	ld	de,l2702
+	ld	hl,l26b7
+	ld	bc,l26b7
+	call	l068e
+	ld	hl,l26b7
+	ld	de,l26bb
+	call	l063c
+	ld	a,(l26d8)
+	cp	6bh
+	jp	z,l0d51
+l0e3d:
+	call	l0561
+	jr	z,l0e93
+	ld	b,0ah
+	call	l15b6
+l0e47:
+	ld	hl,l0e84
+	ld	bc,5
+	cpir
+	jp	z,l0629
+	ld	hl,l26f9
+	inc	(hl)
+	jr	l0e3d
+l0e58:
+	ld	a,0
+	call	l0ed1
+	cp	3
+	jr	z,l0e93
+	push	af
+l0e62:
+	ld	hl,l2067
+	call	l0623
+	call	l0561
+	jr	nz,l0e62
+	ld	a,68h
+	ld	bc,0
+	call	l10fd
+	pop	af
+	jp	l0d5a
+l0e79:
+	ld	b,64h
+	call	l15b6
+	ld	hl,l26f9
+	inc	(hl)
+	jr	l0e47
+l0e84:
+	db	0feh,18h,'*',13h,93h
+	dw	l0e79
+	dw	l0e79
+	dw	l0e58
+	dw	l0e58
+	dw	l0d65
+l0e93:
+	ld	a,(l26d6)
+	cp	0ffh
+	jp	nz,l0dca
+l0e9b:
+	ld	hl,l26b7
+	ld	de,l26aa
+	call	l063c
+	ld	a,0bh
+	call	l118c
+	ld	a,0ffh
+	call	l0ed1
+	ld	hl,l0ec5
+	ld	bc,4
+	cpir
+	jp	z,l0629
+	ld	a,0ffh
+	scf
+	ret
+l0ebd:
+	jr	l0e9b
+l0ebf:
+	jp	l0d4e
+l0ec2:
+	xor	a
+	ret
+l0ec4:
+	ret
+l0ec5:
+	db	3,9,1,5
+	dw	l0ec4
+	dw	l0ec2
+	dw	l0ebf
+	dw	l0ebd
+l0ed1:
+	ld	(l0ef9+1),a
+l0ed4:
+	call	l12eb
+	ld	hl,l0f74
+	ld	bc,9
+	cpir
+	jp	z,l0629
+l0ee2:
+	ld	a,6
+	call	l118c
+	jr	l0ed4
+l0ee9:
+	ret
+l0eea:
+	push	af
+	call	l1c09
+	pop	af
+	ret
+l0ef0:
+	ld	de,l26af
+	ld	hl,l26b3
+	call	l063c
+l0ef9:
+	ld	a,$-$
+	cp	0
+	ld	a,3
+	ret	z
+	ld	de,l26b7
+	ld	hl,l26b3
+	call	l067d
+	ld	a,3
+	ret	z
+	jp	l0ed4
+l0f0f:
+	ld	hl,l26b3
+	ld	de,l26fa
+	call	l063c
+	call	l0f8f
+	ret	c
+	ld	a,0
+	ld	(l26d6),a
+	ld	hl,l269f
+	inc	(hl)
+	call	l048a
+	ld	hl,l26b3
+	ld	de,l26b7
+	call	l063c
+	ld	de,l26af
+	call	l063c
+	ld	de,l26bb
+	call	l063c
+	ld	de,l26bf
+	call	l067d
+	jr	nz,l0f64
+	ld	a,(l26d3)
+	inc	a
+	ld	(l26d3),a
+	cp	5
+	jr	c,l0f64
+	ld	hl,32
+	ld	de,(l26cf)
+	or	a
+	sbc	hl,de
+	jr	nc,l0f64
+	srl	d
+	rr	e
+	ld	(l26cf),de
+l0f64:
+	ld	hl,l26b3
+	ld	de,l26bf
+	call	l063c
+	ld	a,9
+	ret
+l0f70:
+	ld	a,0ffh
+	scf
+	ret
+l0f74:
+	db	10h,7,8,0feh,9,3,1,5,0ffh
+l0f7d:
+	dw	l0ee2
+	dw	l0ee9
+	dw	l0eea
+	dw	l0ef0
+	dw	l0f0f
+	dw	l0f70
+	dw	l0f70
+	dw	l0f70
+	dw	l0f70
+l0f8f:
+	ld	hl,l26c3
+	ld	de,l26f3
+	ld	bc,l26c7
+	call	l06a4
+	ld	hl,l26fa
+	ld	de,l26c7
+	call	l064b
+	jp	nc,l0fd2
+	ld	a,0
+	ld	(l26d7),a
+	ld	hl,l26fa
+	ld	de,l084e
+	ld	bc,l26fe
+	call	l06e5
+	ld	hl,l26fe
+	call	l101d
+	ret	c
+	ld	hl,l26fe
+	ld	de,l26dc
+	call	l063c
+	ld	bc,(l26f3)
+	call	l10a2
+	ret	c
+	xor	a
+	ret
+l0fd2:
+	ld	hl,l26c3
+	ld	de,l084a
+	ld	bc,l26c7
+	call	l06a4
+	ld	hl,l26c7
+	ld	de,l26fa
+	call	l064b
+	jp	nc,l1015
+	ld	a,0
+	ld	(l26d7),a
+	ld	hl,l26fa
+	ld	de,l084e
+	ld	bc,l26fe
+	call	l06e5
+	ld	hl,l26fe
+	call	l1017
+	ret	c
+	ld	hl,l26fe
+	ld	de,l26dc
+	call	l063c
+	ld	bc,(l26f3)
+	call	l10a2
+	ret	c
+	xor	a
+	ret
+l1015:
+	xor	a
+	ret
+l1017:
+	ex	de,hl
+	ld	hl,l26c3
+	jr	l102d
+l101d:
+	call	l1c09
+	ld	de,l226e
+	call	l1bdb
+	ex	de,hl
+	ld	hl,l26c3
+	call	l0632
+l102d:
+	call	l067d
+	ret	z
+	call	l1bf9
+	jr	nz,l103b
+	call	l06bc
+	jr	l102d
+l103b:
+	xor	4
+	ret	z
+	ld	a,0ffh
+	scf
+	ret
+l1042:
+	ld	hl,l2702
+	call	l0632
+	ld	hl,l26bb
+	ld	de,l26da
+	ld	bc,l26dc
+	call	l06e5
+	ld	hl,l26bb
+	ld	de,l26c3
+	call	l064b
+	jp	c,l1070
+	ld	bc,(l26cf)
+	call	l10a2
+	ret	c
+	ld	a,(l26d7)
+	ld	(l26d6),a
+	ex	de,hl
+	ret
+l1070:
+	ld	hl,l26bb
+	ld	de,l26cf
+	ld	bc,l26c7
+	call	l068e
+	ld	hl,l26c3
+	ld	de,l26c7
+	call	l064b
+	jp	c,l108c
+	ld	hl,(l26cf)
+	ret
+l108c:
+	ld	a,(l26d7)
+	ld	(l26d6),a
+	ld	hl,l26c3
+	ld	de,l26bb
+	ld	bc,l26c7
+	call	l06a4
+	ld	hl,(l26c7)
+	ret
+l10a2:
+	ld	de,0
+l10a5:
+	call	l10c5
+	call	l1bf9
+	jr	nz,l10bb
+	ld	(hl),a
+	ld	hl,l26c3
+	call	l06bc
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l10a5
+	ret
+l10bb:
+	cp	4
+	ld	a,0ffh
+	ld	(l26d7),a
+	ret	z
+	scf
+	ret
+l10c5:
+	push	bc
+	push	de
+	ld	hl,(l26dc)
+	add	hl,de
+	ld	bc,(l26da)
+	ld	a,h
+	and	b
+	ld	h,a
+	ld	a,l
+	and	c
+	ld	l,a
+	ld	de,(l26ef)
+	add	hl,de
+	pop	de
+	pop	bc
+	ret
+l10dd:
+	ld	hl,l26aa
+	call	l0632
+	ld	a,8
+	call	l1204
+	call	l12eb
+	ret	c
+	cp	10h
+	ret	z
+	cp	8
+	jr	nz,l10dd
+	ld	a,'O'
+	call	l12a6
+	ld	a,'O'
+	jp	l12a6
+l10fd:
+	ld	(l2706),a
+l1100:
+	push	bc
+	ld	hl,l26b7
+	ld	de,l26a4
+	call	l063c
+	call	l0508
+	pop	bc
+	call	l12dc
+	ld	de,0
+	ld	a,(l26a9)
+	and	' '
+	jr	nz,l1156
+l111b:
+	ld	a,b
+	or	c
+	jr	z,l1131
+	push	bc
+	push	de
+	call	l10c5
+	ld	a,(hl)
+	call	l082f
+	call	l1282
+	pop	de
+	pop	bc
+	inc	de
+	dec	bc
+	jr	l111b
+l1131:
+	ld	a,18h
+	call	l12a6
+	ld	a,(l2706)
+	call	l082f
+	call	l12a6
+	ld	a,(l0830+2)
+	call	l1282
+	ld	a,(l0830+1)
+	call	l1282
+	ld	a,(l2706)
+	cp	6bh
+	ret	z
+	ld	a,11h
+	jp	l12a6
+l1156:
+	ld	a,b
+	or	c
+	jr	z,l116c
+	push	bc
+	push	de
+	call	l10c5
+	ld	a,(hl)
+	call	l0797
+	call	l1282
+	pop	de
+	pop	bc
+	inc	de
+	dec	bc
+	jr	l1156
+l116c:
+	ld	a,18h
+	call	l12a6
+	ld	a,(l2706)
+	call	l0797
+	call	l12a6
+	ld	b,4
+	ld	hl,l229b
+l117f:
+	ld	a,(hl)
+	inc	hl
+	push	bc
+	push	hl
+	cpl
+	call	l1282
+	pop	hl
+	pop	bc
+	djnz	l117f
+	ret
+l118c:
+	ld	(l2707),a
+	ld	a,'*'
+	call	l12a6
+	ld	a,18h
+	call	l12a6
+	call	l12dc
+	ld	a,(l26a9)
+	and	' '
+	jp	nz,l11d1
+	ld	a,'A'
+	call	l12a6
+	ld	a,(l2707)
+	call	l082f
+	call	l1282
+	ld	hl,l26aa
+	ld	b,4
+l11b7:
+	push	bc
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	call	l082f
+	call	l1282
+	pop	hl
+	pop	bc
+	djnz	l11b7
+	ld	a,(l0830+2)
+	call	l1282
+	ld	a,(l0830+1)
+	jp	l1282
+l11d1:
+	ld	a,'C'
+	call	l12a6
+	ld	a,(l2707)
+	call	l0797
+	call	l12a6
+	ld	hl,l26aa
+	ld	b,4
+l11e4:
+	push	bc
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	call	l0797
+	call	l1282
+	pop	hl
+	pop	bc
+	djnz	l11e4
+	ld	hl,l229b
+	ld	b,4
+l11f7:
+	push	bc
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	cpl
+	call	l1282
+	pop	hl
+	pop	bc
+	djnz	l11f7
+	ret
+l1204:
+	ld	(l2707),a
+	ld	hl,l124d
+	call	l15ab
+	call	l12dc
+	ld	a,(l2707)
+	call	l082f
+	call	l1262
+	ld	hl,l26aa
+	ld	b,4
+l121e:
+	push	bc
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	call	l082f
+	call	l1262
+	pop	hl
+	pop	bc
+	djnz	l121e
+	ld	a,(l0830+2)
+	call	l1262
+	ld	a,(l0830+1)
+	call	l1262
+	ld	a,0dh
+	call	l12a6
+	ld	a,0ah
+	call	l12a6
+	ld	a,(l2707)
+	cp	8
+	ret	z
+	ld	a,11h
+	jp	l12a6
+l124d:
+	db	'**',18h,'B',0
+l1252:
+	db	'0123'
+l1256:
+	db	'456789abcdef'
+l1262:
+	push	af
+	ld	hl,l1252
+	ld	b,0
+	rra
+	rra
+	rra
+	rra
+	and	0fh
+	ld	c,a
+	add	hl,bc
+	ld	a,(hl)
+	call	l12a6
+	pop	af
+	ld	hl,l1252
+	ld	b,0
+	and	0fh
+	ld	c,a
+	add	hl,bc
+	ld	a,(hl)
+	jp	l12a6
+l1282:
+	ld	(l12a4+1),a
+	ld	bc,9
+	ld	hl,l12c1
+	cpir
+	jp	z,l0629
+	and	60h
+	jr	nz,l12a4
+	ld	a,(l26d5)
+	or	a
+	jr	z,l12a4
+l129a:
+	ld	hl,l12a4+1
+	set	6,(hl)
+	ld	a,18h
+	call	l12a6
+l12a4:
+	ld	a,$-$
+l12a6:
+	ld	(l12b1+1),a
+l12a9:
+	call	l0561
+	call	l05a6
+	jr	z,l12a9
+l12b1:
+	ld	a,$-$
+	jp	l05a0
+l12b6:
+	ld	a,(l12b1+1)
+	and	7fh
+	cp	'@'
+	jr	nz,l12a4
+	jr	l129a
+l12c1:
+	db	18h,0dh,8dh,10h,90h,11h,91h
+	db	13h,93h
+	dw	l129a
+	dw	l129a
+	dw	l129a
+l12d0:
+	dw	l129a
+	dw	l129a
+	dw	l129a
+	dw	l12b6
+	dw	l12b6
+	dw	l129a
+l12dc:
+	xor	a
+	ld	h,a
+	ld	l,a
+	ld	(l0788+1),a
+	ld	(l0830+1),hl
+	ld	hl,l229b
+	jp	l06d0
+l12eb:
+	xor	a
+	ld	(l270b),a
+	ld	hl,l0400
+	ld	(l2708),hl
+l12f5:
+	ld	a,5
+	ld	(l270a),a
+l12fa:
+	ld	b,0ffh
+	call	l15b6
+	jp	c,l13a4
+	ld	hl,l13b8
+	ld	bc,3
+	cpir
+	jp	z,l0629
+	jr	l133e
+l130f:
+	ld	hl,l270a
+	dec	(hl)
+	ld	a,10h
+	jp	z,l13a4
+	ld	b,0ah
+	call	l15b6
+	jr	c,l12fa
+	ld	hl,l13c1
+	ld	bc,2
+	cpir
+	jp	z,l0629
+	jr	l133e
+l132c:
+	ld	hl,l270a
+	dec	(hl)
+	ld	a,10h
+	jp	z,l13a4
+	jr	l12fa
+l1337:
+	ld	b,0ah
+	call	l15b6
+	jr	c,l134f
+l133e:
+	ld	hl,(l2708)
+	dec	hl
+	ld	(l2708),hl
+	ld	a,h
+	or	l
+	ld	a,0fch
+	jp	z,l13a4
+	jp	l12f5
+l134f:
+	ld	a,0ffh
+	jp	l13a4
+l1354:
+	ld	a,5
+	ld	(l270a),a
+l1359:
+	call	l14d1
+	jr	c,l13a4
+	ld	hl,l13c7
+	ld	bc,2
+l1364:
+	cpir
+	jp	z,l0629
+	jr	l133e
+l136b:
+	call	l14d1
+	jr	c,l13a4
+	ld	hl,l13cd
+	ld	bc,4
+	cpir
+	jp	z,l0629
+	jr	l133e
+l137d:
+	ld	a,10h
+	ld	(l26a8),a
+	call	l1454
+	jr	l1399
+l1387:
+	ld	a,10h
+	ld	(l26a8),a
+	call	l141a
+	jr	l1399
+l1391:
+	ld	a,' '
+	ld	(l26a8),a
+	call	l13df
+l1399:
+	push	af
+	ld	hl,l26a0
+	ld	de,l26b3
+	call	l063c
+	pop	af
+l13a4:
+	ld	hl,l13d9
+	ld	bc,6
+	cpir
+	jr	nz,l13b6
+	cp	98h
+	jr	nz,l13b4
+	ld	a,10h
+l13b4:
+	scf
+	ret
+l13b6:
+	or	a
+	ret
+l13b8:
+	db	18h,0aah,'*'
+	dw	l1354
+	dw	l1354
+	dw	l130f
+l13c1:
+	db	'k',18h
+	dw	l132c
+	dw	l1337
+l13c7:
+	db	'*',18h
+	dw	l136b
+	dw	l1359
+l13cd:
+	db	'CAB',18h
+	dw	l130f
+	dw	l137d
+	dw	l1387
+	dw	l1391
+l13d9:
+	sbc	a,b
+	ld	b,10h
+	rst	38h
+	cp	0fch
+l13df:
+	call	l12dc
+	call	l14fb
+	ret	c
+	ld	(l270b),a
+	call	l0797
+	ld	hl,l26a0
+	ld	b,4
+l13f1:
+	push	bc
+	push	hl
+	call	l14fb
+	call	l0797
+	pop	hl
+	pop	bc
+	ld	(hl),a
+	inc	hl
+	ret	c
+	djnz	l13f1
+	ld	b,4
+l1402:
+	push	bc
+	call	l14fb
+	call	l0797
+	pop	bc
+	ret	c
+	djnz	l1402
+	ld	hl,l229b
+	ld	de,l0793
+	call	l067d
+	jr	z,l144c
+	jr	l1450
+l141a:
+	call	l12dc
+	call	l14fb
+	ret	c
+	ld	(l270b),a
+	call	l082f
+	ld	hl,l26a0
+	ld	b,4
+l142c:
+	push	bc
+	push	hl
+	call	l14fb
+	call	l082f
+	pop	hl
+	pop	bc
+	ld	(hl),a
+	inc	hl
+	ret	c
+	djnz	l142c
+	ld	b,2
+l143d:
+	push	bc
+	call	l14fb
+	call	l082f
+	pop	bc
+	ret	c
+	djnz	l143d
+	ld	a,h
+	or	l
+	jr	nz,l1450
+l144c:
+	ld	a,(l270b)
+	ret
+l1450:
+	ld	a,0ffh
+	scf
+	ret
+l1454:
+	call	l12dc
+	call	l14a4
+	ret	c
+	ld	(l270b),a
+	call	l082f
+	ld	hl,l26a0
+	ld	b,4
+l1466:
+	push	bc
+	push	hl
+	call	l14a4
+	jr	nc,l1470
+	pop	hl
+	pop	bc
+	ret
+l1470:
+	call	l082f
+	pop	hl
+	pop	bc
+	ld	(hl),a
+	inc	hl
+	djnz	l1466
+	ld	b,2
+l147b:
+	push	bc
+	call	l14a4
+	jr	nc,l1483
+	pop	bc
+	ret
+l1483:
+	call	l082f
+	pop	bc
+	djnz	l147b
+	ld	a,h
+	or	l
+	jr	nz,l14a0
+	ld	b,0ah
+	call	l15b6
+	cp	0dh
+	jr	nz,l149b
+	ld	b,0ah
+	call	l15b6
+l149b:
+	or	a
+	ld	a,(l270b)
+	ret
+l14a0:
+	ld	a,0ffh
+	scf
+	ret
+l14a4:
+	call	l14d1
+	ret	c
+	call	l14c3
+	jr	nz,l14bf
+	rlca
+	rlca
+	rlca
+	rlca
+	ld	b,a
+	push	bc
+	call	l14d1
+	pop	bc
+	ret	c
+	call	l14c3
+	jr	nz,l14bf
+	or	b
+	ret
+l14bf:
+	ld	a,0ffh
+	scf
+	ret
+l14c3:
+	ld	l,a
+	sub	'0'
+	cp	0ah
+	jr	c,l14cc
+	sub	''''
+l14cc:
+	ld	l,a
+	and	0f0h
+	ld	a,l
+	ret
+l14d1:
+	ld	b,64h
+	call	l15b6
+	ret	c
+	and	NoMSB
+	ld	hl,l14f6
+	ld	bc,2
+	cpir
+	jr	z,l14d1
+	ld	bc,3
+	cpir
+	ret	z
+	ld	b,a
+	and	60h
+	jr	nz,l14f4
+	ld	a,(l26d5)
+	or	a
+	jr	nz,l14d1
+l14f4:
+	ld	a,b
+	ret
+l14f6:
+	db	11h,13h,0dh,0ah,18h
+l14fb:
+	ld	b,64h
+	call	l15b6
+	ret	c
+	ld	e,a
+l1502:
+	and	60h
+	ld	a,e
+	ret	nz
+	cp	18h
+	jr	z,l151c
+	ld	hl,l156e
+	ld	bc,4
+	cpir
+	jr	z,l14fb
+	ld	a,(l26d5)
+	or	a
+	jr	nz,l14fb
+	ld	a,e
+	ret
+l151c:
+	ld	b,64h
+	call	l15b6
+	ret	c
+	cp	18h
+	jr	nz,l1540
+	ld	b,64h
+	call	l15b6
+	ret	c
+	cp	18h
+	jr	nz,l1540
+	ld	b,64h
+	call	l15b6
+	ret	c
+	cp	18h
+	jr	nz,l1540
+	ld	b,64h
+	call	l15b6
+	ret	c
+l1540:
+	ld	hl,l1572
+	ld	bc,11
+	cpir
+	jp	z,l0629
+	ld	l,a
+	ld	a,(l26d5)
+	or	a
+	jr	z,l1557
+	ld	a,l
+	and	60h
+	jr	z,l151c
+l1557:
+	ld	a,l
+	and	60h
+	cp	40h
+	jr	nz,l1568
+	ld	a,l
+	xor	40h
+	ret
+l1562:
+	ld	a,7fh
+	ret
+l1565:
+	ld	a,0ffh
+	ret
+l1568:
+	ld	a,0ffh
+l156a:
+	or	80h
+	scf
+	ret
+l156e:
+	ld	de,l1391
+	sub	e
+l1572:
+	db	11h,91h,13h,93h,18h,'hijklm'
+	dw	l1565
+	dw	l1562
+	dw	l156a
+	dw	l156a
+	dw	l156a
+	dw	l156a
+	dw	l156a
+	dw	l151c
+	dw	l151c
+	dw	l151c
+	dw	l151c
+l1593:
+	db	18h,18h,18h,18h,18h,18h,18h
+	db	18h,18h,18h,08h,08h,08h,08h
+	db	08h,08h,08h,08h,08h,08h,00h
+l15a8:
+	ld	hl,l1593
+l15ab:
+	ld	a,(hl)
+	inc	hl
+l15ad:
+	or	a
+	ret	z
+l15af:
+	push	hl
+	call	l12a6
+l15b3:
+	pop	hl
+	jr	l15ab
+l15b6:
+	push	bc
+	call	l1e0c
+	call	nz,l1e07
+	cp	1bh
+	ld	a,18h
+	ld	c,0ah
+	call	z,l0558
+	pop	bc
+l15c7:
+	call	l05ad
+	jr	nz,l15d2
+	djnz	l15c7
+	ld	a,0feh
+	scf
+	ret
+l15d2:
+	or	a
+	ret
+;
+; Parse file
+; ENTRY	Reg DE points to FCB
+;	Reg HL points to string
+;	Zero flag set if no wildcard
+;
+l15d4:
+	push	bc
+	ld	(l270c),a
+	call	l1e80
+	push	de
+	call	l176e
+	ld	(de),a
+l15e0:
+	pop	de
+	push	de
+	call	l15e9
+	pop	de
+	pop	bc
+	jr	l165f
+l15e9:
+	xor	a
+	ld	(de),a
+	ld	(l270f),a
+	ld	(l270e),a
+	call	l1d8c
+	ld	a,c
+	ld	(l2710),a
+	push	de
+	ld	a,(hl)
+	cp	':'
+	jr	nz,l15ff
+	inc	hl
+l15ff:
+	ld	b,8
+	call	l1664
+	pop	de
+	ld	a,(hl)
+	ld	(l270d),a
+	cp	':'
+	jr	nz,l1640
+	inc	hl
+	ld	a,(l270c)
+	or	a
+	jr	z,l1619
+	call	l168c
+	jr	z,l1627
+l1619:
+	call	l16df
+	jr	z,l1627
+	ld	a,(l270c)
+	or	a
+	jr	nz,l1627
+	call	l168c
+l1627:
+	ld	a,(l270f)
+	ld	(de),a
+	push	de
+	inc	de
+	call	l1774
+	pop	de
+	xor	a
+	ld	(l270e),a
+	push	de
+	ld	b,8
+	call	l1664
+	pop	de
+	ld	a,(hl)
+	ld	(l270d),a
+l1640:
+	ld	a,(l270d)
+	ex	de,hl
+	ld	bc,8
+	add	hl,bc
+	ex	de,hl
+	ld	b,3
+	cp	'.'
+	jr	nz,l1655
+	inc	hl
+	push	de
+	call	l1664
+	pop	de
+l1655:
+	ex	de,hl
+	ld	bc,5
+	add	hl,bc
+	ex	de,hl
+	ld	a,(l2710)
+	ld	(de),a
+l165f:
+	ld	a,(l270e)
+	or	a
+	ret
+l1664:
+	call	l171b
+	ret	z
+	inc	de
+	cp	'*'
+	jr	nz,l1675
+	ld	a,'?'
+	ld	(de),a
+	call	l1685
+	jr	l167c
+l1675:
+	ld	(de),a
+	inc	hl
+	cp	'?'
+	call	z,l1685
+l167c:
+	djnz	l1664
+l167e:
+	call	l171b
+	ret	z
+	inc	hl
+	jr	l167e
+l1685:
+	push	hl
+	ld	hl,l270e
+	inc	(hl)
+	pop	hl
+	ret
+l168c:
+	push	hl
+	push	de
+	call	l1694
+	pop	de
+	pop	hl
+	ret
+l1694:
+	call	l178c
+	jr	z,l170c
+	ex	de,hl
+	inc	hl
+	call	l1794
+	ld	b,a
+	inc	b
+	ld	a,(hl)
+	cp	'A'
+	jr	c,l16b6
+	sub	'@'
+	cp	b
+	jr	nc,l170c
+	ld	(l270f),a
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	ret	z
+	call	l1767
+	ret	c
+l16b6:
+	push	hl
+	ld	b,2
+l16b9:
+	ld	a,(hl)
+	cp	' '
+	jr	z,l16cb
+	call	l1767
+	jr	c,l16dc
+	inc	hl
+	djnz	l16b9
+	ld	a,(hl)
+	cp	' '
+	jr	nz,l16dc
+l16cb:
+	pop	hl
+	call	l179c
+	ld	c,a
+	inc	c
+	call	l173c
+	cp	c
+	jr	nc,l170c
+	ld	(l2710),a
+	xor	a
+	ret
+l16dc:
+	pop	hl
+	jr	l170c
+l16df:
+	push	hl
+	push	de
+	call	l16e7
+	pop	de
+	pop	hl
+	ret
+l16e7:
+	call	l17a4
+	jr	z,l170c
+	ex	de,hl
+	inc	hl
+l16ee:
+	ld	a,(de)
+	or	a
+	jr	z,l170c
+	inc	de
+	inc	de
+	push	hl
+	push	de
+	ld	b,8
+l16f8:
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,l1700
+	inc	hl
+	inc	de
+	djnz	l16f8
+l1700:
+	pop	de
+	pop	hl
+	jr	z,l170f
+	ex	de,hl
+	ld	bc,16
+	add	hl,bc
+	ex	de,hl
+	jr	l16ee
+l170c:
+	or	0ffh
+	ret
+l170f:
+	dec	de
+	ld	a,(de)
+	ld	(l2710),a
+	dec	de
+	ld	a,(de)
+	ld	(l270f),a
+	xor	a
+	ret
+l171b:
+	ld	a,(hl)
+	cp	'!'
+	jr	c,l173a
+	cp	'='
+	ret	z
+	cp	5fh
+	ret	z
+	cp	'.'
+	ret	z
+	cp	':'
+	ret	z
+	cp	','
+	ret	z
+	cp	'<'
+	ret	z
+	cp	'>'
+	ret	z
+	or	a
+	ret	z
+	cp	';'
+	ret
+l173a:
+	xor	a
+	ret
+l173c:
+	push	bc
+	ld	bc,l1100
+l1740:
+	ld	a,(hl)
+	call	l171b
+	jr	z,l1760
+	inc	hl
+	call	l1767
+	jr	c,l1764
+	ld	d,a
+	ld	a,c
+	rlca
+	jr	c,l1764
+	rlca
+	jr	c,l1764
+	add	a,c
+	jr	c,l1764
+	rlca
+	jr	c,l1764
+	add	a,d
+	jr	c,l1764
+	ld	c,a
+	djnz	l1740
+l1760:
+	ld	a,c
+	pop	bc
+	or	a
+	ret
+l1764:
+	pop	bc
+	scf
+	ret
+l1767:
+	sub	'0'
+	ret	c
+	cp	0ah
+	ccf
+	ret
+l176e:
+	xor	a
+	ld	(de),a
+	inc	de
+	call	l1774
+l1774:
+	ld	b,0bh
+	ld	a,' '
+	call	l1787
+	xor	a
+	ld	(de),a
+	inc	de
+	call	l1d8c
+	ld	a,c
+	ld	(de),a
+	inc	de
+	ld	b,3
+	xor	a
+l1787:
+	ld	(de),a
+	inc	de
+	djnz	l1787
+	ret
+l178c:
+	push	hl
+	push	de
+	ld	de,l002e
+	jp	l17ab
+l1794:
+	push	hl
+	push	de
+	ld	de,l002c
+	jp	l17ab
+l179c:
+	push	hl
+	push	de
+	ld	de,l002d
+	jp	l17ab
+l17a4:
+	push	de
+	ld	de,l0015
+	jp	l17b8
+l17ab:
+	ld	hl,(l2711)
+	ld	a,h
+	or	l
+	jr	z,l17b3
+	add	hl,de
+l17b3:
+	ld	a,(hl)
+	pop	de
+	pop	hl
+	or	a
+	ret
+l17b8:
+	ld	hl,(l2711)
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	ex	de,hl
+	pop	de
+	or	a
+	ret
+;
+; Save ZCPR environment
+; ENTRY	Reg HL holds environment address
+;
+l17c5:
+	ld	(l2711),hl
+	ret
+;
+;
+;
+l17c9:
+	push	de
+	ld	(l2752),a
+	call	l1979
+	call	l185c
+	jp	l17e0
+xxx::
+	push	de
+	ld	(l2752),a
+	call	l1979
+	call	l185d
+l17e0:
+	pop	de
+	ret	z
+	push	af
+	ld	a,(l2752)
+	call	l19cb
+	call	l1938
+	xor	a
+	call	l17f2
+	pop	af
+	ret
+l17f2:
+	push	bc
+	push	de
+	push	hl
+	ld	(l273f),hl
+	push	hl
+	ld	(l2713),a
+	ld	de,l273f
+	ld	(l2741),bc
+	ld	hl,l181a
+	ld	(l2745),hl
+	ld	hl,(l2747)
+	call	l1a30
+	pop	hl
+	ld	(l273f),hl
+	call	l1a81
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l181a:
+	push	bc
+	push	hl
+	push	de
+	ld	a,(l2713)
+	or	a
+	jr	z,l1853
+	ld	bc,9
+	add	hl,bc
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+l182a:
+	ld	b,3
+	call	l1f6a
+	pop	de
+	pop	hl
+	jr	nz,l1851
+	push	hl
+	push	de
+	inc	hl
+	inc	de
+	ld	b,8
+	call	l1f6a
+	pop	de
+	pop	hl
+	jr	nz,l1851
+	push	hl
+	push	de
+	ld	bc,12
+	add	hl,bc
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	ld	a,(de)
+	cp	(hl)
+l184b:
+	pop	de
+	pop	hl
+	jr	nz,l1851
+	ld	a,(de)
+	cp	(hl)
+l1851:
+	pop	bc
+	ret
+l1853:
+	inc	hl
+	inc	de
+	ld	b,0ch
+	call	l1f6a
+	jr	l184b
+l185c:
+;;	or	0afh
+	db	0f6h
+l185d:
+	xor	a
+;;
+	ld	(l2738),a
+	push	hl
+	push	de
+	ld	(l273f),hl
+	ld	(l2739),hl
+	ld	hl,l2714
+	ld	a,'?'
+	ld	b,0ch
+	call	l1f09
+	xor	a
+	ld	b,18h
+	call	l1f09
+	ld	hl,0
+	ld	(l273b),hl
+	ld	de,DMA
+	ld	c,.setdma
+	call	BDOS
+	ld	c,.srcfrs
+	jr	l1892
+l188b:
+	call	l18a8
+	jr	z,l18a5
+	ld	c,.srcnxt
+l1892:
+	ld	de,l2714
+	call	BDOS
+	cp	0ffh
+	jr	nz,l188b
+	or	0ffh
+l189e:
+	ld	bc,(l273b)
+	pop	de
+	pop	hl
+	ret
+l18a5:
+	xor	a
+	jr	l189e
+l18a8:
+	push	bc
+	push	de
+	push	hl
+	rrca
+	rrca
+	rrca
+	and	60h
+	ld	de,DMA
+	ld	l,a
+	ld	h,0
+	add	hl,de
+	ld	a,(hl)
+	cp	0e5h
+	jr	z,l18e5
+	cp	'!'
+	jr	nc,l18e5
+	call	l18eb
+	jr	z,l18e5
+	push	hl
+	ld	hl,(l273b)
+	inc	hl
+	ld	(l273b),hl
+	pop	hl
+	ld	de,(l273f)
+	ld	bc,16
+	ldir
+	ld	(l273f),de
+	call	l1f4a
+	ld	a,h
+	dec	a
+	cp	d
+	jr	nz,l18e5
+	xor	a
+;;	ld	hl,lfff6
+	db	21h
+l18e5:
+	or	0ffh
+;;
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l18eb:
+	push	hl
+	ex	de,hl
+	ld	bc,(l273b)
+	ld	a,b
+	or	c
+	jr	z,l1934
+	ld	hl,(l2739)
+l18f8:
+	push	bc
+	push	hl
+	push	de
+	ld	b,0ch
+	call	l1f6a
+	pop	de
+	pop	hl
+	jr	nz,l192a
+	push	hl
+	push	de
+	ld	bc,12
+	add	hl,bc
+	ex	de,hl
+	add	hl,bc
+	ld	a,(de)
+	cp	(hl)
+	pop	de
+	pop	hl
+	jr	nc,l1920
+	ld	a,(l2738)
+	or	a
+	jr	nz,l1926
+l1918:
+	ex	de,hl
+	ld	bc,16
+	ldir
+	jr	l1926
+l1920:
+	ld	a,(l2738)
+	or	a
+	jr	nz,l1918
+l1926:
+	pop	bc
+	xor	a
+	pop	hl
+	ret
+l192a:
+	ld	bc,16
+	add	hl,bc
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l18f8
+l1934:
+	or	0ffh
+	pop	hl
+	ret
+l1938:
+	push	hl
+	push	de
+	push	af
+	push	hl
+	ld	hl,0
+	ld	(l273d),hl
+	pop	hl
+	ld	(l273f),hl
+	push	bc
+l1947:
+	pop	bc
+	ld	a,b
+	or	c
+	jr	z,l1971
+	dec	bc
+	push	bc
+	bit	7,(hl)
+	jr	z,l196b
+	res	7,(hl)
+	ex	de,hl
+	ld	hl,(l273d)
+	inc	hl
+	ld	(l273d),hl
+	ld	hl,(l273f)
+	ex	de,hl
+	ld	bc,16
+	ldir
+	ld	(l273f),de
+	jr	l1947
+l196b:
+	ld	bc,16
+	add	hl,bc
+	jr	l1947
+l1971:
+	ld	bc,(l273d)
+	pop	af
+	pop	de
+	pop	hl
+	ret
+l1979:
+	push	de
+	push	bc
+	ex	de,hl
+	call	l19a1
+	ld	hl,(l2750)
+	ld	(l2741),hl
+	ld	hl,16
+	ld	(l2743),hl
+	ld	hl,0
+	ld	(l273f),hl
+	ld	hl,l00ff
+	ld	(l2749),hl
+	ex	de,hl
+	ld	de,l273f
+	call	l1a30
+	pop	bc
+	pop	de
+	ret
+l19a1:
+	push	bc
+	push	de
+	push	hl
+	push	af
+	ld	c,.DPB
+	call	BDOS
+	inc	hl
+	inc	hl
+	ld	de,l274b
+	ldi
+	ldi
+	ldi
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(l274e),de
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(l2750),de
+	pop	af
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+l19cb:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	(l2752),a
+	push	bc
+l19d3:
+	pop	bc
+	ld	a,b
+	or	c
+	jr	z,l1a06
+	dec	bc
+	push	bc
+	push	hl
+	push	de
+	inc	hl
+	inc	de
+	ld	b,8
+	ex	de,hl
+	call	l1f58
+	pop	de
+	pop	hl
+	jr	nz,l1a00
+	push	hl
+	push	de
+	ld	bc,9
+	add	hl,bc
+	ex	de,hl
+	add	hl,bc
+	ld	b,3
+	call	l1f58
+	pop	de
+	pop	hl
+	jr	nz,l1a00
+	call	l1a0b
+	jr	nz,l1a00
+	set	7,(hl)
+l1a00:
+	ld	bc,16
+	add	hl,bc
+	jr	l19d3
+l1a06:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l1a0b:
+	push	de
+	push	hl
+	ld	de,10
+	add	hl,de
+	bit	7,(hl)
+	pop	hl
+	pop	de
+	ld	a,(l2752)
+	jr	z,l1a21
+	bit	6,a
+	jr	nz,l1a25
+l1a1e:
+	or	0ffh
+	ret
+l1a21:
+	bit	7,a
+	jr	z,l1a1e
+l1a25:
+	bit	5,a
+	jr	nz,l1a2e
+	xor	(hl)
+	and	'?'
+	jr	nz,l1a1e
+l1a2e:
+	xor	a
+	ret
+l1a30:
+	push	bc
+	push	de
+	push	hl
+	call	l1b84
+	pop	de
+	ld	(l275d),de
+	ld	hl,(l2757)
+	ld	a,h
+	or	l
+	jr	z,l1a7b
+	ld	b,h
+	ld	c,l
+	add	hl,hl
+	jr	c,l1a7b
+	add	hl,de
+	jr	c,l1a7b
+	ex	de,hl
+	ld	hl,(BDOS+1)
+	sbc	hl,de
+	jr	c,l1a7b
+	ld	hl,(l2755)
+	ld	a,h
+	or	l
+	jr	z,l1a5a
+	ex	de,hl
+l1a5a:
+	push	de
+	ld	hl,(l275d)
+l1a5e:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	hl
+	ld	hl,(l2759)
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l1a5e
+	pop	hl
+	ld	(l2755),hl
+	push	hl
+	call	l1b91
+	pop	hl
+	dec	a
+l1a78:
+	pop	de
+	pop	bc
+	ret
+l1a7b:
+	xor	a
+	ld	hl,(l275d)
+	jr	l1a78
+l1a81:
+	ex	af,af'
+	push	af
+	ex	af,af'
+	push	hl
+	push	de
+	push	bc
+	push	af
+	call	l1b84
+	call	l1b9a
+	ld	a,(l275f)
+	or	a
+	jr	z,l1af1
+	ld	a,(l2760)
+	or	a
+	jr	nz,l1af1
+	ld	hl,(l2757)
+	ld	a,h
+	or	l
+	jr	z,l1af1
+	ld	(l2761),hl
+	ld	hl,0
+	ld	(l2763),hl
+l1aaa:
+	ld	hl,(l2761)
+	dec	hl
+	ld	a,h
+	or	l
+	jr	z,l1af1
+	ld	(l2761),hl
+	ld	hl,(l2763)
+	inc	hl
+	ld	(l2763),hl
+	ld	d,h
+	ld	e,l
+	call	l1b7c
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ex	de,hl
+	call	l1b29
+	sbc	hl,de
+	add	hl,de
+	jr	nc,l1aaa
+	push	de
+	push	hl
+	call	l1b08
+	ld	hl,(l2763)
+	call	l1b7c
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+l1ade:
+	ld	a,(hl)
+	inc	hl
+	cp	e
+	inc	hl
+	jr	nz,l1ade
+	dec	hl
+	ld	a,(hl)
+	inc	hl
+	cp	d
+	jr	nz,l1ade
+	pop	de
+	dec	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l1aaa
+l1af1:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	ret
+l1af9:
+	push	hl
+	push	de
+	ld	bc,l1b0e
+	push	bc
+	ld	a,(l275f)
+	or	a
+	jr	nz,l1b11
+	call	l1b25
+l1b08:
+	ld	bc,(l2759)
+	jr	l1b1b
+l1b0e:
+	pop	de
+	pop	hl
+	ret
+l1b11:
+	call	l1b7c
+	ex	de,hl
+	dec	hl
+	add	hl,hl
+	add	hl,bc
+	ld	bc,2
+l1b1b:
+	ld	a,(de)
+	ldi
+	dec	hl
+	ld	(hl),a
+	inc	hl
+	jp	pe,l1b1b
+	ret
+l1b25:
+	call	l1b29
+	ex	de,hl
+l1b29:
+	push	de
+	dec	hl
+	ld	d,h
+	ld	e,l
+	ld	bc,(l2759)
+	ld	hl,-27
+	add	hl,bc
+	ld	hl,0
+	jr	nc,l1b4a
+	ld	a,10h
+l1b3c:
+	add	hl,hl
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jr	nc,l1b43
+	add	hl,bc
+l1b43:
+	dec	a
+	jr	nz,l1b3c
+	jr	l1b4e
+l1b48:
+	dec	bc
+	add	hl,de
+l1b4a:
+	ld	a,b
+	or	c
+	jr	nz,l1b48
+l1b4e:
+	ld	de,(l2755)
+	add	hl,de
+	pop	de
+	ret
+l1b55:
+	push	hl
+	push	de
+	ld	bc,l1b0e
+	push	bc
+	ld	a,(l275f)
+	or	a
+	jr	nz,l1b66
+	call	l1b25
+	jr	l1b76
+l1b66:
+	call	l1b7c
+	ex	de,hl
+	dec	hl
+	add	hl,hl
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	h,b
+	ld	l,c
+l1b76:
+	push	hl
+	ld	hl,(l275b)
+	ex	(sp),hl
+	ret
+l1b7c:
+	dec	hl
+	add	hl,hl
+	ld	bc,(l275d)
+	add	hl,bc
+	ret
+l1b84:
+	ex	de,hl
+	ld	(l2753),hl
+	ld	de,l2755
+l1b8b:
+	ld	bc,12
+	ldir
+	ret
+l1b91:
+	ld	hl,l2755
+	ld	de,(l2753)
+	jr	l1b8b
+l1b9a:
+	ld	hl,(l2757)
+	ld	(l2763),hl
+l1ba0:
+	ld	hl,(l2763)
+	srl	h
+	rr	l
+	ld	a,l
+	or	h
+	ret	z
+	bit	0,l
+	jr	nz,l1baf
+	dec	hl
+l1baf:
+	ld	(l2763),hl
+	ld	(l2761),hl
+l1bb5:
+	ld	hl,(l2761)
+	inc	hl
+	ld	(l2761),hl
+	ex	de,hl
+	ld	hl,(l2757)
+	or	a
+	sbc	hl,de
+	jr	c,l1ba0
+l1bc5:
+	ld	hl,(l2763)
+	ex	de,hl
+	sbc	hl,de
+	jr	c,l1bb5
+	jr	z,l1bb5
+	ex	de,hl
+	add	hl,de
+	call	l1b55
+	jr	nc,l1bb5
+	call	l1af9
+	jr	l1bc5
+l1bdb:
+	push	hl
+	call	l1c23
+	call	l1c37
+	pop	hl
+	ret	nz
+	cpl
+	ld	(l1c35),a
+	cpl
+	ret
+	push	hl
+	call	l1c2c
+	call	l1c75
+	pop	hl
+	ret	nz
+	cpl
+	ld	(l1c36),a
+	cpl
+	ret
+l1bf9:
+	push	hl
+	call	l1c23
+	jp	l1c98
+	push	hl
+	push	af
+	call	l1c2c
+	pop	af
+	jp	l1cdf
+l1c09:
+	push	hl
+	call	l1c23
+	call	nz,l1d16
+	pop	hl
+	ret	nz
+	ld	(l1c35),a
+	ret
+	push	hl
+	call	l1c2c
+	call	nz,l1d21
+	pop	hl
+	ret	nz
+	ld	(l1c36),a
+	ret
+l1c23:
+	ld	hl,l2765
+	ld	a,(l1c35)
+	ld	(hl),a
+	or	a
+	ret
+l1c2c:
+	ld	hl,l280d
+	ld	a,(l1c36)
+	ld	(hl),a
+	or	a
+	ret
+l1c35:
+	nop
+l1c36:
+	nop
+l1c37:
+	push	bc
+	push	de
+	ld	a,(hl)
+	or	a
+	ld	a,7
+	jr	nz,l1c72
+	ld	(l28b5),hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	push	hl
+	ld	bc,36
+	ex	de,hl
+	ldir
+	pop	de
+	call	l1df3
+	call	l1dd7
+	ld	a,3
+	jr	nz,l1c72
+	call	l1d56
+	ld	a,4
+	jr	nz,l1c72
+l1c5f:
+	ld	hl,(l28b5)
+	ld	(hl),0ffh
+	inc	hl
+	ld	(hl),80h
+	inc	hl
+	ex	de,hl
+	ld	hl,l0026
+	add	hl,de
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	xor	a
+l1c72:
+	jp	l1d52
+l1c75:
+	push	bc
+	push	de
+	ld	a,(hl)
+	or	a
+	ld	a,7
+	jr	nz,l1c72
+	ld	(l28b5),hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	push	hl
+	ld	bc,36
+	ex	de,hl
+	ldir
+	pop	de
+	call	l1df3
+	call	l1dc9
+	jr	z,l1c5f
+	ld	a,5
+	jr	l1c72
+l1c98:
+	push	bc
+	push	de
+	ld	a,(hl)
+	or	a
+	ld	a,1
+	jr	z,l1d11
+	ld	(l28b5),hl
+	inc	hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,d
+	or	e
+	ld	a,4
+	jr	z,l1d11
+	ld	a,(de)
+	ld	(l28b7),a
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	dec	(hl)
+	jr	nz,l1cd5
+	ld	(hl),80h
+	inc	hl
+	ex	de,hl
+	ld	hl,l0026
+	add	hl,de
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	call	l1d56
+	jr	z,l1cd5
+	ld	hl,(l28b5)
+	inc	hl
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	ld	(hl),0
+l1cd5:
+	ld	a,(l28b7)
+	cp	a
+	jr	l1d12
+l1cdb:
+	push	hl
+	ld	hl,(l28b5)
+l1cdf:
+	push	bc
+	push	de
+	ld	(l28b7),a
+	ld	a,(hl)
+	or	a
+	ld	a,1
+	jr	z,l1d11
+	ld	(l28b5),hl
+	inc	hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,(l28b7)
+	ld	(de),a
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	dec	(hl)
+	jr	nz,l1cd5
+	ld	(hl),80h
+	inc	hl
+	ex	de,hl
+	ld	hl,l0026
+	add	hl,de
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	call	l1d6d
+	jr	z,l1cd5
+	ld	a,2
+l1d11:
+	or	a
+l1d12:
+	pop	de
+	pop	bc
+	pop	hl
+	ret
+l1d16:
+	push	bc
+	push	de
+	ld	a,(hl)
+	or	a
+	jr	z,l1d52
+	ld	(l28b5),hl
+	jr	l1d40
+l1d21:
+	push	bc
+	push	de
+	ld	a,(hl)
+	or	a
+	jr	z,l1d52
+	ld	(l28b5),hl
+	inc	hl
+	ld	a,(hl)
+	cp	80h
+	jr	z,l1d40
+	ld	a,1ah
+	call	l1cdb
+l1d35:
+	ld	a,(hl)
+	cp	80h
+	jr	z,l1d40
+	xor	a
+	call	l1cdb
+	jr	l1d35
+l1d40:
+	ld	hl,(l28b5)
+	ld	(hl),0
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	ex	de,hl
+	call	l1dd2
+	ld	a,6
+	jr	nz,l1d52
+	xor	a
+l1d52:
+	pop	de
+	pop	bc
+	or	a
+	ret
+l1d56:
+	ld	hl,(l28b5)
+	ld	de,l0028
+	add	hl,de
+	call	l1de9
+	ld	de,(l28b5)
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	call	l1ddf
+	jr	l1d82
+l1d6d:
+	ld	hl,(l28b5)
+	ld	de,l0028
+	add	hl,de
+	call	l1de9
+	ld	de,(l28b5)
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	call	l1de4
+l1d82:
+	push	af
+	ld	hl,l0080
+	call	l1de9
+	pop	af
+	or	a
+	ret
+l1d8c:
+	push	af
+	push	de
+	push	hl
+	ld	c,.retdsk
+	call	ZBDOS
+	push	af
+	ld	e,_get
+	ld	c,.usrcod
+	call	ZBDOS
+	ld	c,a
+	pop	af
+	ld	b,a
+	pop	hl
+	pop	de
+	pop	af
+	ret
+l1da3:
+	ld	a,.filsiz
+	jr	l1da9
+l1da7::
+	ld	a,.setrrn
+l1da9:
+	push	de
+	push	bc
+	push	af
+	ld	hl,l28b8
+	ld	bc,36
+	push	hl
+	ex	de,hl
+	ldir
+	pop	de
+	pop	af
+	call	.ZBDOS
+	ld	hl,33
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	ex	de,hl
+	pop	bc
+	pop	de
+	or	a
+	ret
+l1dc9:
+	call	l1dd7
+	ret	z
+	ld	a,.make
+	jp	FBDOS
+l1dd2:
+	ld	a,.close
+	jp	FBDOS
+l1dd7:
+	ld	a,.open
+FBDOS:
+	call	.ZBDOS
+	ret	m
+	xor	a
+	ret
+l1ddf:
+	ld	a,.rdseq
+	jp	.ZBDOS
+l1de4:
+	ld	a,.wrseq
+	jp	.ZBDOS
+l1de9:
+	push	af
+	ld	a,.setdma
+	ex	de,hl
+	call	.ZBDOS
+	ex	de,hl
+	pop	af
+	ret
+l1df3:
+	push	hl
+	push	de
+	push	af
+	ex	de,hl
+	ld	de,12
+	ld	(hl),d
+	add	hl,de
+	ld	e,15h
+l1dfe:
+	ld	(hl),d
+	inc	hl
+	dec	e
+	jr	nz,l1dfe
+	pop	af
+	pop	de
+	pop	hl
+	ret
+l1e07:
+	ld	a,.conin
+	jp	.ZBDOS
+l1e0c:
+	ld	a,.const
+	jp	.ZBDOS
+;
+; Call BDOS - save regs
+; ENTRY	Reg C holds function
+;	Reg (D)E holds parameter
+; EXIT	Accu and reg HL hold result
+;
+ZBDOS:
+	push	de
+	push	bc
+	call	BDOS
+	pop	bc
+	pop	de
+	or	a
+	ret
+;
+; Call BDOS - save regs
+; ENTRY	Accu holds function
+;	Reg (D)E holds parameter
+; EXIT	Accu and reg HL hold result
+;
+.ZBDOS:
+	push	hl
+	push	de
+	push	bc
+	ld	c,a
+	call	BDOS
+	or	a
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l1e26:
+	push	bc
+	push	hl
+	push	de
+	push	af
+	ld	b,8
+	call	l1e3c
+	ld	(hl),'.'
+	inc	hl
+	ld	b,3
+	call	l1e3c
+	pop	af
+	pop	de
+	pop	hl
+	pop	bc
+	ret
+l1e3c:
+	ld	a,(de)
+	and	NoMSB
+	cp	' '
+	jr	z,l1e45
+	ld	(hl),a
+	inc	hl
+l1e45:
+	inc	de
+	djnz	l1e3c
+	ret
+l1e49:
+	push	bc
+	ld	b,0
+	jp	l1e52
+l1e4f::
+	push	bc
+	ld	b,0ffh
+l1e52:
+	push	hl
+	push	af
+	ld	h,100
+	call	l1e65
+	ld	h,10
+	call	l1e65
+	call	l1e79
+	pop	af
+	pop	hl
+	pop	bc
+	ret
+l1e65:
+	ld	l,0ffh
+l1e67:
+	sub	h
+	inc	l
+	jr	nc,l1e67
+	add	a,h
+	ld	h,a
+	ld	a,l
+	or	a
+	jr	nz,l1e79
+	or	b
+	ld	a,h
+	ret	m
+	ld	a,' '
+	jr	z,l1e7c
+	xor	a
+l1e79:
+	add	a,'0'
+	ld	b,a
+l1e7c:
+	ld	(de),a
+	inc	de
+	ld	a,h
+	ret
+;
+; Convert line to UPPER case
+; ENTRY	Reg HL points to string
+;
+l1e80:
+	push	af
+	push	hl
+l1e82:
+	ld	a,(hl)
+	or	a
+	jr	z,l1e8d
+	call	l1f3f
+	ld	(hl),a
+	inc	hl
+	jr	l1e82
+l1e8d:
+	pop	hl
+	pop	af
+	ret
+	push	af
+l1e91:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	z,l1e9b
+	call	l1f24
+	jr	z,l1e91
+l1e9b:
+	dec	hl
+	pop	af
+	ret
+l1e9e:
+	push	af
+l1e9f:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	z,l1e9b
+	call	l1f24
+	jr	nz,l1e9f
+	jr	l1e9b
+;
+; Parse arguments from ^HL to ^DE, Accu holds NULL flag
+;
+l1eab:
+	push	bc
+	push	de
+	push	hl
+	ld	c,a
+	ex	de,hl
+	ld	b,(hl)
+	push	hl
+	inc	hl
+	inc	hl
+l1eb4:
+	call	l1ee8		; Skip blanks
+	or	a
+	jr	z,l1edd
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	dec	b
+	jr	z,l1ed2
+	call	l1ef6		; Skip item
+	or	a
+	jr	z,l1edd
+	ld	a,c
+	or	a
+	jr	z,l1ece
+	xor	a
+	ld	(de),a
+	inc	de
+l1ece:
+	ld	a,b
+	or	a
+	jr	nz,l1eb4
+l1ed2:
+	call	l1ef6		; Skip item
+	call	l1ee8		; Skip blanks
+	or	a
+	jr	z,l1edd
+	or	0ffh
+l1edd:
+	pop	hl
+	push	af
+	ld	a,(hl)
+	sub	b
+	inc	hl
+	ld	(hl),a
+	pop	af
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Skip blanks
+;
+l1ee8:
+	ld	a,(de)		; Get character
+	and	NoMSB		; Less MSB
+	inc	de
+	cp	' '		; Test white space
+	jr	z,l1ee8
+	cp	tab
+	jr	z,l1ee8
+	dec	de
+	ret
+;
+; Skip item
+;
+l1ef6:
+	ld	a,(de)		; Get character
+	and	NoMSB		; Less MSB
+	ret	z		; End of string
+	cp	' '		; Test white space
+	ret	z
+	cp	tab
+	ret	z
+	inc	de
+	jr	l1ef6
+l1f03:
+	push	hl
+	call	l1f09
+	pop	hl
+	ret
+l1f09:
+	push	bc
+l1f0a:
+	ld	(hl),a
+	inc	hl
+	djnz	l1f0a
+	pop	bc
+	ret
+l1f10:
+	push	bc
+	ld	c,a
+	and	7fh
+	call	l1f3f
+	cp	'A'
+	jr	c,l1f1f
+	cp	5bh
+	jr	c,l1f20
+l1f1f:
+;;	or	0afh
+	db	0f6h
+l1f20:
+	xor	a
+;;
+	ld	a,c
+	pop	bc
+	ret
+l1f24:
+	push	af
+	and	7fh
+	jr	z,l1f39
+	cp	7fh
+	jr	z,l1f39
+	cp	' '
+	jr	z,l1f39
+	cp	8
+	jr	c,l1f3c
+	cp	0eh
+	jr	nc,l1f3c
+l1f39:
+	pop	af
+	cp	a
+	ret
+l1f3c:
+	pop	af
+	or	a
+	ret
+;
+; Convert character to upper case
+;
+l1f3f:
+	and	NoMSB
+	cp	'a'
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	UPPER
+	ret
+l1f4a:
+	ld	hl,(BDOS+1)
+	ld	l,0
+	ld	a,(OS+2)
+	sub	16h
+	cp	h
+	ret	nc
+	ld	h,a
+	ret
+l1f58:
+	ld	a,(hl)
+	and	NoMSB
+	cp	'?'
+	jr	z,l1f65
+	ld	c,a
+	ld	a,(de)
+	and	7fh
+	cp	c
+	ret	nz
+l1f65:
+	inc	hl
+	inc	de
+	djnz	l1f58
+	ret
+l1f6a:
+	ld	a,(hl)
+	and	7fh
+	ld	c,a
+	ld	a,(de)
+	and	7fh
+	cp	c
+	ret	nz
+	inc	hl
+	inc	de
+	djnz	l1f6a
+	ret
+l1f78:
+	dw	l28dc
+
+dyn	equ	($+000ffh) AND 0ff00h
+
+l2000	equ	dyn		;;2000h
+l2001	equ	l2000+1		;;2001h
+l2002	equ	2002h
+l2003	equ	2003h
+
+l2067	equ	l2003+2*50
+
+l226d	equ	226dh
+l226e	equ	226eh
+l226f	equ	226fh
+l2293	equ	2293h
+l2297	equ	2297h
+l229b	equ	229bh
+l229f	equ	229fh
+l260a	equ	260ah
+l269f	equ	269fh
+l26a0	equ	26a0h
+l26a4	equ	26a4h
+l26a8	equ	26a8h
+l26a9	equ	26a9h
+l26aa	equ	26aah
+l26ae	equ	26aeh
+l26af	equ	26afh
+l26b3	equ	26b3h
+l26b7	equ	26b7h
+l26bb	equ	26bbh
+l26bf	equ	26bfh
+l26c3	equ	26c3h
+l26c7	equ	26c7h
+l26cb	equ	26cbh
+l26cd	equ	26cdh
+l26cf	equ	26cfh
+l26d3	equ	26d3h
+l26d4	equ	26d4h
+l26d5	equ	26d5h
+l26d6	equ	26d6h
+l26d7	equ	26d7h
+l26d8	equ	26d8h
+l26d9	equ	26d9h
+l26da	equ	26dah
+l26dc	equ	26dch
+l26e0	equ	26e0h
+l26e1	equ	26e1h
+l26e2	equ	26e2h
+l26e3	equ	26e3h
+l26e5	equ	26e5h
+l26e7	equ	26e7h
+l26eb	equ	26ebh
+l26ec	equ	26ech
+l26ed	equ	26edh
+l26ee	equ	26eeh
+l26ef	equ	26efh
+l26f1	equ	26f1h
+l26f3	equ	26f3h
+l26f5	equ	26f5h
+l26f7	equ	26f7h
+l26f8	equ	26f8h
+l26f9	equ	26f9h
+l26fa	equ	26fah
+l26fe	equ	26feh
+l2702	equ	2702h
+l2706	equ	2706h
+l2707	equ	2707h
+l2708	equ	2708h
+l270a	equ	270ah
+l270b	equ	270bh
+l270c	equ	270ch
+l270d	equ	270dh
+l270e	equ	270eh
+l270f	equ	270fh
+l2710	equ	2710h
+l2711	equ	2711h
+l2713	equ	2713h
+l2714	equ	2714h
+l2738	equ	2738h
+l2739	equ	2739h
+l273b	equ	273bh
+l273d	equ	273dh
+l273f	equ	273fh
+l2741	equ	2741h
+l2743	equ	2743h
+l2745	equ	2745h
+l2747	equ	2747h
+l2749	equ	2749h
+l274b	equ	274bh
+l274e	equ	274eh
+l2750	equ	2750h
+l2752	equ	2752h
+l2753	equ	2753h
+l2755	equ	2755h
+l2757	equ	2757h
+l2759	equ	2759h
+l275b	equ	275bh
+l275d	equ	275dh
+l275f	equ	275fh
+l2760	equ	2760h
+l2761	equ	2761h
+l2763	equ	2763h
+l2765	equ	2765h
+l280d	equ	280dh
+l28b5	equ	28b5h
+l28b7	equ	28b7h
+l28b8	equ	28b8h
+l28dc	equ	28dch
+
+	end
+

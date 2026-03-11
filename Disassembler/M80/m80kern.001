@@ -1,0 +1,1901 @@
+; ===== Start M80 =====
+
+	jp	iniM80		; Jump vector CPM+
+;
+; Start M80
+; ENTRY	Reg HL holds available top of memory
+;	Accu holds number of pages for extra stack (P option)
+;
+M80go:
+	ld	(top.mem),hl
+	inc	a		; Fix pages requested
+	cpl
+	ld	d,a
+	ld	e,0
+	add	hl,de
+	ld	(top.data),hl	; Init top of data
+	ld	bc,top.mem-pass-1; Calculate length
+	ld	hl,pass
+	ld	de,pass+1
+	ld	(hl),0
+	ldir			; Clear data field
+	ld	hl,(Heap)
+	ld	(SymPtr),hl	; Set symbol table base
+	ld	(hl),a
+	inc	h		; Let room for four pages
+	inc	h
+	inc	h
+	inc	h
+	ld	(LastMem),hl	; .. into top
+	ld	bc,32
+	add	hl,bc
+	ld	(l401f),hl
+	ld	hl,-relbits*256
+	ld	(bits),hl	; Reset .REL bits
+	ld	hl,r.cc.table	; Init regs and condition codes
+unp.cc.loop:
+	ld	de,actbuf
+	ld	a,(hl)		; Get from table
+	or	a		; Test end
+	jr	z,M80..go
+	push	af
+	and	LenMask		; Strip off index
+	ld	(de),a		; Set length
+	ld	c,a
+	ld	b,0
+	inc	hl
+	inc	de
+	ldir			; .. unpack
+	push	hl
+	call	PutSymbol	; .. and put to symbol table
+	pop	de
+	pop	af		; Get back code
+	and	not LenMask	; Extract code
+	ld	(hl),a		; .. save
+	inc	hl
+	ld	a,(de)
+	inc	de
+	ld	(hl),' '	; Set delimiter
+	inc	hl
+	ld	(hl),a		; Set bit combination
+	ex	de,hl
+	jr	unp.cc.loop
+Pass2:
+	call	iniMAC		; Re-init source
+	ld	a,1
+	ld	(pass),a	; Init 2nd pass
+M80..go:
+	xor	a
+	ld	(.EOF),a	; Clear end of file
+	ld	(l4006),a
+	ld	(SUBTTL.line),a	; Zero length of line
+	ld	(cref.flag),a	; Init CREF flag
+	ld	(IF.level.1),a	; Init IF level
+	ld	(IF.level.2),a
+	ld	(l3de8),a
+	ld	(l3cf5),a
+	ld	(l3ffa),a
+	ld	(phase.flag),a	; Init PHASE flag
+	ld	hl,CurPtr
+	ld	b,10
+M80.ini.cl:
+	ld	(hl),a		; Clear field
+	inc	hl
+	djnz	M80.ini.cl
+	inc	a
+	ld	(l3d28),a
+	ld	(all.flag),a	; Init ALL flag
+	ld	(list.flag),a	; Init list flag
+	ld	(code.flag),a	; Init code flag
+	ld	a,defRAD
+	ld	(radix),a	; Set default radix
+	ld	a,(Iopt)
+	ld	(CPU.flag),a
+	ld	a,(Xopt)
+	ld	(cond.flag),a
+	ld	a,defPAG
+	ld	(page.count),a
+	inc	a
+	ld	(page.length),a	; Init page length
+	ld	hl,1
+	ld	(pag.cnt),hl	; Init page counter
+	dec	hl
+	ld	(l4016),hl	; 0
+	dec	hl
+	ld	(page.flag),hl	; Init page to -1
+	ld	hl,(top.mem)
+	ld	sp,hl		; Get stack
+	ld	hl,scan.line	; Set direction
+	push	hl
+	ld	hl,sample.line
+	push	hl
+;
+; ***** M80 Main loop *****
+;
+M80.main:
+	xor	a
+	ld	(dev.flag),a	; Init .PRN device
+	ld	(l3d31),a
+	ld	(emp.src),a	; Set no empty line
+	ld	(l3ffb),a
+	inc	a
+	ld	(l3d29),a
+	call	init.line	; Init line
+	pop	hl		; Get last caller
+	push	hl
+	ld	bc,begin.scan
+	push	bc		; Set return
+	jp	(hl)		; .. proceed last caller
+;
+; Start the scanner
+;
+begin.scan:
+	ld	hl,src.line	; Init source
+	ld	(actptr),hl
+	ld	bc,256*(SrcLen+2)+ff
+beg.sc.loop:
+	ld	a,(hl)
+	cp	c		; Find FF
+	call	z,src.FF.line	; .. process
+	inc	hl
+	cp	cr		; Test EOL
+	jr	z,beg.sc.end
+	djnz	beg.sc.loop
+beg.sc.end:
+	pop	bc		; Get old two level caller
+	pop	hl
+	push	hl
+	push	bc
+	ld	bc,legal.start?	; Set return
+	push	bc
+	jp	(hl)		; Execute last caller
+;
+; Test Form Feed read
+;
+tst.FF:
+	cp	ff		; .. test
+	ret	nz
+;
+; Process form feed
+;
+src.FF.line:
+	push	af
+	push	hl
+	ld	hl,(pag.cnt)
+	inc	hl		; Bump page
+	ld	(pag.cnt),hl
+	ld	hl,-1
+	ld	(page.flag),hl	; Init page
+	ld	a,(page.length)	; Get remaining
+	dec	a
+	ld	(page.count),a
+	pop	hl
+	pop	af
+	ret
+;
+; Fill line
+;
+sample.line:
+	ld	a,1
+	ld	(l4010),a
+	ld	(l400f),a
+	ld	c,SrcLen+1	; Init source line
+	ld	hl,src.line
+samp.l.loop:
+	call	file.char	; Get character
+	cp	lf		; Test new line
+	jr	z,samp.l.loop
+	call	tst.FF		; Test form feed
+	jr	z,samp.l.loop
+	dec	c		; Test room for more
+	inc	c
+	jr	z,samp.l.tstEOL
+	ld	(hl),a		; Save if so
+	inc	hl
+	dec	c
+samp.l.tstEOL:
+	cp	cr		; Test EOL
+	jr	nz,samp.l.loop
+	ld	(hl),a		; Force end
+	ret
+;
+; Get character from selected source file
+; EXIT	Accu holds character
+;	Carry set on end of file
+;	(Fall in error if so)
+;
+file.char:
+	ld	a,(.EOF)	; Test invalid EOF
+	or	a
+	jr	nz,ill.END
+	ld	a,(INC.flag)	; Test device
+	or	a
+	jr	z,file.MAC.char
+	call	getINC		; Get from include file
+	ret	nc		; .. ok
+	xor	a
+	ld	(INC.flag),a	; Reset device
+	call	clsINC		; Close include file
+file.MAC.char:
+	call	getMAC		; Get from source file
+	ret	nc
+	ld	(.EOF),a	; Set EOF
+	ld	a,SrcLen+1
+	cp	c		; Test any in buffer
+	jr	z,ill.END
+	push	hl
+	push	bc
+	push	de
+	ld	b,3
+	ld	de,src.line-1
+	ld	hl,$.END
+END..set:
+	inc	de
+	ld	a,(de)		; Skip control
+	cp	' '+1
+	jr	c,END..set
+END.fnd:
+	ld	a,(de)
+	call	UpCase		; Convert to UPPER
+	cp	(hl)		; .. compare
+	jr	nz,ill.pop.	; .. no match
+	inc	hl
+	inc	de
+	djnz	END.fnd
+ill.pop.:
+	pop	de
+	pop	bc
+	pop	hl
+	ld	a,cr		; Return EOL
+	ret	z		; .. if END
+ill.END:
+	ld	hl,$noEND
+	call	string		; Test no end
+	ld	a,cr		; Close line
+	ld	(src.line),a
+	call	conout
+	ld	a,lf
+	call	conout
+	scf
+	jp	end.code	; Fall into real END
+;
+; Scan current line
+;
+scan.line:
+	xor	a
+	ld	l,a
+	ld	h,a
+	ld	(CurSym),hl	; Clear pointer
+	ld	(l3d30),a
+	dec	a
+	ld	(l3ffb),a
+	ld	hl,(l3dda)
+	ld	(l3dde),hl
+	ld	a,(src.line)
+	cp	'*'		; Test special prefix
+	jr	nz,scan.l.prefix
+	ld	a,'$'		; Change if so
+	ld	(src.line),a
+scan.l.prefix:
+	sub	'$'
+	ld	(spec.read),a	; Set flag
+	call	get.item	; Get substring
+	jp	nz,l040d
+	cp	':'		; Test label
+	jp	z,scan.l.lab
+	ld	a,(spec.read)	; Test special prefix
+	or	a
+	jr	nz,l0324
+	ld	a,(actbuf)
+	dec	a
+	jr	nz,l0324
+	call	get.item
+	ld	b,LabLen+2
+	ld	hl,actbuf
+	ld	a,(hl)
+	cp	b
+	jr	nc,l0319
+	inc	(hl)
+l0319:
+	inc	hl
+	ld	a,'$'
+l031c:
+	ld	c,(hl)		; Get current
+	ld	(hl),a		; .. store new
+	ld	a,c		; .. swap
+	inc	hl
+	djnz	l031c
+l0324:
+	ld	hl,(actptr)
+	dec	hl		; Get previous pointer
+	ld	a,(hl)		; .. get character
+	inc	hl
+	cp	cr		; Test EOL
+	jp	z,l03bf		; .. yeap
+	push	hl
+	call	swap.oper	; Swap operands
+	call	get.item	; Fetch next
+	call	DecodeStmt	; Find statement
+	jr	nz,l0381	; .. no
+	ld	a,(hl)		; Get descriptor
+	or	a
+	jp	p,l0381		; .. normal code
+	inc	hl
+	ld	a,(hl)		; Get code
+	cp	..?set		; Test ASET, DEFL or SET
+	jr	z,l0352
+	cp	..macro		; .. or MACRO
+	jr	z,l0352
+	cp	..equ		; .. or EQU
+	jr	nz,l0381
+l0352:
+	pop	hl		; Clean stack
+	ld	hl,(actptr)
+	dec	hl		; .. adjust pointer
+	ld	(actptr),hl
+	push	af		; Save code
+	ld	a,(l3d28)
+	or	a
+	jp	z,l046b
+	call	swap.oper
+	pop	af		; Get back code
+	push	af
+	cp	..macro		; Skip MACRO
+	jr	z,l0373
+	or	a
+	call	PutSymbol	; Put EQU/SET to symbol table
+	call	ChkSymb
+l0373:
+	pop	af		; Get code back again
+	cp	..?set		; Test any SET
+	jp	z,l2d78
+	cp	..macro		; Test MACRO
+	jp	z,l37af
+	jp	l2d44		; .. go EQU
+l0381:
+	pop	hl		; Get back pointer
+	ld	(actptr),hl
+	call	swap.oper
+	jr	l03bf
+scan.l.lab:
+	ld	a,(l3d28)
+	or	a
+	jr	z,l03b9
+	call	l1b31
+	call	PutSymbol	; Put to symbol table
+	call	ChkSymb
+	ld	(CurSym),hl	; Set current pointer
+	ex	de,hl
+	call	l1b6a
+	ex	de,hl
+	push	bc
+	ld	bc,(Gopt)	; Get global set flag
+	or	c		; Set it
+	pop	bc
+	push	af
+	call	chk.curch	; Get current character
+	cp	':'		; Test label
+	jr	nz,l03b5	; .. nope, EQU or any
+	pop	af
+	or	_PUB		; Force PUBLIC
+	push	af
+	call	chk.char
+l03b5:
+	pop	af
+	call	l0ddb
+l03b9:
+	call	get.item
+	jr	nz,l040d
+l03bf:
+	call	pred.ptr
+	ld	a,(l3d28)
+	or	a
+	jr	z,l03cf
+	call	l0c0e
+	jp	z,l3892
+l03cf:
+	call	DecodeStmt	; Get statement
+	jr	nz,l040d	; .. no
+	or	a
+	push	af		; .. save
+	ld	a,(l3d28)
+	or	a
+	jr	nz,l03e8
+	pop	af		; Get back code
+	jp	p,l046c		; .. normal statement
+	push	af
+	and	(_cond + _endc) shl 3
+	jp	z,l046b		; .. no conditional
+l03e8:
+	pop	af
+	jp	p,l03fb		; .. skip normal statement
+	inc	hl
+	ld	a,(hl)		; Get index
+	ld	hl,pseudo.table	; Get table
+l03f1:
+	add	a,a		; Set index
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Bump to location
+	ld	e,(hl)		; Get routine
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; .. execute
+l03fb:
+	rra			; Get index
+	rra
+	rra
+	and	LoMask		; .. mask
+	inc	hl
+	ld	c,(hl)		; Get code
+	push	af
+	call	l1b31
+	ld	hl,mnemo.table
+	pop	af		; Get back index
+	jr	l03f1
+l040d:
+	cp	';'		; Test comment
+	ret	z
+	cp	cr		; .. or EOL
+	ret	z
+	ld	hl,src.line	; Init source line
+	ld	(actptr),hl
+	ld	hl,(CurSym)	; Get back pointer
+	ld	a,h
+	or	l		; Test zero
+	call	nz,get.item
+	ld	a,(l3d28)
+	or	a
+	jr	z,l046c
+	jp	DB.code
+;
+; Swap sampled operands
+;
+swap.oper:
+	ld	hl,actbuf	; Set buffers
+	ld	de,actswap
+	ld	b,LabLen+3
+swap..oper:
+	ld	c,(hl)		; Get actual
+	ld	a,(de)		; Get old
+	ld	(hl),a		; .. onto actual
+	ld	a,c
+	ld	(de),a		; .. actual into old
+	inc	hl
+	inc	de
+	djnz	swap..oper
+	ret
+;
+; Init output line
+;
+init.line:
+	ld	hl,out.l.code
+	ld	(code.ptr),hl	; Set code pointer
+	ld	hl,out.line
+	ld	bc,prf.lin*256+' '
+init.lin.loop:
+	ld	(hl),c		; Blank line
+	inc	hl
+	djnz	init.lin.loop
+	ret
+;
+; Test legal start of line
+;
+legal.start?:
+	call	pred.ptr
+l0455:
+	call	white.space	; Sync start
+	or	a
+	jr	z,l0455
+l045c:
+	push	hl
+	cp	cr		; Test EOL
+	jr	z,l046c
+	cp	';'		; .. or comment
+	jr	z,l046c
+	call	Q.err		; .. error if not
+	push	af
+l046b:
+	pop	af
+l046c:
+	pop	hl
+	ld	a,(pass)
+	or	a		; Test pass
+	jr	nz,l0497	; .. skip pass 1
+	ld	a,(out.line)	; Filter errors
+	cp	'V'		; .. value error
+	jr	z,l048b
+	cp	'M'		; .. multiple definition
+	jr	z,l048b
+	cp	'D'		; .. double definition
+	jr	z,l048b
+	cp	'X'		; .. invalid macro exit
+	jp	nz,M80.main
+l048b:
+	ld	(dev.flag),a	; Set console device
+	call	err.update	; Update error count
+	call	l197e
+	jp	M80.main
+l0497:
+	call	l192b
+	jp	M80.main
+;
+; ***** ERROR handler *****
+;
+A.err:
+	push	bc
+	ld	b,'A'
+	jr	comm..err
+C.err:
+	push	bc
+	ld	b,'C'
+	jr	comm..err
+D.err:
+	push	bc
+	ld	b,'D'
+	jr	comm..err
+E.err:
+	push	bc
+	ld	b,'E'
+	jr	comm..err
+M.err:
+	push	bc
+	ld	b,'M'
+	jr	comm..err
+N.err:
+	push	bc
+	ld	b,'N'
+	jr	comm..err
+;
+; Pseudocode ASET, DEFL, SET, EQU, MACRO, .PASS2
+;
+.PASS2.code:
+O.err:
+	push	bc
+	ld	b,'O'
+	jr	comm..err
+P.err:
+	push	bc
+	ld	b,'P'
+	jr	comm..err
+S.err:
+	push	bc
+	ld	b,'S'
+	jr	comm..err
+Q.err:
+	push	bc
+	ld	b,'Q'
+	jr	comm..err
+R.err:
+	push	bc
+	ld	b,'R'
+	jr	comm..err
+U.err:
+	push	bc
+	ld	b,'U'
+	jr	comm..err
+V.err:
+	push	bc
+	ld	b,'V'
+	jr	comm..err
+X.err:
+	push	bc
+	ld	b,'X'
+comm..err:
+	push	hl
+	push	af
+	ld	hl,out.line
+	ld	a,(hl)		; Test error set
+	cp	' '
+	jr	nz,err..skip	; .. skip if so
+	ld	(hl),b		; Set error code
+	ld	hl,line.flag
+	set	_ErrBit,(hl)	; .. set bit
+err..skip:
+	pop	af
+	pop	hl
+	pop	bc
+	ret
+;
+$noEND:
+	db	'%No '
+$.END:
+	db	'END statement',null
+;
+; Decode statement
+; EXIT	Zero flag set if statement found
+;	Accu holds code of statement descriptor
+;	Reg HL points to statement descriptor
+;
+DecodeStmt:
+	ld	a,(actbuf+1)
+	cp	'.'		; Test pseudo opcode
+	jp	z,pseudo.opcode
+	cp	'$'		; Test special control
+	jp	z,special.code
+	cp	'Z'+1		; Test legal letter range
+	inc	a
+	ret	nc
+	sub	'A'+1		; Strip off offset
+	or	a
+	ret	m		; Test .LT. A
+	add	a,a
+	push	bc
+	push	de
+	ld	e,a
+	ld	d,0
+	ld	hl,opcode.table
+	add	hl,de		; Get index to table
+	ld	e,(hl)		; Load table portion
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+dec.st.fnd:
+	ld	a,(actbuf)	; Get length
+	dec	a
+	ld	c,a
+dec.st.src:
+	ld	a,(hl)
+	or	a		; Test end of table
+	jr	z,dec.st.notfnd
+	or	a		; Test Z80 code
+	jp	m,dec.st.Z80
+	ld	a,(CPU.flag)	; Check CPU
+	add	a,a
+	ld	a,(hl)
+	jr	nz,dec.st.Z80?
+	cp	Z80.cod		; Test Z80 code found
+	jr	nc,dec.st.Z80
+	jr	dec.st..nomtch
+dec.st.Z80?:
+	cp	Z80.cod		; Verify Z80
+	jr	nc,dec.st..nomtch
+dec.st.Z80:
+	and	LenMask		; Get length
+	cp	c		; .. check requested
+	jr	nz,dec.st..nomtch
+	ld	de,actbuf+2
+	push	hl
+	ld	b,c
+	inc	hl
+	inc	hl
+dec.st.cmp:
+	ld	a,(de)
+	cp	(hl)		; Compare code
+	jr	nz,dec.st.nomtch
+	inc	hl
+	inc	de
+	djnz	dec.st.cmp	; Go thru the loop
+	pop	hl
+	xor	a		; .. found, set zero
+	ld	a,(hl)		; .. get descriptor
+	pop	de
+	pop	bc
+	ret
+dec.st.notfnd:
+	pop	de
+	pop	de
+	inc	a		; Not found, reset zero
+	ret
+dec.st.nomtch:
+	pop	hl
+dec.st..nomtch:
+	ld	a,(hl)
+	and	0111b		; Get length
+	add	a,2		; .. remember control bytes
+	ld	e,a
+	ld	d,0
+	add	hl,de		; .. next entry
+	jr	dec.st.src
+special.code:
+	ld	hl,special.code.table
+	jr	dec.st.table
+pseudo.opcode:
+	ld	hl,pseudo.opcode.table
+dec.st.table:
+	push	bc
+	push	de
+	jr	dec.st.fnd	; Get special code
+;
+; Indices to menemonic table
+; Each address represents a letter A..Z
+;
+opcode.table:
+	dw	A.code
+	dw	B.code
+	dw	C.code
+	dw	D.code
+	dw	E.code
+	dw	F.code
+	dw	G.code
+	dw	H.code
+	dw	I.code
+	dw	J.code
+	dw	K.code
+	dw	L.code
+	dw	M.code
+	dw	N.code
+	dw	O.code
+	dw	P.code
+	dw	Q.code
+	dw	R.code
+	dw	S.code
+	dw	T.code
+	dw	U.code
+	dw	V.code
+	dw	W.code
+	dw	X.code
+	dw	Y.code
+	dw	Z.code
+;
+; Macro building following mnemonic entry
+;
+; TYPE	 0=normal, 1=special
+; IDX	 Table index
+; VAL	 2nd byte (Index for Z80, code for 8080 -- mostly)
+; STRING Mnemonic string
+;
+code	macro	type,idx,val,string
+local	part,len
+sys	aset	type shl 7
+shf	aset	idx  shl 3
+
+part:	db	sys+shf+len,val,string
+
+len	aset	$-part-2
+	endm
+;
+; Code tables
+; Contains of
+;	Byte  0   : Statement descriptor
+;	Byte  1   : Index or code
+;	Byte 2..n : ASCII representation of statement
+;
+; The descriptor bits are coded as follows:
+;	pcccclll, with
+;	p	indicates pseudo opcode
+;	cccc	index into statement code table
+;	lll	length of ASCII presentation
+;
+; Normal statements:
+;	cccc =  0.. 9 : 8080 code
+;	cccc = 10..14 : Z80  code
+; Pseudo statements:
+;	1000	Conditional
+;	0100	End Conditional
+;	0010	Macro
+;	0001	End Macro
+;
+A.code:
+	code	0,5,0ceh,'CI'
+	code	0,3,088h,'DC'
+	code	0,10,0,'DC'
+	code	0,3,080h,'DD'
+	code	0,10,2,'DD'
+	code	0,5,0c6h,'DI'
+	code	0,3,0a0h,'NA'
+	code	0,10,4,'ND'
+	code	0,5,0e6h,'NI'
+	code	1,0,000h,'SEG'
+	code	1,0,..?set,'SET'
+	db	null
+B.code:
+	code	0,11,6,'IT'
+	code	1,0,03eh,'YTE'
+	db	null
+C.code:
+	code	0,6,0cdh,'ALL'
+	code	0,10,8,'ALL'
+	code	0,6,0dch,'C'
+	code	0,13,03fh,'CF'
+	code	0,6,0fch,'M'
+	code	0,0,02fh,'MA'
+	code	0,0,03fh,'MC'
+	code	0,3,0b8h,'MP'
+	code	0,6,0d4h,'NC'
+	code	0,6,0c4h,'NZ'
+	code	1,0,001h,'OMMON'
+	code	1,_cond,014h,'OND'
+	code	0,6,0f4h,'P'
+	code	0,10,10,'P'
+	code	0,14,0a9h,'PD'
+	code	0,14,0b9h,'PDR'
+	code	0,6,0ech,'PE'
+	code	0,5,0feh,'PI'
+	code	0,14,0a1h,'PI'
+	code	0,14,0b1h,'PIR'
+	code	0,13,02fh,'PL'
+	code	0,6,0e4h,'PO'
+	code	1,0,002h,'SEG'
+	code	0,6,0cch,'Z'
+	db	null
+D.code:
+	code	0,0,027h,'AA'
+	code	0,13,027h,'AA'
+	code	0,2,009h,'AD'
+	code	1,0,003h,'B'
+	code	1,0,004h,'C'
+	code	0,4,005h,'CR'
+	code	0,2,00bh,'CX'
+	code	0,10,12,'EC'
+	code	1,0,003h,'EFB'
+	code	1,0,..?set,'EFL'
+	code	1,0,003h,'EFM'
+	code	1,0,005h,'EFS'
+	code	1,0,007h,'EFW'
+	code	0,0,0f3h,'I'
+	code	0,13,0f3h,'I'
+	code	0,10,14,'JNZ'
+	code	1,0,005h,'S'
+	code	1,0,006h,'SEG'
+	code	1,0,007h,'W'
+	db	null
+E.code:
+	code	0,0,0fbh,'I'
+	code	0,13,0fbh,'I'
+	code	1,_cond,..else,'LSE'
+	code	1,0,009h,'ND'
+	code	1,_endc,00ah,'NDC'
+	code	1,_endc,00ah,'NDIF'
+	code	1,_endm,00bh,'NDM'
+	code	1,0,00ch,'NTRY'
+	code	1,0,..equ,'QU'
+	code	0,10,16,'X'
+	code	0,13,0d9h,'XX'
+	code	1,0,00eh,'XITM'
+	code	1,0,..ext,'XT'
+	code	1,0,..ext,'XTERNAL'
+	code	1,0,..extrn,'XTRN'
+	db	null
+F.code:
+	db	null
+G.code:
+	code	1,0,020h,'LOBAL'
+	db	null
+H.code:
+	code	0,13,076h,'ALT'
+	code	0,0,076h,'LT'
+	db	null
+I.code:
+	code	1,_cond,011h,'F'
+	code	1,_cond,032h,'FB'
+	code	1,_cond,039h,'FDIF'
+	code	1,_cond,012h,'FE'
+	code	1,_cond,013h,'FF'
+	code	1,_cond,03ah,'FIDN'
+	code	1,_cond,033h,'FNB'
+	code	1,_cond,014h,'FT'
+	code	0,12,18,'M'
+	code	0,5,0dbh,'N'
+	code	0,10,20,'N'
+	code	0,10,22,'NC'
+	code	1,0,038h,'NCLUDE'
+	code	0,14,0aah,'ND'
+	code	0,14,0bah,'NDR'
+	code	0,14,0a2h,'NI'
+	code	0,14,0b2h,'NIR'
+	code	0,4,004h,'NR'
+	code	0,2,003h,'NX'
+	code	1,_cond,015h,'F1'
+	code	1,_cond,016h,'F2'
+	code	1,_cond,017h,'FDEF'
+	code	1,_cond,018h,'FNDEF'
+	code	1,_macro,019h,'RP'
+	code	1,_macro,01ah,'RPC'
+	db	null
+J.code:
+	code	0,6,0dah,'C'
+	code	0,6,0fah,'M'
+	code	0,6,0c3h,'MP'
+	code	0,6,0d2h,'NC'
+	code	0,6,0c2h,'NZ'
+	code	0,6,0f2h,'P'
+	code	0,10,24,'P'
+	code	0,6,0eah,'PE'
+	code	0,6,0e2h,'PO'
+	code	0,10,26,'R'
+	code	0,6,0cah,'Z'
+	db	null
+K.code:
+	db	null
+L.code:
+	code	0,10,28,'D'
+	code	0,6,03ah,'DA'
+	code	0,1,00ah,'DAX'
+	code	0,14,00a8h,'DD'
+	code	0,14,0b8h,'DDR'
+	code	0,14,0a0h,'DI'
+	code	0,14,0b0h,'DIR'
+	code	0,6,02ah,'HLD'
+	code	1,0,..local,'OCAL'
+	code	0,9,001h,'XI'
+	db	null
+M.code:
+	code	1,0,038h,'ACLIB'
+	code	1,_macro,..macro,'ACRO'
+	code	0,7,040h,'OV'
+	code	0,8,006h,'VI'
+	db	null
+N.code:
+	code	1,0,01dh,'AME'
+	code	0,14,044h,'EG'
+	code	0,0,000h,'OP'
+	code	0,13,000h,'OP'
+	db	null
+O.code:
+	code	0,10,01eh,'R'
+	code	0,3,0b0h,'RA'
+	code	1,0,01eh,'RG'
+	code	0,5,0f6h,'RI'
+	code	0,14,0bbh,'TDR'
+	code	0,14,0b3h,'TIR'
+	code	0,5,0d3h,'UT'
+	code	0,10,32,'UT'
+	code	0,14,0abh,'UTD'
+	code	0,14,0a3h,'UTI'
+	db	null
+P.code:
+	code	1,0,01fh,'AGE'
+	code	0,0,0e9h,'CHL'
+	code	0,2,0c1h,'OP'
+	code	0,10,34,'OP'
+	code	1,0,020h,'UBLIC'
+	code	0,2,0c5h,'USH'
+	code	0,10,36,'USH'
+	db	null
+Q.code:
+	db	null
+R.code:
+	code	0,0,017h,'AL'
+	code	0,0,01fh,'AR'
+	code	0,0,0d8h,'C'
+	code	1,_macro,021h,'EPT'
+	code	0,11,38,'ES'
+	code	0,0,0c9h,'ET'
+	code	0,10,40,'ET'
+	code	0,14,04dh,'ETI'
+	code	0,14,045h,'ETN'
+	code	0,0,020h,'IM'
+	code	0,11,42,'L'
+	code	0,13,017h,'LA'
+	code	0,0,007h,'LC'
+	code	0,11,44,'LC'
+	code	0,13,007h,'LCA'
+	code	0,14,06fh,'LD'
+	code	0,0,0f8h,'M'
+	code	0,0,0d0h,'NC'
+	code	0,0,0c0h,'NZ'
+	code	0,0,0f0h,'P'
+	code	0,0,0e8h,'PE'
+	code	0,0,0e0h,'PO'
+	code	0,11,46,'R'
+	code	0,13,01fh,'RA'
+	code	0,0,00fh,'RC'
+	code	0,11,48,'RC'
+	code	0,13,00fh,'RCA'
+	code	0,14,067h,'RD'
+	code	0,4,0c7h,'ST'
+	code	0,10,50,'ST'
+	code	0,0,0c8h,'Z'
+	db	null
+S.code:
+	code	0,3,098h,'BB'
+	code	0,5,0deh,'BI'
+	code	0,10,52,'BC'
+	code	0,13,037h,'CF'
+	code	0,11,54,'ET'
+	code	1,0,..?set,'ET'
+	code	0,6,022h,'HLD'
+	code	0,0,030h,'IM'
+	code	0,11,56,'LA'
+	code	0,0,0f9h,'PHL'
+	code	0,11,58,'RA'
+	code	0,11,60,'RL'
+	code	0,6,032h,'TA'
+	code	0,1,002h,'TAX'
+	code	0,0,037h,'TC'
+	code	0,3,090h,'UB'
+	code	0,10,62,'UB'
+	code	1,0,023h,'UBTTL'
+	code	0,5,0d6h,'UI'
+	db	null
+T.code:
+	code	1,0,024h,'ITLE'
+	db	null
+U.code:
+	db	null
+V.code:
+	db	null
+W.code:
+	db	null
+X.code:
+	code	0,0,0ebh,'CHG'
+	code	0,10,64,'OR'
+	code	0,3,0a8h,'RA'
+	code	0,5,0eeh,'RI'
+	code	0,0,0e3h,'THL'
+	db	null
+Y.code:
+	db	null
+Z.code:
+	db	null
+;
+pseudo.opcode.table:
+	code	1,0,036h,'8080'
+	code	1,0,037h,'Z80'
+	code	1,0,025h,'COMMENT'
+	code	1,0,026h,'CREF'
+	code	1,0,027h,'DEPHASE'
+	code	1,0,028h,'LALL'
+	code	1,0,03bh,'LFCOND'
+	code	1,0,029h,'LIST'
+	code	1,0,02ah,'PASS2'
+	code	1,0,02bh,'PHASE'
+	code	1,0,02ch,'PRINTX'
+	code	1,0,02dh,'RADIX'
+	code	1,0,035h,'REQUEST'
+	code	1,0,02eh,'SALL'
+	code	1,0,03ch,'SFCOND'
+	code	1,0,03dh,'TFCOND'
+	code	1,0,02fh,'XALL'
+	code	1,0,030h,'XCREF'
+	code	1,0,031h,'XLIST'
+	db	null
+special.code.table:
+	code	1,0,01fh,'EJECT'
+	code	1,0,038h,'INCLUDE'
+	code	1,0,034h,'TITLE'
+	db	null
+mnemo.table:
+;
+; Part 1 : 8080 code - Index 0..9
+;
+	dw	sngl.code	;  0
+	dw	ldx.code	;  1
+	dw	rp.code		;  2
+	dw	math.code	;  3
+	dw	r8.code		;  4
+	dw	imm.code	;  5
+	dw	addr.code	;  6
+	dw	mov.code	;  7
+	dw	mvi.code	;  8
+	dw	lxi.code	;  9
+;
+; Part 2 : Z80 code - Index 10..14
+;
+Z80.cod	equ	(($-mnemo.table) /2) shl 3
+	dw	z80.codes	; 10
+	dw	CB.code		; 11
+	dw	im.code		; 12
+	dw	sngl.code	; 13
+	dw	ED.code		; 14
+;
+; Pseudo code table
+;
+pseudo.table:
+				; hex  code
+	dw	ASEG.code	; 00 : ASEG
+	dw	COMMON.code	; 01 : COMMON, LOCAL
+	dw	CSEG.code	; 02 : CSEG
+	dw	DB.code		; 03 : DB, DEFB, DEFM
+	dw	DC.code		; 04 : DC
+	dw	DS.code		; 05 : DS, DEFS
+	dw	DSEG.code	; 06 : DSEG
+	dw	DW.code		; 07 : DW, DEFW
+	dw	ELSE.code	; 08 : ELSE
+	dw	END.code	; 09 : END
+	dw	ENDIF.code	; 0a : ENDIF, ENDC
+	dw	ENDM.code	; 0b : ENDM
+	dw	ENTRY.code	; 0c : ENTRY
+	dw	O.err		; 0d : EQU
+	dw	EXITM.code	; 0e : EXITM
+	dw	EXT.code	; 0f : EXT, EXTERNAL
+	dw	EXT.code	; 10 : EXTRN
+	dw	IF.code		; 11 : IF
+	dw	IFE.code	; 12 : IFE
+	dw	IFE.code	; 13 : IFF
+	dw	IF.code		; 14 : COND
+	dw	IF1.code	; 15 : IF1
+	dw	IF2.code	; 16 : IF2
+	dw	IFDEF.code	; 17 : IFDEF
+	dw	IFNDEF.code	; 18 : IFNDEF
+	dw	IRP.code	; 19 : IRP
+	dw	IRPC.code	; 1a : IRPC
+	dw	ENDM.code	; 1b : LOCAL
+	dw	O.err		; 1c : MACRO
+	dw	NAME.code	; 1d : NAME
+	dw	ORG.code	; 1e : ORG
+	dw	PAGE.code	; 1f : $EJECT, PAGE
+	dw	ENTRY.code	; 20 : PUBLIC, GLOBAL
+	dw	REPT.code	; 21 : REPT
+	dw	O.err		; 22 : ASET, DEFL, SET
+	dw	SUBTTL.code	; 23 : SUBTTL
+	dw	TITLE.code	; 24 : TITLE
+	dw	.COMMENT.code	; 25 : .COMMENT
+	dw	.CREF.code	; 26 : .CREF
+	dw	.DEPHASE.code	; 27 : .DEPHASE
+	dw	.LALL.code	; 28 : .LALL
+	dw	.LIST.code	; 29 : .LIST
+	dw	.PASS2.code	; 2a : .PASS2
+	dw	.PHASE.code	; 2b : .PHASE
+	dw	.PRINTX.code	; 2c : .PRINTX
+	dw	.RADIX.code	; 2d : .RADIX
+	dw	.SALL.code	; 2e : .SALL
+	dw	.XALL.code	; 2f : .XALL
+	dw	.XCREF.code	; 30 : .XCREF
+	dw	.XLIST.code	; 31 : XLIST
+	dw	IFB.code	; 32 : IFB
+	dw	IFNB.code	; 33 : IFNB
+	dw	$TITLE.code	; 34 : $TITLE
+	dw	.REQUEST.code	; 35 : .REQUEST
+	dw	.P.8080.code	; 36 : .8080
+	dw	.P.Z80.code	; 37 : .Z80
+	dw	MACLIB.code	; 38 : $INCLUDE, MACLIB
+	dw	IFDIF.code	; 39 : IFDIF
+	dw	IFIDN.code	; 3a : IFIDN
+	dw	.LFCOND.code	; 3b : .LFCOND
+	dw	.SFCOND.code	; 3c : .SFCOND
+	dw	.TFCOND.code	; 3d : .TFCOND
+	dw	BYTE.code	; 3e : BYTE
+;
+; Z80 code table
+; Byte 1 holds index to execution table
+; Byte 2 holds opcode of instruction
+;
+Z80.code.table:
+	db	 4,088h		;  0 : ADC
+	db	 6,080h		;  2 : ADD
+	db	 0,0a0h		;  4 : AND
+	db	 2,040h		;  6 : BIT
+	db	12,0cdh		;  8 : CALL
+	db	 0,0b8h		; 10 : CP
+	db	 8,005h		; 12 : DEC
+	db	22,010h		; 14 : DJNZ
+	db	30,000h		; 16 : EX
+	db	10,046h		; 18 : IM
+	db	26,000h		; 20 : IN
+	db	 8,004h		; 22 : INC
+	db	16,0c3h		; 24 : JP
+	db	18,018h		; 26 : JR
+	db	34,000h		; 28 : LD
+	db	 0,0b0h 	; 30 : OR
+	db	28,000h		; 32 : OUT
+	db	32,0c1h		; 34 : POP
+	db	32,0c5h		; 36 : PUSH
+	db	 2,080h		; 38 : RES
+	db	14,000h		; 40 : RET
+	db	20,010h		; 42 : RL
+	db	20,000h		; 44 : RLC
+	db	20,018h		; 46 : RR
+	db	20,008h		; 48 : RRC
+	db	24,0c7h		; 50 : RST
+	db	 4,098h		; 52 : SBC
+	db	 2,0c0h		; 54 : SET
+	db	20,020h		; 56 : SLA
+	db	20,028h		; 58 : SRA
+	db	20,038h		; 60 : SRL
+	db	 0,090h		; 62 : SUB
+	db	 0,0a8h		; 64 : XOR
+;
+; Z80 code execution table
+;
+Z80.exec.table:
+	dw	Z.log.code	;  0 : AND, CP, OR, SUB, XOR
+	dw	Z.bit.code	;  2 : BIT, RES, SET
+	dw	Z.math.16	;  4 : ADC, SBC
+	dw	Z.math		;  6 : ADD
+	dw	Z.inc.dec	;  8 : DEC, INC
+	dw	Z.IM.code	; 10 : IM
+	dw	Z.call.code	; 12 : CALL
+	dw	Z.ret.code	; 14 : RET
+	dw	Z.jp.code	; 16 : JP
+	dw	Z.jr.code	; 18 : JR
+	dw	Z.shf.code	; 20 : RL, RLC, RR, RRC,
+				;      SLA, SRA, SRL
+	dw	Z.djnz.code	; 22 : DJNZ
+	dw	Z.rst.code	; 24 : RST
+	dw	Z.in.code	; 26 : IN
+	dw	Z.out.code	; 28 : OUT
+	dw	Z.ex.code	; 30 : EX
+	dw	Z.pop.code	; 32 : POP, PUSH
+	dw	Z.ld.code	; 34 : LD
+;
+; Check character in current line position
+; EXIT	Accu holds character
+;	Sign set indicates non alpha-numeric character
+;	If sign reset:	Zero set indicates alpha character
+;		  	Zero reset indicates number
+;
+chk.char:
+	push	hl
+chk..char:
+	ld	hl,(actptr)	; Get line pointer
+	ld	a,(hl)		; .. load character
+	inc	hl
+	ld	(actptr),hl
+	cp	ff		; Skip Form Feed
+	jr	z,chk..char
+	ld	l,a
+	cp	'A'		; Test alphabetic
+	jr	nc,chk.tst.char
+	cp	'0'		; Test digit
+	jr	c,chk.no.char
+	cp	'9'+1
+	jr	c,chk.dig.char
+chk.no.char:
+	scf			; Any other
+	sbc	a,a		; Return Sign set, Zero reset
+	ld	a,l
+	pop	hl
+	ret
+chk.dig.char:
+	or	a		; Return Sign and Zero reset
+	pop	hl
+	ret
+chk.tst.char:
+	cp	'Z'+1
+	jr	c,chk.alph.char
+	cp	'a'		; Test lower case
+	jr	c,chk.no.char
+	cp	'z'+1
+	jr	nc,chk.no.char
+chk.alph.char:
+	xor	a		; Return Sign reset, Zero set
+	ld	a,l
+	pop	hl
+	ret
+;
+; Get character
+; EXIT	Accu holds character
+;
+chk.curch:
+	call	chk.char	; Get character
+	jr	pred.ptr	; .. adjust for previous
+;
+; Get character, verify NO EOL
+; EXIT	Accu holds character
+;
+chk.no.NL:
+	call	chk.char	; Get character
+	push	af
+	cp	cr		; Verify no CR
+	jp	nz,pop.flag
+	call	O.err		; .. error
+	pop	af
+;
+; Get predictor of current line pointer
+;
+pred.ptr:
+	push	hl
+	ld	hl,(actptr)
+	dec	hl		; Decrement
+	ld	(actptr),hl
+	pop	hl
+	ret
+;
+; Get successor of current line pointer
+;
+succ.ptr:
+	ld	hl,(actptr)
+	inc	hl		; Increment
+	ld	(actptr),hl
+	ret
+;
+; Get UPPER case letter
+; EXIT	Accu holds character in UPPER case
+;
+UPP.char:
+	call	chk.char	; Test character
+	ret	nz		; .. no letter
+UpCase:
+	cp	'a'		; Test case
+	jr	c,UPP..char
+	sub	'a'-'A'		; Make UPPER
+UPP..char:
+	cp	a		; Reset sign
+	ret
+;
+; Sample ASCII operand
+;
+get.item:
+	call	white.space	; Skip tabs
+	call	pred.ptr	; .. fix pointer
+	ld	hl,actbuf+1
+	ld	bc,256*(LabLen+2)+' '
+get.i.clr:
+	ld	(hl),c		; Blank buffer
+	inc	hl
+	djnz	get.i.clr
+	ld	hl,actbuf
+	ld	(hl),0		; Clear entry
+	inc	hl
+	call	legal.label	; Check legal label
+	call	nz,get.i.pop	; .. exit if not
+	ld	(last.read),a	; Save character
+	ld	c,0		; Clear counter
+get.i.samp:
+	call	UpCase		; .. convert to UPPER
+	ld	(hl),a		; Save character
+	inc	hl
+	inc	c
+	ld	a,c
+	cp	LabLen+2	; Test buffer filled
+	jr	z,get.i.trncat	; .. truncate on overflow
+	call	legal.label
+	jp	p,get.i.samp
+	call	l0bda
+	jr	nc,get.i.amp
+	jp	p,get.i.samp	; Sample more
+get.i.amp:
+	ld	b,a		; Save character
+	ld	a,c
+	ld	(actbuf),a	; Set length
+	xor	a		; Set zero
+	ld	a,b		; .. get back last character
+	ret
+get.i.trncat:
+	call	legal.label	; .. loop till end
+	jp	p,get.i.trncat
+	call	l0bda
+	jr	nc,get.i.amp
+	jp	p,get.i.trncat
+	jr	get.i.amp
+;
+; Test legal label
+; EXIT	Accu holds character
+;	Sign reset indicates character alpha-numeric
+;	Sign set indicates any other character type
+;	Zero set indicates other legal character
+;
+legal.label:
+	call	chk.char
+	ret	p
+	cp	'$'
+	ret	z
+	cp	'.'
+	ret	z
+	cp	'@'
+	ret	z
+	cp	'?'
+	ret	z
+	cp	'_'
+	ret	z
+	cpl
+	or	a
+	cpl
+	ret
+;
+; Skip white space (BLANK or TAB)
+; EXIT	Accu holds character
+;	Sign reset indicates character alpha-numeric
+;	Sign set indicates any other character type
+;
+white.space:
+	call	chk.char	; Check character
+	ret	p		; .. alpha-numeric
+	cp	' '		; Test blank
+	jr	z,white.space
+	cp	tab		; .. or tabulator
+	jr	z,white.space
+	cpl
+	or	a		; Fix return
+	cpl
+	ret
+;
+;
+;
+l0bda:
+	push	af
+	or	a
+	jr	z,l0be4
+	cp	'&'
+	jr	nz,pop..flag
+l0be4:
+	ld	a,(l3ffb)
+	or	a
+	jr	nz,l0bed
+pop..flag:
+	pop	af
+	ret
+l0bed:
+	pop	af
+l0bee:
+	call	legal.label
+	or	a
+	jr	z,l0bee
+	cp	'&'
+	jr	z,l0bee
+	call	pred.ptr
+	call	legal.label
+	scf
+	ret
+;
+; Test ampersand in label
+; EXIT	Zero flag set if not
+;	Return less one level if so
+;
+get.i.pop:
+	call	l0bda
+	jr	nc,l0c09
+	ret	z
+l0c09:
+	pop	bc		; Get old caller
+	ld	c,0		; Fix return
+	ld	b,a
+	ret			; Return previous level
+;
+;
+;
+l0c0e:
+	ld	hl,F.Arr.1
+	ld	a,(actbuf)
+	push	af
+	call	Get...Ptr	; Get symbol pointer
+	jr	z,l0c22		; .. empty
+	pop	af
+	ld	(actbuf),a
+	or	a
+	ld	a,(hl)
+	ret
+l0c22:
+	pop	bc
+	ret
+;
+; Get symbol table pointer
+; EXIT	Reg HL holds pointer
+;	Zero flag not set indicates no entry in chain
+;
+GetSymPtr:
+	ld	hl,SymbChn	; Set chain table
+;
+; Get symbol table pointer
+; ENTRY	Reg HL holds base chain table address
+; EXIT	Reg HL holds pointer
+;	Zero flag not set indicates no entry in chain
+;
+Get...Ptr:
+	call	ChrIdx		; Get index
+	ld	b,0
+	add	hl,bc
+	add	hl,bc
+	ld	(CurChn),hl	; .. save base pointer
+	ld	e,(hl)		; Fetch tree address
+	inc	hl
+	ld	d,(hl)
+	ld	hl,TmpChn
+	ld	b,ChnLen
+	xor	a
+l0c3a:
+	ld	(hl),a		; Clear field
+	inc	hl
+	djnz	l0c3a
+	ld	hl,actbuf
+	ld	a,(hl)
+	cp	LabLen		; Check label length
+	jr	c,l0c4b
+	ld	(hl),LabLen	; .. truncate
+l0c4b:
+	ld	hl,actbuf
+	ld	c,(hl)		; Load length
+	dec	c
+l0c50:
+	ld	a,d
+	or	e		; .. test node grounded
+	jr	z,l0cbe
+	ex	de,hl
+	ld	e,(hl)		; Get left node
+	inc	hl
+	ld	d,(hl)
+	push	de
+	inc	hl
+	ld	e,(hl)		; .. get right node
+	inc	hl
+	ld	d,(hl)
+	push	de
+	push	hl
+	inc	hl
+	ld	a,(hl)
+	dec	a
+	jr	z,l0c79
+	ld	de,8
+	add	hl,de
+	ld	de,actbuf+2
+	ld	b,a
+l0c6e:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l0c8b
+	inc	hl
+	inc	de
+	djnz	l0c6e
+l0c79:
+	pop	hl
+	inc	hl
+	ld	a,(hl)
+	dec	a
+	cp	c
+	jr	nz,l0cb8
+	inc	hl
+	ld	(BField),hl	; Save pointer
+	inc	hl
+	ld	a,(hl)
+	dec	hl
+	pop	bc
+	pop	bc
+	ret
+l0c8b:
+	ccf
+	sbc	a,a
+	and	2		; Calculate direction
+	pop	hl
+l0c90:
+	push	af
+	dec	hl		; Fix pointer
+	dec	hl
+	dec	hl
+	push	hl		; .. save
+	push	bc
+	ld	hl,l3f6a
+	ld	de,TmpChn
+	ld	bc,ChnLen-3
+	ldir			; Unpack
+	ex	de,hl
+	pop	bc
+	pop	de
+	pop	af
+	ld	(hl),a		; Put into chain
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	pop	de
+	jr	z,l0c50		; .. above zero result
+	ex	de,hl		; .. swap pointers
+	jr	l0c50
+l0cb8:
+	dec	hl
+	ld	a,2
+	jr	l0c90
+l0cbe:
+	inc	a		; Set not zero
+	ld	hl,(SymPtr)	; Fetch current symbol table
+	ld	a,(hl)		; .. get content
+	ret
+;
+; Decode characters
+; EXIT	Reg C returns index
+;
+ChrIdx:
+	ld	c,0
+	ld	a,(actbuf+1)	; .. get from buffer
+	cp	'$'		; $ - 0
+	ret	z
+	inc	c
+	cp	'.'		; . - 1
+	ret	z
+	inc	c
+	cp	'?'		; ? - 2
+	ret	z
+	inc	c
+	cp	'_'		; _ - 3
+	ret	z
+	inc	c
+	cp	' '		;   - 4
+	ret	z
+	sub	'@'-5		; Map @..Z ->> 5..31
+	ld	c,a
+	ret
+;
+;
+;
+l0dd4:
+	push	af
+	call	l0c0e
+	jr	l0d00
+;
+; Put symbol into table
+; ENTRY	Carry flag indicates mode for cross-reference
+; EXIT	Reg HL points to symbol
+;
+; Symbol structure:
+;
+;    0     1     2     3     4     5     6     7     8
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; | Left Node | Right Node| Len | CC1 | CC2 |   Offset  |
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+;    ^
+;    +-- Current Symbol pointer
+;
+;    9     10     11..
+; +-----+-----+--....--+
+; | xxx | xxx |  Name  |
+; +-----+-----+--....--+
+;
+; 'x Node' is left or right hook in binary tree
+; 'Len'    is the length of symbol 'Name'
+; 'Offset' is reference of label or COMMON size
+;
+; 'CC1'    is defined as:
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+; | Def | Pub | Kno | Int | xxx | xxx | xxx | xxx |
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+;
+; 'CC2'    is defined as:
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+; | Def | Pub | Kno | xxx | xxx | Com |   Mode    |
+; +-----+-----+-----+-----+-----+-----+-----+-----+
+;
+; 'Def'  if defined
+; 'Pub'  set on PUBLIC
+; 'Kno'  if known
+; 'Int'  if M80 internal
+; 'Com'  on COMMON definition
+; 'Mode' address mode bits
+;
+; Both modes together form the valid entry after pass 1
+;
+; For example (less mode bits):
+;
+; Pass1  Pass2
+; +++++  +++++
+; 00 80  40 80  EXTERN   symbol
+; 00 20  40 20  Internal COMMON definition
+; 00 00  40 00  Unknown  symbol
+; 80 20  C0 20  EQU definition, internal symbol
+; 80 60  C0 60  ENTRY    symbol
+;    50 20      Internal single register
+;    60 20      Internal register pair
+;    70 20      Internal condition flag
+;
+PutSymbol:
+	push	af		; .. save flag
+	call	GetSymPtr	; Get symbol table pointer
+l0d00:
+	ld	(BField),hl	; .. save address we got
+	pop	bc		; Get entry flag
+	push	af		; .. save new one
+	push	bc
+	pop	af		; .. swap
+	call	CrossSym	; Mark into cross-ref
+	pop	af
+	ret	z		; .. return on chain
+	push	hl
+	ld	hl,(l3f6e)
+	ex	de,hl
+	ld	a,d
+	or	e
+	jr	z,l0dce
+	ld	a,(l3f6d)
+	ex	de,hl
+	ld	b,0
+	ld	c,a
+	add	hl,bc
+	jr	l0d1e
+l0dce:
+	ld	hl,(CurChn)	; Get base pointer
+l0d1e:
+	pop	de		; Get back pointer
+	ld	(hl),e		; .. save into chain
+	inc	hl
+	ld	(hl),d
+	ex	de,hl
+	ld	c,4
+	xor	a
+l0d26:
+	ld	(hl),a		; Clear node addresses
+	inc	hl
+	dec	c
+	jr	nz,l0d26
+	ld	de,actbuf
+	ld	a,(de)
+	cp	LabLen		; Test length
+	jr	c,l0d37
+	ld	a,LabLen	; .. truncate
+l0d37:
+	ld	(hl),a		; Store length
+	ld	b,a
+	inc	hl
+	inc	de
+	xor	a
+	ld	(hl),a		; Clear type 1
+	ld	(BField),hl	; Save pointer
+	inc	hl
+	ld	(hl),a		; Clear type 2
+	inc	hl
+	ld	(hl),a		; .. and offset
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	inc	hl		; .. skip
+	inc	hl
+l0d49:
+	ld	a,(de)
+	ld	(hl),a		; .. unpack symbols name
+	inc	hl
+	inc	de
+	djnz	l0d49
+	ld	(SymPtr),hl	; Store new pointer
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	(hl),b		; .. clear length of next
+	ld	de,256
+	add	hl,de
+	ex	de,hl
+	ld	hl,(LastMem)
+	call	cmp.HL.DE	; Test against top
+	call	c,mem.alloc	; Fix if pointer higher max
+	ld	hl,(BField)	; .. get pointer
+	ld	a,h
+	or	a		; Fix flag
+	ld	a,0		; Set return
+	ret
+;
+; Give symbol table overflow message
+;
+sym.full:
+	ld	hl,$SYMfull
+..full:
+	call	string		; Give message
+	jp	OS		; .. exit
+;
+$SYMfull:
+	db	'?Symbol table full',cr
+..LF:
+	db	lf,null
+;
+; Compare HL against DE
+; ENTRY	Reg HL and DE hold pointer
+; EXIT	Carry set if HL<DE
+;	Zero  set if HL=DE
+;
+cmp.HL.DE:
+	ld	a,h
+	sub	d		; Compare HI
+	ret	nz
+	ld	a,l
+	sub	e		; .. and LO
+	ret
+;
+; Write reference to cross-reference file
+; ENTRY	Carry flag set indicates ENTRY symbol
+;
+CrossSym:
+	push	af
+	ld	a,(pass)
+	or	a
+	jp	z,pop.flag	;.. skip pass 1
+	ld	a,(Copt)
+	or	a
+	jp	z,pop.flag	; .. skip no cross-ref
+	ld	a,(cref.flag)
+	or	a
+	jp	nz,pop.flag
+	ld	hl,(BField)	; Get symbol pointer
+	bit	b_PUB,(hl)	; Test definition
+	jp	nz,pop.flag	; .. skip flag set
+	pop	af
+	ld	a,DefItm+MSB	; Get sync
+	jr	nc,MarkEXT
+	ld	a,StrtItm+MSB
+MarkEXT:
+	call	putPRN		; Set start indicator
+	push	hl
+	ld	hl,actbuf
+	ld	b,(hl)		; Fetch count
+CrossLoop:
+	inc	hl
+	ld	a,(hl)
+	call	putPRN		; Write label
+	djnz	CrossLoop
+	pop	hl
+	ret
+;
+;
+;
+l0ddb:
+	ld	b,a
+	ld	a,(hl)
+	and	00111000b
+	jr	nz,l0e02
+	inc	hl
+	bit	5,(hl)
+	jr	nz,l0e11
+l0de9:
+	dec	hl
+	set	7,(hl)
+	inc	hl
+	ld	a,(hl)
+	or	b
+	ld	(hl),a
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	de
+	ld	de,(l3dde)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	de
+	ret
+l0e02:
+	ld	a,(hl)
+	and	01000000b
+	ld	(hl),a
+	ld	a,(CPU.flag)	; Test CPU
+	or	a
+	call	z,Q.err		; .. error on Z80
+	inc	hl
+	jr	l0de9
+l0e11:
+	ld	a,(hl)
+	and	10010100b
+	call	nz,l0e61	; .. error
+	ld	a,(hl)
+	xor	b
+	and	0000011b
+	call	nz,l0e61	; .. error
+	inc	hl
+	push	de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl
+	call	cmp.HL.DE
+	call	nz,l0e52
+	pop	de
+	push	hl
+	ld	hl,(l3dde)
+	ex	de,hl
+	ld	a,b
+	and	00000011b
+	cp	00000011b
+	jr	nz,l0e44
+	ld	a,e
+	cp	(hl)		; Compare low
+	call	nz,l0e61	; .. should be same
+	inc	hl
+	ld	a,d
+	cp	(hl)		; .. and high
+	call	nz,l0e61
+l0e44:
+	pop	de
+	ld	a,(out.line)
+	cp	' '		; Test error
+	ld	hl,(BField)
+	inc	hl
+	jr	z,l0de9		; .. nope
+	ret
+;
+;
+;
+l0e52:
+	ld	a,(l3d30)
+	or	a
+	jr	nz,l0e61	; .. error
+	ld	hl,(BField)
+	ld	a,(hl)
+	or	a
+	jp	p,P.err
+;
+;
+;
+l0e61:
+	push	hl
+	ld	hl,(BField)
+	inc	hl
+	set	4,(hl)
+	set	4,b
+	pop	hl
+	jp	M.err
+

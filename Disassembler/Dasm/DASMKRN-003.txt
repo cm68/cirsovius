@@ -1,0 +1,928 @@
+;
+; %%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  ?      %%
+; %% Statistic output %%
+; %%%%%%%%%%%%%%%%%%%%%%
+;
+stat::
+	call	pstrng		;This is rather straight-forward, so few comments
+	db	'Current Work File = ',null
+	ld	hl,fcbsav
+	ld	a,(hl)		;Check work file here
+	cp	' '
+	push	af
+	call	nz,pr.file
+	pop	af
+	jr	nz,..stat
+	call	pstrng		;.. no file
+	db	'********',null
+..stat:
+	call	pstrng
+	db	cr,lf,lf,'Scratch Area Start = ',null
+	call	PrgTop
+	ld	de,FBUFLEN
+	add	hl,de
+	call	pval.NL		;Print value
+	call	pstrng
+	db	'Scratch Area End   = ',null
+	call	OSTop
+	call	pval.NL		;print the beginning of bdos
+	ld	hl,comlad
+	call	sthex		;Store address
+	call	pstrng
+	db	lf
+	db	'COM Start = '
+comlad:
+	db	'0100',cr,lf
+	db	'COM End   = ',null
+	ld	hl,(relend)	;Get end address
+	call	pval.NL
+	call	pstrng
+	db	lf
+	db	'SYMTBL = ',null
+	ld	hl,(sym.root)
+	call	pvalue
+	ld	hl,(sym.heap)
+	call	pval.NL
+	call	TellPC
+	call	pstrng
+	db	'COMNTS = ',null
+	ld	hl,(comst)
+	call	pvalue
+	ld	hl,(comend)
+	call	pval.NL
+	call	ctlst
+	call	pstrng
+	db	'(FREE  = ',null
+	ld	hl,(comst)
+	ld	de,(ctl.heap)
+	or	a
+	sbc	hl,de		;Get free space
+	dec	hl
+	dec	hl
+	push	hl
+	call	pvalue
+	call	pstrng
+	db	'- ',null
+	pop	hl
+	call	pdec		;Print decimal
+	call	pstrng
+	db	' bytes)',cr,lf,null
+	call	cmntst
+	jp	getcmd
+;
+; Store load address to ^HL
+;
+sthex:
+	ld	de,(LoadAdr)
+	ld	a,d		;Get load address in de
+	call	acctoasc	;Store as ascii chars in buffer
+	ld	a,e
+	call	acctoasc
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  F                      %%
+; %% Find the occurrence of addresses %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+find::
+	call	get.buf		;Check for no further args
+	jr	z,prevf
+	call	cnvrt		;Get arg in de
+	ld	(fndadd),de	;Address to look for
+	ld	de,(LoadAdr)	;Get start
+	ld	(fndpc),de	;Set start of search address
+	cp	cr		;Done?
+	jr	z,prevf
+	call	chk.delim
+	inc	hl
+	call	cnvrt		;Get 2nd arg for find
+	cp	cr
+	jp	nz,what
+	ld	(fndpc),de	;Start looking from here
+;
+; Continue the previous 'F' command
+;
+prevf:
+	ld	de,(fndadd)	;Get address we are looking for
+nyet:
+	call	brkchk		;Check for break
+	ld	hl,(fndpc)	;Pt to pc
+	call	fget		;Get byte at pc
+	inc	hl		;Pt to next
+	ld	(fndpc),hl
+	cp	e		;Compare byte with address we are looking for
+	jr	nz,nyet
+	call	fget		;Partial match -- try high byte
+	cp	d
+	jr	nz,nyet
+;
+; We found address in memory -- print data
+;
+	push	hl
+	push	de
+	dec	hl
+	call	pvalue		;Print location of found address (relative)
+	pop	de
+	pop	hl
+	call	space		;Print <sp>
+	jr	nyet
+;
+; %%%%%%%%%%%%%%%%%%%%
+; %% Command:  Z    %%
+; %% Close the file %%
+; %%%%%%%%%%%%%%%%%%%%
+;
+close::
+	call	hsym
+	ld	a,TRUE		;Enable writing to disk file
+	ld	(wrtenab),a
+	call	pstg		;Write end statement
+	db	'END',cr,lf,null
+	xor	a		;Disable writing to file
+	ld	(wrtenab),a
+	call	..close		;Do the closure
+	jp	getcmd
+..close:
+	ld	a,(File)	;Check if file was open
+	or	a
+	ret	z
+	call	wrteof		;Fill with ^z
+	xor	a		;Close file
+	ld	(File),a
+	call	pstrng		;Print message
+	db	'++ ',etx,' File Closed ++',cr,lf,null
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  R          %%
+; %% Read a file or files %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+read::
+	call	setfcb		;Load the fcb with the proper file name and type
+	ld	de,tpall	;Is it 'ALL'?
+	call	chkFCB
+	jr	nz,notall	;Proceed if not
+;
+; Read in CMT, SMB, CTL files
+;
+	call	allrd		;Read in all files
+	jp	stat		;Print statistics
+;
+; File type was not 'ALL', so check to see what type
+; it was and process
+;
+notall:
+	ld	de,tpsym	;Check for sym
+	call	chkFCB
+	jr	nz,notsym
+	call	symrd		;Read sym file
+	jp	stat		;Print stats
+notsym:
+	ld	de,tpcom	;Check for com
+	call	chkFCB
+	jr	nz,notcom
+	call	comrd		;Read in a com file
+	jp	getcmd		;Continue command line processing
+;
+; The read is not a .SMB or a .COM file
+;
+notcom:
+	ld	de,tpctl	;Check for ctl file
+	call	chkFCB
+	jr	z,isctl		;Read in ctl file
+	ld	de,tpdoc	;Check for doc file
+	call	chkFCB
+	jp	nz,what		;Error if not com, smb, ctl, or doc
+	call	docrd		;Read in doc file
+	jp	stat
+;
+; Read in a control table
+;
+isctl:
+	call	ctlrd		;Read control file
+	jp	stat		;Print statistics
+;
+; Entry for reading in files on start of DASM
+;
+..all:
+	call	allrd		;Read in all files
+	call	pstrng
+	db	cr,lf,'-- Read Complete --',cr,lf,null
+	jp	signon
+;
+; Read in all files -- common routine
+;
+allrd:
+	ld	hl,tpsym	;Set file type to sym
+	call	fixtyp
+	call	pstrng		;Tell user what is happening
+	db	cr,lf
+	db	'Reading SMB file...',cr,lf,null
+	call	symrd		;Read file in
+;
+	ld	hl,tpctl	;Set file type to ctl
+	call	fixtyp
+	call	pstrng		;Tell user what is happening
+	db	'Reading CTL file...',cr,lf,null
+	call	ctlrd		;Read file in
+;
+	ld	hl,tpdoc	;Set file type to doc
+	call	fixtyp
+	call	pstrng		;Tell user what is happening
+	db	'Reading CMT file...',cr,lf,null
+	call	docrd		;Read file in
+;
+	ld	hl,tpcom	;Set file type to com
+	call	fixtyp
+	call	pstrng		;Tell user what is happening
+	db	'Preparing COM file...',cr,lf,null
+	call	comrd		;Read file in
+	ret
+;
+; Prepare COM file for read
+;
+comrd::
+	call	reset		;Open com file for read
+	call	ini.win		;Init .COM file window
+	call	filsiz		;Get size of file
+	or	a		;Verify correct range
+	jr	nz,COM.ovl
+	ld	a,h
+	or	l
+	jr	z,COM.emp
+	ld	a,h
+	cp	HIGH (65535 / reclen) +1
+	jr	nc,COM.ovl
+	ld	(crecs),hl	;Save length
+	ld	h,l		;*128
+	ld	l,0
+	srl	a
+	rr	h
+	rr	l
+	ld	de,(LoadAdr)
+	add	hl,de		;Build top address
+	ld	(relend),hl	;Save relative end address
+	call	pstrng
+	db	'Last Block Ends at ',null
+	call	pval.NL
+	call	clr.FCB		;Reset FCB
+	call	exist		;Reopen file
+	ld	hl,FCB
+	ld	de,CFCB
+	ld	bc,fcblen
+	ldir			;Unpack file name
+	ret
+COM.ovl:
+	call	pstrng
+	db	'COM file too long',null
+	jp	getcmd.NL
+COM.emp:
+	call	pstrng
+	db	'COM file empty',null
+	jp	getcmd.NL
+;
+; Get byte in Accu from .COM file - Address in reg HL
+;
+fget::
+	push	bc
+	push	de
+	ld	a,(CFCB)
+	inc	a		;Test file open
+	jr	z,ill.open	;Nope
+	ex	de,hl
+	ld	hl,(relend)
+	dec	hl
+	or	a
+	sbc	hl,de
+	jr	c,ill.addr
+	ex	de,hl
+	call	..fget
+	pop	de
+	pop	bc
+	ret
+ill.addr:
+	ld	hl,invadr
+	call	sthex		;Store address
+	call	pstrng
+	db	'Invalid address ( '
+invadr:
+	db	'0100 to ',null
+	ld	hl,(relend)
+	dec	hl
+	call	pvalue
+	call	pstrng
+	db	')',null
+	jp	getcmd.NL
+ill.open:
+	call	pstrng
+	db	'No .COM file open',null
+	jp	getcmd.NL
+;
+; Do the get job
+;
+..fget:
+	push	hl
+	ex	de,hl
+	ld	hl,(en@)
+	or	a
+	sbc	hl,de		;Test in window
+	jr	c,new.win	;..nope
+	ex	de,hl
+	ld	de,(st@)
+	or	a
+	sbc	hl,de
+	jr	c,new.win
+	ld	de,(virtual)
+	add	hl,de		;Get buffer address
+	ld	a,(hl)		;Get byte
+	pop	hl
+	ret
+new.win:
+	pop	hl
+	push	hl
+	ld	a,l
+	and	reclen		;Get record boundary
+	ld	l,a
+	ld	(st@),hl	;Save new start
+	ex	de,hl
+	ld	hl,FBUFLEN-1
+	add	hl,de
+	ld	(en@),hl	;.. and end
+	ld	hl,(LoadAdr)
+	call	neghl
+	add	hl,de		;Get zero relative address
+	xor	a
+	add	hl,hl		;/128
+	adc	a,0
+	ld	l,h
+	ld	h,a
+	call	get.rec		;Get records to be read
+	ld	b,c
+	ex	de,hl
+	ld	de,(virtual)	;Get start of buffer
+rd.com.win:
+	push	bc
+	push	de
+	push	hl
+	call	set.dma		;Set disk buffer
+	pop	hl
+	push	hl
+	call	rd.rrn		;Read record
+	pop	hl
+	pop	de
+	pop	bc
+	jr	nz,end.file	;Error
+	ex	de,hl
+	ld	a,reclen
+	call	AddA		;Bump buffer address
+	ex	de,hl
+	inc	hl		;And record number
+	djnz	rd.com.win
+	xor	a
+end.file:
+	push	af
+	ld	de,OSdma
+	call	set.dma		;Reset the dma address to 80h
+	pop	af
+	pop	hl
+	jr	z,..fget	;Process if no error
+	call	pstrng
+	db	'.COM file read error',null
+	jp	getcmd.NL
+;
+; Negate reg HL
+;
+neghl:
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ret
+;
+; Set disk buffer to address ^DE
+;
+set.dma:
+	ld	c,.dma
+	call	BDOS
+	ret
+;
+; Get records to be read into reg BC - Start record in reg HL
+;
+get.rec:
+	ex	de,hl
+	ld	bc,RECS
+	ld	hl,(crecs)	;Get record length
+	or	a
+	sbc	hl,de		;Get difference
+	or	a
+	sbc	hl,bc		;Test more than buffer size
+	ret	nc		;Yeap
+	add	hl,bc
+	ld	c,l		;Get max
+	ld	b,h
+	ret
+;
+; Read the symbol table from disk
+;
+symrd::
+	ld	hl,(sym.root)	;Pt to symbol table
+	call	readfile	;Read file into it
+	ld	(sym.heap),hl	;Set end address of symbol tabl
+	inc	hl		;Pt to next symbol char count
+	inc	hl
+	ld	(hl),0		;Set char count to zero
+	call	set.CTL		;Set control table
+	ret
+;
+; Routine to read in a control table
+;
+ctlrd::
+	call	reset		;Open file for reading
+	ld	hl,(ctl.root)	;Pt to control table
+lup:
+	ld	de,0		;Set value = 0
+numlup:
+	call	get		;Read next char
+	cp	eof		;Error if eof encountered
+	jr	z,.termf
+	cp	','		;Done with number if comma found
+	jr	z,strde
+	call	num.get		;Insert number
+	jr	numlup		;Continue
+;
+; Store the address accumulated in DE into the control table
+;
+strde:
+	ld	(hl),e		;Store address
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	call	get		;Read control mode char
+	ld	(hl),a		;Store it
+	inc	hl		;Pt to next control table entry
+	jr	lup
+.termf:
+	call	termf		;Set end
+	call	Clr.Cmt		;Clear comment table
+	ret
+;
+; Read the CMT (comments) file from disk
+;
+docrd::
+	call	Clr.Cmt		;Clear comments
+	call	reset		;Open file
+docrd1:
+	call	get		;Read next byte (returned in a)
+	cp	eof		;Return if eof eached
+	ret	z
+	cp	tab		;Ignore <tab>, <cr>, <lf>
+	jr	z,docrd1
+	cp	cr
+	jr	z,docrd1
+	cp	lf
+	jr	z,docrd1
+	call	num1		;Convert from hex chars to value in de
+	push	de
+	ld	hl,inbuf.1
+	ld	b,0		;Count chars in symbol
+doclup:
+	call	get		;Get next byte
+	cp	tab		;Done if <tab> or <cr>
+	jr	z,docterm
+	cp	cr
+	jr	z,docterm
+	ld	(hl),a		;Store byte
+	inc	hl		;Pt to next
+	inc	b		;Incr char count
+	jr	doclup
+docterm:
+	ld	(hl),cr
+	pop	de		;Get value
+	ld	hl,inbuf.1-1
+	ld	(hl),b		;Set length
+	inc	hl
+	ld	c,l
+	ld	b,h
+	call	InsCmt		;Insert comment
+	jr	docrd1
+;
+; Read file set in FCB into memory pted to by HL
+;
+readfile::
+	call	reset		;Open file
+rdfl1:
+	call	get		;Read next byte (returned in a)
+	cp	eof		;Return if eof eached
+	ret	z
+	cp	tab		;Ignore <tab>, <cr>, <lf>
+	jr	z,rdfl1
+	cp	cr
+	jr	z,rdfl1
+	cp	lf
+	jr	z,rdfl1
+	call	num1		;Convert from hex chars to value in de
+	ld	(hl),e		;Save the address
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	hl
+	inc	hl
+	ld	b,0		;Count chars in symbol
+symlup:
+	call	get		;Get next byte
+	cp	tab		;Done if <tab> or <cr>
+	jr	z,symterm
+	cp	cr
+	jr	z,symterm
+	ld	(hl),a		;Store byte
+	inc	hl		;Pt to next
+	inc	b		;Incr char count
+	jr	symlup
+symterm:
+	ex	(sp),hl
+	ld	(hl),b
+	pop	hl
+	jr	rdfl1
+;
+; %%%%%%%%%%%%%%%%%%%%
+; %% Command:  S    %%
+; %% Save the files %%
+; %%%%%%%%%%%%%%%%%%%%
+;
+save::
+	call	setfcb		;Load the fcb from the command line
+	ld	de,tpall	;Check for type of 'all'
+	call	chkFCB
+	jr	nz,ntall	;Check for specific type if not all
+;
+; Save CMT, SMB, CTL and MAC/ASM files
+;
+	call	allsav		;Save all files
+	jp	svasm		;Save MAC/ASM file
+;
+; Type was not ALL, so check for specific file types
+;
+ntall:
+	ld	de,tpsym	;Check for sym
+	call	chkFCB
+	jr	nz,ntsym
+	call	symsv
+	jp	getcmd
+;
+; Not of type SMB -- check for CTL
+;
+ntsym:
+	ld	de,tpctl	;Check for ctl type
+	call	chkFCB
+	jr	z,svctl		;Yes, so save ctl file
+	ld	de,tpdoc	;Check for doc type
+	call	chkFCB
+	jr	z,svdoc		;Yes, so save doc file
+	ld	de,tpasm	;Check for mac type
+	call	chkFCB
+	jp	nz,what		;Error if not mac at this point
+	jp	svasm		;Save assembly language (type already mac)
+;
+; Save the comment table
+;
+svdoc:
+	call	docsv
+	jp	getcmd	
+;
+; Save the control table on disk
+;
+svctl:
+	call	svctl0		;Use routine
+	jp	getcmd
+;
+; Save all files -- common routine
+;
+allsav:
+	ld	hl,tpdoc	;Save doc file
+	call	fixtyp
+	call	pstrng
+	db	cr,lf
+	db	'Saving .CMT file...',cr,lf,null
+	call	docsv
+;
+	ld	hl,tpsym	;Save sym file
+	call	fixtyp
+	call	pstrng
+	db	'Saving .SMB file...',cr,lf,null
+	call	symsv
+;
+	ld	hl,tpctl	;Save ctl file
+	call	fixtyp
+	call	pstrng
+	db	'Saving .CTL file...',cr,lf,null
+	call	svctl0
+;
+	call	pstrng		;Optionally save mac file
+	db	'Create a New .',etx,' File (Y/N)? ',null
+	call	yes		;Get response
+	jp	nz,getcmd
+	ld	hl,tpasm	;Prepare MAC/ASM file
+	call	fixtyp
+	ret
+;
+; Save the MAC/ASM file
+;
+svasm::
+	call	exist		;Test file on disk
+	jr	z,nofile	;Nope
+	call	pstrng		;Optionally overwrite mac file
+	db	etx,' File exists - Overwrite it (Y/N)? ',null
+	call	yes		;Get response
+	jp	nz,getcmd
+nofile:
+	ld	a,TRUE		;Mark file as open
+	ld	(File),a
+	xor	a		;Disable writing at this time
+	ld	(wrtenab),a
+	call	rewrite		;Open file for output
+	call	pstrng		;Print message
+	db	'++ Writing ',etx,' Enabled'
+	db	cr,lf,'Use Z Command or '
+	db	'E Control to Close File ++',null
+	jp	getcmd.NL	;Now process user's next commands
+;
+; Routine to save the symbol table
+;
+symsv::
+	ld	hl,(sym.root)	;Pt to symbol table
+svfl:
+	push	hl
+	call	Get.Ptr.len	;Get values
+	pop	hl
+	ret	z		;Nothing in table
+	call	rewrite		;Open the file
+lup2:
+	call	Get.Ptr.len	;Get values
+	jr	z,wrteof	;Write eof to file if done
+	call	expnd		;Write address in de as ascii chars on disk
+	ld	a,' '		;Output <sp>
+	call	put
+wrtsym:
+	ld	a,(hl)		;Get next char of symbol
+	call	put		;Write to disk
+	inc	hl		;Pt to next
+	djnz	wrtsym		;Count down size of symbol
+	call	putNL		;... new line
+	jr	lup2
+;
+; Routine to save the control table on disk
+;
+svctl0::
+	ld	hl,(ctl.root)	;Pt to table
+	push	hl
+	call	Get.Ptr		;Test any here
+	pop	hl
+	ret	z
+	call	rewrite		;Open file
+svctl1:
+	call	Get.Ptr		;Get values
+	jr	z,wrteof
+	call	expnd		;Output address in de as 4 hex chars
+	ld	a,','		;Output comma
+	call	put
+	ld	a,(hl)		;Output control mode char
+	call	put
+	call	putNL		;Output new line
+	inc	hl		;Pt to next control table entry
+	jr	svctl1
+;
+; Write an EOF
+;
+wrteof:
+	ld	a,eof		;Write eof
+	call	put
+	call	nxtrcrd
+	ret
+;
+; Save comments
+;
+docsv::
+	ld	hl,(comend)	;Get ptr in hl
+	inc	hl
+	inc	hl
+	ld	(hl),0		;Set nulll final comment
+	ld	hl,(comst)	;Pt to start of table
+	jp	svfl		;Perform straight save
+;
+; Get values from control and comment table pointed to by HL
+; Reg DE returns symbol address, Accu and reg B return length
+; If zero flag set, symbol is empty, e.g. end of table
+;
+Get.Ptr.len:
+	call	Get.Ptr		;Get address of symbol in de
+	ld	a,(hl)		;Get length of symbol in a
+	inc	hl
+	ld	b,a		;... and b
+	or	a		;Done if length is zero
+	ret
+Get.Ptr:
+	ld	e,(hl)		;Get address in de
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,d		;Check for end (0ffffh)
+	and	e
+	inc	a		;A=0 if so
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  C                         %%
+; %% Control table entries are made here %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+ctl::
+	call	iecnt		;Init ecnt
+	call	get.buf		;Dump control table if just a 'c' command
+	jp	z,cdump1
+	call	cnvrt		;Get address
+	cp	cr		;Error?
+	jp	z,cdump		;Dump if so
+	call	chk.delim	;Delimiter?
+	inc	hl		;Pt to 2nd operand
+	ld	a,(hl)		;Get it (control type)
+	call	ftctl		;Process entry with control table
+	jp	getcmd
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  ;                                 %%
+; %% Comment routine.  It adds or lists comments %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+cmnt::
+	call	get.buf		;Done?
+	jp	z,lstcmt	;Yes, so list comments
+	cp	'O'		;Look for 'on/off' switch
+	jr	nz,cmnt1
+	inc	hl
+	ld	a,(hl)		;Second character of the comment
+	sbc	a,'F'		;Create a 0 for 'off'
+	jr	z,cmnt2
+	cp	'N'-'F'		;Look for an 'n' (for 'on')
+	jp	nz,what
+cmnt2:
+	ld	(xcsw),a	;Turn off comments
+	jp	getcmd
+;
+; Process new comment entry
+;
+cmnt1:
+	call	cnvrt		;Get address in de
+	inc	hl		;Pt to next char
+	cp	cr		;If done, we delete comment
+	jp	z,onecmt
+	call	chk.delim
+	ld	bc,inbuf.1	;Set base
+	call	InsCmt		;Insert comment
+	jp	getcmd
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  E                        %%
+; %% Place a symbol in the symbol table %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+enter::
+	ld	hl,inbuf.2	;Check for chars after the E
+	call	cnvrt		;Get value
+	call	chk.delim	;Must be followed by <sp> or ','
+;
+; Get symbol
+;
+enter0:
+	inc	hl		;Pt to symbol
+	ld	a,(hl)		;Get '.'
+	cp	'.'		;Must be '.'
+	jp	nz,what
+	push	de		;Save the symbol's value
+	push	hl		;Save the buffer ptr
+	call	symsch		;Return with c=0 for match
+				;.. B=length   HL=start of string
+	jr	c,enter1	;Nothing to delete
+	push	hl
+	call	crlf		;Print message that symbol was killed
+	call	prnt
+	call	pstrng
+	db	' was Killed',cr,lf,null
+	pop	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	call	kill0		;Kill symbol
+enter1:
+	pop	hl
+	push	hl
+	call	lngth		;Compute length of symbol in b
+	pop	de
+	ld	a,b		;Check for symbol too long
+	cp	symmax+1
+	jr	c,enter2
+	push	hl
+	ld	bc,symmax	;Set to max length
+	ld	h,d		;Hl=de
+	ld	l,e
+	inc	hl		;Add 1 for 1st char
+	add	hl,bc
+	ld	(hl),0		;Terminate symbol
+	ld	b,c		;B=symmax
+	call	pstrng
+	db	'** Label truncated',cr,lf,null
+	pop	hl
+enter2:
+	pop	de
+	call	insert		;Insert symbol into symbol table
+	jp	getcmd
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  K                    %%
+; %% Delete a symbol from the table %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+kill::
+	call	get.buf		;Check for symbol specified
+	cp	'.'		;Must be '.'
+	jp	nz,what
+	call	lngth		;Get length in b
+	call	plcsym		;Find symbol pted to by hl
+	jp	c,what		;Error if not found
+	call	kill0		;Kill it
+	jp	getcmd
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  X                   %%
+; %% Purge all symbols and control %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+purge::
+	call	pstrng		;Prompt user
+	db	'Restart DASM (Y/N)? ',null
+	call	yes
+	jp	nz,getcmd
+	call	IniTables	;Do initialization
+	call	pstrng		;Print function
+	db	'Restarting DASM',null
+	jp	getcmd.NL
+;
+; %%%%%%%%%%%%%%%
+; Command:  #  %%
+; %% Exit DASM %%
+; %%%%%%%%%%%%%%%
+;
+exit::
+	call	pstrng		;Prompt user
+	db	cr,lf,'Exit (Y/N)? ',null
+	call	yes
+	jp	nz,getcmd
+	call	..close		;Close pending assembler file
+	jp	wboot
+;
+; Watch the console for a key and abort if so
+;
+brkchk:
+	push	bc
+	push	de
+	push	hl
+	call	conclr		;Clear console input
+	jp	z,PopRegs	;.. none pressed
+	call	crlf		;Else new line
+brkcmd:
+	call	pstrng		;Prompt user
+	db	'[USER ABORT]',null
+	jp	getcmd.NL
+;
+; Watch the console for a question mark and give satatistic if so
+;
+statchk:
+	push	bc
+	push	de
+	push	hl
+	call	conclr		;Clear console input
+	jp	z,PopRegs	;.. none pressed
+	cp	'?'		;Test statistic request
+	jr	nz,brkcmd	;Nope, abort processing
+	ld	a,(hush)	;Test quiet
+	push	af
+	cp	TRUE
+	call	z,TellPC	;Give PC value if so
+	pop	af
+	ld	(hush),a	;Reset quiet state
+	jp	PopRegs
+;
+; Give current PC
+;
+TellPC:
+	call	pstrng
+	db	'PC     = ',null
+	ld	hl,(pc)
+	call	pval.NL
+	ret
+

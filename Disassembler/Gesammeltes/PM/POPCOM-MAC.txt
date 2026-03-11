@@ -1,0 +1,2897 @@
+	title	COM File Compression
+	name	('POPCOM')
+
+; DASMed version of POPCOM.COM
+; By W. Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+CCP	equ	0080h
+TPA	equ	0100h
+
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.make	equ	22
+.rename	equ	23
+.setdma	equ	26
+.rndrd	equ	33
+.rndwr	equ	34
+.filsiz	equ	35
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+_DIR	equ	16
+_RRN	equ	33
+FCBlen	equ	36
+
+reclng	equ	128
+
+_DR	equ	8		; Number of destination records
+_SR	equ	8		; Number of source records
+
+null	equ	00h
+bell	equ	07h
+bs	equ	08h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+MAXFIL	equ	128
+
+NOMSB	equ	01111111b
+LOMASK	equ	00001111b
+BITMASK	equ	00000111b
+
+FLLEN	equ	2000h
+
+_JP	equ	0c3h
+_JR	equ	018h
+
+l0400	equ	1024
+
+l0008	equ	08h
+l00e5	equ	0e5h
+
+POPLEN	equ	TPA+CmprLen	;;00110h
+
+lffff	equ	0ffffh
+
+l0100:
+	jp	l0200
+;
+	db	10h,0
+l0105:
+	db	8		; Cluster size
+l0106:
+	db	0		; File delete flag
+l0107:
+	db	0		; Destination drive
+l0108:
+	db	0		; Jump flag
+;
+	db	0,0,0,0,0,0,0
+;
+; Process time stamp
+;
+l0110:
+	ret
+;
+	ld	hl,1bh
+	add	hl,de
+	ex	de,hl
+	ld	hl,1bh
+	add	hl,bc
+	ld	bc,4
+	ldir
+	ret
+;
+	db	'0110H-01FFH is the patch area for keeping time stamp. '
+	db	'When it is called, BC has source FCB and DE has destination FCB. '
+	db	'And both files are already opened. '
+	db	'So you can copy the time stamp. '
+	db	'Aftre return, both files are closed.'
+;
+	db	0,0
+;
+; ######################
+; #### START POPCOM ####
+; ######################
+;
+l0200:
+	ld	sp,l1ce7	; Get local stack
+	ld	de,l129d
+	ld	c,.string
+	call	BDOS		; Tell what we are
+	ld	a,(TPATOP+1)	; Get top page
+	cp	0a8h		; Test room
+	jr	nc,l021b	; Yeap
+	ld	de,l144f
+	ld	c,.string
+	call	BDOS		; Tell not enough memory
+	rst	0
+l021b:
+	xor	a
+	ld	(l16e1),a	; Clear option -L and -R
+	ld	hl,CCP		; Point to CCP line
+	ld	d,a
+	ld	e,(hl)		; Get length of line
+	inc	de
+	ex	de,hl
+	add	hl,de		; Point end of line
+	ld	(hl),a		; Close it
+	ex	de,hl
+l0229:
+	inc	hl
+	ld	a,(hl)		; Get CCP character
+	cp	' '		; Skip blanks
+	jr	z,l0229
+	jr	c,l0267		; Give help if input is not valid
+	cp	'-'		; Test option prefix
+	jr	nz,l025c	; Nope
+	inc	hl		; Skip zo option
+	ld	a,(hl)		; Get option
+	dec	hl
+	call	l1217		; Convert to upper case
+	cp	'L'		; Test list files
+	jr	z,l0243
+	cp	'R'		; Test restore file
+	jr	nz,l025c
+l0243:
+	ld	(l16e1),a	; Set option
+	inc	hl		; Skip option
+l0247:
+	inc	hl
+	ld	a,(hl)		; Get next character
+	cp	' '		; Skip blanks
+	jr	z,l0247
+	jr	nc,l025c	; End on more in line
+	ld	a,(l16e1)	; Get option
+	cp	'L'		; Test list
+	jr	nz,l0267	; Give help if input is not valid
+	ld	(hl),'*'	; Set wildcard
+	inc	hl
+	ld	(hl),null
+	dec	hl
+l025c:
+	ld	(l16e2),hl	; Save CCP pointer
+	ld	hl,0
+	ld	(l1629),hl
+	jr	l0270
+;
+; Give help  and exit
+;
+l0267:
+	ld	de,l12ee
+	ld	c,.string
+	call	BDOS		; Give help
+	rst	0		; Exit
+;
+; Continue parse
+;
+l0270:
+	ld	hl,(l16e2)	; Get CCP pointer
+	dec	hl
+l0274:
+	inc	hl
+	ld	a,(hl)		; Get character
+	cp	' '
+	jr	z,l0274		; Skip blanks
+	jr	c,l02f6		; End reached
+	cp	'-'		; Test option prefix
+	jp	nz,l032d	; Nope, process filematch
+	inc	hl
+	ld	a,(hl)		; Get option
+	inc	hl
+	call	l1217		; Convert to upper case
+	cp	' '		; Test dummy option
+	jr	z,l02f7
+	cp	'C'		; Test cluster size in terms of records
+	jr	z,l02ad
+	cp	'D'		; Test deletion of original file
+	jr	z,l02c0
+	cp	'J'		; Test usage of JP on entry
+	jr	z,l02ca
+	cp	'N'		; Test no usage of JP on entry
+	jr	z,l02ca
+	cp	'O'		; Test output file drive
+	jr	z,l02cf
+	jr	l02ee		; Bad option otherwise
+l02a1:: ;;**
+	call	l0301		; Convert hex ASCII ^HL to value in reg DE
+	jr	c,l02ee
+	ld	(l1629),de
+	dec	hl
+	jr	l0274
+;
+; Option -Cxx : Set size of a cluster to xx records
+;
+l02ad:
+	call	l0301		; Convert hex ASCII ^HL to value in reg DE
+	jr	c,l02ee		; Invalid
+	ld	a,d
+	or	a		; Verify byte value
+	jr	nz,l02ee	; Error if not
+	ld	a,e
+	or	a		; Must be not zero
+	jr	z,l02ee		; Error if so
+	ld	(l0105),a	; Set up cluster size
+	dec	hl
+	jr	l0274
+;
+; Option -D   : Delete original file
+;
+l02c0:
+	ld	a,(l0106)	; Get delete flag
+	xor	0ffh		; Toggle it
+	ld	(l0106),a
+	jr	l02e7
+;
+; Option -J   : Use JP at entry
+; Option -N   : Do not use JP at entry
+;
+l02ca:
+	ld	(l0108),a	; Set (no) jump
+	jr	l02e7
+;
+; Option -Od  : Output files to drive d:
+;
+l02cf:
+	ld	a,(hl)		; Get drive character
+	inc	hl
+	cp	' '+1		; Test default
+	jr	c,l02e3		; Yeap
+	call	l1217		; Convert to upper case
+	sub	'A'		; Check range A..P
+	jr	c,l02ee		; Invalid if not
+	cp	'P'+1-'A'
+	jr	nc,l02ee
+	inc	a		; Map A->1
+	jr	l02e4
+l02e3:
+	xor	a
+l02e4:
+	ld	(l0107),a	; Set up drive
+l02e7:
+	ld	a,(hl)		; Get next character
+	cp	' '		; Test more
+	jr	c,l02f6		; End reached
+	jr	z,l0274		; Next item on blank
+l02ee:
+	ld	de,l1461
+	ld	c,.string
+	call	BDOS		; Tell bad option
+l02f6:
+	rst	0		; Exit to OS
+l02f7:
+	ld	a,(hl)
+	cp	' '
+	jr	c,l02f6		; End reached
+	jr	nz,l032d	; Process filematch
+	inc	hl
+	jr	l02f7
+;
+; Convert hex ASCII ^HL to value in reg DE - C set on error
+;
+l0301:
+	ld	de,0		; Init result
+l0304:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	' '		; Test end of number
+	ret	z		; Yeap
+	jr	c,l032c		; Exit if end on input
+	call	l1217		; Convert to upper case
+	sub	'0'		; Strip off offset
+	jr	c,l032a		; Invalid
+	cp	9+1		; Test decimal
+	jr	c,l0320		; Yeap
+	sub	'A'-'0'-10	; Fix for hex
+	cp	10		; Verify valid range
+	jr	c,l032a
+	cp	15+1
+	jr	nc,l032a
+l0320:
+	ex	de,hl
+	add	hl,hl		; * 2
+	add	hl,hl		; * 4
+	add	hl,hl		; * 8
+	add	hl,hl		; *16
+	or	l		; Insert new digit
+	ld	l,a
+	ex	de,hl
+	jr	l0304
+l032a:
+	scf
+	ret
+l032c:
+	rst	0
+;
+; Process filematch - parse file
+;
+l032d:
+	push	hl
+	ld	hl,FCB
+	ld	(hl),0		; Init default drive
+	inc	hl
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),' '
+	ld	bc,.nam+.ext-1
+	ldir			; Clear name of file
+	pop	hl
+	ld	de,FCB		; Init pointer to FCB
+	inc	hl		; Skip possible drive
+	ld	a,(hl)		; Get character
+	dec	hl
+	cp	':'		; Test drive delimiter
+	jr	nz,l0364	; Nope
+;
+; Set up drive
+;
+	ld	a,(hl)
+	call	l1217		; Convert to upper case
+	sub	'A'		; Check valid drive
+	jp	c,l03d5		; Error
+	cp	'P'+1-'A'
+	jr	nc,l03d5
+	inc	a
+	ld	(de),a
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	cp	' '+1
+	jr	nc,l0364
+	inc	de
+	ld	b,.nam
+	jr	l037e
+l0364:
+	inc	de
+	ld	b,.nam		; Set length
+l0367:
+	ld	a,(hl)		; Get name
+	cp	' '+1		; Test end of input
+	jr	c,l03b4
+	inc	hl
+	cp	'.'		; Test type delimiter
+	jr	z,l038e		; End of name
+	cp	'*'		; Test wildcard
+	jr	z,l037e		; Fill remainder of name if so
+	call	l1217		; Convert to upper case
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	l0367
+	jr	l0384
+l037e:
+	ld	a,'?'
+l0380:
+	ld	(de),a		; Fill wildcard
+	inc	de
+	djnz	l0380
+l0384:
+	ld	a,(hl)		; Get character
+	cp	' '+1		; Test end of input
+	jr	c,l03b4
+	inc	hl
+	cp	'.'		; Wait for type delimiter
+	jr	nz,l0384
+l038e:
+	ld	de,FCB+.drv+.nam
+	ld	b,.ext		; Set length
+l0393:
+	ld	a,(hl)		; Get type
+	cp	' '+1		; Test end of input
+	jr	c,l03b4
+	inc	hl
+	cp	'*'		; Test wildcard
+	jr	z,l03a6		; Fill remainder of name if so
+	call	l1217		; Convert to upper case
+	ld	(de),a		; Unpack type
+	inc	de
+	djnz	l0393
+	jr	l03ac
+l03a6:
+	ld	a,'?'
+l03a8:
+	ld	(de),a		; Fill wildcard
+	inc	de
+	djnz	l03a8
+l03ac:
+	ld	a,(hl)		; Get character
+	cp	' '+1		; Test end of input
+	jr	c,l03b4
+	inc	hl
+	jr	l03ac		; Position to end
+;
+; End of parse
+;
+l03b4:
+	ld	(l16e2),hl	; Set CCP pointer
+	ld	hl,FCB+.drv+.nam
+	ld	a,(hl)		; Get type
+	cp	' '		; Test defined
+	jr	nz,l03c9	; Yeap
+	ld	(hl),'C'	; Set default .COM
+	inc	hl
+	ld	(hl),'O'
+	inc	hl
+	ld	(hl),'M'
+	jr	l03de
+l03c9:
+	cp	'$'		; Verify not .$$$
+	jr	nz,l03de
+	inc	hl
+	cp	(hl)
+	jr	nz,l03de
+	inc	hl
+	cp	(hl)
+	jr	nz,l03de
+;
+; Tell bad name of file and exit
+;
+l03d5:
+	ld	de,l1470
+	ld	c,.string
+	call	BDOS		; Tell bad name
+	rst	0
+;
+; Sample files
+;
+l03de:
+	ld	hl,FCB+_EX	; Point to extent
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),0
+	ld	bc,FCBlen-_EX-1
+	ldir			; Clear remainder of FCB
+	ld	de,l2000
+	ld	c,.setdma
+	call	BDOS		; Set DMA buffer
+	ld	de,FCB
+	ld	c,.srcfrs	
+	call	BDOS		; Search for file
+	cp	3+1		; Test file found
+	jr	c,l040a		; Yeap
+	ld	de,l1481
+	ld	c,.string
+	call	BDOS		; Tell file not found
+	jp	l0270
+l040a:
+	ld	de,l16e6
+	ld	(l16e4),de	; Init search buffer
+	ld	b,0		; Init file count
+l0413:
+	rrca			; *32
+	rrca
+	rrca
+	ld	h,0
+	ld	l,a		; Expand index to 16 bit
+	ld	a,b
+	cp	MAXFIL		; Test max number of files reached
+	jr	z,l0435		; Yeap
+	inc	b		; Update file count
+	push	bc
+	ld	bc,l2000+.drv
+	add	hl,bc		; Build address in buffer
+	ld	bc,.nam+.ext
+	ldir			; Unpack name of file
+	push	de
+	ld	c,.srcnxt
+	call	BDOS		; Find next file
+	pop	de
+	pop	bc
+	cp	3+1		; Test more files found
+	jr	c,l0413		; Yeap
+;
+; End of search
+;
+l0435:
+	xor	a
+	ld	(de),a		; Close search buffer
+l0437:
+	ld	hl,(l16e4)	; Get search buffer
+	ld	a,(hl)		; Get byte
+	or	a		; Test end
+	jp	z,l0270		; Yeap
+	ld	de,l1675+.drv
+	ld	bc,.nam+.ext
+	ldir			; Unpack file name
+	ld	(l16e4),hl	; Update search buffer
+	ld	h,d
+	ld	l,e
+	inc	de
+	ld	(hl),0
+	ld	bc,FCBlen-_EX-1
+	ldir			; Clear remainder
+	ld	a,(l16e1)	; Get option
+	cp	'L'		; Test list
+	jr	z,l0467		; Yeap
+	ld	hl,l1675+.drv+.nam
+	bit	7,(hl)		; Test read only
+	jr	nz,l0437	; Skip if so
+	inc	hl
+	bit	7,(hl)		; Test system
+	jr	nz,l0437	; Skip if so
+l0467:
+	ld	a,(FCB)		; Get drive
+	ld	(l1675),a	; Put into FCB
+	ld	hl,l1675
+	ld	de,l1699
+	ld	bc,FCBlen
+	ldir			; Unpack FCB
+	ld	a,(l0107)	; Get destination drive
+	or	a		; Test default
+	jr	z,l0481		; Yeap
+	ld	(l1699),a	; Put into FCB
+l0481:
+	ld	a,(l1675)	; Get drive
+	or	a		; Test default
+	jr	nz,l0492	; Nope
+	ld	e,' '
+	ld	c,.conout
+	call	BDOS		; Filler for D:
+	ld	e,' '
+	jr	l049c
+l0492:
+	add	a,'A'-1		; Build drive
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Print it
+	ld	e,':'		; Followed by delimiter
+l049c:
+	ld	c,.conout
+	call	BDOS
+	ld	hl,l1675+.drv
+	ld	b,.nam
+l04a6:
+	ld	e,(hl)
+	push	hl
+	push	bc
+	ld	c,.conout
+	call	BDOS		; Print name of file
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l04a6
+;
+	ld	e,'.'
+	ld	c,.conout
+	call	BDOS		; Give delimiter
+	ld	hl,l1675+.drv+.nam
+	ld	b,.ext
+l04bf:
+	ld	e,(hl)
+	push	hl
+	push	bc
+	ld	c,.conout
+	call	BDOS		; Print type of file
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l04bf
+;
+	ld	e,' '
+	ld	c,.conout
+	call	BDOS		; Give some blanks
+	ld	e,' '
+	ld	c,.conout
+	call	BDOS
+	ld	de,l1675
+	ld	c,.open
+	call	BDOS		; Open file
+	cp	3+1		; Test success
+	jr	c,l04f1		; Yeap
+	ld	de,l1494
+	ld	c,.string
+	call	BDOS		; Tell open not possible
+	jp	l0437
+l04f1:
+	ld	de,l1675
+	ld	c,.filsiz
+	call	BDOS		; Get size of file
+	ld	hl,(l1675+_RRN)
+	ld	a,h
+	cp	2		; Test within range 0x0000-0xFFFF
+	jr	c,l0514		; Yeap
+	ld	de,l14a3
+	ld	c,.string
+	call	BDOS		; Tell file too big to fit into memory
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS		; Close file
+	jp	l0437
+l0514:
+	ld	(l163a),hl	; Save size of file
+	ld	a,(l16e1)	; Get option
+	cp	'L'		; Test list
+	jr	z,l053f
+	cp	'R'		; Test restore
+	jr	z,l053f
+	ld	a,h
+	or	a		; Test range
+	jr	nz,l053f
+	ld	a,(l0105)	; Get cluster size
+	cp	l		; Test valid length
+	jr	c,l053f		; Yeap
+	ld	de,l14b3
+	ld	c,.string
+	call	BDOS		; File too small
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS
+	jp	l0437
+l053f:
+	xor	a		; Size*reclng
+	srl	h
+	rr	l
+	rra
+	ld	e,a
+	ld	d,l
+	ld	(l1627),de	; Save length in bytes
+	ld	hl,l0100
+	add	hl,de		; Add TPA offset
+	ld	a,h
+	ld	(l0d31),a
+	ld	a,l
+	ld	(l0d36),a
+	ld	hl,l0100
+	ld	(l1641),hl
+	ld	hl,0
+	ld	(l1675+_RRN),hl	; Init record
+	ld	de,l2000
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l1675
+	ld	c,.rndrd
+	call	BDOS		; Read first record
+	or	a		; Verify success
+	jr	z,l0589
+	ld	de,l1565
+	ld	c,.string
+	call	BDOS		; Tell read error
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS
+	jp	l0437
+l0589:
+	call	l1066		; Test file already compressed - C set says not
+	ld	a,(l16e1)	; Get option
+	jr	nc,l05a3	; It is compressed
+;
+; Process option on uncompressed file
+; ...................................
+;
+	cp	'L'		; Test list
+	jr	z,l05b5
+	cp	'R'		; Test restore
+	jr	nz,l05e6	; Should not be so
+	ld	de,l14db
+	ld	c,.string
+	call	BDOS		; Tell not compressed
+	jr	l05db
+;
+; Process option on compressed file
+; .................................
+;
+l05a3:
+	cp	'L'		; Test list
+	jr	z,l05bf
+	cp	'R'		; Test restore
+	jr	z,l05e6		; Should be so
+	ld	de,l14c5
+	ld	c,.string
+	call	BDOS		; Tell already compressed
+	jr	l05db
+;
+; List uncompressed file
+;
+l05b5:
+	ld	de,l12eb
+	ld	c,.string
+	call	BDOS		; Close line
+	jr	l05db
+;
+; List compressed file
+;
+l05bf:
+	ld	hl,(l1627)	; Get byte length
+	call	l1239		; Print it decimal
+	ld	de,l152f
+	ld	c,.string
+	call	BDOS
+	ld	hl,(l2000+ARClen)
+	call	l1239		; Print length in header as decimal
+	ld	de,l12eb
+	ld	c,.string
+	call	BDOS		; Close line
+l05db:
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS		; Close file
+	jp	l0437
+;
+; Compress or restore file
+;
+l05e6:
+	ld	hl,l1699+.drv+.nam
+	ld	(hl),'$'	; Set type .$$$
+	inc	hl
+	ld	(hl),'$'
+	inc	hl
+	ld	(hl),'$'
+	ld	de,l1699
+	ld	c,.open
+	call	BDOS		; Test file on disk
+	cp	3+1
+	jr	nc,l0609	; Nope
+	ld	de,l1699
+	ld	c,.delete
+	call	BDOS		; Delete existing file
+	cp	3+1		; Verify success
+	jr	nc,l0615	; Nope
+l0609:
+	ld	de,l1699
+	ld	c,.make
+	call	BDOS		; Create file
+	cp	3+1		; Verify success
+	jr	c,l0628		; Yeap
+l0615:
+	ld	de,l14ed
+	ld	c,.string
+	call	BDOS		; Cannot create it
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS		; Close file
+	jp	l0437
+l0628:
+	ld	hl,0
+	ld	(l1657),hl	; Clear destination byte count
+	ld	hl,l2400
+	ld	(l1655),hl	; Init destination buffer
+	ld	hl,l0100
+	ld	(l1653),hl	; Init destination address
+	ld	a,(l16e1)	; Get option
+	cp	'R'		; Test restore
+	jp	z,l0de9
+;
+; Compress file
+;
+	ld	de,l150d
+	ld	c,.string
+	call	BDOS		; Tell compressing
+	ld	hl,(l163a)	; Get size of file
+	ld	de,l0008-1
+	add	hl,de		; Fix it
+	srl	h		; Divide by 8
+	rr	l
+	srl	h
+	rr	l
+	srl	h
+	rr	l
+	ld	b,l		; Set for count
+	call	l1220		; Print dots
+	ld	hl,0
+	ld	(l1636),hl
+	ld	(l1629),hl
+	ld	(l162b),hl
+	ld	hl,l165d
+	ld	(l165b),hl	; Init pointer
+	ld	a,8
+	ld	(l1659),a	; Init bit count
+	xor	a
+	ld	(l163c),a	; Init done count
+	call	l10e5		; Read file into memory
+	jp	c,l102c		; Read error if end of file
+	ld	hl,l1643
+	ld	b,CmprLen
+l0687:
+	call	l10a3		; Read byte from disk
+	jp	c,l102c		; Read error if end of file
+	ld	(hl),a
+	inc	hl
+	djnz	l0687
+	ld	hl,l161d	; Point to header for compressed files
+	ld	b,CmprLen
+l0696:
+	ld	a,(hl)
+	call	l118d		; Write header to disk
+	jp	c,l1036		; Write error
+	inc	hl
+	djnz	l0696
+	ld	a,(l1643)	; Get first byte from file
+	call	l0a89		; Init compression header
+	ld	hl,l1643
+	ld	b,CmprLen
+l06ab:
+	ld	a,(hl)
+	call	l0abc
+	inc	hl
+	djnz	l06ab
+l06b2:
+	ld	a,(l162d)
+	ld	e,a
+	ld	a,(l163c)	; Get done count
+	cp	1+1
+	jr	nc,l06da
+	ld	h,HIGH l1f00
+	ld	a,(l162e)
+	ld	l,a
+l06c3:
+	call	l10a3		; Read byte from disk
+	jp	c,l102c		; Read error if end of file
+	ld	(hl),a
+	inc	l
+	ld	a,l
+	cp	e
+	jr	z,l06d7
+	ld	a,(l163c)	; Get done count
+	cp	2
+	jr	c,l06c3
+	ld	a,l
+l06d7:
+	ld	(l162e),a
+l06da:
+	call	l0b37
+	ld	a,(l1633)
+	or	a
+	jr	z,l0701
+	ld	c,a
+	ld	de,(l1634)
+	ld	hl,(l1630)	; Fetch current address
+	or	a
+	sbc	hl,de
+	jr	nc,l06f4
+	ld	de,l2000
+	add	hl,de
+l06f4:
+	ex	de,hl
+	dec	a
+	jr	nz,l071f
+	ld	a,d
+	or	a
+	jr	nz,l0701
+	ld	a,e
+	cp	80h
+	jr	c,l0728
+l0701:
+	xor	a
+	call	l1129		; Write 0 to file
+	jp	c,l1036		; Write error
+	ld	h,HIGH l1f00
+	ld	a,(l162d)
+	ld	l,a
+	inc	a
+	ld	(l162d),a
+	ld	a,(hl)
+	call	l116b		; Write byte
+	jp	c,l1036		; Write error
+	call	l0abc
+	jp	l082b
+l071f:
+	ld	a,d
+	or	a
+	jr	nz,l073a
+	ld	a,e
+	cp	80h
+	jr	nc,l0746
+l0728:
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036		; Write error
+	ld	a,e
+	call	l116b		; Write byte
+	jp	c,l1036		; Write error
+	ld	a,c
+	jp	l07ab
+l073a:
+	ld	a,d
+	cp	4
+	jr	c,l0746
+	jr	nz,l0780
+	ld	a,e
+	cp	80h
+	jr	nc,l0780
+l0746:
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036		; Write error
+	ld	hl,-80h
+	add	hl,de
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	ld	a,h
+	or	10000000b
+	call	l116b		; Write byte
+	jp	c,l1036		; Write error
+	ld	a,l
+	rlca
+	call	l1129		; Write bit to file
+	jp	c,l1036		; Write error
+	rlca
+	call	l1129		; Write bit to file
+	jp	c,l1036
+	rlca
+	call	l1129		; Write bit to file
+	jp	c,l1036
+	rlca
+	call	l1129		; Write bit to file
+	jp	c,l1036
+	ld	a,c
+	dec	a
+	jp	l07ab
+l0780:
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036		; Write error
+	ld	h,d
+	ld	l,e
+	ld	a,c
+	sub	3
+	ccf
+	rl	l
+	rl	h
+	ld	a,h
+	or	11000000b
+	call	l116b		; Write byte
+	jp	c,l1036		; Write error
+	ld	a,l
+	call	l116b		; Write byte
+	jp	c,l1036		; Write error
+	ld	a,c
+	dec	a
+	ld	b,a
+	dec	a
+	jp	z,l0818
+	jp	l07b6
+l07ab:
+	ld	b,a
+	dec	a
+	jr	z,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036		; Write error
+l07b6:
+	dec	a
+	jr	z,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036		; Write error
+	dec	a
+	jr	z,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036
+	dec	a
+	sub	4
+	jr	c,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036
+	sub	8
+	jr	c,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036
+	sub	16
+	jr	c,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036
+	sub	32
+	jr	c,l07fc
+	scf
+	call	l1129		; Write 1 to file
+	jp	c,l1036
+	sub	64
+	ccf
+	jr	c,l07fd
+l07fc:
+	xor	a
+l07fd:
+	call	l1129		; Write 1 or 0 to file
+	jp	c,l1036		; Write error
+	ld	a,b
+	cp	4
+	jr	c,l0818
+	ld	b,7
+l080a:
+	rlca
+	jr	c,l080f
+	djnz	l080a
+l080f:
+	rlca
+	call	l1129		; Write bit to file
+	jp	c,l1036		; Write error
+	djnz	l080f
+l0818:
+	ld	h,HIGH l1f00
+	ld	a,(l162d)
+	ld	l,a
+	ld	b,c
+	inc	b
+l0820:
+	ld	a,(hl)
+	call	l0abc
+	inc	l
+	djnz	l0820
+	ld	a,l
+	ld	(l162d),a
+l082b:
+	ld	hl,(l165b)	; Get pointer
+	ld	de,l165d
+	or	a
+	sbc	hl,de		; Calculate length
+	ld	a,(l1659)	; Get bit count
+	cp	8
+	jr	z,l083c
+	inc	hl
+l083c:
+	ld	de,(l1653)	; Get destination address
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l1641)
+	or	a
+	sbc	hl,de
+	jr	c,l0857
+	ex	de,hl
+	ld	hl,(l1636)
+	or	a
+	sbc	hl,de
+	jr	nc,l0857
+	ld	(l1636),de
+l0857:
+	ld	hl,(l1627)	; Get byte length
+	ld	de,l0100
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l1641)
+	or	a
+	sbc	hl,de
+	jp	c,l06b2
+	ld	a,(l1659)	; Get bit count
+	cp	8
+	jr	z,l0879
+	ld	b,a
+l0870:
+	xor	a
+	call	l1129		; Write 0 to file
+	jp	c,l1036		; Write error
+	djnz	l0870
+l0879:
+	ld	hl,(l1653)	; Get destination address
+	ld	(l0d04),hl
+	dec	hl
+	ld	(l0d1a),hl
+	ld	de,(l1636)
+	add	hl,de
+	ld	(l0d1d),hl
+	ld	hl,(l1653)	; Get destination address
+	ld	de,POPLEN
+	or	a
+	sbc	hl,de
+	ld	(l0d20),hl
+	ld	hl,l1643
+	ld	b,CmprLen
+l089c:
+	ld	a,(hl)
+	call	l118d		; Write byte to disk
+	jp	c,l1036		; Write error
+	inc	hl
+	djnz	l089c
+	ld	hl,(l1653)	; Get destination address
+	ld	(l1638),hl	; Set address
+	ld	de,l00e5
+	add	hl,de
+	ld	(l0d0f),hl
+	ld	de,(l1636)
+	add	hl,de
+	ld	(l0d12),hl
+	ld	hl,(l1653)	; Get destination address
+	add	hl,de
+	ld	de,l0d25-l0d03
+	add	hl,de
+	ld	(l0d23),hl	; Set JP address
+	ex	de,hl
+	ld	hl,l0d2f-l0d25
+	add	hl,de
+	ld	(l0de7),hl
+	ld	hl,l0d03	; Point to code
+	ld	bc,l00e6	; Set length
+l08d4:
+	ld	a,(hl)
+	call	l118d		; Write byte to disk
+	jp	c,l1036		; Write error
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l08d4
+	call	l11c0		; Write buffer to disk
+	jp	c,l1036		; Write error
+	ld	a,(l0105)	; Get cluster size
+	ld	d,0
+	ld	e,a
+	ld	hl,(l1699+_RRN)
+	ld	bc,0
+l08f3:
+	inc	bc
+	or	a
+	sbc	hl,de
+	jr	z,l08fb
+	jr	nc,l08f3
+l08fb:
+	push	bc
+	ld	hl,(l163a)	; Get size of file
+	ld	bc,0
+l0902:
+	inc	bc
+	or	a
+	sbc	hl,de
+	jr	z,l090a
+	jr	nc,l0902
+l090a:
+	pop	hl
+	or	a
+	sbc	hl,bc
+	jr	c,l0937
+	ld	de,l1533
+	ld	c,.string
+	call	BDOS		; Tell inefficiency
+	ld	hl,(l1627)	; Get byte length
+	call	l1239		; Print it decimal
+	ld	de,l152a
+	ld	c,.string
+	call	BDOS		; Print arrow
+	ld	hl,(l1657)	; Get destination byte count
+	call	l1239		; Print it decimal
+	ld	de,l12eb
+	ld	c,.string
+	call	BDOS		; Close line
+	jp	l103e
+l0937:
+	ld	hl,l161d	; Point to header for compressed files
+	ld	de,(l1638)	; Get address
+	ld	a,(l0108)	; Get jump flag
+	cp	'J'		; Test use JP at entry
+	jr	z,l095e		; Yeap
+	cp	'N'		; Test not use JP at entry
+	jr	z,l0950
+	ld	a,(l1643)
+	cp	_JP		; Test JP in buffer
+	jr	z,l095e
+;
+; Do not use JP at entry
+;
+; Insert sequence:
+;
+; JR 0
+; JP addr1
+;
+l0950:
+	ld	(hl),_JR	; Set code
+	inc	hl
+	ld	(hl),0
+	inc	hl
+	ld	(hl),_JP	; Set JP
+	inc	hl
+	ld	(hl),e		; Store address
+	inc	hl
+	ld	(hl),d
+	jr	l096c
+;
+; Use JP at entry
+;
+; Insert sequence:
+;
+; JP addr1
+; DW addr2
+;
+l095e:
+	ld	(hl),_JP	; Set JP
+	inc	hl
+	ld	(hl),e		; Store addresses
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	de,(l1643+3)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l096c:
+	ld	hl,0
+	ld	(l1699+_RRN),hl	; Init record
+	ld	de,l2400
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l1699
+	ld	c,.rndrd
+	call	BDOS		; Read first record
+	or	a		; Verify success
+	jp	nz,l1036	; Write error if not
+	ld	hl,l161d	; Point to header for compressed files
+	ld	de,l2400
+	ld	bc,CmprLen
+	ldir			; Put into destination buffer
+	ld	de,l1699
+	ld	c,.rndwr
+	call	BDOS		; Write record
+	or	a		; Verify success
+	jp	nz,l1036	; Write error if not
+	ld	de,l151a
+	ld	c,.string
+	call	BDOS		; Tell success
+	ld	hl,(l1627)	; Get byte length
+	call	l1239		; Print it decimal
+	ld	de,l152a
+	ld	c,.string
+	call	BDOS		; Print arrow
+	ld	hl,(l1657)	; Get destination byte count
+	call	l1239		; Print it decimal
+	ld	de,l12eb
+	ld	c,.string
+	call	BDOS		; Close line
+	ld	bc,l1675	; Point to source FCB
+	ld	de,l1699	; Point to destination FCB
+	call	l0110		; Process time stamp
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS		; Close files
+	ld	de,l1699
+	ld	c,.close
+	call	BDOS
+	cp	3+1		; Verify success
+	jr	c,l09e9
+	ld	de,l15a0
+	ld	c,.string
+	call	BDOS		; Tell close not possible
+	jp	l0437
+l09e9:
+	ld	a,(l0106)	; Get delete flag
+	or	a		; Test file deletion
+	jr	z,l0a06		; Nop
+	ld	de,l1675
+	ld	c,.delete
+	call	BDOS		; Delete file
+	cp	3+1		; Verify success
+	jr	c,l0a5b
+	ld	de,l15e0
+	ld	c,.string
+	call	BDOS		; Tell deletion not possible
+	jp	l0437
+l0a06:
+	ld	hl,l1675
+	ld	de,l16bd
+	ld	bc,.drv+.nam
+	ldir			; Unpack name of file
+	ex	de,hl
+	ld	(hl),'O'	; Force type .ORG
+	inc	hl
+	ld	(hl),'R'
+	inc	hl
+	ld	(hl),'G'
+	inc	hl
+	ld	d,h
+	ld	e,l
+	inc	hl
+	ld	(hl),0
+	ld	bc,FCBlen-_EX-1
+	ldir			; Clear remainder of FCB
+	ld	de,l16bd
+	ld	c,.open
+	call	BDOS		; Open ORG file
+	cp	3+1		; Test file on disk
+	jr	c,l0a7e		; Yeap, cannot rename it
+	ld	de,l16bd
+	ld	c,.close
+	call	BDOS		; Close ORG file
+	ld	hl,l16bd
+	ld	de,l16bd+_DIR
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack new name
+	ld	hl,l1675
+	ld	de,l16bd
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack old name
+	ld	de,l16bd
+	ld	c,.rename
+	call	BDOS		; Rename ORG file
+	cp	3+1		; Verify success
+	jr	nc,l0a7e	; Nope, cannot rename it
+l0a5b:
+	ld	hl,l1675
+	ld	de,l16bd+_DIR
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack new name
+	ld	hl,l1699
+	ld	de,l16bd
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack old name
+	ld	de,l16bd
+	ld	c,.rename
+	call	BDOS		; Rename file
+	cp	3+1		; Verify success
+	jp	c,l0437		; Yeap
+l0a7e:
+	ld	de,l1603
+	ld	c,.string
+	call	BDOS		; Tell rename not possible
+	jp	l0437
+;
+; Init compression header
+;
+l0a89:
+	push	af		; Save byte
+	ld	hl,l9800	; Point to header area
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(hl),0
+	ld	bc,la800-l9800-1
+	ldir			; Clear it
+	pop	af
+	and	BITMASK		; Get lower bits
+	ld	h,a		; Get for index
+	ld	l,0
+	add	hl,hl
+	ld	de,l9800
+	add	hl,de
+	ld	de,lffff
+	ld	(hl),e		; Init this entry
+	inc	hl
+	ld	(hl),d
+	xor	a
+	ld	(l1632),a
+	ld	(l162f),a	; Init first access
+	ld	(l162d),a
+	ld	(l162e),a
+	ld	hl,l2800
+	ld	(l1630),hl	; Init current address
+	ret
+;
+;
+;
+l0abc:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	b,a		; Unpack byte
+	ld	a,(l162f)
+	or	a		; Test first access
+	jr	z,l0ae4		; Yeap
+	ld	hl,(l1630)	; Fetch current pointer
+	ld	e,(hl)		; Get byte
+	inc	hl
+	ld	a,h
+	cp	HIGH (l2800+FLLEN)	;;l4800	; Test end of area
+	jr	nz,l0ad4	; Nope
+	ld	hl,l2800	; Reset it
+l0ad4:
+	ld	a,(hl)		; Get byte
+	and	BITMASK		; Get lower bits
+	ld	d,a
+	ld	hl,l9800
+	add	hl,de		; Build index
+	add	hl,de
+	ld	e,(hl)		; Get value
+	inc	hl
+	ld	d,(hl)
+	dec	de		; Count down
+	ld	(hl),d		; Update it
+	dec	hl
+	ld	(hl),e
+l0ae4:
+	ld	hl,(l1630)	; Get destination buffer address
+	ld	(hl),b		; Store byte
+	ld	de,-l2800
+	add	hl,de
+	add	hl,hl
+	ld	de,l4800
+	add	hl,de
+	ex	de,hl
+	ld	a,(l1632)
+	ld	c,a
+	ld	a,b
+	ld	(l1632),a
+	and	BITMASK		; Get lower bits
+	ld	b,a
+	ld	hl,l8800
+	add	hl,bc
+	add	hl,bc
+	ld	a,(hl)
+	ld	(de),a
+	inc	hl
+	inc	de
+	ld	a,(hl)
+	ld	(de),a
+	ld	de,(l1630)	; Fetch current address
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l9800
+	add	hl,bc
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	inc	de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	nz,l0b27
+	ld	(l162f),a	; Reset first access
+	ld	de,l2800
+l0b27:
+	ld	(l1630),de	; Set current address
+	ld	hl,(l1641)
+	inc	hl
+	ld	(l1641),hl
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0b37:
+	xor	a
+	ld	(l1633),a
+	ld	a,(l162d)
+	ld	l,a
+	ld	a,(l162e)
+	dec	a
+	ld	e,a
+	cp	l
+	ret	z
+	ld	h,HIGH l1f00
+	ld	c,(hl)
+	ld	b,0
+	ld	d,0
+l0b4d:
+	inc	b
+	jr	z,l0b5a
+	ld	a,l
+	cp	e
+	jr	z,l0b5a
+	inc	l
+	ld	a,(hl)
+	cp	c
+	jr	z,l0b4d
+	inc	d
+l0b5a:
+	dec	b
+	ld	a,b
+	ld	(l0bae),a
+	ld	a,(hl)
+	ld	(l0c13),a
+	ld	a,(l1632)
+	cp	c
+	jr	z,l0b74
+	ld	a,d
+	or	a
+	jr	nz,l0b81
+	dec	b
+	ld	a,b
+	ld	(l0bae),a
+	jr	l0b81
+l0b74:
+	ld	a,b
+	ld	(l1633),a
+	ld	hl,(l1630)	; Fetch current address
+	ld	(l1634),hl
+	ld	a,d
+	or	a
+	ret	z
+l0b81:
+	ld	h,HIGH l1f00
+	ld	a,(l162d)
+	ld	l,a
+	ld	a,(hl)
+	ld	(l0be5),a
+	ld	c,a
+	inc	l
+	ld	a,(hl)
+	ld	(l0ba9),a
+	and	BITMASK
+	ld	b,a
+	ld	hl,l8800
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	hl,l9800
+	add	hl,bc
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	a,b
+	or	c
+	ret	z
+l0ba7:
+	ld	a,(de)
+l0ba9	equ	$+1
+	cp	0
+	jp	nz,l0cf0
+l0bae	equ	$+1
+	ld	a,0
+	cp	2
+	jp	c,l0c80
+	ld	l,a
+	ld	a,(l1633)
+	cp	l
+	jp	nc,l0bf6
+	ld	h,0
+	ld	l,a
+	or	a
+	sbc	hl,bc
+	ret	nc
+	dec	de
+	ld	a,d
+	cp	HIGH l2800
+	jr	nc,l0bcc
+	ld	de,l2800+FLLEN-1
+l0bcc:
+	ld	l,0
+l0bce:
+	inc	l
+	ld	a,(l0bae)
+	cp	l
+	jr	z,l0c3f
+	dec	bc
+	dec	de
+	ld	a,d
+	cp	HIGH l2800
+	jr	nc,l0bdf
+	ld	de,l2800+FLLEN-1
+l0bdf:
+	ld	a,b
+	or	c
+	jr	z,l0be8
+	ld	a,(de)
+l0be5	equ	$+1
+	cp	0
+	jr	z,l0bce
+l0be8:
+	inc	bc
+	inc	de
+	inc	de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	nz,l0bf3
+	ld	de,l2800
+l0bf3:
+	jp	l0ce2
+l0bf6:
+	ld	h,0
+	dec	l
+	or	a
+	sbc	hl,bc
+	ret	nc
+	push	de
+	inc	de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	nz,l0c07
+	ld	de,l2800
+l0c07:
+	ld	hl,(l1630)	; Fetch current address
+	or	a
+	sbc	hl,de
+	ld	a,(de)
+	pop	de
+	jp	z,l0cf0
+l0c13	equ	$+1
+	cp	0
+	push	af
+	dec	de
+	ld	a,d
+	cp	HIGH l2800
+	jr	nc,l0c1e
+	ld	de,l2800+FLLEN-1
+l0c1e:
+	pop	af
+	ld	a,(de)
+	ld	h,a
+	jp	nz,l0c62
+	ld	a,(l0bae)
+	dec	a
+	ld	l,a
+l0c29:
+	dec	bc
+	dec	de
+	ld	a,d
+	cp	HIGH l2800
+	jr	nc,l0c33
+	ld	de,l2800+FLLEN-1
+l0c33:
+	ld	a,(de)
+	cp	h
+	jr	nz,l0c73
+	dec	l
+	jr	nz,l0c29
+	ld	a,(l0bae)
+	inc	a
+	ld	l,a
+l0c3f:
+	inc	de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	nz,l0c48
+	ld	de,l2800
+l0c48:
+	push	de
+	push	hl
+	ld	h,0
+	dec	l
+	add	hl,de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	c,l0c57
+	ld	hl,-FLLEN
+	add	hl,de
+l0c57:
+	ex	de,hl
+	pop	hl
+	ld	a,(l162d)
+	add	a,l
+	ld	h,a
+	dec	l
+	jp	l0c88
+l0c62:
+	dec	bc
+	ld	a,b
+	or	c
+	ret	z
+	dec	de
+	ld	a,d
+	cp	HIGH l2800
+	jr	nc,l0c6f
+	ld	de,l2800+FLLEN-1
+l0c6f:
+	ld	a,(de)
+	cp	h
+	jr	z,l0c62
+l0c73:
+	inc	de
+	inc	de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	nz,l0c7d
+	ld	de,l2800
+l0c7d:
+	jp	l0cf1
+l0c80:
+	push	de
+	ld	a,(l162d)
+	inc	a
+	ld	h,a
+	ld	l,0
+l0c88:
+	push	bc
+	ld	b,l
+	ld	c,h
+l0c8b:
+	inc	de
+	ld	a,d
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jr	nz,l0c94
+	ld	de,l2800
+l0c94:
+	inc	b
+	inc	c
+	ld	a,b
+	cp	0ffh
+	jp	z,l0cd4
+	ld	a,(l162e)
+	cp	c
+	jp	z,l0cd4
+	ld	hl,(l1630)	; Fetch current address
+	or	a
+	sbc	hl,de
+	jr	z,l0cb9
+	ld	a,(de)
+	ld	h,HIGH l1f00
+	ld	l,c
+	cp	(hl)
+	jp	z,l0c8b
+	ld	l,b
+	pop	bc
+	pop	de
+	jp	l0ce2
+l0cb9:
+	ld	a,(l162d)
+	ld	d,HIGH l1f00
+	ld	e,a
+	ld	h,d
+	ld	l,c
+l0cc1:
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,l0cdf
+	inc	e
+	inc	l
+	inc	b
+	ld	a,b
+	cp	0ffh
+	jr	z,l0cd4
+	ld	a,(l162e)
+	cp	l
+	jp	nz,l0cc1
+l0cd4:
+	pop	af
+	pop	de
+	ld	a,b
+	ld	(l1633),a
+	ld	(l1634),de
+	ret
+l0cdf:
+	ld	l,b
+	pop	bc
+	pop	de
+l0ce2:
+	ld	a,(l1633)
+	cp	l
+	jr	nc,l0cf0
+	ld	a,l
+	ld	(l1633),a
+	ld	(l1634),de
+l0cf0:
+	dec	bc
+l0cf1:
+	ld	a,b
+	or	c
+	ret	z
+	ld	hl,-l2800
+	add	hl,de
+	add	hl,hl
+	ld	de,l4800
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	jp	l0ba7
+;
+; ************ CODE WRITTEN TO FILE ************
+;
+l0d03:
+l0d04	equ	$+1
+	ld	hl,$-$		; Get destination address
+	ld	de,l0100
+	ld	bc,CmprLen
+	ldir			; Unpack original bytes of file
+l0d0f	equ	$+1
+	ld	hl,$-$
+l0d12	equ	$+1
+	ld	de,$-$
+	ld	bc,l00c4
+	lddr			; Move code
+l0d1a	equ	$+1
+	ld	hl,$-$		; Get destination address - 1
+l0d1d	equ	$+1
+	ld	de,$-$
+l0d20	equ	$+1
+	ld	bc,$-$		; Get length
+l0d23	equ	$+1
+	jp	$-$		; Start following code
+;
+; Code moved to top of memory
+;
+; Executed to restore code in TPA
+;
+l0d25:
+	lddr			; Move code down
+	ex	de,hl
+	inc	hl
+	ld	e,10000000b	; Init bit
+	exx
+	ld	hl,TPA+CmprLen;;POPLEN
+l0d2f:
+	ld	a,h
+l0d31	equ	$+1
+	cp	0		; Test ready
+	jr	nz,l0d3d	; Nope
+	ld	a,l
+l0d36	equ	$+1
+	cp	0
+	jr	c,l0d3d
+	jp	z,TPA		; Start program if done
+	rst	0
+;
+; Restore code
+;
+l0d3d:
+	exx
+	rlc	e		; Get MSB
+	jr	nc,l0d44	; Not yet rotated
+	ld	d,(hl)		; Get new control byte
+	inc	hl
+l0d44:
+	rlc	d		; Get control bit
+	ld	a,(hl)		; Get next byte
+	inc	hl
+	jr	c,l0d4f		; Not to be used
+	exx
+	ld	(hl),a		; Unpack byte
+	inc	hl		; Next address
+	jr	l0d2f		; Restore on
+l0d4f:
+	bit	7,a		; Test 1xxxxxxb
+	jr	nz,l0d5b	; Yeap
+	exx
+	ld	d,0		; Clear control byte
+	ld	e,a		; Set bit
+	exx
+	xor	a
+	jr	l0d95
+l0d5b:
+	bit	6,a		; Test 11xxxxxxb
+	jr	nz,l0d80	; Yeap
+	res	7,a		; Make 01xxxxxxb
+	ld	bc,256*4+0
+l0d64:
+	rlc	e
+	jr	nc,l0d6a
+	ld	d,(hl)
+	inc	hl
+l0d6a:
+	rlc	d
+	rla
+	rl	c
+	djnz	l0d64
+	add	a,10000000b
+	exx
+	ld	e,a
+	exx
+	ld	a,c
+	adc	a,0
+	exx
+	ld	d,a
+	exx
+	ld	a,1
+	jr	l0d95
+l0d80:
+	and	00111111b
+	srl	a
+	exx
+	ld	d,a
+	exx
+	ld	a,(hl)
+	inc	hl
+	rra
+	exx
+	ld	e,a
+	exx
+	ld	a,2
+	jr	nc,l0dd7
+	ld	c,1
+	jr	l0da1
+l0d95:
+	ld	c,a
+	inc	a
+	rlc	e
+	jr	nc,l0d9d
+	ld	d,(hl)
+	inc	hl
+l0d9d:
+	rlc	d
+	jr	nc,l0dd7
+l0da1:
+	inc	a
+	rlc	e
+	jr	nc,l0da8
+	ld	d,(hl)
+	inc	hl
+l0da8:
+	rlc	d
+	jr	nc,l0dd7
+	inc	a
+	rlc	e
+	jr	nc,l0db3
+	ld	d,(hl)
+	inc	hl
+l0db3:
+	rlc	d
+	jr	nc,l0dd7
+	ld	a,2
+l0db9:
+	rlc	e
+	jr	nc,l0dbf
+	ld	d,(hl)
+	inc	hl
+l0dbf:
+	rlc	d
+	jr	nc,l0dc8
+	inc	a
+	cp	7
+	jr	nz,l0db9
+l0dc8:
+	ld	b,a
+	ld	a,1
+l0dcb:
+	rlc	e
+	jr	nc,l0dd1
+	ld	d,(hl)
+	inc	hl
+l0dd1:
+	rlc	d
+	rla
+	djnz	l0dcb
+	add	a,c
+l0dd7:
+	exx
+	ld	b,h
+	ld	c,l
+	scf
+	sbc	hl,de
+	ld	d,b
+	ld	e,c
+	ld	b,0
+	ld	c,a
+	inc	bc
+	ldir
+	ex	de,hl
+l0de7	equ	$+1
+	jp	l0d2f
+l00e6	equ	$-l0d03
+l00c4	equ	$-l0d25
+;
+; **********************************************
+;
+; Restore file
+;
+l0de9:
+	ld	hl,l2000	; Init buffer
+	ld	a,(hl)		; Get code
+	inc	hl
+	cp	_JP		; Test JP
+	jr	z,l0df4		; Yeap
+	inc	hl		; Position to address
+	inc	hl
+l0df4:
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ld	(l1638),de	; Set address
+	ld	de,l1548
+	ld	c,.string
+	call	BDOS		; Tell restoring
+	ld	hl,(l2000+ARClen)
+	ld	(l1627),hl	; Set byte length
+	ld	de,l0400-1
+	add	hl,de
+	ld	a,h
+	rrca
+	rrca
+	and	00111111b
+	ld	b,a
+	call	l1220		; Print dots
+	ld	hl,(l1638)	; Get address
+	ld	de,-POPLEN
+	add	hl,de
+	push	hl
+	xor	a
+	rl	l		; Calculate start record
+	rl	h
+	rla
+	ld	d,a
+	ld	e,h
+	ld	(l1675+_RRN),de	; Store record
+	ld	de,l1675
+	ld	c,.rndrd
+	call	BDOS		; Read this one
+	pop	hl
+	or	a		; Test success
+	jp	nz,l102c	; Read error if end of file
+	ld	a,l
+	and	NOMSB
+	cp	01110001b	;;71h
+	jr	c,l0e53		; Within start record
+	push	hl
+	ld	hl,(l1675+_RRN)
+	inc	hl		; Advance record
+	ld	(l1675+_RRN),hl
+	ld	de,l1675
+	ld	c,.rndrd
+	call	BDOS		; Read it
+	pop	hl
+	or	a		; Verify success
+	jp	nz,l102c	; Read error if end of file
+l0e53:
+	ld	a,l
+	and	NOMSB
+	ld	d,0
+	ld	e,a		; Build index
+	ld	hl,l2000
+	add	hl,de
+	ld	de,l1643
+	ld	bc,CmprLen
+	ldir			; Unpack header
+	ld	hl,0
+	ld	(l1675+_RRN),hl	; Reset record
+	xor	a
+	ld	(l163c),a	; Clear done count
+	call	l10e5		; Read file into memory
+	jp	c,l102c		; Read error if end of file
+	ld	b,CmprLen
+l0e77:
+	call	l10a3		; Read byte from disk
+	jp	c,l102c		; Read error if end of file
+	djnz	l0e77
+	ld	hl,0
+	ld	(l1653),hl	; Clear destination address
+	ld	hl,l2800
+	ld	de,l1643
+	ld	b,CmprLen
+l0e8d:
+	ld	a,(de)
+	ld	(hl),a
+	call	l118d		; Write byte to disk
+	inc	de
+	inc	hl
+	djnz	l0e8d
+	ld	a,1
+	ld	(l1659),a	; Set bit count
+l0e9b:
+	push	hl
+	ld	hl,(l1653)	; Get destination address
+	ld	bc,(l1627)	; Get byte length
+	or	a
+	sbc	hl,bc
+	pop	hl
+	jp	nc,l0f8f
+	call	l0f64		; Read bit into Carry
+	jr	c,l0ec6		; Got 1
+	call	l10a3		; Read byte from disk
+	jp	c,l102c		; Read error if end of file
+	ld	(hl),a
+	call	l118d		; Write byte to disk
+	inc	hl
+	ld	a,h
+	cp	HIGH (l2800+FLLEN)	;;l4800
+	jp	nz,l0e9b
+	ld	hl,l2800
+	jp	l0e9b
+l0ec6:
+	call	l10a3		; Read byte from disk
+	jp	c,l102c		; Read error if end of file
+	bit	7,a		; Test 1xxxxxxxb
+	jr	nz,l0ed6	; Yeap
+	ld	d,0		; Clear control byte
+	ld	e,a		; Set bit
+	xor	a
+	jr	l0f0b
+l0ed6:
+	bit	6,a		; Test 11xxxxxxb
+	jr	nz,l0ef2	; Yeap
+	res	7,a		; Make 01xxxxxxb
+	ld	bc,256*4+0
+l0edf:
+	call	l0f64		; Read bit into Carry
+	rla			; Shift four bits in
+	rl	c
+	djnz	l0edf
+	add	a,10000000b
+	ld	e,a
+	ld	a,c
+	adc	a,0
+	ld	d,a
+	ld	a,1
+	jr	l0f0b
+l0ef2:
+	and	00111111b
+	ld	d,a
+	call	l10a3		; Read byte from disk
+	jp	c,l102c		; Read error if end of file
+	ld	e,a
+	ld	a,d
+	srl	a
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	ld	a,2
+	jr	nc,l0f34
+	ld	c,1
+	jr	l0f12
+l0f0b:
+	ld	c,a
+	inc	a
+	call	l0f64		; Read bit into Carry
+	jr	nc,l0f34	; Got 0
+l0f12:
+	inc	a
+	call	l0f64		; Read bit into Carry
+	jr	nc,l0f34	; Got 0
+	inc	a
+	call	l0f64		; Read bit into Carry
+	jr	nc,l0f34	; Got 0
+	ld	a,2
+l0f20:
+	call	l0f64		; Read bit into Carry
+	jr	nc,l0f2a	; Got 0
+	inc	a
+	cp	7
+	jr	nz,l0f20
+l0f2a:
+	ld	b,a
+	ld	a,1
+l0f2d:
+	call	l0f64		; Read bit into Carry
+	rla
+	djnz	l0f2d
+	add	a,c
+l0f34:
+	push	hl
+	scf
+	sbc	hl,de
+	ld	b,0
+	ld	c,a
+	inc	bc
+	ld	a,h
+	cp	HIGH l2800
+	jr	nc,l0f45
+	ld	de,l2000
+	add	hl,de
+l0f45:
+	ex	de,hl
+	pop	hl
+l0f47:
+	ld	a,(de)
+	ld	(hl),a
+	call	l118d		; Write byte to disk
+	ld	a,HIGH (l2800+FLLEN)	;;l4800
+	inc	de
+	cp	d
+	jr	nz,l0f55
+	ld	de,l2800
+l0f55:
+	inc	hl
+	cp	h
+	jr	nz,l0f5c
+	ld	hl,l2800
+l0f5c:
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l0f47
+	jp	l0e9b
+;
+; Read bit into Carry
+;
+l0f64:
+	push	bc
+	ld	c,a
+	ld	a,(l1659)	; Get bit count
+	dec	a		; Count down
+	jr	z,l0f79		; All bits read
+	ld	(l1659),a	; Update count
+	ld	a,(l165a)	; Get current bits
+	rla			; Get bit into Carry
+	ld	(l165a),a
+	ld	a,c
+	pop	bc
+	ret
+l0f79:
+	call	l10a3		; Read byte from disk
+	jr	c,l0f8a		; Invalid end of file
+	rla			; Get bit into Carry
+	ld	(l165a),a
+	ld	a,8
+	ld	(l1659),a	; Init bit count
+	ld	a,c
+	pop	bc
+	ret
+l0f8a:
+	pop	bc
+	pop	af
+	jp	l102c		; Read error
+l0f8f:
+	push	af
+	ld	hl,(l1655)	; Get current destination buffer
+	ld	de,l2400
+	or	a
+	sbc	hl,de		; Test any in buffer
+	jr	z,l0faa		; Nope
+	ld	e,'o'
+	ld	c,.conout
+	call	BDOS
+	call	l11c0		; Write buffer to disk
+	pop	bc
+	jp	c,l1036		; Write error
+	push	bc
+l0faa:
+	ld	de,l12eb
+	ld	c,.string
+	call	BDOS		; Close line
+	ld	bc,l1675	; Point to source FCB
+	ld	de,l1699	; Point to destination FCB
+	call	l0110		; Process time stamp
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS		; Close files
+	ld	de,l1699
+	ld	c,.close
+	call	BDOS
+	pop	bc
+	cp	3+1		; Verify success
+	jr	c,l0fdb
+	ld	de,l15a0
+	ld	c,.string
+	call	BDOS		; Tell close not possible
+	jp	l0437
+l0fdb:
+	push	bc
+	pop	af
+	jr	z,l0fea
+	ld	de,l1553
+	ld	c,.string
+	call	BDOS		; Tell restore error
+	jp	l0437
+l0fea:
+	ld	de,l1675
+	ld	c,.delete
+	call	BDOS		; Delete file
+	cp	3+1		; Verify success
+	jr	c,l0ffe
+	ld	de,l15e0
+	ld	c,.string
+	call	BDOS		; Tell deletion not possible
+l0ffe:
+	ld	hl,l1699
+	ld	de,l16bd
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack old name
+	ld	hl,l1675
+	ld	de,l16bd+_DIR
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack new name
+	ld	de,l16bd
+	ld	c,.rename
+	call	BDOS		; Rename file
+	cp	3+1		; Verify success
+	jp	c,l0437		; Yeap
+	ld	de,l1603
+	ld	c,.string
+	call	BDOS		; Tell rename not possible
+	jp	l0437
+l102c:
+	ld	de,l1565
+	ld	c,.string
+	call	BDOS		; Tell read error
+	jr	l103e
+l1036:
+	ld	de,l1582
+	ld	c,.string
+	call	BDOS		; Tell write error
+l103e:
+	ld	de,l1675
+	ld	c,.close
+	call	BDOS		; Close files
+	ld	de,l1699
+	ld	c,.close
+	call	BDOS
+	ld	de,l1699
+	ld	c,.delete
+	call	BDOS		; Delete file
+	cp	3+1		; Verify success
+	jp	c,l0437
+	ld	de,l15bc
+	ld	c,.string
+	call	BDOS		; Tell deletion not possible
+	jp	l0437
+;
+; Test already compressed - C set says not
+;
+l1066:
+	ld	hl,l2000
+	ld	a,(hl)		; Get first byte in disk buffer
+	cp	_JP		; Test JP xxxx
+	jr	z,l107d		; Yeap
+	cp	_JR		; Test JR xx
+	jr	nz,l10a1	; Nope
+	inc	hl
+	ld	a,(hl)		; Get offset
+	or	a		; Test any
+	jr	nz,l10a1	; Yeap, treat like JP
+	inc	hl
+	ld	a,(hl)		; Get next
+	cp	_JP		; Test JP xxxx
+	jr	nz,l10a1	; Nope
+l107d:
+	ld	hl,l2000+ARCoff
+	ld	a,(hl)		; Test -pcn- (n=0..9)
+	cp	'-'
+	jr	nz,l10a1
+	inc	hl
+	ld	a,(hl)
+	cp	'p'
+	jr	nz,l10a1
+	inc	hl
+	ld	a,(hl)
+	cp	'c'
+	jr	nz,l10a1
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	cp	'-'
+	jr	nz,l10a1
+	dec	hl
+	ld	a,(hl)		; Get digit
+	cp	'1'
+	ret	c
+	cp	'9'+1
+	ccf
+	ret
+l10a1:
+	scf
+	ret
+;
+; Read byte from disk - C set says end of file
+;
+l10a3:
+	push	hl
+	push	de
+	ld	de,(l163d)	; Get current disk buffer address
+	ld	a,(de)		; Load byte
+	inc	de
+	or	a
+	push	af
+	ld	hl,(l163f)	; Get last disk buffer address
+	sbc	hl,de		; Test all read
+	jr	z,l10bc		; Yeap, get next record
+	ld	(l163d),de	; Update disk buffer
+	pop	af
+	pop	de
+	pop	hl
+	ret
+l10bc:
+	push	bc
+	ld	a,(l16e1)	; Get option
+	cp	'R'		; Test restore
+	jr	z,l10cb		; Yeap, ignore
+	ld	e,'o'
+	ld	c,.conout
+	call	BDOS		; Indicate compression
+l10cb:
+	ld	a,(l163c)	; Get done count
+	or	a
+	jr	nz,l10dc	; Yeap
+	call	l10e5		; Read file into memory
+	jr	nc,l10e0	; Not yet end of file
+	pop	bc
+	pop	af
+	pop	de
+	pop	hl
+	scf
+	ret
+l10dc:
+	inc	a
+	ld	(l163c),a	; Update done count
+l10e0:
+	pop	bc
+	pop	af
+	pop	de
+	pop	hl
+	ret
+;
+; Read file into memory - C set says end of file
+;
+l10e5:
+	ld	de,l2000
+	ld	(l163d),de	; Init source disk buffer
+	ld	b,_SR		; Set record count
+l10ee:
+	push	bc
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l1675
+	ld	c,.rndrd
+	call	BDOS		; Read record
+	pop	de
+	or	a		; Test end of file
+	jr	nz,l1126	; Yeap
+	ld	hl,reclng
+	add	hl,de		; Point to next DMA address
+	ex	de,hl
+	ld	hl,(l1675+_RRN)
+	inc	hl		; Advance record
+	ld	(l1675+_RRN),hl
+	ld	bc,(l163a)	; Get size of file
+	or	a
+	sbc	hl,bc		; Test all read
+	pop	bc
+	jr	z,l111b		; Yeap
+	djnz	l10ee
+	jr	l1120
+l111b:
+	ld	a,1
+	ld	(l163c),a	; Set done count
+l1120:
+	ld	(l163f),de	; Set last disk buffer address
+	or	a
+	ret
+l1126:
+	pop	bc
+	scf			; Indicate end of file
+	ret
+;
+; Write Carry to file - C set on write error
+;
+l1129:
+	push	af
+	ld	a,(l165a)	; Get current bits
+	rla			; Shift carry in
+	ld	(l165a),a
+	ld	a,(l1659)	; Get bit count
+	dec	a		; Count down
+	jr	z,l113d		; Byte is ready
+	ld	(l1659),a	; Update count
+	pop	af
+	or	a		; Set success
+	ret
+l113d:
+	ld	a,(l165a)	; Get current bits
+	call	l118d		; Write byte to disk
+	jr	c,l1168		; Write error
+	push	hl
+	ld	hl,l165d	; Init buffer
+l1149:
+	ld	a,(l165b)	; Get pointer
+	cp	l		; Test buffer written
+	jr	z,l1158		; Yeap
+	ld	a,(hl)		; Get byte
+	call	l118d		; Write to disk
+	jr	c,l1167		; Write error
+	inc	hl
+	jr	l1149
+l1158:
+	ld	hl,l165d
+	ld	(l165b),hl	; Reset buffer
+	pop	hl
+	ld	a,8
+	ld	(l1659),a	; Reset bit count
+	pop	af
+	or	a
+	ret
+l1167:
+	pop	hl
+l1168:
+	pop	af
+	scf
+	ret
+;
+; Write byte - C set says error
+;
+l116b:
+	push	af
+	ld	a,(l1659)	; Get bit count
+	cp	8		; Test done
+	jr	z,l1180		; Yeap
+	pop	af
+	push	hl
+	ld	hl,(l165b)	; Get pointer
+	ld	(hl),a		; Store byte
+	inc	hl
+	ld	(l165b),hl
+	pop	hl
+	or	a
+	ret
+l1180:
+	pop	af
+	push	af
+	call	l118d		; Write byte to disk
+	jr	c,l118a		; Write error
+	pop	af
+	or	a
+	ret
+l118a:
+	pop	af
+	scf			; Indicate error
+	ret
+;
+; Write byte to disk - C set on write error
+;
+l118d:
+	push	hl
+	push	de
+	ld	de,(l1653)	; Get destination address
+	inc	de		; Update it
+	ld	(l1653),de
+	ld	de,(l1655)	; Get current destination buffer
+	ld	(de),a		; Store character
+	inc	de
+	ld	(l1655),de	; Update destination buffer
+	ld	hl,l2400+_DR*reclng
+	or	a
+	sbc	hl,de		; Test buffer filled
+	jr	nz,l11bd	; Nope
+	push	bc
+	ld	a,(l16e1)	; Get option
+	cp	'R'		; Test restore
+	jr	nz,l11b9	; Nope, skip indicator
+	ld	e,'o'
+	ld	c,.conout
+	call	BDOS		; Show progress
+l11b9:
+	call	l11c0		; Write buffer to disk - C set on error
+	pop	bc
+l11bd:
+	pop	de
+	pop	hl
+	ret
+;
+; Write buffer to disk - C set on write error
+;
+l11c0:
+	ld	hl,(l1655)	; Get current destination buffer
+	ld	de,l2400
+	ld	(l1655),de	; Reset destination buffer
+	or	a
+	sbc	hl,de		; Test any in buffer
+	ret	z		; Nope
+	ld	a,l
+	and	reclng-1	; Mask pointer
+	jr	z,l11e1		; Skip if record boundary
+	ld	b,a
+	ld	a,reclng
+	sub	b		; Calculate gap length
+	ld	b,a
+	add	hl,de		; Get back buffer address
+l11d9:
+	ld	(hl),0		; Fill buffer
+	inc	hl
+	djnz	l11d9
+	or	a
+	sbc	hl,de		; Calculate length of buffer
+l11e1:
+	push	hl
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l1699
+	ld	c,.rndwr
+	call	BDOS		; Write record
+	or	a		; Test success
+	jr	nz,l1213	; Nope, write error
+	ld	hl,(l1699+_RRN)
+	inc	hl		; Advance record
+	ld	(l1699+_RRN),hl
+	ld	hl,(l1657)	; Get destination byte count
+	ld	de,reclng
+	add	hl,de		; Advance it
+	ld	(l1657),hl
+	ex	de,hl
+	pop	de
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	bc,reclng
+	or	a
+	sbc	hl,bc		; Test all written
+	jr	nz,l11e1	; Nope
+	or	a
+	ret
+l1213:
+	pop	de
+	pop	hl
+	scf
+	ret
+;
+; Convert character to upper case
+;
+l1217:
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; Convert it
+	ret
+;
+; Print dots B-times
+;
+l1220:
+	push	bc
+l1221:
+	push	bc
+	ld	e,'.'
+	ld	c,.conout
+	call	BDOS		; Print dots
+	pop	bc
+	djnz	l1221
+	pop	bc
+l122d:
+	push	bc
+	ld	e,bs
+	ld	c,.conout
+	call	BDOS		; Bring cursor back
+	pop	bc
+	djnz	l122d
+	ret
+;
+; Print decimal number in reg HL
+;
+l1239:
+	ld	c,' '		; Set leading character
+	ld	de,10000
+	call	l1258		; Print ten thousands
+	ld	de,1000
+	call	l1258		; Print thousands
+	ld	de,100
+	call	l1258		; Print hundreds
+	ld	de,10
+	call	l1258		; Print tens
+	ld	a,l		; Get units
+	add	a,'0'		; Make ASCII
+	jr	l126a
+;
+; Print digit HL DIV DE
+;
+l1258:
+	xor	a		; Init quotient
+l1259:
+	inc	a		; Update qoutient
+	sbc	hl,de		; Divide by successive subtraction
+	jr	nc,l1259
+	add	hl,de		; Make > 0
+	add	a,'0'-1		; Calculate ASCII quotient
+	cp	'0'		; Test zero
+	jr	nz,l1268	; Nope
+	ld	a,c		; Get leading character
+	jr	l126a
+l1268:
+	ld	c,'0'		; Change leading character
+l126a:
+	push	hl
+	push	de
+	push	bc
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Print digit
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Print hexdecimal number in Accu
+;
+; !!!! NEVER CALLED !!!!
+; ######################
+;
+l1277:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	rrca			; Get upper bits
+	rrca
+	rrca
+	rrca
+	call	l128c		; Put to console
+	pop	af
+	push	af
+	call	l128c		; Put lower bits then
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Print nibble as hex
+;
+l128c:
+	and	LOMASK		; Mask bits
+	add	a,'0'		; Add offset
+	cp	'9'+1		; Test range
+	jr	c,l1296
+	add	a,'A'-'0'-10	; Fix for hex
+l1296:
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Put to console
+	ret
+;
+l129d:
+	db	'PopCom! Version 1.00 for 47K CP/M(Z80)'
+	db	cr,lf
+	db	'Copyright(C) 1992 by Yoshihiko Mino.'
+	db	cr,lf
+l12eb:
+	db	cr,lf,eot
+l12ee:
+	db	'Usage:'
+	db	cr,lf
+	db	' POPCOM [<option> ...] <filematch> ... ; Compress files'
+	db	cr,lf
+	db	' POPCOM -R <filematch> ...             ; Restore files'
+	db	cr,lf
+	db	' POPCOM -L [<filematch> ...]           ; List files'
+	db	cr,lf,cr,lf
+	db	'Options:'
+	db	cr,lf
+	db	' -Cxx : Set size of a cluster to xx records'
+	db	cr,lf
+	db	' -D   : Delete original file'
+	db	cr,lf
+	db	' -J   : Use JP at entry'
+	db	cr,lf
+	db	' -N   : Do not use JP at entry'
+	db	cr,lf
+	db	' -Od  : Output files to drive d:'
+	db	cr,lf,eot
+l144f:
+	db	'Out of memory.',bell
+	db	cr,lf,eot
+l1461:
+	db	'Bad option.',bell
+	db	cr,lf,eot
+l1470:
+	db	'Bad filename.',bell
+	db	cr,lf,eot
+l1481:
+	db	'File not found.',bell
+	db	cr,lf,eot
+l1494:
+	db	'Cannot open.'
+	db	cr,lf,eot
+l14a3:
+	db	'Too big file.'
+	db	cr,lf,eot
+l14b3:
+	db	'Too small file.'
+	db	cr,lf,eot
+l14c5:
+	db	'Already compressed.'
+	db	cr,lf,eot
+l14db:
+	db	'Not compressed.'
+	db	cr,lf,eot
+l14ed:
+	db	'Temporary file cannot create.'
+	db	cr,lf,eot
+l150d:
+	db	'Compressing ',eot
+l151a:
+	db	cr,lf,'    Success! ',eot
+l152a:
+	db	' => ',eot
+l152f:
+	db	' / ',eot
+l1533:
+	db	cr,lf,'--- Inefficiency. ',eot
+l1548:
+	db	'Restoring ',eot
+l1553:
+	db	'Restore error.',bell
+	db	cr,lf,eot
+l1565:
+	db	cr,lf
+	db	'*** File read error ***',bell
+	db	cr,lf,eot
+l1582:
+	db	cr,lf
+	db	'*** File write error ***',bell
+	db	cr,lf,eot
+l15a0:
+	db	'*** File close error ***',bell
+	db	cr,lf,eot
+l15bc:
+	db	'--- Cannot delete temporary file.'
+	db	cr,lf,eot
+l15e0:
+	db	'--- Cannot delete original file.'
+	db	cr,lf,eot
+l1603:
+	db	'--- Cannot rename file.'
+	db	cr,lf,eot
+;
+; --------------------------------------
+;
+; Header for compressed files
+;
+l161d:
+	db	0,0,0
+	dw	0
+ARCoff	equ	$-l161d
+	db	'-pc1-'
+ARClen	equ	$-l161d
+;
+l1627:
+	dw	0		; Byte length of file
+l1629:
+	dw	0
+l162b:
+	dw	0
+CmprLen	equ	$-l161d
+;
+; --------------------------------------
+;
+l162d:
+	db	0
+l162e:
+	db	0
+l162f:
+	db	0		; First access flag
+l1630:
+	dw	0		; Current destination address
+l1632:
+	db	0
+l1633:
+	db	0
+l1634:
+	dw	0
+l1636:
+	dw	0
+l1638:
+	dw	0		; Start address
+l163a:
+	dw	0		; Size of file
+l163c:
+	db	0		; File done count
+l163d:
+	dw	0		; Current disk buffer address
+l163f:
+	dw	0		; Last disk buffer address
+l1641:
+	dw	0
+l1643:
+	ds	CmprLen
+l1653:
+	dw	0		; Destination address
+l1655:
+	dw	0		; Current destination buffer
+l1657:
+	dw	0		; Destination byte count
+l1659:
+	db	0		; Current bit count
+l165a:
+	db	0		; Current bits
+l165b:
+	dw	0		; Byte pointer
+l165d:
+	ds	24		; Write bytes
+l1675:
+	ds	10		; Source FCB
+	db	0
+
+l1699	equ	l1675+FCBlen	; Destination FCB
+l16bd	equ	l1699+FCBlen	; ORG FCB
+l16e1	equ	l16bd+FCBlen	; Option character (L or R)
+l16e2	equ	l16e1+1		; CCP pointer
+l16e4	equ	l16e2+2		; Pointer to search buffer
+l16e6	equ	l16e4+2		; Search buffer
+l1c66	equ	l16e6+MAXFIL*(.nam+.ext)
+l1ce7	equ	l1c66+2*64+1
+;
+l1f00	equ	01f00h		; Buffer???
+l2000	equ	02000h		; DMA buffer (source)
+l2400	equ	02400h		; DMA buffer (destination)
+l2800	equ	02800h		; End of destination buffer
+l4800	equ	l2800+FLLEN	;;4800h
+l8800	equ	08800h
+l9800	equ	09800h		; 0x1000 for compression
+la800	equ	0a800h		; 0x1000 for compression
+
+	end
+

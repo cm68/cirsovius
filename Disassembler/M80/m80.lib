@@ -1,0 +1,295 @@
+	.xlist
+
+; File : M80.LIB
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Z80 Assembler Project - M80 compatible
+;
+; Definition file for the Z80 assembler
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Compatible to M80 version : 3.44 of 09-Dec-81
+;
+; This assembler project consists of the following modules:
+;
+; M80KERN.MAC	The kernel, doing the hard assembly job
+; M80VER.MAC	The version file, should be updated each time
+;		any of the other modules were modified
+; M80DATE.MAC	The CP/M time routines
+; M80IO.MAC	The CP/M I/O package
+; M80CMD.MAC	The user interface, only required on start
+
+	.z80
+;
+; ************************************************************
+;
+FALSE	equ	0
+TRUE	equ	not FALSE
+;
+; ************************************************************
+;
+;
+; ************************************************************
+;
+OS	equ	0000h
+BDOS	equ	0005h
+CPMbuff	equ	0080h
+CPMPLUS	equ	030h
+
+OSFCB	equ	005ch
+OSFCB.n	equ	OSFCB+1
+FCBnam	equ	8
+FCBext	equ	3
+FCBlen	equ	FCBnam+FCBext
+FCB..	equ	36
+
+f.EX	equ	12
+f.CR	equ	32
+
+noREL	equ	10000000b	; REL file bit
+noPRN	equ	01000000b	; PRN/CRF file bit
+
+reclen	equ	128		; Default CP/M record size
+
+.conin	equ	  1
+.conout	equ	  2
+.auxin	equ	  3		; Reader on CP/M 2.2
+.lstout	equ	  5
+.condir	equ	  6
+.string	equ	  9
+.rdline	equ	 10
+.consta	equ	 11
+.vers	equ	 12
+.retdsk	equ	 13
+.seldsk	equ	 14
+.open	equ	 15
+.close	equ	 16
+.delete	equ	 19
+.rdsq	equ	 20
+.wrtsq	equ	 21
+.make	equ	 22
+.curdsk	equ	 25
+.setdma	equ	 26
+.mulsec	equ	 44		; CPM+
+.chain	equ	 47		; CPM+
+.getdat	equ	105		; CPM+
+.parse	equ	152		; CPM+
+
+C.in	equ	0ffh
+
+CPMerr	equ	255
+
+EOFItm	equ	0		; CRF codes (MSB set)
+StrtItm	equ	1
+DefItm	equ	2
+EndItm	equ	3
+;
+null	equ	00h
+CtrlC	equ	'C'-'@'
+tab	equ	09h
+lf	equ	0ah
+ff	equ	0ch
+cr	equ	0dh
+so	equ	0eh
+si	equ	0fh
+eof	equ	1ah
+eot	equ	'$'
+
+MSB	equ	10000000b
+noMSB	equ	01111111b
+LoMask	equ	00001111b
+HiMask	equ	11110000b
+LenMask	equ	00000111b
+Mask2	equ	00000011b
+Mask3	equ	00000111b
+Mask6	equ	00111111b
+MaskOdd	equ	00000110b
+
+relbits	equ	8		; .REL bits
+
+ModLen	equ	  6		; Max module name length
+SymLen	equ	  6		; Max symbol name length
+LabLen	equ	 16		; Max label length
+SrcLen	equ	130		; Max source line length
+
+defRAD	equ	10		; Default radix
+defPAG	equ	59		; Default lines/page
+
+_ErrBit	equ	4		; Error indicator
+ErrBit	equ	1 SHL _ErrBit
+
+_iflev	equ	50		; Max IF depth
+
+; Registers and conditions
+
+_D	equ	2
+_ACCU	equ	7
+
+_HL	equ	4
+
+_cC	equ	3
+
+CB	equ	0cbh		; Special code prefix
+DD	equ	0ddh
+ED	equ	0edh
+
+IMmax	equ	2		; Max IM argument
+
+IRbit	equ	00001000b	; Index register bit
+r.p	equ	00111000b
+
+.STAX	equ	002h		; LD (rp),A
+.LDAX	equ	00ah		; LD A,(rp)
+.DCR	equ	005h		; DEC r
+.MVI	equ	006h		; LD r,data
+.EXAFAF	equ	008h		; EX AF,AF'
+.DCX	equ	00bh		; DEC rp
+.JRc	equ	020h		; JR CC
+.SHLD	equ	022h		; LD (adr),HL
+.LHLD	equ	02ah		; LD HL,(adr)
+.STA	equ	032h		; LD (adr),A
+.MVI.M	equ	036h		; LD (HL),data
+.LDA	equ	03ah		; LD A,(adr)
+.MOV	equ	040h		; LD r1,r2
+.HALT	equ	076h		; HALT
+.RETc	equ	0c0h		; RET CC
+.JPc	equ	0c2h		; JP CC
+.CALLc	equ	0c4h		; CALL CC
+.RET	equ	0c9h		; RET
+.OUT	equ	0d3h		; OUT
+.IN	equ	0dbh		; IN
+.XTHL	equ	0e3h		; EX (SP),HL
+.PCHL	equ	0e9h		; JP (HL)
+.XCHG	equ	0ebh		; EX DE,HL
+.SPHL	equ	0f9h		; LD SP,HL
+
+; ED prefixed code
+
+..IN	equ	040h
+..OUT	equ	041h
+.SBC	equ	042h
+.LD.adr	equ	043h
+.LDIA	equ	047h
+.LD.rp	equ	04bh
+.LDAI	equ	057h
+
+; Pseudo code control bits
+
+_cond	equ	1000b		; Condition bit
+_endc	equ	0100b		; End of condition bit
+_macro	equ	0010b		; Macro bit
+_endm	equ	0001b		; End macro bit
+
+..else	equ	08h		; Pseudocode ELSE
+..equ	equ	0dh		; Pseudocode EQU
+..ext	equ	0fh		; Pseudocode EXT
+..extrn	equ	10h		; Pseudocode EXTRN
+..local	equ	1bh		; Pseudocode LOCAL
+..macro	equ	1ch		; Pseudocode MACRO
+..?set	equ	22h		; Pseudocode SET, ASET, DEFL
+
+b_DEF	equ	7
+b_PUB	equ	6
+b_KNOW	equ	5
+b_INT	equ	4
+b_COMM	equ	2
+
+_DEF	equ	1 SHL b_DEF
+_PUB	equ	1 SHL b_PUB
+_KNOW	equ	1 SHL b_KNOW
+_INT	equ	1 SHL b_INT
+_COMM	equ	1 SHL b_COMM
+
+NoGlbl	equ	_KNOW
+Glbl	equ	NoGlbl+_PUB
+
+; I/O Module definitions
+
+FCBLO	equ	0
+FCBHI	equ	1
+dmaLO	equ	2
+dmaHI	equ	3
+curLO	equ	4
+curHI	equ	5
+maxLO	equ	6
+maxHI	equ	7
+recs	equ	8
+device	equ	9
+
+basyer	equ	 78
+.days	equ	365
+.feb	equ	 28
+weeks	equ	 52
+w.days	equ	  7
+
+; Function codes
+
+.EndItm	equ	 0
+.Number	equ	 1
+.LftPar	equ	 2
+.RgtPar	equ	 3
+.LE	equ	 4
+.TYPE	equ	 5
+.NUL	equ	 6
+.HIGH	equ	 7
+.PLUS	equ	 8
+.MINUS	equ	 9
+.MULT	equ	10
+.DIV	equ	11
+.LOW	equ	12
+.GE	equ	13
+.GT	equ	14
+.LT	equ	15
+.NE	equ	16
+.EQ	equ	17
+.OR	equ	18
+.SHR	equ	19
+.SHL	equ	20
+.MOD	equ	21
+.NOT	equ	22
+.XOR	equ	30
+.AND	equ	-1
+
+Chn.Len	equ	'Z'-'A'+8
+
+LinLen	equ	65
+
+PageLen	equ	56
+
+; Address modes
+
+@@mod	equ	11b		; Two bits
+
+@@cs	equ	01b
+@@ds	equ	10b
+@@com	equ	11b
+
+$ext	equ	'*'
+$cs	equ	''''
+$ds	equ	'"'
+$com	equ	'!'
+
+_ds	equ	2
+
+;
+; Record requirenment for I/O module
+;
+RELr	equ	2		; Allow two records
+RELt	equ	RELr*reclen	; Buffer size
+;
+PRNr	equ	4		; Allow four records
+PRNt	equ	PRNr*reclen	; Buffer size
+;
+ERRr	equ	1		; Allow one record
+ERRt	equ	ERRr*reclen	; Buffer size
+;
+MACr	equ	4		; Allow four records
+MACt	equ	MACr*reclen	; Buffer size
+;
+INCr	equ	1		; Allow one record
+INCt	equ	INCr*reclen	; Buffer size
+
+	.list
+

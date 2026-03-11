@@ -1,0 +1,735 @@
+;
+; **********************************************************
+; ***                   Editor entry                     ***
+; *** This editor version is designed especially for the ***
+; *** keyboard layout for the CP/M 3.x machine PCW8xxx   ***
+; *** It is developed on a German keyboard               ***
+; **********************************************************
+;
+; ENTRY	Reg HL holds offset within text
+;
+EDIT:
+	push	hl		; Save offset
+	ld	de,lf*256+cr
+	ld	hl,(TxtEnd)	; Get end
+	ld	(hl),d		; .. close line
+	dec	hl
+	ld	(hl),e
+	ld	(EDLine+_LinLen),de
+	xor	a
+	ld	(NewFlg),a	; Clear flag
+	inc	a
+	ld	(Ed..Row),a	; Init row
+	ld	hl,AllDelim
+	ld	(DelimP),hl	; Init delimiters
+	ld	iy,EditPSW	; Load status
+	call	ClrScr
+	pop	de		; Get offset
+	inc	de		; .. fix
+	ld	hl,(TxtBeg)	; Get start
+	add	hl,de		; Position pointer
+	call	l33a9
+;
+; //////////////////////
+; // EDITOR MAIN LOOP //
+; //////////////////////
+;
+E.MAIN:
+	call	l3b96
+	call	TellStatus	; Give status
+	call	EDCtrl		; Get character
+	jr	nc,E.NoCtrl	; .. no control
+	ld	hl,E.MAIN
+	ld	a,d		; Save HI
+	cp	(HIGH @MSB)-1	; Test special address
+	jr	c,E.NoSpcCtrl	; .. nope
+	ld	(ChgFlg),a	; Set change flag
+	and	NoMSB
+	ld	d,a
+	xor	a		; Get MSB
+	ld	(CompFlg),a	; Set compile flag
+E.NoSpcCtrl:
+	push	hl
+	push	de		; Save execution address
+	ld	hl,l4456+1
+	ld	de,l445a+1
+	ld	bc,8
+	lddr			; .. save a bit
+	ret			; .. go
+;
+; Start here on normal character entry
+;
+E.NoCtrl:
+	ld	(ChgFlg),a	; Set change flag
+	ld	hl,CompFlg
+	ld	(hl),0		; .. and compiler flag
+	ld	hl,(CurEdPtr)	; Get current pointer
+	ld	de,EDLine+_LinLen-2
+	call	CmpAdr		; Test edit pointer
+	jr	nc,E.MAIN	; .. too long
+	bit	_M,(iy+_EdIns)	; Test insert
+	push	af
+	call	z,RoomForOne	; .. insert, so make room
+	pop	af
+	ld	(hl),a		; Save character
+	inc	hl		; .. bump buffer
+	push	hl
+	call	l4197
+	pop	hl
+	ld	(CurEdPtr),hl	; Set new edit pointer
+	call	l3fe7
+	jp	E.MAIN		; Restart
+;
+; Check control and get if necessary
+; EXIT	Carry set if control
+;	Accu holds character
+;
+EDCtrl:
+	call	EDCharIn	; Get character
+	cp	'~'+1		; Test valid range
+	ccf
+	ret	nc		; .. ok
+	push	af
+	add	a,a		; .. times 2
+	ld	c,a
+	ld	b,0
+	ld	hl,CtrlTab
+	add	hl,bc
+	ld	e,(hl)		; Get routine address
+	inc	hl
+	ld	d,(hl)
+	pop	af
+	scf			; .. set carry
+	ret
+;
+; Display character
+; ENTRY	Accu holds character
+;
+PrCtrl:
+	push	af
+	call	.NormVideo	; Set normal video
+	pop	af
+	cp	'~'+1		; Test special control
+	ret	nc		; .. yeap
+	cp	' '		; Test normal control
+	jp	nc,ChrPutCon	; .. nope
+	push	af
+	push	af
+	ld	a,'^'
+	call	ChrPutCon	; Give control prefix
+	pop	af
+	add	a,'A'-1
+	call	ChrPutCon	; .. followed by ASCII
+	pop	af
+	ret
+;
+; Give editor status
+;
+TellStatus:
+	call	PollIn		; Get character
+	call	IsAheadEmpty	; Test any character there
+	ret	nz		; .. yeap
+	ld	hl,NewFlg
+	ld	a,(hl)
+	or	a		; Test status changed
+	jr	nz,TS.NoCtrl	; .. no change
+	ld	(hl),-1		; .. reset it
+	ld	hl,0
+	ld	(l4476),hl	; Clear a bit
+	xor	a
+	ld	(l4478),a
+	call	ExecXY		; .. home cursor
+	call	ClrPart		; Prepare line
+	call	.LowVideo	; Set low video
+	@XY	_FilPos,_StLin
+	call	ExecXY		; Set cursor
+	call	PrWFCB		; .. print name of file
+	@XY	_LinPos,_StLin
+	call	CtrlStrXY	; Print control indicators
+IF	@@GERMAN
+	db	'Zeile ',eot
+ELSE
+	db	'Line ',eot
+ENDIF	;@@GERMAN
+	@XY	_ColPos,_StLin
+	call	CtrlStrXY
+IF	@@GERMAN
+	db	'Spalte ',eot
+	@XY	_InsPos,_StLin
+ELSE
+	db	'Col ',eot
+	@XY	_InsPos,_StLin
+ENDIF	;@@GERMAN
+	ld	a,(ED.Ins)	; Test flag
+	or	a
+	jr	nz,TS.ovwrt	; .. overwrite
+	call	CtrlStrXY
+IF	@@GERMAN
+	db	'Einf}gen  ',eot
+ELSE
+	db	'Insert    ',eot
+ENDIF	;@@GERMAN
+	jr	TS.skpOvwrt
+TS.ovwrt:
+	call	CtrlStrXY
+IF	@@GERMAN
+	db	']berschr. ',eot
+ELSE
+	db	'Overwrite ',eot
+ENDIF	;@@GERMAN
+TS.skpOvwrt:
+	ld	a,(ED.Ind)	; Test flag
+	or	a
+	jr	nz,TS.NoCtrl	; .. no indent
+	call	CtrlStrj
+IF	@@GERMAN
+	db	'Einr. ',eot
+ELSE
+	db	'Indent',eot
+ENDIF	;@@GERMAN
+TS.NoCtrl:
+	ld	a,(EditPSW)
+	add	a,(iy+_EdCol)	; Add column
+	inc	a
+	ld	hl,(l4478)
+	cp	l
+	jr	z,TS.noCol
+	ld	(l4478),a
+	push	af
+	@XY	_ColVal,_StLin
+	call	ExecXY
+	call	.LowVideo	; .. low video
+	pop	af
+	ld	l,a
+	ld	h,0
+	ld	a,3		; Set digit count
+	call	StatForm	; .. give count
+TS.noCol:
+	ld	de,(l4476)
+	ld	hl,(CurMemPtr)	; .. get edit text pointer
+	call	CmpAdr		; Test addresses
+	jp	z,EdCursor	; .. same, only set cursor
+	call	EdCursor	; Set cursor
+	ld	de,(TxtBeg)	; Get start
+	ld	hl,(CurMemPtr)	; .. get edit text pointer
+	or	a
+	sbc	hl,de		; .. get relative position
+	ld	c,l
+	ld	b,h
+	ex	de,hl
+	ld	de,1
+	ld	a,c		; Test any
+	or	b
+	jr	z,TS.Line
+TS.SrcLine:
+	ld	a,lf
+	inc	de
+	cpir			; Find new line
+	jp	po,TS.Line	; .. got line
+	dec	e
+	inc	e
+	call	z,PollIn	; Get character
+	call	IsAheadEmpty	; Test any character there
+	jr	nz,.EdCursor	; .. yeap
+	jr	TS.SrcLine
+TS.Line:
+	@XY	_LinVal,_StLin
+	push	de
+	call	ExecXY
+	call	.LowVideo	; .. low video
+	pop	hl
+	ld	a,5		; Set digit count
+	call	StatForm	; Display number
+	ld	hl,(CurMemPtr)	; Get text pointer
+	ld	(l4476),hl
+.EdCursor:
+	jp	EdCursor	; .. set cursor
+;
+; Print fixed format integer
+; ENTRY	Reg HL holds number to be printed
+;	Accu holds decimal places
+;
+StatForm:
+	push	af
+	ld	b,0		; Clear count
+	call	StatInt		; .. print number
+	pop	af
+	add	a,b		; Test all digits typed
+	ret	z		; .. yeap
+	ld	b,a
+	ld	a,' '
+SF.blnk:
+	call	ChrPutCon	; .. clear rest
+	djnz	SF.blnk
+	ret
+;
+; Print decimal number
+; ENTRY	Reg HL holds number
+;	Reg B  holds places
+;
+StatInt:
+	ld	a,h		; Test zero
+	or	l
+	ld	a,'0'
+	jr	z,SD.prn	; .. yeap
+	ld	de,10000
+	call	StatDig		; Get ten thousands
+	ld	de,1000
+	call	StatDig		; .. thousands
+	ld	de,100
+	call	StatDig		; .. hundreds
+	ld	de,10
+	call	StatDig		; .. tens
+	ld	de,1		; .. and units
+;
+; Print modulo
+; ENTRY	Reg HL holds number
+;	Reg DE holds divisor
+;	Reg B  holds places
+; EXIT	Reg HL fixed
+;	Reg B  decremented if digit is printed
+;
+StatDig:
+	xor	a		; Clear digit
+SD.sub:
+	sbc	hl,de		; .. subtract
+	jr	c,SD.got	; .. till < 0
+	inc	a		; .. bump digit
+	jr	SD.sub
+SD.got:
+	add	hl,de		; Make > 0
+	add	a,'0'		; Make ASCII
+	cp	'0'		; Test zero
+	jr	nz,SD.prn	; .. print always if not
+	inc	b
+	dec	b		; Test 1st digit
+	ret	z		; .. suppress leading zeroes
+SD.prn:
+	dec	b		; .. count dwn
+	jp	ChrPutCon	; .. and print digit
+;
+; Get string for search and file function
+; ENTRY	Reg DE points to line buffer
+;	Byte 0 holds max characters
+;	Byte 1 holds resulting length
+;
+EDGetLin:
+	call	String		; Indicate input
+	db	': ',eot
+	ex	de,hl
+	push	hl
+	pop	ix		; Copy buffer
+	inc	hl
+	ld	d,(hl)		; Get length of current
+	call	GiveCurr
+EGL.loop:
+	res	_LB,(iy+_Video)	; Disable video
+	push	de
+	push	hl
+	call	EDCtrl		; Test control
+	pop	hl
+	pop	de
+	set	_LB,(iy+_Video)	; Allow video
+	jr	nc,EGL.Chr	; .. no control
+	call	EDBreak		; Test cancel
+	cp	@LnDEL		; Test delete line
+	jr	nz,EGL.Rdy?
+ClrCurr:
+	call	EDLinFix	; Fix line
+	jr	nz,ClrCurr	; .. till all deleted
+	jr	EGL.loop
+EGL.Rdy?:
+	cp	@CR		; Test RETURN
+	jr	z,EGL.Done	; .. yeap
+	cp	@NL		; .. or ENTER
+	jr	nz,EGL.Bak?	; .. nope
+EGL.Done:
+	ld	(hl),eof	; Close line
+	ret
+EGL.Bak?:
+	cp	@CWRgt		; Test word right
+	jr	nz,EGL.Move?
+	ld	a,(ix+1)
+	cp	d		; Test we reached limit
+	jr	nc,EGL.loop	; .. yeap
+	inc	(ix+1)		; Bump count
+	jr	EGL.prnt
+EGL.Move?:
+	cp	@Move		; Test EINBL
+	jr	nz,EGL.Wld?
+EGL.Move:
+	ld	a,(ix+1)
+	cp	d		; Test limit reached
+	jr	z,EGL.loop	; .. yeap
+	ld	a,(hl)
+	call	PrCtrl		; Print control
+	inc	hl
+	inc	(ix+1)		; .. bump
+	jr	EGL.Move
+EGL.Wld?:
+	cp	@Recal		; Test wildcard
+	jr	nz,EGL.Del?
+	ld	a,'A'-'@'
+	jr	EGL.Chr		; Put character
+EGL.Del?:
+	cp	@CDEL		; Test DEL left
+	jr	nz,EGL.loop
+EGL.Fix:
+	call	EDLinFix	; Fix a bit
+.EGL.loop:
+	jr	EGL.loop
+EGL.Chr:
+	ld	e,a		; Save character
+	ld	a,(ix+1)
+	cp	(ix)		; Test room in buffer
+	jr	nc,EGL.loop	; .. nope
+	inc	(ix+1)		; Bump count
+	ld	(hl),e		; .. save character
+EGL.prnt:
+	ld	a,(hl)		; Get character
+	inc	hl		; .. bump count
+	call	PrCtrl		; Print control
+	ld	a,(ix+1)
+	cp	d		; Compare against current
+	jr	c,.EGL.loop
+	ld	d,(ix+1)	; .. get new current
+	jp	.EGL.loop	; .. retry
+;
+; Give current string
+; ENTRY	Reg HL points to text-1
+;	Reg D  holds length
+;
+GiveCurr:
+	push	de
+	call	..GivCurr
+	pop	de
+	ret
+..GivCurr:
+	inc	d
+..G.Curr:
+	dec	d
+	inc	hl
+	ret	z		; .. empty
+	ld	a,(hl)
+	call	PrCtrl		; Print control
+	jr	..G.Curr
+;
+; Fix character position
+; EXIT	Zero set on left margin
+;
+EDLinFix:
+	ld	a,(ix+1)	; Get count
+	or	a
+	ret	z		; Exit if empty
+	dec	(ix+1)		; Fix count
+	dec	hl		; .. and buffer
+	ld	a,(hl)
+	cp	' '		; Test range
+	call	c,ELF.do	; .. delete if control
+ELF.do:
+	call	CtrlStrj	; Delete character
+	db	bs+MSB,' '+MSB,bs+MSB,eot
+	ld	a,-1
+	or	a		; Set flag
+	ret
+;
+; SUCHE : Find string
+;
+ED.FIND:
+	xor	a
+	ld	(FndFlg),a	; Set find flag
+	call	GetFndItm	; Get string searched for
+	call	GetOptItm	; Get options
+	jr	DoREPL.FND
+;
+; Get search string
+;
+GetFndItm:
+	call	StrPosS		; Tell what we want
+IF	@@GERMAN
+	db	'Suchen',eot
+ELSE
+	db	'Find',eot
+ENDIF	;@@GERMAN
+	ld	de,$FndItm	; Get buffer
+.EDGetLin:
+	jp	EDGetLin	; Get search string
+;
+; Get string to be replaced
+;
+GetReplItm:
+	call	StrPos		; Tell what we want
+IF	@@GERMAN
+	db	'Ersetzen durch',eot
+ELSE
+	db	'Replace with',eot
+ENDIF	;@@GERMAN
+	ld	de,$RplItm	; Get buffer
+	jr	.EDGetLin	; .. get it
+;
+; Get options for find and replace
+;
+GetOptItm:
+	call	StrPos
+IF	@@GERMAN
+	db	'Optionen',eot
+ELSE
+	db	'Options',eot
+ENDIF	;@@GERMAN
+	ld	de,$OptBuf	; Get buffer
+	call	EDGetLin	; Get options
+	ld	a,(@ScrCol)	; Get screen width
+	ld	h,a
+	dec	h
+	ld	l,_StLin
+	jp	ExecXY		; Set cursor
+;
+; SHIFT SUCHE : Replace string
+;
+ED.REPLC:
+	ld	a,-1
+	ld	(FndFlg),a	; Set replace flag
+	call	GetFndItm	; Get string searched for
+	call	GetReplItm	; Get replacement
+	call	GetOptItm	; Get options
+	jr	DoREPL.FND
+;
+; ALT SUCHE or F7 : Repeat last search
+;
+ED.SRCREP:
+	call	PollIn		; Get character
+	call	IsAheadEmpty	; Test any character there
+	ld	(iy+_EdCh),3	; Set count
+DoREPL.FND:
+	call	PollAppend	; Sample character
+	call	LastInLine	; Find last non blank
+	inc	hl		; .. fix over
+	ld	de,(CurEdPtr)	; Get edit pointer
+	call	MinAdr		; Get MIN
+	ld	de,EDLine
+	or	a
+	sbc	hl,de		; Subtract base
+	ld	de,(CurMemPtr)	; Get current text pointer
+	add	hl,de		; .. add for real address
+	ld	(SrcEndPtr),hl	; Set end
+	ld	de,0
+	ld	hl,$OptBuf+1	; Init buffer
+	ld	b,(hl)		; .. get length
+	ld	(iy+_FndSta),0	; Clear flag
+	inc	b		; Test any
+	dec	b
+	jr	z,EDFR.noOpt
+EDFR.nxtOpt:
+	inc	hl
+	ld	a,(hl)
+	cp	'0'		; Test count
+	jr	c,EDFR.noNum
+	cp	'9'+1
+	jr	nc,EDFR.noNum
+	call	Mult10		; Get times 10
+	sub	'0'
+	add	a,e
+	ld	e,a
+	jr	nc,EDFR.next	; .. no carry
+	inc	d		; Fix HI
+	jr	EDFR.next
+EDFR.noNum:
+	call	DoUPcase
+	cp	_Wchr		; Test whole word search
+	jr	nz,EDFR.U?
+	set	_W,(iy+_FndSta)
+EDFR.U?:
+	cp	_Uchr		; Test ignore case
+	jr	nz,EDFR.N?
+	set	_U,(iy+_FndSta)
+EDFR.N?:
+	cp	_Nchr		; Test no request
+	jr	nz,EDFR.G?
+	set	_N,(iy+_FndSta)
+EDFR.G?:
+	cp	_Gchr		; Test global search
+	jr	nz,EDFR.B?
+	set	_G,(iy+_FndSta)
+EDFR.B?:
+	cp	_Bchr		; Test backwards
+	jr	nz,EDFR.next
+	set	_B,(iy+_FndSta)
+EDFR.next:
+	djnz	EDFR.nxtOpt
+EDFR.noOpt:
+	ld	a,e		; Test any loop count
+	or	d
+	jr	nz,EDFR.noCnt
+	ld	de,1		; Set default
+EDFR.noCnt:
+	ld	(FndCnt),de
+	ld	hl,(TxtBeg)	; Get start
+	ld	a,(FndStat)	; .. and status
+	bit	_B,a		; .. test backwards
+	jr	z,EDFR.back	; .. nope
+	ld	hl,(TxtEnd)	; Get end if yes
+EDFR.back:
+	bit	_G,a		; Test global search
+	jr	nz,EDFR.global	; .. yeap
+	ld	hl,(SrcEndPtr)	; Else get end
+EDFR.global:
+	ld	(SrcEndPtr),hl	; Set end address
+	bit	_B,(iy+_FndSta)	; Test backward
+	jr	nz,EDFR.goBack	; .. yeap
+	ld	de,(TxtEnd)	; Get end
+	dec	de
+	call	CmpAdr		; Compare
+	jp	nc,l3380	; .. HL>=DE
+	jr	l32fb
+EDFR.goBack:
+	call	FixBeg		; Pointer-1
+	jp	c,l3380		; .. below start
+l32fb:
+	ld	de,$FndItm+2	; Init buffer
+	ld	a,($FndItm+1)	; .. and length of item
+	ld	b,a
+	bit	_B,(iy+_FndSta)	; Test backward
+	jr	z,l330e		; .. nope
+	dec	a
+	add	a,e
+	ld	e,a
+	jr	nc,l330e
+	inc	d
+l330e:
+	bit	_W,(iy+_FndSta)	; Test whole words
+	jr	z,l3323		; .. nope
+	push	de
+	push	hl
+	call	l33fb
+	ld	a,(hl)
+	pop	hl
+	pop	de
+	jr	c,l3323
+	call	IsAlphaNum	; Test alphanumeric
+	jr	c,l3377		; .. yeap
+l3323:
+	dec	b
+	inc	b
+	jr	z,l332e
+l3327:
+	call	l340f
+	jr	nz,l3377
+	djnz	l3364
+l332e:
+	bit	_W,(iy+_FndSta)	; Test whole words
+	jr	z,l3341		; .. nope
+	push	hl
+	call	l3406
+	ld	a,(hl)
+	pop	hl
+	jr	c,l3341
+	call	IsAlphaNum	; Test alphanumeric
+	jr	c,l3377		; .. yeap
+l3341:
+	bit	_B,(iy+_FndSta)	; Test backwards
+	call	z,l3bdd		; .. nope
+	ld	a,(FndFlg)	; Test mode
+	or	a
+	call	nz,GetYES.NO	; .. replace
+	bit	_G,(iy+_FndSta)	; Test global search
+l3353:
+	jr	nz,EDFR.global	; .. yeap
+	ld	bc,(FndCnt)
+	dec	bc		; Count down
+	ld	(FndCnt),bc
+	ld	a,b
+	or	c		; Test end
+	jr	nz,l3353
+	jr	l33a9		; .. yeap
+l3364:
+	push	de
+	call	l3406
+	pop	de
+	jr	c,l3380
+	bit	_B,(iy+_FndSta)	; Test backwards
+	jr	z,l3374		; .. nope
+	dec	de
+	jr	l3327
+l3374:
+	inc	de
+	jr	l3327
+l3377:
+	ld	hl,(SrcEndPtr)	; Get end address
+	call	l3406
+	jp	nc,EDFR.global
+l3380:
+	call	l33d6
+	call	l33a9
+	bit	_G,(iy+_FndSta)	; Test global
+	ret	nz		; .. yeap
+	call	StrPosS
+IF	@@GERMAN
+	db	'Zeichenkette nicht gefunden',eot
+ELSE
+	db	'Search string not found',eot
+ENDIF	;@@GERMAN
+	jp	l3f12
+;
+;
+;
+l33a9:
+	call	l33af
+	jp	ED.RESLIN	; Restore line
+;
+; ???????????????????????????????????????
+; ENTRY	Reg HL holds text address
+; EXIT	Reg HL unchanged or pointer to end of text
+;
+l33af:
+	ld	de,(TxtEnd)	; Get end
+	dec	de
+	call	CmpAdr		; Compare addresses
+	jr	c,l33ba		; .. HL<DE
+	ex	de,hl		; Swap if out of editor
+l33ba:
+	push	hl
+	push	hl
+	call	FixEOL		; Adjust to previous EOL
+	ld	(CurMemPtr),hl	; .. set text pointer
+	or	a
+	ex	de,hl
+	pop	hl
+	sbc	hl,de		; Get length
+	ld	de,EDLine	; Get base
+	add	hl,de		; .. add length
+	ld	(CurEdPtr),hl	; Save edit pointer
+	call	l3fe7
+	call	l401f
+	pop	hl
+	ret
+;
+;
+;
+l33d6:
+	ld	de,(TxtBeg)	; Get start
+	call	MinAdr		; Get MIN
+	ld	hl,(TxtEnd)	; Get end
+	dec	hl
+	jp	MinAdr		; .. get MIN
+;
+; Check character alphanumeric
+; ENTRY	Accu holds character
+; EXIT	Carry set if alphanumeric
+;
+IsAlphaNum:
+	cp	'0'		; Test 0..9
+	jr	c,IAN.no
+	cp	'9'+1
+	ret	c
+	cp	'A'		; .. A..Z
+	jr	c,IAN.no
+	cp	'Z'+1
+	ret	c
+	cp	'a'		; .. a..z
+	jr	c,IAN.no
+	cp	'z'+1
+	ret	c
+IAN.no:
+	or	a
+	ret
+

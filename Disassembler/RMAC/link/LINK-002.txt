@@ -1,0 +1,2095 @@
+;
+; Write record to Y temp file
+;
+Wr$Y$rec:
+	ld	a,(iy+Y$.WR)	; .. test file created
+	rra
+	jr	c,Wr$Y..crec	; .. skip if exist
+	ld	hl,(Y.FCB)	; Get FCB
+IF	@@DU
+	call	FCrecDU		; Create file
+ELSE
+	call	FCreate		; Create file
+ENDIF	;@@DU
+	ld	(iy+Y$.WR),TRUE	; Set created
+Wr$Y..crec:
+	ld	l,(iy+Y$.buf)	; Get buffer
+	ld	h,(iy+Y$.buf+1)
+	ld	c,(iy+Y$.len)	; .. length
+	ld	b,(iy+Y$.len+1)
+	ld	de,(Y.FCB)	; Get FCB
+	call	DiskWr		; .. write
+	ret
+;
+; Write byte to Y temp file
+; ENTRY	Accu holds byte
+;
+Wr$Y$byte:
+	ld	e,(iy+Y$.cur)	; Get current
+	ld	d,(iy+Y$.cur+1)
+	ld	l,(iy+Y$.buf)
+	ld	h,(iy+Y$.buf+1)
+	add	hl,de
+	ld	(hl),a		; Save byte
+	inc	de		; Bump pointer
+	ld	(iy+Y$.cur),e
+	ld	(iy+Y$.cur+1),d
+	ex	de,hl
+	ld	c,(iy+Y$.len)
+	ld	b,(iy+Y$.len+1)
+	or	a
+	sbc	hl,bc		; Test buffer filled
+	ret	c
+	call	Wr$Y$rec	; .. write buffer
+	xor	a
+	ld	(iy+Y$.cur),a	; Reset current
+	ld	(iy+Y$.cur+1),a
+	ret
+;
+; Write word to Y temp file
+; ENTRY	Reg BC holds word
+;
+Wr$Y$word:
+	push	bc
+	ld	a,c
+	call	Wr$Y$byte	; Write LO
+	pop	bc
+	ld	a,b
+	call	Wr$Y$byte	; Write HI
+	ret
+;
+; Read record from Y temp file
+;
+Rd$Y$rec:
+	ld	l,(iy+Y$.buf)	; Get block
+	ld	h,(iy+Y$.buf+1)
+	ld	c,(iy+Y$.len)	; .. length
+	ld	b,(iy+Y$.len+1)
+	ld	de,(Y.FCB)	; .. FCB
+	call	DiskRd		; .. read
+	ret
+;
+; Read byte from Y temp file
+; EXIT	Accu holds byte
+;
+Rd$Y$byte:
+	ld	l,(iy+Y$.cur)	; Get current
+	ld	h,(iy+Y$.cur+1)
+	inc	hl		; .. bump
+	ld	(iy+Y$.cur),l
+	ld	(iy+Y$.cur+1),h
+	ld	c,(iy+Y$.len)
+	ld	b,(iy+Y$.len+1)
+	or	a
+	sbc	hl,bc		; Test buffer
+	jr	c,RYB.end
+	call	Rd$Y$rec	; Read if done
+	xor	a
+	ld	(iy+Y$.cur),a	; Cleare current
+	ld	(iy+Y$.cur+1),a
+RYB.end:
+	ld	c,(iy+Y$.cur)	; Get current
+	ld	b,(iy+Y$.cur+1)
+	ld	l,(iy+Y$.buf)
+	ld	h,(iy+Y$.buf+1)
+	add	hl,bc		; Get buffer
+	ld	a,(hl)		; .. fetch character
+	ret
+;
+; Read word from Y temp file
+; EXIT	Reg HL holds word
+;
+Rd$Y$word:
+	call	Rd$Y$byte	; Read LO
+	ld	l,a
+	push	hl
+	call	Rd$Y$byte	; .. and HI
+	pop	hl
+	ld	h,a
+	ret
+;
+; Save temporary pointer
+; ENTRY	Accu holds index to table
+;
+Save$Y:
+	ld	l,a
+	ld	h,0
+	ld	bc,Y$TAB
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Get block address
+	inc	hl
+	ld	d,(hl)
+	push	de
+	pop	iy
+	ld	hl,Y$.FCB
+	add	hl,de
+	ld	(Y.FCB),hl	; .. save pointer to FCB
+	ret
+Y.FCB:
+	dw	0
+;
+; Write end of file to temp file and re-open it
+;
+Cls$Y:
+	ld	a,Y.eof		; Write special
+	call	Wr$Y$byte
+	ld	bc,-1
+	ld	a,(iy+Y$.WR)	; Check file attached
+	rra
+	jr	nc,Cls$Y$NoAtt	; .. no
+Cls$Y$wrtEOF:
+	ld	a,(iy+Y$.cur)
+	or	(iy+Y$.cur+1)	; Test empty
+	jr	z,Cls$Y$full
+	ld	a,eof		; Fill with eof
+	call	Wr$Y$byte
+	jr	Cls$Y$wrtEOF
+Cls$Y$full:
+	ld	hl,(Y.FCB)	; Get FCB
+	call	FClose		; Close file
+	ld	hl,(Y.FCB)	; Get FCB again
+	call	FOpen		; .. re-open
+	ld	c,(iy+Y$.len)	; Fetch length
+	ld	b,(iy+Y$.len+1)
+Cls$Y$NoAtt:
+	ld	(iy+Y$.cur),c	; .. set it
+	ld	(iy+Y$.cur+1),b
+	ret
+;
+; Get address from temporary table
+; EXIT	Reg HL holds address
+;
+Get$Y$Adr:
+	ld	hl,(Heap)	; Get base
+	inc	hl		; .. skip control
+	ld	e,(hl)		; Get content
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Get value from temporary table
+; EXIT	Reg HL holds word
+;
+Get$Y$Val:
+	ld	bc,.Y$Val
+	ld	hl,(Heap)	; Get base
+	add	hl,bc		; .. fix pointer
+	ld	e,(hl)		; Get content
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Get linkage from temporary table
+; EXIT	Reg HL holds chain
+;
+Get$Y$Lnk:
+	ld	bc,.Y$Lnk
+	ld	hl,(Heap)	; Get base
+	add	hl,bc		; .. fix pointer
+	ld	e,(hl)		; Get content
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Get state of bit b2 of temporary status -> Solve chain
+; EXIT	Accu holds TRUE if bit set
+;
+Get$Y$Solv:
+	ld	hl,(Heap)	; Get base
+	ld	a,FALSE
+	bit	Y$$solv,(hl)	; .. test
+	ret	z
+	ld	a,TRUE
+	ret
+;
+; Get state of bit b3 of temporary status -> Define offset
+; EXIT	Accu holds TRUE if bit set
+;
+Get$Y$Offb:
+	ld	hl,(Heap)	; Get base
+	ld	a,FALSE
+	bit	Y$$Off,(hl)	; .. test
+	ret	z
+	ld	a,TRUE
+	ret
+;
+; Get bits b1 and b0 of temporary status
+; EXIT	Accu holds the bits
+;
+Get$Y$Mode:
+	ld	hl,(Heap)	; Get base
+	ld	a,Y@@mod
+	and	(hl)		; Get bits
+	ret
+;
+; Get temporary status
+; EXIT	Accu holds status
+;
+Get$Y$Ctrl:
+	ld	hl,(Heap)	; Get base
+	ld	a,(hl)		; .. get control
+	ret
+;
+; Get offset from temporary table
+; EXIT	Reg HL holds word
+;
+Get$Y$Off:
+	ld	bc,.Y$Off
+	ld	hl,(Heap)	; Get base
+	add	hl,bc		; .. fix pointer
+	ld	e,(hl)		; Get content
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Get base linkage from temporary table
+; EXIT	Reg HL holds chain
+;
+Get$Y$B_Lnk:
+	ld	bc,.Y$Lnk
+	ld	hl,(SavHeap)	; Get old base
+	add	hl,bc		; .. fix pointer
+	ld	e,(hl)		; Get content
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Put adress to temporary table
+; ENTRY	Reg BC holds address
+;
+Put$Y$Adr:
+	ld	hl,(Heap)	; Get base
+	inc	hl		; .. skip control
+	ld	(hl),c		; .. store value
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Put value to temporary table
+; ENTRY	Reg BC holds value
+;
+Put$Y$Val:
+	ld	de,.Y$Val
+	ld	hl,(Heap)	; Get base
+	add	hl,de		; .. fix pointer
+	ld	(hl),c		; .. store value
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Put linkage to temporary table
+; ENTRY	Reg BC holds chain
+;
+Put$Y$Lnk:
+	ld	de,.Y$Lnk
+	ld	hl,(Heap)	; Get base
+	add	hl,de		; .. fix pointer
+	ld	(hl),c		; .. store value
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Set state of bit b2 to temporary status -> Solve chain
+; ENTRY	Accu holds bit
+;
+Put$Y$Solv:
+	ld	hl,(Heap)
+	res	Y$$solv,(hl)	; Clear status bit
+	bit	$$LSB,a		; Test bit to be set
+	ret	z		; .. nope
+	set	Y$$solv,(hl)	; .. set it
+	ret
+;
+; Set state of bit b3 for temporary status -> Define offset
+; ENTRY	Accu holds bit
+;
+Put$Y$Offb:
+	ld	hl,(Heap)
+	res	Y$$Off,(hl)	; Clear status bit
+	bit	$$LSB,a		; Test bit to be set
+	ret	z		; .. nope
+	set	Y$$Off,(hl)	; .. set it
+	ret
+;
+; Set state of bit b4 for temporary status -> Offset sign
+; ENTRY	Accu holds bit
+;
+Put$Y$Offs:
+	ld	hl,(Heap)
+	res	Y$$Offs,(hl)	; Clear status bit
+	bit	$$LSB,a		; Test bit to be set
+	ret	z		; .. nope
+	set	Y$$Offs,(hl)	; .. set it
+	ret
+;
+; Set bits b1 and b0 of temporary status
+; ENTRY	Accu holds the bits
+;
+Put$Y$Mode:
+	and	Y@@mod		; .. isolate bits
+	ld	b,a
+	ld	hl,(Heap)
+	ld	a,(hl)
+	and	NOT Y@@mod	; Clear status bits
+	or	b
+	ld	(hl),a		; Store control
+	ret
+;
+; Set offset to temporary table
+; ENTRY	Reg BC holds word
+;
+Put$Y$Off:
+	ld	de,.Y$Off
+	ld	hl,(Heap)	; Get base
+	add	hl,de		; .. fix pointer
+	ld	(hl),c		; Set value
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Set base linkage to temporary table
+; ENTRY	Reg BC holds chain
+;
+Put$Y$B_Lnk:
+	ld	de,.Y$Lnk
+	ld	hl,(SavHeap)	; Get old base
+	add	hl,de		; .. fix pointer
+	ld	(hl),c		; .. store value
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Count number of chain addresses
+; ENTRY	Reg HL holds address
+;	Accu   holds address mode
+; EXIT	Carry set if addresses are the same
+;
+Get$Y$AdrCnt:
+	ld	(ChnAdr),hl
+	ld	hl,0
+	ld	(AdrCnt),hl	; Clear address count
+	ld	l,a		; Get mode
+	ld	bc,SymTab	; .. as index
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Fetch table address
+	inc	hl
+	ld	d,(hl)
+G$AC.loop:
+	ld	(Heap),de	; .. as heap base
+	ld	a,e		; Test zero
+	or	d
+	ret	z		; .. yeap
+	call	Get$Y$Adr	; Get address from table
+	ld	de,ChnAdr
+	call	SUB.@DE.HL	; Test limit reached
+	jr	nc,G$AC.ex	; .. yeap
+	ld	hl,(Heap)
+	ld	(SavHeap),hl	; Save base
+	ld	hl,(AdrCnt)
+	inc	hl		; Bump count
+	ld	(AdrCnt),hl
+	call	Get$Y$Lnk	; Fetch linkage
+	ld	(Heap),hl	; .. as heap
+	ex	de,hl
+	jr	G$AC.loop
+G$AC.ex:
+	call	Get$Y$Adr	; Get address from table
+	ld	de,ChnAdr
+	call	SUB.@DE.HL	; Test same
+	or	l
+	sub	1
+	sbc	a,a		; Get state
+	rra
+	ret
+;
+; Build temporary address record
+; ENTRY	Reg BC  holds offset if to be defined
+;	Reg E   holds offset flag
+;	<SP>    holds offset bit
+;	<SP-2>  holds mode
+;	<SP-4>  holds solve chain bit
+;	<SP-6>  holds mode
+;	<SP-8>  holds word - chain or value
+;	<SP-10> holds word - address or chain
+;
+Build$Y$Rec:
+	ld	hl,B$R.off
+	ld	(hl),e
+	dec	hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	pop	de
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	push	de
+	ld	a,0
+	ld	de,B$R.adr
+	call	SUB.@DE.A	; Test zero address
+	or	l
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(B$R.cnt)
+	sub	0		; Test zero index
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	ret	c		; .. end if both zero
+	ld	a,(B$R.offBit)
+	rra			; Test offset flag
+	ld	a,.Y$Off
+	jr	nc,BRY.allo	; .. nope
+	ld	a,.Y$Off+2	; Set bytes required
+BRY.allo:
+	ld	de,MemTop
+	call	SUB.@DE.A	; Get gap
+	ex	de,hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,SymTop
+	call	SUB.DE.@HL	; Test enough space
+	jp	c,MemOvl	; .. nope
+	ld	a,(B$R.off)
+	rra			; Test offset
+	jr	nc,BRY.skpOff	; .. nope
+	ld	hl,(B$R.adr)
+	ld	a,(B$R.cnt)	; Get index
+	call	Get$Y$AdrCnt	; Get count
+BRY.skpOff:
+	ld	hl,(MemTop)	; Get top
+	ld	(Heap),hl	; .. as pointer
+	ld	(hl),0
+	ld	bc,(B$R.adr)	; Get address
+	call	Put$Y$Adr	; Save address
+	ld	a,0
+	ld	de,AdrCnt
+	call	SUB.@DE.A	; Test zero count
+	or	l
+	jr	nz,BRY.Lnk	; .. nope
+	ld	hl,(B$R.cnt)	; Get index
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	jr	BRY.noLnk
+BRY.Lnk:
+	call	Get$Y$B_Lnk	; Get base linkage
+	ld	b,h
+	ld	c,l
+BRY.noLnk:
+	call	Put$Y$Lnk	; .. save
+	ld	bc,(B$R.val)	; Get address
+	call	Put$Y$Val	; .. save it
+	ld	a,(B$R.offBit)
+	rra			; Test offset flag
+	jr	nc,BRY.noOffB
+	ld	bc,(B$R.offVal)	; Get offset
+	call	Put$Y$Off	; .. set it
+BRY.noOffB:
+	ld	a,(B$R.solve)	; Get solve chain bit
+	call	Put$Y$Solv	; .. set it
+	ld	a,(B$R.mode)
+	call	Put$Y$Mode	; .. mode bits
+	ld	a,(B$R.offBit)
+	call	Put$Y$Offb	; .. offset bit
+	ld	a,(OffSgn)	; Get sign
+	call	Put$Y$Offs	; .. sign bit
+	ld	a,0
+	ld	de,AdrCnt
+	call	SUB.@DE.A	; Test zero count
+	or	l
+	jr	nz,BRY.IniLnk	; .. nope
+	ld	hl,(B$R.cnt)	; Get index
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,(MemTop)	; Get top
+	ld	(hl),e		; .. store
+	inc	hl
+	ld	(hl),d
+	ret
+BRY.IniLnk:
+	ld	bc,(MemTop)	; Get top
+	call	Put$Y$B_Lnk	; .. store as base chain
+	ret
+;
+; Fix linkage in table
+;
+Fix$Y$Link:
+	ld	hl,FL.idx
+	ld	(hl),0		; Clear index
+F$L.loop:
+	ld	a,$$Files-1
+	cp	(hl)		; Test done
+	ret	c		; .. yeap
+	ld	l,(hl)		; Get index
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Fetch base
+	inc	hl
+	ld	d,(hl)
+	ld	(Heap),de	; .. save
+	ld	hl,0
+	ld	(FL.heap),hl	; Clear chain
+F$L.fix:
+	ld	a,0
+	ld	de,Heap
+	call	SUB.@DE.A	; Test zero chain
+	or	l
+	jr	z,F$L.done	; .. yeap
+	call	Get$Y$Lnk	; Get linkage
+	push	hl		; .. save
+	ld	bc,(FL.heap)	; Fetch value
+	call	Put$Y$Lnk	; .. save linkage
+	ld	hl,(Heap)
+	ld	(FL.heap),hl	; Change value
+	pop	hl
+	ld	(Heap),hl	; .. get link
+	jr	F$L.fix		; .. loop
+F$L.done:
+	ld	hl,(FL.idx)	; Get index
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl		; .. into table
+	add	hl,bc
+	ld	de,(FL.heap)	; .. get pointer
+	ld	(hl),e		; .. store top
+	inc	hl
+	ld	(hl),d
+	ld	hl,FL.idx
+	inc	(hl)		; Bump index
+	jr	F$L.loop
+;
+; Fix linkage and write temp record
+;
+Wr$Y$Data:
+	call	Fix$Y$Link	; Fix linkage
+	ld	hl,WD.idx
+	ld	(hl),0		; Init index
+W$Y.loop:
+	ld	a,$$Files-1
+	cp	(hl)		; Test done
+	jr	c,W$Y.ex	; .. yeap
+	ld	l,(hl)		; Get index
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Fetch base
+	inc	hl
+	ld	d,(hl)
+	ld	(Heap),de	; .. save
+	ld	a,(WD.idx)	; Get index
+	call	Save$Y		; Save
+W$Y.fix:
+	ld	a,0
+	ld	de,Heap
+	call	SUB.@DE.A	; Test empty chain
+	or	l
+	jr	z,W$Y.empty	; .. yeap, skip saving
+	call	Get$Y$Ctrl	; Get status
+	call	Wr$Y$byte	; Write to temp
+	call	Get$Y$Adr	; .. get address
+	ld	b,h
+	ld	c,l
+	call	Wr$Y$word	; .. to tem
+	call	Get$Y$Val	; .. get value
+	ld	b,h
+	ld	c,l
+	call	Wr$Y$word	; .. to temp
+	call	Get$Y$Offb	; Get offset bit
+	rra
+	jr	nc,W$Y.noOff	; .. not set
+	call	Get$Y$Off	; Get offset size
+	ld	b,h
+	ld	c,l
+	call	Wr$Y$word	; .. to temp
+W$Y.noOff:
+	call	Get$Y$Lnk	; Get linkage
+	ld	(Heap),hl	; .. as base
+	jr	W$Y.fix
+W$Y.empty:
+	ld	hl,WD.idx
+	inc	(hl)		; Bump index
+	jr	W$Y.loop
+W$Y.ex:
+	ld	hl,0
+	ld	(ABS.sym),hl	; Clear tables
+	ld	(CS.sym),hl
+	ld	(DS.sym),hl
+	ld	(CM.sym),hl
+	ret
+;
+; Clear item lengthes
+;
+ClrSymLen:
+	ld	hl,(SymPtr)	; Get current symbol
+	inc	hl
+	inc	hl
+	ld	(hl),0		; Clear total length
+	ld	bc,.SymCtr-2
+	add	hl,bc
+	ld	(hl),0		; Clear symbol length
+	ret
+;
+; Get chain address from current symbol
+; EXIT	HL holds address
+;
+GetSymCHN:
+	ld	hl,(SymPtr)	; Get current symbol
+	ld	e,(hl)		; Fetch link
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Set chain address for current symbol
+; ENTRY	Reg BC holds chain address
+;
+SetSymCHN:
+	ld	hl,(SymPtr)	; Get current symbol
+	ld	(hl),c		; Set address
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Get length of current symbol
+; EXIT	Accu holds length
+;
+GetSymLen:
+	ld	bc,.SymCtr
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to length
+	ld	a,.SymLen
+	and	(hl)		; .. mask
+	ret
+;
+; Set symbol length
+; ENTRY	Accu holds length
+;
+SetSymLen:
+	ld	de,.SymCtr
+	ld	hl,(SymPtr)
+	add	hl,de		; Set pointer
+	or	(hl)		; Insert length
+	ld	(hl),a
+	ret
+;
+; Get length of item
+; EXIT	Accu holds length
+;
+GetItmLen:
+	ld	hl,(SymPtr)	; Get current symbol
+	inc	hl
+	inc	hl		; Point to length
+	ld	a,.ItmLen
+	and	(hl)		; .. mask
+	ret
+;
+; Set item length
+; ENTRY	Accu holds length
+;
+SetItmLen:
+	ld	hl,(SymPtr)
+	inc	hl
+	inc	hl		; Point to length
+	or	(hl)		; Insert it
+	ld	(hl),a
+	ret
+;
+; Get symbol fixed
+; EXIT	Accu holds FALSE if not set
+;	Accu holds TRUE  if set
+;
+GetFix:
+	ld	hl,(SymPtr)
+	inc	hl
+	inc	hl
+	xor	a
+	bit	X$$fix,(hl)	; Test bit set
+	ret	z		; .. nope
+	inc	a
+	ret
+;
+; Set symbol fixed
+;
+SetFix:
+	ld	hl,(SymPtr)
+	inc	hl
+	inc	hl
+	set	X$$fix,(hl)	; Set bit
+	ret
+;
+; Get LIB REQUEST
+; EXIT	Accu holds FALSE if no request
+;	Accu holds TRUE  if REQUEST
+;
+GetRQST:
+	ld	hl,(SymPtr)
+	inc	hl
+	inc	hl
+	xor	a
+	bit	X$$LIB,(hl)	; Test bit set
+	ret	z		; .. nope
+	inc	a
+	ret
+;
+; Set LIB REQUEST
+;
+SetRQST:
+	ld	hl,(SymPtr)
+	inc	hl
+	inc	hl
+	set	X$$LIB,(hl)		; Set bit
+	ret
+;
+; Get ENTRY state of symbol
+; EXIT	Accu holds FALSE if not set
+;	Accu holds TRUE  if set
+;
+GetENT:
+	ld	bc,.SymCtr
+	ld	hl,(SymPtr)
+	add	hl,bc
+	xor	a
+	bit	$$ENT,(hl)	; Test bit set
+	ret	z		; .. nope
+	inc	a
+	ret
+;
+; Set ENTRY state of symbol
+; ENTRY	LSB of Accu reflects the bit state
+;
+SetENT:
+	ld	de,.SymCtr
+	ld	hl,(SymPtr)
+	add	hl,de		; Point to symbol length
+	res	$$ENT,(hl)	; Clear status bit
+	bit	$$LSB,a		; Test bit to be set
+	ret	z		; .. nope
+	set	$$ENT,(hl)	; .. set it
+	ret
+;
+; Get length of COMMON
+; EXIT	Reg HL holds space of COMMON area
+;
+GetCOMlen:
+	call	GetItmLen
+	ld	de,SymPtr
+	call	ADD.A.@DE	; Point to end
+	dec	hl		; Point to COMMON length
+	ld	d,(hl)		; .. get length
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	ret
+;
+; Set length of COMMON
+; ENTRY	Reg BC holds space of COMMON area
+;
+SetCOMlen:
+	push	bc
+	call	GetItmLen
+	ld	de,SymPtr
+	call	ADD.A.@DE	; Point to end
+	dec	hl		; Fix for COMMON length
+	pop	bc
+	ld	(hl),b		; Set length
+	dec	hl
+	ld	(hl),c
+	ret
+;
+; Get value from current symbol
+; EXIT	Reg HL holds offset
+;
+GetVAL:
+	ld	bc,.SymOff
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to value
+	ld	e,(hl)		; .. fetch it
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Set value into current symbol
+; ENTRY	Reg BC holds offset
+;
+SetVAL:
+	ld	de,.SymOff
+	ld	hl,(SymPtr)
+	add	hl,de		; Point to offset
+	ld	(hl),c		; .. set offset
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Fetch symbol address control bits xBBx.xxxx
+; EXIT	Accu holds bits
+;
+GetADRmod:
+	ld	bc,.SymCtr
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to length
+	ld	a,(hl)
+	rlca
+	rlca
+	rlca
+	and	X@@mod		; Mask two bits
+	ret
+;
+; Set symbol address control bits xBBx.xxxx
+; ENTRY	Accu holds bits
+;
+SetADRmod:
+	ld	de,.SymCtr
+	ld	hl,(SymPtr)
+	add	hl,de		; Point to control
+	and	X@@mod		; .. isolate bits
+	rrca			; Shift into right place
+	rrca
+	rrca
+	ld	c,a
+	ld	a,(hl)		; Get bits
+	and	.ItmBit		; .. mask
+	or	c		; .. insert
+	ld	(hl),a
+	ret
+;
+; Get hash table index
+; ENTRY	Accu   holds length of symbol
+;	Reg HL points to symbol
+; EXIT	Reg HL hold address into hash table
+;
+getIdx:
+	ld	b,a		; .. set length
+	xor	a		; Clear index
+getIDX.loop:
+	dec	b		; Count down
+	jp	m,getIDX.end
+	add	a,(hl)		; Build sum over all
+	inc	hl		; Bump pointer
+	jr	getIDX.loop
+getIDX.end:
+	res	$$MSB,a		; Strip off MSB
+	ld	l,a
+	ld	h,0
+	ld	bc,HashTab
+	add	hl,hl
+	add	hl,bc		; Set pointer
+	ret
+;
+; Find symbol in table
+; ENTRY	Accu   holds length of symbol
+;	Reg HL holds pointer to symbol
+; EXIT	Carry set if found
+;
+SymFind:
+	ld	(SFptr+2),a
+	ld	(SFptr),hl
+	call	GetSymBeg	; Get symbol base
+	ld	(SymPtr),hl
+SymFind.loop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC	; Test more
+	ret	nc		; .. nope
+	call	GetRQST		; Test LIB REQ
+	rra
+	jr	nc,SymFind.next	; Skip no symbol
+	call	GetSymLen	; Get symbol length
+	ld	hl,SFptr+2
+	cp	(hl)
+	jr	nz,SymFind.next	; Test same length
+	ld	bc,.SymLab
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to symbol
+	ex	de,hl
+	ld	hl,(SFptr)
+	ld	a,(SFptr+2)
+	ld	b,a
+	call	Compare		; .. compare
+	rra
+	ret	c
+SymFind.next:
+	call	GetItmLen
+	ld	de,SymPtr
+	call	ADD.A.@DE	; Point to next
+	ex	de,hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	SymFind.loop	; .. loop
+;
+; Search symbol from table
+; ENTRY	Reg E  holds FALSE if no COMMON searched
+;	Reg E  holds TRUE  if    COMMON searched
+; EXIT	Carry flag set if symbol found
+;
+SrcName:
+	ld	hl,BF.Name	; Load standard values
+	ld	a,(BF.Len)
+;
+; Search symbol from table
+; ENTRY	Accu   holds length of symbol
+;	Reg E  holds FALSE if no COMMON searched
+;	Reg E  holds TRUE  if    COMMON searched
+;	Reg HL holds pointer to symbol
+; EXIT	Carry flag set if symbol found
+;
+SrcSym:
+	ld	c,a
+	ld	a,e
+	ld	(SSmod),a	; .. save COMMON flag
+	ld	a,c
+	ld	(SSlen),a	; .. and length
+	ld	(SSptr),hl	; .. and pointer
+	call	getIdx		; Get hash index
+	ld	e,(hl)		; .. get entry
+	inc	hl
+	ld	d,(hl)
+	ld	(SymPtr),de	; Set as symbol pointer
+SrcSym.loop:
+	ld	a,0
+	ld	de,SymPtr
+	call	SUB.@DE.A	; Test empty entry
+	or	l
+	ret	z		; .. not found
+	call	GetSymLen	; Get symbol length
+	ld	hl,SSlen
+	cp	(hl)		; Compare against searched one
+	jr	nz,SrcSym.skp
+	ld	bc,.SymLab
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to symbol
+	ex	de,hl
+	ld	hl,(SSptr)
+	ld	a,(SSlen)	; Get length
+	ld	b,a
+	call	Compare		; Compare names
+	rra
+	jr	nc,SrcSym.skp	; .. not found
+	call	GetADRmod	; Get mode
+	sub	@COMM		; Test COMMON
+	sub	1
+	sbc	a,a
+	ld	hl,SSmod
+	xor	(hl)		; Compare entry
+	rra
+	ccf
+	ret	c		; .. got it
+SrcSym.skp:
+	call	GetSymCHN	; Get chain address
+	ld	(SymPtr),hl	; .. as next
+	jr	SrcSym.loop
+;
+; Insert symbol into table
+; ENTRY	Reg DE holds size in case of COMMON
+;	Reg C  holds TRUE for COMMON select
+;	<SP>   holds ENTRY control bit
+;	<SP>-2 holds address control bits xBBx.xxxx
+;	<SP>-4 holds value
+;	<SP>-6 holds length  of symbol
+;	<SP>-8 holds pointer to symbol
+;
+InsSym:
+	ld	hl,IS.COM+1
+	ld	(hl),d		; Save parameter
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	pop	de
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),c
+	dec	hl
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	push	de
+	ld	a,(IS.sel)	; Test COMMON selected
+	rra
+	ld	a,(IS.len)
+	jr	nc,Ins.NoCOM	; .. no
+	inc	a		; Fix length for 16 bits
+	inc	a
+Ins.NoCOM:
+	add	a,.SymHed	; Add header for complete len
+	ld	(IS..len),a
+	ld	hl,(SymTop)	; Get top
+	ld	(SymPtr),hl	; .. for new item
+	ld	c,a		; Get length
+	ld	b,0
+	add	hl,bc		; Get new top
+	ld	(SymTop),hl
+	ld	de,MemTop
+	call	SUB.@DE.HL	; Test room
+	jp	c,MemOvl	; .. nope
+	call	ClrSymLen	; Clear lengthes
+	ld	hl,(IS.buf)	; Get buffer
+	ld	a,(IS.len)	; .. and length
+	call	getIdx		; Get index
+	push	hl
+	ld	c,(hl)		; Get content
+	inc	hl
+	ld	b,(hl)
+	call	SetSymCHN	; Set chain
+	pop	hl
+	ld	de,(SymPtr)
+	ld	(hl),e		; Set symbol table
+	inc	hl
+	ld	(hl),d
+	ld	a,(IS..len)
+	call	SetItmLen	; Set length of item
+	ld	bc,(IS.val)
+	call	SetVAL		; Set value
+	ld	a,(IS.MSB)
+	call	SetENT		; Set ENTRY bit
+	ld	a,(IS.Len)
+	call	SetSymLen	; Set length
+	ld	a,(IS.Adr)
+	call	SetADRmod	; Set address mode
+	ld	bc,(IS.len)	; Get length
+	ld	b,0
+	ld	de,.SymHed
+	ld	hl,(SymPtr)
+	add	hl,de		; Point to symbol
+	ex	de,hl
+	ld	hl,(IS.buf)
+	ldir			; Unpack symbol
+	ld	a,(IS.sel)	; Test COMMON
+	rra
+	ld	bc,(IS.COM)
+	call	c,SetCOMlen	; .. insert length
+IF	NOT	@@HASH
+	ld	bc,.SymHed
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to symbol
+	ld	a,(hl)
+	cp	SpcChar		; Test special
+	ret	nz
+	ld	hl,SpecSym
+	ld	(hl),TRUE	; .. set flag
+ENDIF	;NOT @@HASH
+	ret
+;
+$TOP:
+	db	cr,lf,'Module top   ',eot
+$START?:
+	db	'Undefined start symbol: ',eot
+YY$$:
+	db	'YY????  $$$'
+XX$$:
+	db	'XX????  $$$'
+$RQST:
+	db	'RQST',eot
+$SYMBOL?:
+	db	cr,lf,'Undefined symbols:',cr,lf,eot
+$ABS:
+	db	'Absolute     ',eot
+$CSEG:
+	db	'Code size    ',eot
+$DSEG:
+	db	'Data size    ',eot
+$COMMON:
+	db	'COMMON size  ',eot
+$USE:
+	db	'Use factor     ',eot
+;
+; Print character and control count
+; ENTRY	Reg C holds character
+;
+PrChar:
+	ld	e,c
+	call	BannChar	; Print
+	ld	hl,CharCnt
+	inc	(hl)		; Bump count
+	ret
+;
+; Delete additional temp files
+;
+Del$YY:
+	ld	a,(Y$PRG$buf+Y$.WR)
+	ld	hl,Y$ABS$buf+Y$.WR
+	or	(hl)		; Test any file attached
+	ld	hl,Y$DAT$buf+Y$.WR
+	or	(hl)
+	ld	hl,Y$COM$buf+Y$.WR
+	or	(hl)
+	rra
+	ret	nc		; .. no
+	ld	a,(FCB$Y$ABS)
+	ld	(FCB),a		; Set drive
+	;;	Set Y wildcard
+	Move	YY$$,FCB+.nam,@nam+@ext
+	ld	de,FCB
+	call	delete		; Delete file(s)
+	ld	a,FALSE		; Reset the flags
+	ld	(Y$ABS$buf+Y$.WR),a
+	ld	(Y$PRG$buf+Y$.WR),a
+	ld	(Y$DAT$buf+Y$.WR),a
+	ld	(Y$COM$buf+Y$.WR),a
+	ret
+;
+; Delete temp files
+;
+Del$XX:
+	ld	hl,DelXflg
+	ld	(hl),FALSE	; Clear attache flag
+	ld	hl,DelXcnt
+	ld	(hl),0		; Clear count
+DelX$loop:
+	ld	a,$$Files-1
+	cp	(hl)		; Test scanned
+	jr	c,DelX$del?
+	ld	l,(hl)
+	ld	h,0
+	ld	bc,X$TAB
+	add	hl,hl
+	add	hl,bc		; Point to table
+	ld	e,(hl)		; .. get block
+	inc	hl
+	ld	d,(hl)
+	ld	(DelX.ptr),de
+	ld	bc,X$.WR
+	ld	hl,(DelX.ptr)
+	add	hl,bc
+	ld	a,(hl)
+	rra			; Test write attached
+	jr	nc,DelX$noWR	; .. no
+	ld	(hl),FALSE	; Clear write flag
+	ld	bc,X$.FCB
+	ld	hl,(DelX.ptr)
+	add	hl,bc		; Get FCB
+	call	FClose		; .. close file
+	ld	hl,DelXflg
+	ld	(hl),TRUE	; Indicate attached
+DelX$noWR:
+	ld	hl,DelXcnt
+	inc	(hl)		; Bump count
+	jr	DelX$loop
+DelX$del?:
+	ld	a,(DelXflg)	; Test file attached
+	rra
+	ret	nc		; .. nope
+	ld	a,(FCB$X$ABS)
+	ld	(FCB),a
+	;;	Set wildcard X temp file
+	Move	XX$$,FCB+.nam,@nam+@ext
+	ld	de,FCB
+	call	delete		; .. delete file(s)
+	ret
+;
+; Check load addresses
+;
+CheckLoad:
+	ld	hl,(loadaddr)	; Get load address
+	inc	hl		; .. +3
+	inc	hl
+	inc	hl
+	push	hl
+	ld	de,datorig
+	call	SUB.@DE.HL	; Test data origin
+	sbc	a,a
+	ld	hl,D.opt	; Test [D] option
+	and	(hl)
+	rra
+	pop	hl
+	jr	c,CkLd.NO
+	push	hl
+	ld	de,prgorig
+	call	SUB.@DE.HL	; Test prg origin
+	sbc	a,a
+	ld	hl,P.opt	; Test [P] option
+	and	(hl)
+	rra
+	pop	hl
+	jr	c,CkLd.NO
+	ld	de,ABS.beg
+	call	SUB.@DE.HL	; Test ABS origin
+	jr	c,CkLd.NO
+	ld	a,(XFerFlg)	; Test transfer flag
+	rra
+	jr	nc,CkLd.noXFer
+	ld	a,0
+	ld	de,XFerAddr
+	call	SUB.@DE.A	; Get difference
+	or	l
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(XFerMode)
+	sub	@c.rel		; Test CODE
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	push	af
+	ld	a,(P.opt)	; Test [P] option
+	cpl
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	c,CkLd.NO
+CkLd.YES:
+	ld	hl,LoadFlg
+	ld	(hl),TRUE	; Set flag
+	ret
+CkLd.noXFer:
+	ld	a,(G.opt)
+	ld	hl,P.opt
+	or	(hl)
+	rra			; Test [P] or [G] option
+	jr	c,CkLd.YES
+CkLd.NO:
+	ld	hl,LoadFlg
+	ld	(hl),FALSE	; .. reset load flag
+	ret
+;
+; Set up segments
+;
+SetSegments:
+	ld	hl,(prgorig)
+	ld	a,(P.opt)	; Test [P] option
+	rra
+	jr	c,SetSeg.endCod
+	ld	hl,(loadaddr)
+	ld	a,(LoadFlg)	; Test load flag
+	rra
+	jr	nc,SetSeg.endCod
+	inc	hl
+	inc	hl
+	inc	hl
+SetSeg.endCod:
+	ld	(CS.strt),hl	; Set code start
+	ld	a,(D.opt)	; Test [D] option
+	rra
+	jr	nc,SetSeg.noD
+	ld	hl,(datorig)
+	ld	(CM.strt),hl	; Set COMMON start
+	jr	SetSeg.exDat
+SetSeg.noD:
+	ld	de,(CS.len)	; Get code length
+	ld	hl,(CS.strt)	; .. add to start
+	add	hl,de
+	ld	(CM.strt),hl	; Set as COMMON start
+IF	NOT @@BIOS
+	ld	a,(B.opt)	; Test [B] option
+	rra
+	jr	nc,SetSeg.exDat	; .. no
+	ld	de,PageLen-1
+	ld	hl,(CM.strt)	; Get COMMON start
+	add	hl,de
+	ld	l,0		; .. as page boundary
+	ld	(CM.strt),hl	; Set start
+ENDIF	;NOT @@BIOS
+SetSeg.exDat:
+	ld	de,(CM.len)	; Get COMMON length
+	ld	hl,(CM.strt)	; .. add to start
+	add	hl,de
+	ld	(DS.strt),hl	; Set as data start
+	ld	bc,ABS.end
+	ld	de,ABS.beg
+	call	SUB.@DE.@BC	; Compare ABSOLUTEs
+	jr	nc,SetSeg.noChn
+	ld	bc,ABS.beg
+	ld	de,ABS.end
+	call	SUB.@DE.@BC	; Get difference
+	inc	hl
+	ld	(ABS.chn),hl
+	ret
+SetSeg.noChn:
+	ld	hl,0
+	ld	(ABS.chn),hl
+	ret
+;
+; Fix all object tables
+;
+FixAllObj:
+	ld	hl,Obj.Cnt
+	ld	(hl),@abs	; Clear count
+	ld	hl,(ABS.beg)
+	ld	(ABS.strt),hl	; Set ABSOLUTE
+	ld	hl,CurObjIdx
+	ld	(hl),0		; Clear index
+FAO.loop:
+	ld	a,$$Files-1
+	cp	(hl)		; Test all scanned
+	jr	c,FAO.ex	; .. yeap
+	ld	l,(hl)		; Get index
+	ld	h,0
+	ld	bc,ChnTab	; Get chain pointer
+	add	hl,hl
+	add	hl,bc
+	ld	a,0
+	call	SUB.A.@HL	; Test zero
+	call	c,FixObjTab	; Fix object tables
+	ld	hl,CurObjIdx
+	inc	(hl)		; Bump index
+	jr	FAO.loop
+FAO.ex:
+	ld	hl,0
+	ld	(ABS.strt),hl	; Clear ABSOLUTE
+	ret
+;
+; Fix object table
+;
+FixObjTab:
+	ld	hl,FOT.idx	; Clear index
+	ld	(hl),0
+	ld	a,(Obj.Cnt)	; Save object count
+	ld	(SavObjCnt),a
+	ld	a,(CurObjIdx)	; Get main index
+	ld	(ObjIdx),a	; .. set it
+FObT.loop:
+	ld	a,(SavObjCnt)	; Get count
+	dec	a		; Bump down
+	ld	(SavObjCnt),a
+	cp	-1		; .. till all fixed
+	jr	z,FObT.ex
+	ld	hl,(ObjIdx)	; Get index
+	ld	h,0
+	ld	bc,StrtTab
+	add	hl,hl		; Get table entry
+	add	hl,bc
+	push	hl		; .. save address
+	ld	hl,(FOT.idx)
+	ld	h,0
+	ld	bc,ObjTable
+	add	hl,bc
+	ld	c,(hl)		; Get index
+	ld	b,0
+	ld	hl,StrtTab
+	add	hl,bc
+	add	hl,bc
+	pop	de
+	call	SUB.@DE.@HL	; Compare ranges
+	jr	nc,FObT.skip	; .. nothing to fix
+	ld	hl,(FOT.idx)
+	ld	h,0
+	ld	bc,ObjTable
+	add	hl,bc
+	ld	a,(hl)		; Get index
+	ld	(SavObjIdx),a	; .. save
+	ld	hl,(FOT.idx)
+	ld	h,0
+	add	hl,bc
+	ld	a,(ObjIdx)
+	ld	(hl),a		; Unpack index
+	ld	a,(SavObjIdx)
+	ld	(ObjIdx),a	; .. set new
+FObT.skip:
+	ld	hl,FOT.idx
+	inc	(hl)
+	jr	FObT.loop
+FObT.ex:
+	ld	hl,(FOT.idx)
+	ld	h,0
+	ld	bc,ObjTable
+	add	hl,bc
+	ld	a,(ObjIdx)
+	ld	(hl),a		; Set new index
+	ld	a,(Obj.Cnt)
+	inc	a		; Bump object count
+	ld	(Obj.Cnt),a
+	ret
+;
+; Fix symbols for proper value
+; Symbols will be fixed if either ENTRY symbol or overlay mode
+;
+FixSymbols:
+	ld	hl,(SymBeg)	; Get symbol pointer
+	ld	(SymPtr),hl	; .. save
+FiS.loop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC	; Test end of symbols
+	ret	nc		; .. yeap
+	call	GetFix		; Get already fixed
+	cpl
+	push	af
+	call	GetENT		; Check ENTRY
+	ld	hl,OvlFlg
+	or	(hl)
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	nc,FiS.skip	; Special set, no ENTRY, no OVL
+	call	GetVAL		; Get value
+	push	hl
+	call	GetADRmod	; Get address mode
+	ld	c,a
+	ld	b,0
+	ld	hl,StrtTab
+	add	hl,bc
+	add	hl,bc
+	pop	de
+	call	ADD.DE.@HL	; Add values
+	ld	b,h
+	ld	c,l
+	call	SetVAL		; Set value
+	call	SetFix		; Mark symbol fixed
+FiS.skip:
+	call	GetItmLen
+	ld	de,SymPtr
+	call	ADD.A.@DE	; Point to end
+	ex	de,hl
+	ld	(hl),d		; .. set new pointer
+	dec	hl
+	ld	(hl),e
+	jr	FiS.loop
+;
+; Clean Y temp file
+;
+Clean$Y$:
+	ld	hl,X$Cnt
+	ld	(hl),0		; Set count
+Cln$Y$loop:
+	ld	a,$$Files-1
+	cp	(hl)		; Test done
+	ret	c
+	ld	a,(hl)
+	call	Save$X		; Save PB
+	ld	a,(A.opt)	; Test additional memory
+	rra
+	ld	a,(X$Cnt)
+	jr	nc,Cln$Y$noAopt	; .. nope
+	call	Save$Y		; .. save
+	call	Cls$Y		; Write end of file
+Cln$Y$A.loop:
+	call	Rd$Y$byte	; Get status
+	ld	(Y$char),a
+	cp	Y.eof		; .. test EOF
+	jr	z,Cln$Y$next
+	call	Rd$Y$word	; Read address
+	ld	(..Y$Cl.Adr),hl
+	call	Rd$Y$word
+	ld	(..Y$Cl.Val),hl	; .. value
+	ld	a,(Y$char)	; Get control
+	and	Y@@Off		; Test offset
+	jr	z,Cln$Y$A.skp	; .. nope
+	call	Rd$Y$word	; Read offset
+	ld	(..Y$Cl.Off),hl
+Cln$Y$A.skp:
+	call	Fix$Y$Path	; Fix path
+	jp	Cln$Y$A.loop
+Cln$Y$noAopt:
+	ld	l,a
+	ld	h,0
+	ld	bc,SymTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+Cln$Y$noA.loop:
+	ld	(Heap),hl	; .. as base
+	ld	a,h
+	or	l		; .. test zero
+	jr	z,Cln$Y$next	; .. yeap
+	call	Get$Y$Ctrl	; Get control
+	ld	(Y$char),a	; .. store it
+	call	Get$Y$Adr	; Get address
+	ld	(..Y$Cl.Adr),hl
+	call	Get$Y$Val	; .. value
+	ld	(..Y$Cl.Val),hl
+	call	Get$Y$Offb	; Get offset bit
+	rra
+	jr	nc,Cln$Y$noA.skp
+	call	Get$Y$Off	; Get offset if set
+	ld	(..Y$Cl.Off),hl
+Cln$Y$noA.skp:
+	call	Fix$Y$Path	; Fix path
+	call	Get$Y$Lnk	; Get linkage
+	jr	Cln$Y$noA.loop
+Cln$Y$next:
+	ld	hl,X$Cnt
+	inc	(hl)		; Bump count
+	jr	Cln$Y$loop
+;
+; Store path into file
+; ENTRY	Reg DE holds resulting address
+;	Reg BC holds address to be fixed
+;
+ST.PATH:
+	push	de
+	push	bc
+	ld	a,e
+	call	ST.Seg		; Give lower part
+	pop	bc
+	inc	bc		; .. next address
+	pop	af
+	call	ST.Seg		; .. then high part
+	ret
+;
+; Get value from table
+; ENTRY	Reg BC holds table address
+; EXIT	Reg HL holds value from table
+;
+GetPtrVAL:
+	ld	(SymPtr),bc	; .. set pointer
+	call	GetVAL		; Get value
+	ret
+;
+; Fix up an chain path
+;
+Fix$Y$Path:
+	ld	a,(Y$char)	; Get control
+	ld	c,a
+	and	Y@@mod		; .. fetch mode
+	ld	(..Path.mod),a	; .. save
+	ld	a,c
+	and	Y@@solv		; Test chain to be solved
+	jr	z,F$P.noSolv	; .. nope
+	ld	bc,(..Y$Cl.Val)	; Get value
+	call	GetPtrVAL	; Get address from table
+	jr	F$P.skp
+F$P.noSolv:
+	ld	hl,(..Path.mod)	; Get mode
+	ld	h,0
+	ld	bc,StrtTab
+	add	hl,hl		; .. for index
+	add	hl,bc
+	ld	de,..Y$Cl.Val	; Get value
+	call	ADD.@DE.@HL	; .. get combined address
+F$P.skp:
+	ld	(PathAdr),hl	; .. save
+	ld	a,(Y$char)	; Get control
+	ld	c,a
+	and	Y@@off		; Test offset
+	jr	z,F$P.noSgn	; .. nope
+	ld	a,c
+	and	Y@@Offs		; Test sign
+	jr	z,F$P.OffGT0	; .. +offset
+	ld	bc,..Y$Cl.Off	; Get offset
+	ld	de,PathAdr
+	call	SUB.@DE.@BC	; .. subtract
+	push	hl
+	call	GetADRmod	; Get address mode
+	ld	c,a
+	ld	b,0
+	ld	hl,StrtTab
+	add	hl,bc
+	add	hl,bc		; Get start of segment
+	pop	de
+	call	SUB.DE.@HL	; .. fix
+	jr	F$P.OffSt
+F$P.OffGT0:
+	ld	de,(..Y$Cl.Off)	; Get offset
+	ld	hl,(PathAdr)
+	add	hl,de		; .. add
+F$P.OffSt:
+	ld	(PathAdr),hl
+F$P.noSgn:
+	ld	bc,(..Y$Cl.Adr)	; Get temp address
+	ld	de,(PathAdr)
+	call	ST.PATH		; .. store path
+	ret
+;
+; Test valid symbol
+; EXIT	Accu holds xxxx.xxx1 if symbol doesn't start with '?'
+;	or it starts with '?' and [Q] mode is enabled
+;	Accu holds xxxx.xxx0 if symbol starts with '?'
+;	and [Q] mode is disabled
+;	If symbol starts with 00, Accu returns always xxxx.xxx0
+;
+TstSym:
+	ld	bc,.SymLab
+	ld	hl,(SymPtr)
+	add	hl,bc		; Point to symbol
+	ld	a,(hl)
+	sub	0
+	add	a,-1
+	sbc	a,a		; Check 00
+	push	af
+	ld	a,Q.mark
+	sub	(hl)		; Test '?'
+	sub	1
+	sbc	a,a
+	ld	hl,Q.opt
+	and	(hl)		; Check option
+	cpl
+	pop	bc
+	ld	c,b
+	and	c		; Get result
+	ret
+;
+; Scan symbol table for all labels
+;
+CheckSym:
+	ld	hl,0
+	ld	(CkSym.Cnt),hl	; Clear count
+	call	GetSymBeg	; Get symbol base
+	ld	(SymPtr),hl
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; Pass 1 : Print all known symbols
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+CkSym.knownLoop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC	; Test ready
+	jp	nc,CkSym.knownDone
+	call	GetENT		; Check ENTRY
+	push	af
+	call	TstSym		; Test valid symbol
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	nc,CkSym.NotVal	; .. not valid
+	ld	a,(CkSym.Cnt)
+	and	ColMask
+	jr	nz,CkSym.KnownInRow
+	call	NL		; Give new line
+	ld	hl,CharCnt
+	ld	(hl),0		; Clear count
+CkSym.KnownInRow:
+	call	GetADRmod	; Get address mode
+	cp	@COMM		; Test COMMON
+	push	af
+	ld	c,'/'
+	call	z,PrChar	; .. indicate it
+	call	PrSymbol	; Print symbol
+	pop	af
+	ld	c,'/'
+	call	z,PrChar	; .. indicate it
+	ld	a,(CkSym.Cnt)
+	and	ColMask
+	ld	l,a		; Get position
+	ld	h,0
+	ld	de,LabCol+LabDel
+	call	MUL.HL		; .. * 12
+	ld	de,LabCol
+	add	hl,de		; Get cursor position
+	ld	c,l
+	call	PosCurs		; Give tabs
+	call	GetRQST		; Test LIB REQUEST
+	rra
+	jr	nc,CkSym.NoLIB
+	ld	de,$RQST
+	call	CtrlString	; Tell LIB request
+	jr	CkSym.knownLab
+CkSym.NoLIB:
+	call	GetVAL		; Get value
+	call	WrtHexWord	; .. print
+CkSym.knownLab:
+	rept	LabDel
+	ld	c,' '
+	call	PrChar		; Give delimiter
+	endm
+	ld	hl,(CkSym.Cnt)
+	inc	hl		; Bump count
+	ld	(CkSym.Cnt),hl
+CkSym.NotVal:
+	call	GetItmLen
+	ld	de,SymPtr
+	call	ADD.A.@DE	; Point to next
+	ex	de,hl
+	ld	(hl),d		; .. set new
+	dec	hl
+	ld	(hl),e
+	jp	CkSym.knownLoop
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; Pass 2 : Check undefined symbols
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+CkSym.knownDone:
+	ld	a,0
+	ld	hl,CkSym.Cnt
+	call	SUB.A.@HL	; Test position
+	call	c,NL		; Give new line
+	ld	a,TRUE		; Force flag
+	ld	(UndelFlg),a
+	xor	a
+	ld	(CkSym.Cnt),a	; Clear counter
+	ld	(CursPos),a
+	ld	(CharCnt),a	; Clear count
+	call	GetSymBeg	; Get symbol base
+	ld	(SymPtr),hl
+CkSym.UnlLoop:
+	ld	bc,SymTop
+	ld	de,SymPtr
+	call	SUB.@DE.@BC
+	jp	nc,CkSym.UnkDone
+	call	GetENT		; Check ENTRY
+	cpl
+	rra
+	jr	nc,CkSym.UnkNoEXT
+	ld	hl,UndelFlg
+	ld	a,(hl)
+	rra			; Test header given
+	jr	nc,CkSym.UnkHead
+	ld	(hl),FALSE	; .. set
+	ld	de,$SYMBOL?
+	call	CtrlString	; Tell header
+CkSym.UnkHead:
+	ld	a,(CkSym.Cnt)
+	and	UnkMask		; Get position
+	jr	nz,CkSym.UnkInRow
+	call	NL		; Give new line
+	ld	hl,CharCnt
+	ld	(hl),0		; Clear count
+CkSym.UnkInRow:
+	call	PrSymbol	; Print symbol
+	ld	hl,(CkSym.Cnt)
+	inc	hl		; Bump count
+	ld	(CkSym.Cnt),hl
+	ld	a,l
+	and	UnkMask
+	add	a,a		; .. * 8
+	add	a,a
+	add	a,a
+	ld	c,a
+	call	PosCurs		; Give tabs
+CkSym.UnkNoEXT:
+	call	GetItmLen
+	ld	de,SymPtr
+	call	ADD.A.@DE	; Point to next
+	ex	de,hl
+	ld	(hl),d		; .. save
+	dec	hl
+	ld	(hl),e
+	jr	CkSym.UnlLoop
+CkSym.UnkDone:
+	ld	a,0
+	ld	hl,CkSym.Cnt
+	call	SUB.A.@HL	; Test position done
+	call	c,NL		; Close line
+	call	NL
+	ret
+;
+; Position cursor
+; ENTRY	Reg C holds places to be moved
+;
+PosCurs:
+	ld	hl,CursPos
+	ld	(hl),c
+PosC.loop:
+	ld	a,(CharCnt)
+	cp	(hl)		; Test count
+	ret	nc
+	push	hl
+	ld	c,' '
+	call	PrChar		; .. give blank
+	pop	hl
+	jr	PosC.loop
+;
+; Print current symbol
+;
+PrSymbol:
+	ld	hl,PS.cnt
+	ld	(hl),1		; Init count
+PrS.loop:
+	push	hl
+	call	GetSymLen	; Get symbol length
+	pop	hl
+	cp	(hl)		; Test done
+	ret	c
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,.SymLab-1
+	add	hl,bc
+	ld	de,(SymPtr)
+	add	hl,de		; Get symbol
+	ld	c,(hl)
+	call	PrChar		; .. print
+	ld	hl,PS.cnt
+	inc	(hl)		; Bump count
+	jr	PrS.loop
+;
+; Determine transfer address
+;
+GetXferAdr:
+	ld	a,(G.opt)	; Test [G] option
+	rra
+	jr	nc,GXfA.noG	; .. nope
+	ld	hl,optLlabel
+	ld	a,(optLlen)
+	ld	e,.noCOMM
+	call	SrcSym		; Search label for G.o
+	jr	nc,GXfA.Unkn	; .. not found
+	call	GetVAL		; Get value
+	jr	GXfA.ex
+GXfA.noG:
+	ld	a,(XFerFlg)	; Test transfer address
+	rra
+	jr	nc,GXfA.NoXF
+	ld	hl,(XFerMode)	; Get index
+	ld	h,0
+	ld	bc,StrtTab
+	add	hl,hl
+	add	hl,bc
+	ld	de,XFerAddr
+	call	ADD.@DE.@HL	; Add value
+	jr	GXfA.ex
+GXfA.NoXF:
+	ld	a,0
+	ld	hl,CS.chn
+	call	SUB.A.@HL	; Test zero code start
+	jr	nc,GXfA.ABS
+	ld	hl,(CS.strt)	; Get code start
+	jr	GXfA.ex
+GXfA.ABS:
+	ld	bc,-1
+	ld	de,ABS.beg
+	call	SUB.@DE.BC	; Test no ABS
+	or	l
+	ret	z
+	ld	hl,(ABS.beg)
+GXfA.ex:
+	ld	(XferStrt),hl	; .. set ABS start
+	ret
+GXfA.Unkn:
+	ld	hl,0
+	ld	(XferStrt),hl	; Clear start address
+	ld	de,$START?
+	call	CtrlString	; Tell symbol not found
+	ld	hl,GXfaCnt
+	ld	(hl),1		; Init count
+GXfA.PrLoop:
+	ld	a,(optLlen)
+	cp	(hl)		; Test ready
+	jr	c,GXfA.NL
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,optLlabel-1
+	add	hl,bc		; Point to label
+	ld	e,(hl)
+	call	BannChar	; .. print it
+	ld	hl,GXfaCnt
+	inc	(hl)		; Bump count
+	jr	GXfA.PrLoop
+GXfA.NL:
+	call	NL
+	ret
+;
+; Give loading statistic
+;
+Statistic:
+	ld	de,ABS.end
+	ld	bc,ABS.beg
+	call	SUB.@DE.@BC	; .. compare ABSOLUTEs
+	ld	hl,0		; Set all ABS zero for none
+	ld	bc,0
+	jr	c,Stat.noABS	; .. none
+	ld	bc,ABS.beg
+	ld	de,ABS.end
+	call	SUB.@DE.@BC	; Give difference
+	inc	hl
+	ld	b,h	
+	ld	c,l
+	ld	hl,(ABS.beg)	; Get start
+Stat.noABS:
+	ld	de,$ABS
+	call	PrVAL		; .. print range
+Stat.CSEG:
+	ld	de,$CSEG
+	ld	bc,(CS.len)	; Get length
+	ld	hl,(CS.strt)	; Get start address
+	call	PrVAL		; Tell code segment
+	ld	de,$COMMON
+	ld	bc,(CM.len)
+	ld	hl,(CM.strt)
+	call	PrVAL		; Tell common size
+	ld	de,$DSEG
+	ld	bc,(DS.len)
+	ld	hl,(DS.strt)
+	call	PrVAL		; Tell data segment
+	ld	de,$USE
+	call	CtrlString	; Tell use factor
+	ld	bc,SymTop
+	ld	de,HeapTop
+	call	SUB.@DE.@BC	; Get difference
+	ld	de,FreeMem
+	call	SUB.@DE.HL	; Get free memory
+	push	hl
+	ld	a,(FreeMem+1)	; Get page
+	inc	a
+	ld	l,a
+	ld	h,0
+	pop	de
+	call	DIV.HL		; .. divide by pages
+	ld	a,e
+	call	WrtHexByte	; .. print
+	call	NL
+	ret
+;
+; Print hex values
+; ENTRY	Reg HL holds start  of code
+;	Reg BC holds length of code
+;	Reg DE holds message to be printed before
+;
+PrVAL:
+	ld	a,c
+	or	b
+	ret	z		; .. skip if no code
+	ld	(PrV.strt),hl	; Save entries
+	ld	(PrV.len),bc
+	call	CtrlString	; Give message
+	ld	hl,(PrV.len)	; Get length
+	push	hl
+	call	WrtHexWord	; .. print
+	pop	hl
+	ld	a,h
+	or	l		; Test zero length
+	jr	z,PV.NL		; .. yeap, so skip range
+	push	hl
+	ld	e,' '
+	call	BannChar
+	ld	e,'('
+	call	BannChar	; Tell range
+	ld	hl,(PrV.strt)
+	push	hl
+	call	WrtHexWord	; .. print start
+	ld	e,'-'
+	call	BannChar
+	pop	de		; .. get back values
+	pop	hl
+	add	hl,de
+	dec	hl		; Get end
+	call	WrtHexWord	; .. print
+	ld	e,')'
+	call	BannChar
+PV.NL:
+	call	NL
+	ret
+;
+; Tell top of module
+;
+TellTop:
+	ld	de,$TOP
+	call	CtrlString	; Give message
+	ld	hl,(ModTop)	; Get top
+	call	WrtHexWord	; .. print
+	call	NL
+	ret
+;
+; Close load session
+;
+ClsSess:
+	call	CheckLoad	; Check load addresses
+	call	SetSegments	; Set up segments
+	call	FixAllObj	; Fix all object tables
+	call	FixSymbols	; Fix symbols
+	call	GetXferAdr	; Determine transfer address
+	call	Fix$Y$Link	; Fix linkage
+	call	Clean$Y$	; Clean Y temp file
+	ld	hl,BannChar
+	ld	(@@IO+1),hl	; Set console device
+	ld	a,(console)
+	cp	'Z'		; Test NUL console
+	call	nz,CheckSym	; Check symbols
+	call	Statistic	; Give statistic
+	call	ObjClose	; Close object file
+	ld	a,(A.opt)	; Test optional memory
+	rra
+	call	c,Del$YY	; Delete additional temp files
+	ld	hl,WrChar
+	ld	(@@IO+1),hl	; Set file device
+	ld	a,(symdrv)	; Test NUL symbol device
+	cp	'Z'
+	call	nz,WrtSym	; .. write symbol file
+	call	Del$XX		; Delete temp files
+	ret
+;
+$OVLAY:
+	db	'?OVLAY'
+$OVLA0:
+	db	'?OVLA0'
+OVLlen	equ	$-$OVLA0
+;
+$REL:
+	db	'REL'
+$IRL:
+	db	'IRL'
+;
+; Read 16 bit value from bit stream
+;
+RdAdr:
+	ld	b,.Byte
+	call	RdBits		; Get LO
+	ld	l,a
+	push	hl
+	ld	b,.Byte
+	call	RdBits		; Get HI
+	pop	hl
+	ld	h,a
+	ret
+;
+; Print symbol
+;
+PrSym:
+	ld	hl,PScnt
+	ld	(hl),1		; Init count
+PrSym.loop:
+	ld	a,(BF.Len)
+	cp	(hl)		; Compare length
+	ret	c		; Test done
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,BF.Name-1
+	add	hl,bc		; Get pointer
+	ld	e,(hl)		; .. fetch character
+	call	BannChar	; Print
+	ld	hl,PScnt
+	inc	(hl)		; Bump count
+	jr	PrSym.loop
+

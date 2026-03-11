@@ -1,0 +1,337 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 //EN">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/SLR/SLRcryp.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:10:39 GMT -->
+<head><title>Kodierung des SLR Assemblers / Coding of the SLR Assembler</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+
+<body background="crypt.jpg" style="margin-top:3cm;margin-left:0.2cm">
+
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+
+<div>
+<table border="1" background="crypt1.jpg" width="80%" align="center"><tr><td>
+
+<div align="center"><h1><span lang="de">Kodierung des SLR Assemblers</span><span lang="en">Coding of the SLR Assembler</span></h1></div>
+
+<table width="100%">
+
+<tr><td valign="top">1.</td>
+<td>
+<span lang="de">Bei einem ersten Blick in das Programm f&auml;llt auf, dass der Kode nach einigen Datenfeldern ohne Sinn zu sein scheint.</span><span lang="en">A first look at the program shows meaningless code following some meaningful data locations.</span>
+
+<div lang="de">
+<form name="List">
+<textarea cols="81" rows="10" name="Fenster" readonly style="background-color:#DEF7E9">
+	jp	l2459
+; Im Bereich 0103H - 01A5H finden sich Daten im Klartext
+l0103:
+	db	'Z3ENV'
+	db	1
+	dw	0
+	dw	0131h
+	db	0
+	db	80
+	db	60
+	db	0
+	..	..
+	..	..
+; Der erste kodierte Bereich beginnt bei 01A6H und ended bei 245FH
+l01a6:
+;	ORIGINAL		KLARTEXT
+;	--------		--------
+	cp	h		; db	05eh
+	add	a,(hl)		; db	13,'Extra Operand'
+	adc	a,d
+	inc	a
+	ret	pe
+	add	hl,sp
+	jp	nz,9e10h
+	jr	c,017bh
+	add	hl,sp
+	jp	nz,0c837h
+	rst	38h		; db	-1
+	..	..
+	..	..
+; Dekodierung beginnt bei Adresse 2459H
+l2459:
+	ld	hl,l2460	; Versteckte Laenge laden
+	ld	de,l01a6	; Erste Startadresse laden
+	call	l246d		; Dekodieren
+	ld	hl,l633f	; Dann nochmal fuer Teil 2
+	ld	de,l2486
+	call	l246d
+	jr	l24c1		; Assembler starten
+l246d:
+	or	a
+	sbc	hl,de		; Laenge berechnen
+	srl	h		; Halbieren
+	rr	l
+	ld	b,l		; Niederes Byte
+	ld	c,h		; Hoeheres Byte
+	jr	z,l2479
+	inc	c
+l2479:
+	ex	de,hl
+l247a:
+	rrc	(hl)		; Echten Kode laden
+	inc	hl
+	rlc	(hl)
+	inc	hl
+	djnz	l247a
+	dec	c
+	jr	nz,l247a
+	ret
+; Der zweite kodierte Bereich beginnt bei 2486H und ended bei 633EH
+l2486:
+;	ORIGINAL		KLARTEXT
+;	--------		--------
+	ld	(hl),h		; ld	a,(6365H)
+	or	d
+	add	a,0dbh		; or	a
+	sub	l		; jp	z,2905H
+	add	a,d
+	ld	d,d
+	..	..
+	..	..
+; Der Assembler startet hier nach Entschluesselung
+l24c1:
+;	ORIGINAL		KLARTEXT
+;	--------		--------
+	or	0f6h		; ld	sp,(0006h)
+	inc	bc
+	nop
+	dec	d		; ld	hl,(0109h)
+	ld	(de),a
+	add	a,b
+	..	..
+	..	..
+</textarea>
+</form>
+</div>
+<div lang="en">
+<form name="List">
+<textarea cols="81" rows="10" name="window" readonly style="background-color:#DEF7E9">
+	jp	l2459
+; Locations 0103H - 01A5H are not coded data areas
+l0103:
+	db	'Z3ENV'
+	db	1
+	dw	0
+	dw	0131h
+	db	0
+	db	80
+	db	60
+	db	0
+	..	..
+	..	..
+; First coded area starts at 01A6H up to 245FH
+l01a6:
+;	ORIGINAL		DECRYPTED
+;	--------		---------
+	cp	h		; db	05eh
+	add	a,(hl)		; db	13,'Extra Operand'
+	adc	a,d
+	inc	a
+	ret	pe
+	add	hl,sp
+	jp	nz,9e10h
+	jr	c,017bh
+	add	hl,sp
+	jp	nz,0c837h
+	rst	38h		; db	-1
+	..	..
+	..	..
+; Encoder starts at 2459H
+l2459:
+	ld	hl,l2460	; Load hided length
+	ld	de,l01a6	; Load first start address
+	call	l246d		; Encode
+	ld	hl,l633f	; Same for second part
+	ld	de,l2486
+	call	l246d
+	jr	l24c1		; Start assembler
+l246d:
+	or	a
+	sbc	hl,de		; Calculate length
+	srl	h		; Halve it
+	rr	l
+	ld	b,l		; Get low
+	ld	c,h		; Get high
+	jr	z,l2479
+	inc	c
+l2479:
+	ex	de,hl
+l247a:
+	rrc	(hl)		; Build real code
+	inc	hl
+	rlc	(hl)
+	inc	hl
+	djnz	l247a
+	dec	c
+	jr	nz,l247a
+	ret
+; Second coded area starts at 2486H up to 633EH
+l2486:
+;	ORIGINAL		DECRYPTED
+;	--------		---------
+	ld	(hl),h		; ld	a,(6365H)
+	or	d
+	add	a,0dbh		; or	a
+	sub	l		; jp	z,2905H
+	add	a,d
+	ld	d,d
+	..	..
+	..	..
+; Assembler starts here after encoding
+l24c1:
+;	ORIGINAL		DECRYPTED
+;	--------		---------
+	or	0f6h		; ld	sp,(0006h)
+	inc	bc
+	nop
+	dec	d		; ld	hl,(0109h)
+	ld	(de),a
+	add	a,b
+	..	..
+	..	..
+</textarea>
+</form>
+</div>
+<span lang="de">In der Entschl&uuml;sselungsroutine ab 2459H werden zwei Programmteile entschl&uuml;sselt.
+Nach der jeweiligen Berechnung der L&auml;nge des Kodes werden die beiden Teile
+durch abwechselndes Rechts- und Linksschieben in den korrekten Kode gewandelt.</span><span lang="en">The routine starting at 2459H decodes two program parts.
+After calculating the length of code both parts will be converted to correct code
+by shifting their bytes right and left alternately.</span>
+</td></tr>
+
+<tr><td valign="top">2.</td>
+<td>
+<span lang="de">Bei genauer Untersuchung findet sich ein Sicherheitsmechanismus.
+Vor dem Schreiben in eine Datei wird gepr&uuml;ft, ob es sich um eine Originaldatei handelt.
+Stimmt der Test nicht, dann l&auml;sst sich keine Datei beschreiben.
+Das erwartete Resultat steht in Adresse 01A6H &mdash; das ist die erste Adresse im verschl&uuml;sselten Bereich.</span><span lang="en">A closer look at the code shows a security mechanism.
+Before writing data into a file a routine checks an expected checksum.
+If it is a wrong one, no data will be written to disc.
+The expected result will be found at address 01A6H &mdash; this is the first address found in the encrypted area.</span>
+
+<div lang="de">
+<form name="List">
+<textarea cols="81" rows="10" name="Fenster" readonly style="background-color:#DEF7E9">
+;
+; Puffer bei korrekter Seriennummer auf Diskette schreiben
+;
+l6076:
+	push	hl
+	push	bc
+	push	de
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!! Der folgende  Kode ist einfach aber trickreich. Er   !!!
+; !!! prueft die Seriennummer und beendet die Routine ohne !!!
+; !!! auf Dikette zu schreiben, wenn die Nummer falsch ist !!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	hl,1500h	; Nett kodiert
+	ld	a,0		; .. noch besser
+	or	a		; .. dito.
+	rra			; .. dito.
+	adc	hl,hl		; .. dito.
+	ld	b,6
+l6084:
+	add	a,(hl)
+	inc	hl
+	djnz	l6084
+	ld	de,d7a0h	; Offset 01a6h-(2a00h+6)
+	add	hl,de		; .. auch gut
+	cp	(hl)
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	pop	de
+	pop	bc
+	pop	hl
+	ret	nz		; .. Abbruch bei falscher S/N
+	..	..		; Weiter mit Schreiben
+	..	..
+</textarea>
+</form>
+</div>
+<div lang="en">
+<form name="List">
+<textarea cols="81" rows="10" name="window" readonly style="background-color:#DEF7E9">
+;
+; Write buffer(s) to disk if serial number is correct
+;
+l6076:
+	push	hl
+	push	bc
+	push	de
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!! The next code is dirty tricky. It checks the serial  !!!
+; !!! number of the assembler and suspends execution if    !!!
+; !!! no match found against expected one                  !!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	hl,1500h	; Nice, isn't it
+	ld	a,0		; .. more nice
+	or	a		; .. dtto.
+	rra			; .. dtto.
+	adc	hl,hl		; .. dtto.
+	ld	b,6
+l6084:
+	add	a,(hl)
+	inc	hl
+	djnz	l6084
+	ld	de,d7a0h	; Offset 01a6h-(2a00h+6)
+	add	hl,de		; .. also nice.
+	cp	(hl)
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	pop	de
+	pop	bc
+	pop	hl
+	ret	nz		; .. unexpected S/N, so break
+	..	..		; Continue writing data
+	..	..
+</textarea>
+</form>
+</div>
+<span lang="de">Wieder un&uuml;bersichtlich programmiert wird getestet, ob die Seriennummer des Programms korrekt ist.</span><span lang="en">Again programmed confusingly, the code checks the serial number.</span>
+<ol>
+<li><span lang="de">Es wird die Adresse, an der die Seriennummner &mdash; hier SB3051 &mdash; steht, geladen, allerdings statt 2A00H die halbe Adresse 1500H, die dann verdoppelt wird.</span><span lang="en">Load the address where the serial number &mdash; here SB3051 &mdash; is stored.
+    But instead of 2A00H load the half address 1500H, which will then be doubled.</span></li>
+<li><span lang="de">Dann wird die Summe der sechs Zeichen der Seriennummer gebildet.</span><span lang="en">Calculate the sum of the six character number.</span></li>
+<li><span lang="de">Danach wird die Adresse &uuml;ber einen geheimnisvollen Offset auf das erwartete Byte berechnet und der Inhalt mit der Summe verglichen.</span><span lang="en">Calculate the address of the expected sum by adding a mysterious offset.
+    Compare the calculated sum with the expected one.</span></li>
+<li><span lang="de">Stimmt der Vergleich nicht, erfolgt kein Schreiben in eine Datei.</span><span lang="en">If no match found stop writing data to file.</span></li>
+</ol>
+<span lang="de">Das Programm funktioniert mit oder ohne &Uuml;bereinstimmung, aber nur bei korrektem Vergleich wird eine Ausgangsdatei erzeugt.</span><span lang="en">The program itself does run normally whether or not a match occurs.
+But only if it matches an output file will be created.</span>
+</td></tr>
+</table>
+
+<p></p>
+
+<table border="1" bgcolor="#D8FCE8" align="center"><tr><td>
+<a href="../SLR.html"><span lang="de">Zur&uuml;ck zum SLR Assembler</span><span lang="en">Back to the SLR assembler</span></a>
+</td></tr></table>
+
+</td></tr></table>
+</div>
+
+</body>
+
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/SLR/SLRcryp.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:10:39 GMT -->
+</html>

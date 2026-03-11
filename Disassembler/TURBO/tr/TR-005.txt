@@ -1,0 +1,1252 @@
+;
+; Function READLN(var)
+; ENTRY	Reg HL points to variable
+;
+ReadLn:
+	db	SKIP
+;
+; Function READ(var)
+; ENTRY	Reg HL points to variable
+; EXIT	Reg HL points to variable
+;
+Read:
+	xor	a
+	ex	(sp),hl
+	ld	(IOPc),hl	; Get caller
+	ex	(sp),hl
+	push	hl
+	ld	hl,StdIOdev
+	ld	(IOdev),hl	; Set standard device
+	res	wr.bit,(hl)	; Set no write
+	push	af
+	call	RdLine		; Read a line
+	pop	af
+	or	a		; Test READLN
+	call	nz,NL		; .. yeap
+	pop	hl		; Get back pointer
+	ret
+;
+; Read a line from keyboard
+;
+RdLine:
+	ld	b,0		; Reset flag
+.RdLine:
+	ld	hl,BufLen	; Test buffer length
+	ld	a,(hl)
+	cp	.MaxBuf+1
+	jr	c,RLN.Ok	; Set default as max
+	ld	a,.MaxBuf
+RLN.Ok:
+	ld	c,a
+	ld	(hl),.MaxBuf	; Set default
+	ld	hl,(TopRam)	; Init pointer
+	ld	(CurPtr),hl
+RLN.new:
+	ld	d,0		; Reset character counter
+RLN.loop:
+	call	StatChk		; Get character
+	ld	(hl),a		; .. save
+	ld	e,1		; Init flag
+	cp	bs		; Test backspace
+	jr	z,RLN.BS
+	cp	DEL		; .. or delete
+	jr	z,RLN.BS
+	dec	e
+	cp	CtrlX		; Test Ctrl-X
+	jr	z,RLN.BS
+	cp	esc		; .. or escape
+	jr	z,RLN.BS
+	cp	EOF		; .. or Ctrl-Z
+	jr	z,RLN.EOF
+	cp	cr		; .. or Return
+	jr	z,RLN.CR
+	cp	' '		; Test printable character
+	jr	nc,RLN.valid	; .. ok
+	cp	CtrlC		; Test Ctrl-C
+	jr	nz,RLN.loop
+	ld	a,(cbreak)	; .. test active
+	or	a
+	jr	z,RLN.loop	; .. no
+	ld	ix,(IOPc)
+	jp	UsrErr		; .. abort if so
+RLN.valid:
+	ld	a,c
+	cp	d		; Test max against count
+	jr	z,RLN.loop	; .. ignore on overflow
+	ld	a,(hl)
+	inc	d		; Bump a bit
+	inc	hl
+	call	ChrPutCon	; .. and echo character
+	jr	RLN.loop
+;
+; Special control found
+;
+RLN.BS:
+	dec	d		; Fix count
+	jp	m,RLN.new	; .. ignore if 1st position
+	dec	hl
+	call	String		; Position cursor left
+	db	bs,' ',bs,eot
+	dec	e		; Test backspace or ESC
+	jr	z,RLN.loop
+	jr	RLN.BS		; .. else fix to beginning
+;
+; Found CtrlZ
+;
+RLN.EOF:
+	inc	b		; Test flag
+	dec	b
+	jr	z,RLN.loop	; .. loop
+	jr	RLN.Ex
+;
+; Found CR
+;
+RLN.CR:
+	inc	b		; Test flag
+	dec	b
+	jr	nz,RLN.NL
+RLN.Ex:
+	ld	(hl),EOF	; Set EOF
+	jr	RLN.exit	; .. and exit
+RLN.NL:
+	call	NL		; Give new line
+	ld	(hl),cr		; .. close line
+	inc	hl
+	ld	(hl),lf
+RLN.exit:
+	inc	hl
+	ld	(TopPtr),hl	; Save top line
+	ret
+;
+; Get character from file or console buffer
+;
+GetChar:
+	ld	hl,(IOdev)	; Get FIB
+	ld	a,(IOResult)	; Test IO error
+	or	a
+	jr	nz,GC.EOF	; .. force EOF if so
+	ld	a,(hl)
+	bit	wr.bit,a	; Test preread
+	jr	nz,GC.PreRead	; .. fetch if so
+	and	FIBtype		; Test device
+	jr	nz,GC.StdIO	; .. standard IO
+	inc	hl		; Point to sector buffer
+	inc	hl
+	ld	a,(hl)		; Test filled
+	or	a
+	jp	p,GC.Buff	; .. not yet
+	ld	c,.rdseq
+	push	hl
+	call	FIB.FILE	; Read sector
+	pop	hl
+	jr	z,GC.noEOF	; .. ckeck EOF
+	push	hl
+	ld	de,FIB.buff-2
+	add	hl,de		; Point to buffer
+	ld	(hl),EOF	; .. set EOF
+	pop	hl
+GC.noEOF:
+	xor	a
+	ld	(hl),a		; Reset buffer pointer
+GC.Buff:
+	inc	(hl)		; Bump count
+	add	a,FIB.buff-2
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Get current pointer
+	ld	a,(hl)		; Load character
+	cp	EOF		; .. test EOF
+	jr	nz,GC.SetRd
+	ld	hl,(IOdev)
+	inc	hl
+	inc	hl
+	dec	(hl)		; Fix pointer if EOF
+	jr	GC.SetRd
+GC.StdIO:
+	dec	a		; Test CON:
+	jr	nz,GC.NoCON
+	ld	hl,(CurPtr)
+	ld	de,(TopPtr)
+	or	a
+	sbc	hl,de		; Test more in buffer
+	jr	c,GC.moreCON	; .. ok
+	ld	b,-1
+	call	.RdLine		; .. else get more
+GC.moreCON:
+	ld	hl,(CurPtr)	; Get from current pointer
+	ld	a,(hl)
+	inc	hl
+	ld	(CurPtr),hl	; .. bump
+	jr	GC.SetRd
+GC.NoCON:
+	dec	a		; Test KBD:
+	jr	nz,GC.NoKBD
+	call	XConin		; .. get it
+	ld	a,l
+	jr	GC.SetRd
+GC.NoKBD:
+	dec	a
+	dec	a		; Test AUX:
+	jr	nz,GC.NoAUX
+	call	XAuxin		; .. get it
+	ld	a,l
+	jr	GC.SetRd
+GC.NoAUX:
+	call	XConinx		; Get from USR otherwise
+	ld	a,l
+GC.SetRd:
+	ld	hl,(IOdev)	; Get FIB
+	set	wr.bit,(hl)	; .. set preread flag
+	inc	hl
+	ld	(hl),a		; Save character
+	dec	hl
+	ret
+GC.PreRead:
+	inc	hl		; Point to chracter buffer
+	ld	a,(hl)		; .. get it
+	dec	hl
+	ret
+GC.EOF:
+	ld	a,EOF		; Return EOF
+	ret
+;
+; Get character from current device
+; Fix up controls
+;
+GetFromFIB:
+	push	hl
+	ld	hl,(IOdev)	; Get FIB
+	ld	a,(hl)
+	and	FIBtype		; Get device
+	cp	RAMdevice	; .. test RAM
+	jr	z,GFF.ex
+GFF.wait:
+	call	GetChar		; Get character from device
+	cp	' '+1		; Test control
+	jr	nc,GFF.begin
+	cp	EOF		; .. test EOF
+	jr	z,GFF.begin
+	res	wr.bit,(hl)	; Reset preread
+	jr	GFF.wait	; .. and synchronize
+GFF.begin:
+	ld	de,Number	; Set buffer
+	ld	b,.MaxSamp	; .. and max
+GFF.Loop:
+	push	bc
+	push	de
+	call	GetChar		; Get character from device
+	pop	de
+	pop	bc
+	cp	' '+1		; .. test control
+	jr	c,GFF.end
+	res	wr.bit,(hl)	; .. no preread
+	ld	(de),a		; Save character
+	inc	de
+	djnz	GFF.Loop
+GFF.end:
+	xor	a
+	ld	(de),a		; Close buffer
+GFF.ex:
+	pop	hl
+	ret
+;
+; Check negative sign of ASCII number
+; ENTRY	Location NUMBER filled
+; EXIT	Reg IX points to number buffer
+;	Reg B holds 0 on no negative sign
+;	        and 1 on negative sign found
+;	Zero flag indicates empty buffer
+;
+ChkSign:
+	ld	ix,Number	; Init pointer
+	ld	a,(ix)		; Get character
+	or	a
+	ret	z		; .. zero, exit
+	ld	b,0
+	cp	'-'		; Test negative sign
+	ret	nz
+	inc	b		; .. fix regs
+	inc	ix
+	ret
+;
+; Fix number conversion for error
+; ENTRY	Reg IX points behind number
+;	Carry set reflects overflow
+; EXIT	Carry set indicates error
+;	IORESULT set to error 010H
+;
+Cnv.Fix:
+	jr	c,Cnv.Err	; Fall in error on carry set
+	ld	a,(ix)		; Test proper end of ASCII
+	or	a
+	ret	z
+Cnv.Err:
+	ld	a,_IllNum
+	ld	(IOResult),a	; Set error number
+	scf			; .. indicate general error
+	ret
+;
+; Get character from input READ(char)
+; ENTRY	Reg HL points to character variable
+;
+RdChar:
+	push	hl		; Save pointer
+	call	GetChar		; Get character
+	res	wr.bit,(hl)	; Reset preread
+	pop	hl
+	ld	(hl),a		; .. save character
+	ret
+;
+; Get byte from input READ(byte)
+; ENTRY	Reg HL points to byte variable
+;
+RdByte:
+	db	SKIP		; Set flag
+;
+; Get integer from input READ(integer)
+; ENTRY	Reg HL points to integer variable
+;
+RdInt:
+	xor	a
+	ld	c,a		; Clear flag
+	push	bc
+	call	GetFromFIB	; Get number input
+	pop	bc
+	call	ChkSign		; Test sign
+	ret	z		; .. empty number, exit
+	push	bc
+	push	hl
+	call	Cnv.Int		; Convert to signed integer
+	pop	de
+	pop	bc
+	call	Cnv.Fix		; Look for error
+	ret	c		; .. oops, go if so
+	dec	b		; Test negative sign
+	call	z,ComplINT	; .. negate if so
+	ex	de,hl
+	ld	(hl),e
+	inc	c
+	dec	c		; Test byte
+	jr	nz,RIB.byte	; .. skip if so
+	inc	hl
+	ld	(hl),d		; .. set HI on integer
+RIB.byte:
+	ex	de,hl
+	ret
+;
+; Get real from input READ(real)
+; ENTRY	Reg HL points to real variable
+;
+RdReal:
+	call	GetFromFIB	; Get ASCII number
+	call	ChkSign		; Test sign
+	ret	z		; .. empty number, exit
+	push	bc
+	push	hl
+	call	Cnv.Flp		; Convert to real
+	exx
+	pop	hl
+	pop	bc
+	call	Cnv.Fix		; Look for error
+	ret	c		; .. exit if so
+	dec	b		; Test sign
+	exx
+	call	z,Cnv.Neg	; Negate if set
+	exx
+	jp	PutReal		; Put real to variable
+;
+; Get string from input READ(string[max])
+; ENTRY	Reg HL points to string variable
+;	Reg B holds max characters in string
+;
+RdString:
+	push	hl		; Save pointer
+	ex	de,hl
+	ld	c,0		; Clear character count
+RSt.Loop:
+	push	bc
+	push	de
+	call	GetChar		; Get character
+	pop	de
+	pop	bc
+	cp	cr		; Test EOL
+	jr	z,RSt.end
+	cp	EOF		; .. or EOF
+	jr	z,RSt.end
+	res	wr.bit,(hl)	; Reset preread
+	inc	c		; .. bump
+	inc	de
+	ld	(de),a
+	djnz	RSt.Loop	; .. loop
+RSt.end:
+	pop	hl		; Get back pointer
+	ld	(hl),c		; Set length
+	ret
+;
+; Handle end of line after READLN from file
+;
+EndRead:
+	call	GetChar		; Get character
+	cp	EOF		; .. test EOF
+	ret	z
+	res	wr.bit,(hl)	; Reset preread
+	cp	lf		; .. test LF
+	ret	z
+	cp	cr		; Loop till CR
+	jr	nz,EndRead
+	call	GetChar		; .. get next
+	cp	lf		; .. maybe LF
+	ret	nz
+	res	wr.bit,(hl)	; Reset preread if so
+	ret
+;
+; Output character to device
+; ENTRY	Accu holds character
+;
+PutDevice:
+	ld	hl,(IOdev)	; Get FIB
+	ld	c,a		; Save character
+	ld	a,(IOResult)	; Test IO error
+	or	a
+	ret	nz		; .. exit if so
+	ld	a,(hl)
+	and	FIBtype		; Test device
+	jr	nz,PutStd	; .. standard
+	inc	hl
+	inc	hl		; Point to sector buffer
+	push	hl
+	ld	a,(hl)		; Get buffer pointer
+	add	a,FIB.buff-2
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Make pointer absolute
+	ld	(hl),c		; Save character
+	pop	hl
+	inc	(hl)		; Bump counter
+	ret	p		; .. ok if less 128
+	jr	Flash		; .. else force write
+PutStd:
+	cp	RAMdevice	; Test RAM storage
+	jr	z,putRAM
+	pop	hl
+	ld	b,0
+	push	bc
+	push	hl
+	dec	a		; 1=CON:
+	jp	z,XConout
+	dec	a
+	dec	a
+	jp	z,XList		; 3=LST:
+	dec	a
+	jp	z,XAuxout	; 4=AUX:
+	jp	XConoutx	; 5=USR:
+putRAM:
+	ld	hl,(FilIniMode)	; Get string pointer
+	ld	a,(STR.VAL.par)	; .. get max length
+	cp	(hl)		; .. compare against current
+	ret	z
+	inc	(hl)		; Bump
+	ld	e,(hl)		; Get as index
+	ld	d,0
+	add	hl,de		; Point to RAM
+	ld	(hl),c		; .. store
+	ret
+;
+; Write sector to file if any item in buffer
+;
+Flash:
+	ld	hl,(IOdev)	; Get FIB
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get record pointer
+	or	a		; .. test any in buffer
+	ret	z		; .. exit if not
+	ld	(hl),0		; Clear pointer
+	ld	c,.wrseq
+	call	FIB.FILE	; Write record
+	ret	z
+	ld	a,_WrErr
+	ld	(IOResult),a	; .. set error
+	ret
+;
+; Write character to device
+; WRITE(char)
+; ENTRY	Reg L holds character
+;
+WrChar:
+	ld	a,l		; Get into accu
+	jp	PutDevice	; .. put to device
+;
+; Write integer to device
+; WRITE(int)
+; WRITE(int:m)
+; ENTRY	Integer on stack
+;	Reg HL holds digit count (zero without count)
+;
+WrInt:
+	pop	bc
+	pop	de
+	push	bc
+	ld	ix,(TopRam)	; Get ASCII buffer
+	bit	sgn.bit,h	; Test negative count
+	jr	z,WI.posNum
+	call	ComplINT	; Make count >0
+	ex	de,hl		; .. swap
+	jr	WI.begin
+WI.posNum:
+	ex	de,hl
+	bit	sgn.bit,h	; Test number
+	jr	z,WI.begin	; .. positive
+	call	ComplINT	; Make >0
+	ld	(ix),'-'	; Set sign
+	inc	ix
+WI.begin:
+	push	de
+	call	INT.Cnv		; Convert to ASCII
+WI.numstrg:
+	pop	hl
+	call	VALget		; Get count
+	ld	de,(TopRam)	; Get start pointer
+	push	ix
+	pop	hl
+	or	a
+	sbc	hl,de		; Get length of numeric string
+	ld	c,l
+	ex	de,hl
+WI.RgtStr:
+	sub	c		; Test against count
+	jr	c,WI.digits
+	jr	z,WI.digits
+	ld	b,a		; Save count
+	push	hl
+WI.blanks:
+	ld	a,' '
+	push	bc
+	call	PutDevice	; Blank leading places
+	pop	bc
+	djnz	WI.blanks
+	pop	hl
+WI.digits:
+	ld	b,c		; Unpack length
+	inc	b
+WI.digloop:
+	dec	b
+	ret	z
+	ld	a,(hl)
+	push	bc
+	push	hl
+	call	PutDevice	; Type digits
+	pop	hl
+	pop	bc
+	inc	hl
+	jr	WI.digloop
+;
+; Formatted write
+; WRITE(real)
+; WRITE(real:n)
+; WRITE(real:n:m)
+; ENTRY	Reg HL holds fix comma places (-1 on none)
+;	Stack holds decimal places and real
+;	(Without decimal places defaults to 24)
+;
+WrReal:
+	pop	bc
+	pop	de		; Get places
+	exx
+	pop	hl
+	pop	de		; Get number
+	pop	bc
+	exx
+	push	bc
+	ld	ix,(TopRam)	; Load string buffer
+	push	de
+	call	Real.Cnv	; Convert real to ASCII
+	jr	WI.numstrg	; Print number
+;
+; Boolean write
+; WRITE(bool)
+; WRITE(bool:m)
+; ENTRY	Reg HL holds places (0 on none)
+;	Stack holds boolean
+;
+WrBool:
+	pop	bc
+	pop	de		; Get boolean
+	push	bc
+	call	VALget		; Set up places
+	bit	_LB,e		; Test bit
+	ld	hl,$TRUE
+	ld	c,TRUE.l
+	jr	nz,WI.RgtStr	; It's TRUE
+	ld	hl,$FALSE
+	ld	c,FALS.l
+	jr	WI.RgtStr	; .. tell FALSE
+;
+$TRUE:
+	db	'TRUE'
+TRUE.l	equ	$-$TRUE
+$FALSE:
+	db	'FALSE'
+FALS.l	equ	$-$FALSE
+;
+; String and formatted character write
+; WRITE(string)
+; WRITE(string:m)
+; WRITE(char:m)
+; ENTRY	Reg HL holds places (0 on none)
+;	Stack holds string (chracter=string with length=1)
+;
+WrString:
+	call	VALget		; Get places
+	ld	hl,2
+	add	hl,sp		; Fix stack
+	ld	c,(hl)		; Get length
+	inc	hl
+	call	WI.RgtStr	; Give right justified
+	pop	de		; Get back caller
+	ld	sp,hl		; .. and stack
+	push	de
+	ret
+;
+; Immediate string write
+; WRITE('string')
+; ENTRY	Stack holds string starting with length
+;
+WrImStr:
+	pop	hl		; Get pointer to string
+	ld	a,(hl)		; Get length
+	inc	hl
+	or	a		; Test any
+	jr	z,WIS.exit
+	ld	b,a		; Save length
+WIS.loop:
+	ld	a,(hl)		; Get character
+	push	bc
+	push	hl
+	call	PutDevice	; Write it
+	pop	hl
+	pop	bc
+	inc	hl
+	djnz	WIS.loop
+WIS.exit:
+	jp	(hl)
+;
+; Give new line
+; WRITELN{...}
+;
+WriteLnText:
+	ld	a,cr
+	call	PutDevice	; Give CR
+	ld	a,lf
+	jp	PutDevice	; .. and LF
+;
+; The logical delimiter functions
+; Function SEEKEOLN(device):boolean
+; ENTRY	Reg HL points to FIB
+; EXIT	Reg HL holds TRUE or FALSE
+;
+SeekLn:
+	ld	de,1*256+cr	; Set CR
+	jr	log.EO..
+;
+; Function EOLN(device):boolean
+;
+EolnFile:
+	ld	de,cr
+	jr	log.EO..
+;
+; Function SEEKEOF(device):boolean
+;
+SeekEOF:
+	ld	de,1*256+EOF	; Set EOF
+	jr	log.EO..
+;
+; Function EOF(device):boolean
+;
+EOFFile:
+	ld	de,EOF
+log.EO..:
+	ld	(IOdev),hl	; Set device
+	bit	in.bit,(hl)	; Test input possible
+	jr	z,LO.FALSE	; .. no, return FALSE
+LO.loop:
+	push	de
+	call	GetChar		; Get character
+	pop	de
+	cp	e		; Compare to end condition
+	jr	z,LO.TRUE
+	cp	EOF		; .. EOF forces always TRUE
+	jr	z,LO.TRUE
+	cp	' '+1		; Test control
+	jr	nc,LO.FALSE	; .. no
+	inc	d		; Test control checked
+	dec	d
+	jr	z,LO.FALSE	; .. return FALSE if so
+	res	wr.bit,(hl)	; Reset preread
+	jr	LO.loop
+LO.TRUE:
+	ld	hl,.TRUE	; Set TRUE
+	ret
+LO.FALSE:
+	ld	hl,FALSE	; Set FALSE
+	ret
+;
+; Prepare typed files
+; Procedure REWRITE(typed_file)
+; ENTRY	Reg HL points to FIB
+;	Reg DE holds length of record
+;
+RWrRecord:
+	db	SKIP
+;
+; Procedure RESET(typed_file)
+;
+ResetRecord:
+	xor	a
+	ld	(FilIniMode),a	; Set mode (0=RESET)
+	ld	(OvlRecord),de	; Save record length
+	call	CloseRecord	; Close file
+	ld	a,(IOResult)	; Test error
+	or	a
+	ret	nz		; .. end on error
+	call	prepare.FIB	; Set up FIB
+	ld	a,(IOResult)	; Test error
+	or	a
+	ret	nz		; .. end on error
+	ld	hl,(IOdev)	; Init FIB flag
+	ld	(hl),..in+..out+..read
+	inc	hl
+	inc	hl
+	ld	(hl),a		; Init record pointer
+	ld	de,FIB.cur-2
+	add	hl,de		; Point to current record
+	ld	(hl),a		; .. set zero
+	inc	hl
+	ld	(hl),a
+	ld	de,FIB.FCB+_rrn-FIB.cur-1
+	add	hl,de		; Point to FCB random record
+	ld	(hl),a		; .. set zero
+	inc	hl
+	ld	(hl),a
+	ld	de,FIB.rec-FIB.FCB-_rrn-1
+	add	hl,de		; Point to FIB record
+	ld	a,(FilIniMode)
+	or	a		; Test mode
+	jr	nz,RR.wrt
+	push	hl
+	ld	bc,FixRecLen	; Set four bytes
+	xor	a
+	call	RecordIO	; Prepare read
+	pop	hl
+	inc	hl
+	inc	hl
+	ld	c,(hl)		; Point to max records
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(OvlRecord)
+	or	a
+	sbc	hl,bc		; Test against in file
+	ret	z
+	ld	a,_InvRec
+	ld	(IOResult),a	; Set error
+	ret
+RR.wrt:
+	push	hl
+	xor	a
+	ld	(hl),a		; Clear record
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	de,(OvlRecord)	; Fetch length
+	ld	(hl),e		; .. into FIB
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	ld	bc,FixRecLen
+	ld	a,Rec.New+Rec.Wr
+	jp	RecordIO	; Prepare write
+;
+; Procedure CLOSE(typed_file)
+; ENTRY	Reg HL points to FIB
+;
+CloseRecord:
+	ld	(IOdev),hl	; Save FIB
+	ld	a,(hl)
+	and	..in+..out	; Test any action
+	ret	z
+	call	WrtSelRec	; Write record if requested
+	ld	hl,(IOdev)	; Get FIB
+	ld	de,FIB.FCB+_rrn
+	add	hl,de		; Point to random record
+	xor	a
+	ld	(hl),a		; Clear it
+	inc	hl
+	ld	(hl),a
+	ld	de,-FIB.FCB-_rrn+1
+	add	hl,de		; Point to record
+	ld	(hl),a		; .. set zero
+	inc	hl
+	inc	hl
+	ld	bc,FixRecLen
+	ld	a,Rec.Wr
+	call	RecordIO	; Prepare write
+	call	WrtSelRec	; Write if requested
+	jp	CloseFIB	; .. and close
+;
+; Prepare write to record file
+; ENTRY	Reg HL points to FIB
+;
+SWrRec:
+	ex	(sp),hl
+	ld	(IOPc),hl	; Set caller
+	ex	(sp),hl
+	ld	(IOdev),hl	; Set FIB
+	ld	a,(hl)
+	and	..in+..out	; Test IO allowed
+	ret	nz
+Block.Err:
+	ld	a,_BlkErr
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Get structure from input READ(type)
+; ENTRY	Reg HL points to FIB
+;
+RdRecord:
+	ld	a,(IOResult)	; Test previous error
+	or	a
+	ret	nz
+	push	hl
+	call	FIBdata		; Get record data
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Test against last record
+	pop	hl
+	jr	nc,RRc.err	; .. error
+	xor	a
+	call	RecordIO	; Read
+RRc.RD.WR:
+	ld	hl,(IOdev)	; Get back FIB
+	ld	de,FIB.cur
+	add	hl,de
+	inc	(hl)		; Bump record
+	ret	nz
+	inc	hl
+	inc	(hl)		; .. HI, too
+	ret
+RRc.err:
+	ld	a,_IllEOF
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Put structure to output WRITE(type)
+; ENTRY	Reg HL points to FIB
+;
+WriteRecord:
+	ld	a,(IOResult)	; Test previous error
+	or	a
+	ret	nz
+	push	hl
+	call	FIBdata		; Get FIB data
+	or	a
+	sbc	hl,de		; Test same size
+	ld	a,Rec.Wr
+	jr	nz,WRc.same
+	ld	hl,(IOdev)
+	ld	de,FIB.rec
+	add	hl,de		; Point to records
+	inc	(hl)		; Bump
+	jr	nz,WRc.notsame
+	inc	hl
+	inc	(hl)		; .. HI, too
+	jr	z,WRc.err	; Beware of overflow
+WRc.notsame:
+	ld	a,Rec.New+Rec.Wr
+WRc.same:
+	pop	hl
+	call	RecordIO	; Execute write
+	jr	RRc.RD.WR
+WRc.err:
+	pop	hl
+	ld	a,_OvflErr
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Perform record IO
+; ENTRY	Reg HL points to FIB record field
+;	Reg BC holds record length
+;	(Four on CLOSE, RESET and REWRITE)
+;	Accu holds code :
+;		0 : On RESET and READ
+;		1 : On CLOSE and WRITE
+;		3 : On WRITE and REWRITE
+;
+RecordIO:
+	ld	(BlockMode),a	; Save code
+	ex	de,hl		; Save record field
+RIO.loop:
+	ld	hl,(IOdev)	; Get FIB
+	bit	rd.bit,(hl)	; Test known buffer
+	jr	z,RIO.new
+	res	rd.bit,(hl)	; Reset bit
+	ld	a,(BlockMode)	; Get mode
+	bit	Rec.Wr.bit,a	; Test write
+	jr	z,RIO.read	; .. go read
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get record pointer
+	dec	hl
+	dec	hl
+	or	a
+	jr	nz,RIO.read	; .. test not empty
+	ld	a,(BlockMode)	; Get mode
+	bit	Rec.New.bit,a	; Test new
+	jr	nz,RIO.new
+	ld	a,b		; Get counter
+	or	a
+	jr	nz,RIO.new
+	ld	a,c		; Test new
+	or	a
+	jp	m,RIO.new
+RIO.read:
+	push	bc
+	push	de
+	ld	c,.RdRnd
+	call	FIB.FILE	; Read record
+	pop	de
+	pop	bc
+	jr	nz,RIO.RdErr	; .. oops, error
+	ld	hl,(IOdev)	; .. get back FIB
+RIO.new:
+	ld	a,(BlockMode)	; Get type
+	bit	Rec.Wr.bit,a	; Test write allowed
+	jr	z,RIO.noWr
+	set	wr.bit,(hl)	; Set bit
+RIO.noWr:
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get pointer to buffer
+	add	a,FIB.buff-2
+	push	de
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Get address of buffer
+	pop	de
+	sub	FIB.buff-2	; .. reset pointer
+	call	RIO.Swap	; Swap pointer
+RIO.move:
+	ldi			; Move bytes
+	jp	po,RIO.moveOK	; Test done
+	inc	a		; Bump pointer
+	jp	p,RIO.move	; Test done
+	dec	a
+RIO.moveOK:
+	inc	a
+	call	RIO.Swap	; Swap back
+	ld	hl,(IOdev)	; Get FIB
+	inc	hl
+	inc	hl
+	and	noMSB		; Test remainder in buffer
+	ld	(hl),a
+	jr	nz,RIO.tstend
+	push	bc
+	push	de
+	push	hl
+	call	WrtSelRec	; Write record
+	pop	hl
+	pop	de
+	pop	bc
+	jr	nz,RIO.WrErr	; .. write error
+	push	de
+	ld	de,FIB.FCB+_rrn-2
+	add	hl,de
+	pop	de
+	inc	(hl)		; Bump random record
+	jr	nz,RIO.tstend
+	inc	hl		; .. HI part, too
+	inc	(hl)
+RIO.tstend:
+	ld	a,b		; Test more to be done
+	or	c
+	jp	nz,RIO.loop
+	ex	de,hl		; Reset pointers
+	ret
+RIO.RdErr:
+	ld	a,_IllEOF
+	db	SKIP.2
+RIO.WrErr:
+	ld	a,_WrErr
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Swap record pointers on request
+; ENTRY	Reg HL and DE hold pointer
+; EXIT	Register swapped on write selected
+;
+RIO.Swap:
+	push	af
+	ld	a,(BlockMode)	; Get mode
+	bit	Rec.Wr.bit,a	; Test selection
+	jr	z,RIO.NoSwap
+	ex	de,hl		; .. swap
+RIO.NoSwap:
+	pop	af
+	ret
+;
+; Force record write
+; Procedure FLUSH(type)
+; ENTRY	Reg HL holds FIB
+;
+Flush:
+	ld	(IOdev),hl	; Save FIB
+	call	WrtSelRec	; Write if possible
+	ret	z
+	jr	RIO.WrErr	; .. set error
+;
+; Write random record if select, set read
+;
+WrtSelRec:
+	ld	c,.WrRnd	; BDOS function
+	ld	hl,(IOdev)	; Get FIB
+	set	rd.bit,(hl)	; Set read bit
+	bit	wr.bit,(hl)	; Test write
+	ret	z		; .. no
+	res	wr.bit,(hl)	; Reset and write
+;
+; Execute file function
+; ENTRY	Reg C holds file function
+; EXIT	Zero flag reflects state of function
+;	Accu holds BDOS code
+;
+FIB.FILE:
+	push	bc
+	ld	hl,(IOdev)	; Load FIB
+	ld	de,FIB.buff
+	add	hl,de
+	ex	de,hl		; Get record address
+	call	SetDMA		; Set as buffer
+	pop	bc
+;
+; Execute file from FIB function
+; ENTRY	Reg C holds file function
+; EXIT	Zero flag reflects state of function
+;	Accu holds BDOS code
+;	Reg HL points to FIB
+;
+FIB.BDOS:
+	ld	hl,(IOdev)	; Load FIB
+	push	hl
+	ld	de,FIB.FCB
+	add	hl,de
+	ex	de,hl		; Get FCB
+	U.BDOS
+	call	BDOS		; .. execute function
+	pop	hl		; Get FIB
+	or	a		; Set result
+	ret
+;
+; Set disk buffer
+; ENTRY	Reg DE holds buffer address
+;
+SetDMA:
+	ld	c,.setdma
+	call	.BDOS		; .. set file buffer
+	ret
+;
+; Procedure SEEK(file,record)
+; ENTRY	Reg HL holds record seeked for
+;	FIB pushed onto stack
+;
+SeekRec:
+	pop	bc
+	pop	de
+	ld	(IOdev),de	; Save FIB
+	push	bc
+	push	hl		; .. and record
+	call	FIBdata		; Get FIB data
+	pop	de
+	or	a
+	sbc	hl,de		; Test record less size
+	jr	c,Seek.Err	; .. that's an error
+	ld	hl,(IOdev)	; Get FIB
+	ld	bc,FIB.reclen	; Point to length of record
+	add	hl,bc
+	ld	c,(hl)		; Fetch it
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	(hl),e		; .. set record number
+	inc	hl
+	ld	(hl),d
+	call	MulRec		; Get product
+	ld	bc,FixRecLen
+	add	hl,bc		; .. adjust for header
+	jr	nc,SR.noCY	; .. no bit
+	inc	de		; Fix result
+SR.noCY:
+	ld	a,l
+	and	NoMSB		; Get record pointer
+	add	hl,hl		; .. shift result * 2
+	ex	de,hl
+	adc	hl,hl
+	ex	de,hl
+	ld	d,e		; Divide by 2 for DIV 128
+	ld	e,h
+	ld	hl,(IOdev)	; Get device
+	inc	hl
+	inc	hl
+	ld	(hl),a		; Set pointer within record
+	ld	bc,FIB.FCB+_rrn-2
+	add	hl,bc		; Poiint to random record
+	ld	c,(hl)		; .. get it
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+	or	a
+	sbc	hl,bc		; Test record already set
+	add	hl,bc
+	ret	z		; .. yeap
+	push	de
+	push	hl
+	call	WrtSelRec	; Write record
+	pop	de
+	pop	hl
+	ld	(hl),d		; Set current record
+	dec	hl
+	ld	(hl),e
+	ret
+Seek.Err:
+	ld	a,_SeekEOF
+	ld	(IOResult),a	; Set error
+	ret
+;
+; Multiply record number by record length
+; ENTRY	Reg BC holds length of record
+;	Reg DE holds number of record
+; EXIT	Reg HL holds the product of both
+;
+MulRec:
+	push	de		; Copy number
+	exx
+	pop	hl		; .. into rec
+	exx
+	ld	hl,0		; Clear result
+	ld	d,h
+	ld	e,l
+	ld	a,16		; Set bit length
+MR.Loop:
+	add	hl,hl		; Shift result
+	ex	de,hl
+	adc	hl,hl		; .. as 32 bit value
+	ex	de,hl
+	exx
+	add	hl,hl		; Shift number
+	exx
+	jr	nc,MR.noCY	; .. no carry
+	add	hl,bc		; Add length
+	jr	nc,MR.noCY	; .. no carry
+	inc	de		; Fix bit
+MR.noCY:
+	dec	a
+	jr	nz,MR.Loop	; .. loop on
+	ret
+;
+; Function EOF(device):boolean (untyped)
+;
+EOFUntype:
+	call	FileSize	; Get size of file
+	or	a
+	sbc	hl,de		; Test end
+	ld	hl,FALSE	; Set FALSE
+	ret	nz
+	inc	hl		; .. return TRUE
+	ret
+;
+; Get record position of file
+; Function FILEPOS(file):integer
+; ENTRY	Reg HL holds FIB
+; EXIT	Reg HL holds current record
+;
+FilePos:
+	call	FileSize	; Get data
+	ex	de,hl		; .. into integer
+	ret
+;
+; Get record data of file
+; EXIT	Reg HL holds size of file
+;	Reg DE holds current record
+;	Reg BC holds record length
+;
+FIBdata:
+	ld	hl,(IOdev)	; Load FIB
+;
+; Get size of file
+; Function FILESIZE(file):integer
+; ENTRY	Reg HL holds FIB
+; EXIT	Reg HL holds size of file
+;
+FileSize:
+	ld	de,FIB.rec
+	add	hl,de		; Point to records
+	ld	e,(hl)		; Get number of records
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	de
+	ld	c,(hl)		; .. get record length
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	e,(hl)		; .. get current record
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ret
+;
+; Prepare untyped files
+; Procedure REWRITE(un_typed_file)
+; ENTRY	Reg HL points to FIB
+;
+RWrUntype:
+	db	SKIP
+;
+; Procedure RESET(un_typed_file)
+;
+ResetUntyp:
+	xor	a
+	ld	(FilIniMode),a	; Set mode (0=RESET)
+	call	CloseUntyp	; Close open file
+	ld	a,(IOResult)	; Test result
+	or	a
+	ret	nz		; .. exit on error
+	call	prepare.FIB	; Fix FIB
+	ld	a,(IOResult)	; Test result
+	or	a
+	ret	nz		; .. exit on error
+	ld	hl,(IOdev)	; Get FIB
+	ld	(hl),..in+..out	; Set flag
+	ld	c,.filsiz
+	call	FIB.BDOS	; Get size of file
+	ld	de,FIB.FCB+_rrn
+	add	hl,de		; Point to size
+	xor	a
+	ld	c,(hl)		; Fetch size
+	ld	(hl),a		; .. set zero
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),a
+	ld	de,FIB.rec-FIB.FCB-_rrn-1
+	add	hl,de		; Point to #records
+	ld	(hl),c		; .. save
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	(hl),RecLng	; .. set standard record
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a		; .. init current record
+	inc	hl
+	ld	(hl),a
+	ret
+

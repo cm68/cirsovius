@@ -1,0 +1,1666 @@
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+;
+; Get a line from file
+; EXIT	Zero set if valid character
+;
+NewLine:
+	call	GetChr		; Get character
+GetLine:
+	xor	a
+	ld	(BlockCheck),a	; Init a bit
+	dec	a
+	ld	(FirstVAR),a
+	LdSRC	a		; Get character
+	or	a		; Test end
+	jr	z,NewLine	; .. yeap, load next
+	cp	' '		; .. same for blank
+	jr	z,NewLine
+	cp	tab
+	jr	z,NewLine
+	cp	'('		; Test possible comment
+	jr	z,GL.Chk2nd
+	cp	'{'		; Test real comment
+	jr	z,GL.tstDir
+GL.ex:
+	xor	a		; .. return zero
+	ret
+GL.Chk2nd:
+	NxtSRC			; Get next
+	cp	'*'		; Verify comment
+	jr	nz,GL.ex	; .. nope
+	call	GetChr		; Load next
+GL.tstDir:
+	push	bc
+	LdSRC	b		; Save character
+	NxtSRC
+	cp	'$'		; Test possible directive
+	jr	z,GL.LookDir
+GL.WtEnd:
+	call	GetChr
+GL.Wt.End:
+	ld	a,b
+	cp	'*'
+	LdSRC	a
+	jr	nz,GL.End2nd	; Test end of comment
+	cp	b
+	jr	nz,GL.WtEnd
+	NxtSRC
+	cp	')'		; .. really ?
+	jr	nz,GL.WtEnd
+	call	GetChr
+	jr	GL.ReEnt
+GL.End2nd:
+	cp	'}'		; Test end of comment
+	jr	nz,GL.WtEnd
+GL.ReEnt:
+	pop	bc
+	jr	NewLine
+GL.LookDir:
+	push	bc
+	push	de
+	push	hl
+	call	GetChr		; Skip $
+GL.DirLoop:
+	call	GetChr
+	LdSRC	a
+	call	doupcase
+	cp	'I'		; Test INCLUDE or I/O handler
+	ld	b,_Iopt
+	jr	z,GL.ValDir
+	cp	'R'		; Test inedx range check
+	ld	b,_Ropt
+	jr	z,GL.ValDir
+	cp	'A'		; Test absolute code
+	ld	b,_Aopt
+	jr	z,GL.ValDir
+	cp	'U'		; Test user interrupt
+	ld	b,_Uopt
+	jr	z,GL.ValDir
+	cp	'X'		; Test array optimization
+	ld	b,_Xopt
+	jr	z,GL.ValDir
+	cp	'V'		; Test var-parameter check
+	ld	b,_Vopt
+	jr	z,GL.ValDir
+	cp	'B'		; Test I/O mode selection
+	ld	b,_Bopt
+	jr	z,GL.ValDir
+	cp	'C'		; Test control characters
+	ld	b,_Copt
+	jr	z,GL.ValDir
+	cp	'W'		; Test depth of WITH
+	jr	z,GL.WITH
+	ld	b,0
+	cp	'K'		; Skip MS-DOS directives
+	jr	z,GL.ValDir
+	cp	'D'
+	jr	z,GL.ValDir
+	cp	'F'
+	jr	z,GL.skpDir
+	cp	'G'
+	jr	z,GL.skpDir
+	cp	'P'
+	jr	z,GL.skpDir
+	call	ERROR		; Undocumented error
+	db	_SYSerr1
+GL.ToEnd:
+	pop	hl
+	pop	de
+	pop	bc
+	jr	GL.Wt.End	; Find end of directive
+GL.ValDir:
+	call	GetChr
+	LdSRC	a
+	ld	c,0
+	cp	'+'		; Test ON
+	jr	z,GL.Toggle
+	dec	c
+	cp	'-'		; .. or OFF
+	jr	z,GL.Toggle
+	dec	b		; Fix for $I - Include
+	call	ErrNZ		; Undocumented error
+	db	_SYSerr1
+	jr	GL.GotInc
+GL.Toggle:
+	ld	hl,Options
+	ld	a,(hl)		; Get option
+	xor	c		; Toggle bit
+	or	b		; .. insert it
+	xor	c
+	ld	(hl),a		; Set new combined option
+GL..More:
+	call	GetChr		; Skip +, -
+GL.More:
+	LdSRC	a
+	cp	','		; Test comma
+	jp	z,GL.DirLoop	; .. try next
+	jr	GL.ToEnd
+GL.WITH:
+	call	GetChr
+	LdSRC	a		; Get character
+	call	IsItDigit	; Test digit
+	call	ErrCY		; Undocumented error if not
+	db	_SYSerr1	; (Invalid WITH depth)
+	sub	'0'
+	ld	(WithDp),a	; Set depth 0..9
+	jr	GL..More
+GL.skpDir:
+	call	GetChr
+	LdSRC	a
+	call	IsItDigit	; Test digit
+	jr	nc,GL.skpDir	; .. yeap
+	jr	GL.More
+GL.GotInc:
+	cp	' '		; Check blank
+	jr	nz,GL.Parse
+	call	GetChr
+	LdSRC	a
+	jr	GL.GotInc
+GL.Parse:
+	ld	a,(IncFlg)	; Test INCLUDE
+	or	a
+	call	ErrNZ		; Undocumented error
+	db	_SYSerr2
+	call	..SetPAS	; Set extension .PAS
+	ld	de,FCB
+	push	de
+	ld	c,.Open
+	call	.BDOS		; Find file
+	pop	hl
+	inc	a
+	call	ErrZ		; Cannot find file if -1
+	db	_FilFndErr
+	ld	de,CFCB
+	ld	bc,FCBlen
+	ldir			; Copy FCB
+	ld	a,(CmpTyp)	; Get mode
+	dec	a
+	jr	z,GL.CHN	; .. compile to file
+	ld	hl,TmpBuff
+	ld	(Inc.DMA),hl	; Init buffer
+	ld	hl,l79d7
+	ld	a,1		; Set one record
+	jr	l7103
+GL.CHN:
+	ld	hl,(LabPtr)	; Get label pointer
+	ld	de,(COM$Top)	; Get top of .COM/.CHN file
+	ld	(Inc.DMA),de	; .. save as buffer
+	or	a
+	sbc	hl,de		; Get gap
+	srl	h
+	rr	l
+	ld	a,h		; .. test room
+	or	a
+	call	ErrZ		; Compiler overflow on zero
+	db	_CompOverflow
+	ld	a,l
+	and	MSB
+	ld	l,a
+	push	hl
+	add	hl,hl
+	ld	a,h		; Get records
+	pop	hl
+	add	hl,de
+l7103:
+	ld	(INC$Top),hl	; Set .INC top address
+	ld	(INC.ptr),hl	; .. and bottom
+	ld	(Inc.recs),a	; Save record count
+	ld	(IncFlg),a	; (Re)Set INCLUDE
+	ld	hl,0
+	ld	(l7beb),hl
+	ld	a,(Options)	; Save options
+	ld	(l7b9f),a
+	ld	a,(WithDp)	; .. and depth of WITH
+	ld	(l7bc8),a
+	jp	GL.ToEnd
+;
+; Parse include file - default extension is .PAS
+;
+..SetPAS:
+	CopySRC	de		; Save text pointer
+..GetEnd:
+	LdSRC	a		; Get character
+	or	a		; Test end
+	jr	z,..SetEnd
+	cp	'}'		; Test end of line
+	jr	z,..SetEnd
+	cp	'*'
+	jr	z,..SetEnd
+	IncSRC
+	jr	..GetEnd
+..SetEnd:
+	push	af		; Save character
+	PushSRC			; .. and pointer
+	LdiSRC	0		; .. close line
+	call	SetPAS		; Set .PAS
+	PopSRC
+	pop	af
+	StSRC			; .. set character
+	ret
+;
+; Get character from text buffer
+;
+GetChr:
+	LdSRC	a
+	IncSRC
+	or	a		; Test end reached
+	ret	nz		; .. nope
+	push	bc
+	push	de
+	push	hl
+	ld	a,(EOFflg)	; Test end of file
+	or	a
+	call	ErrNZ		; Unexpected end of source
+	db	_EOFerr
+	ld	hl,(SrcPtr)	; .. save source pointer
+	ld	(l7bd9),hl
+	ld	hl,(l7beb)
+	ld	(l7bed),hl
+	ld	hl,l79d7
+	SetSRC	hl		; Copy text pointer
+	ld	b,_LinLen	; Set max length
+GC.skp:
+	push	hl
+	push	bc
+	call	FGet		; Get character
+	pop	bc
+	pop	hl
+	cp	cr		; Test end of line
+	jr	z,GC.eol
+	cp	eof		; Test end of file
+	jr	z,GC.eof
+	cp	tab		; Test tab
+	jr	z,GC.put
+	cp	' '		; Ignore control
+	jr	c,GC.skp
+GC.put:
+	djnz	GC.stor		; Fill line
+	inc	b		; Force 1
+	jr	GC.skp
+GC.stor:
+	ld	(hl),a		; Save character
+	inc	hl
+	jr	GC.skp		; Get next
+GC.eof:
+	ld	(EOFflg),a	; Set end of file
+	call	BmpLine		; Bump line count
+	call	ChkAbort	; Check abort
+	jr	GC.ex
+GC.eol:
+	call	BmpLine		; Bump line count
+GC.ex:
+	ld	(hl),0		; Set end of line
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Bump line count, check abort each 16th line
+;
+BmpLine:
+	push	af
+	push	hl
+	ld	hl,(LinCnt)
+	inc	hl		; Bump
+	ld	(LinCnt),hl
+	ld	a,l
+	and	LoMask		; .. mask it
+	jr	z,Chk.Abort	; .. 16th line reached
+	pop	hl
+	pop	af
+	ret
+;
+; Display compile mode, check ABORT
+;
+ChkAbort:
+	push	af
+	push	hl
+Chk.Abort:
+	push	bc
+	push	de
+	push	ix
+	push	iy
+	ld	a,cr
+	call	chrputcon	; Give return
+	ld	a,(IncFlg)	; Test INCLUDE
+	or	a
+	jr	z,CA.noI	; .. nope
+	ld	a,'I'
+	jr	CA.chk
+CA.noI:
+	ld	a,' '
+CA.chk:
+	call	chrputcon	; Indicate type of file
+	ld	a,' '
+	call	chrputcon
+	ld	hl,(LinCnt)	; Get line
+	call	PrInt		; .. and print it
+	call	XConstat	; Get key state
+	or	a
+	jr	z,CA.noBrk	; .. none
+	call	string
+IF	@@GERMAN
+	db	'   *** Lauf abbrechen   ',eot
+ELSE
+	db	'   *** Abort compilation',eot
+ENDIF	;@@GERMAN
+	call	YesNo		; Test quit
+	call	ErrNZ		; Undocumented error
+	db	_ABORT		; (Abort error)
+	ld	b,32
+CA.blnk:
+	call	string		; Clear string
+	db	bs,' ',bs,0
+	djnz	CA.blnk
+CA.noBrk:
+	pop	iy
+	pop	ix
+	pop	de
+	pop	bc
+	pop	hl
+	pop	af
+	ret
+;
+; Get character from file to be compiled
+; EXIT	Accu holds character
+;
+FGet:
+	ld	a,(IncFlg)	; Test INCLUDE
+	or	a
+	jr	nz,FGet.INC	; .. yeap
+FGetMem:
+	ld	hl,(SrcPtr)	; Get source pointer
+	ld	a,(hl)
+	cp	eof		; Test end of file
+	ret	z		; .. yeap
+	inc	hl		; Bump pointer
+	ld	(SrcPtr),hl
+	ret
+FGet.INC:
+	ld	hl,(INC.ptr)	; Get current pointer
+	ld	de,(INC$Top)	; .. .INC top
+	or	a
+	sbc	hl,de		; Test buffer scanned
+	add	hl,de
+	jr	c,l7242		; .. nope
+	call	Rd.Inc		; Read records from file
+	jr	z,l723f		; .. read total buffer
+;;l7237:
+	ld	a,eof
+	ld	(de),a		; Set end of file
+	inc	de
+	ld	(INC$Top),de	; Set .INC top
+l723f:
+	ld	a,(Inc.recs)	; Get total records
+	sub	b		; Calculate records read
+	ld	(Inc.read),a	; .. save
+	ld	hl,(Inc.DMA)	; Get DMA
+l7242:
+	ld	a,(hl)		; Get character
+	inc	hl
+	ld	(INC.ptr),hl	; .. update pointer
+	cp	eof		; Test end of file
+	jr	nz,l725d	; .. nope
+	xor	a
+	ld	(IncFlg),a	; Clear INCLUDE
+	ld	a,(l7b9f)
+	ld	(Options),a	; Get back options
+	ld	a,(l7bc8)
+	ld	(WithDp),a	; .. and depth of WITH
+	jr	FGetMem		; Get from memory
+l725d:
+	ld	hl,(l7beb)
+	inc	hl
+	ld	(l7beb),hl
+	ret
+;
+; Read records from file
+; EXIT	Zero set on complete read, EOF otherwise
+;	Reg B holds remainig record count
+;
+Rd.Inc:
+	ld	de,(Inc.DMA)	; Get DMA
+	ld	a,(Inc.recs)	; .. and records
+	ld	b,a
+l721a:
+	push	bc
+	push	de
+	ld	c,.SetDMA
+	call	.BDOS		; Set buffer
+	ld	de,CFCB
+	ld	c,.RdSeq
+	call	.BDOS		; Read record
+	pop	de
+	pop	bc
+	or	a		; Test end of file
+	ret	nz		; .. yeap
+	ld	hl,RecLng
+	add	hl,de		; Bump buffer
+	ex	de,hl
+	djnz	l721a		; .. more records
+	ret
+;
+; Test valid label character
+; ENTRY	Accu holds character
+; EXIT	Carry set if invalid
+;
+IsItLab:
+	cp	'A'		; Test UPPERcase letter
+	ret	c
+	cp	'Z'+1
+	ccf
+	ret	nc
+	cp	'_'		; Test special underline
+	ret	z
+	cp	'a'		; Test lowercase letter
+	ret	c
+	cp	'z'+1
+	ccf
+	ret
+;
+; Test valid character
+; ENTRY	Accu holds character
+; EXIT	Carry set if invalid
+;
+IsItValid:
+	call	IsItLab		; Test label
+	ret	nc		; .. yeap
+;
+; Test valid digit character
+; ENTRY	Accu holds character
+; EXIT	Carry set if invalid
+;
+IsItDigit:
+	cp	'0'		; Test range 0..9
+	ret	c
+	cp	'9'+1
+	ccf
+	ret
+;
+; Compare signed integers
+; ENTRY	Reg HL holds 1st number
+;	Reg DE holds 2nd number
+; EXIT	Zero set if numbers are equal
+;	Carry set if 1st less 2nd
+;
+CmpNum:
+	ld	a,h
+	xor	d		; Test same sign
+	ld	a,h
+	jp	m,CmpMinus	; .. nope
+	cp	d		; Compare
+	ret	nz
+	ld	a,l
+	cp	e
+	ret
+CmpMinus:
+	rla			; Set sign for result
+	ret
+;
+; Multiply integers
+; ENTRY	Reg HL holds multiplicand
+;	Reg DE holds multiplier
+; EXIT	Reg HL holds product
+;	Reg BC holds multiplicand
+;	Carry set on number overflow
+;
+MulNum:
+	ld	b,h		; Copy multiplicand
+	ld	c,l
+	ld	hl,0		; Clear result
+	ld	a,16		; Set bit count
+MulNm.loop:
+	add	hl,hl		; Double result
+	ret	c		; .. overflow
+	ex	de,hl
+	add	hl,hl		; Double multiplier
+	ex	de,hl
+	jr	nc,MulNm.noC	; Test bit
+	add	hl,bc		; Add multipicand
+	ret	c		; .. overflow
+MulNm.noC:
+	dec	a
+	jr	nz,MulNm.loop
+	ret
+;
+; Divide integers
+; ENTRY	Reg HL holds dividend
+;	Reg DE holds divisor
+; EXIT	Reg HL holds quotient
+;	Reg BC holds remainder
+;
+;;DivNum:
+;;l72ae:
+;;	ld	b,d		; Copy divisor
+;;	ld	c,e
+;;	ex	de,hl
+;;	xor	a
+;;	ld	h,a		; Clear quotient
+;;	ld	l,a
+;;	ld	a,17		; Set bit count
+;;DivNm.loop:
+;;	adc	hl,hl		; Double quotient
+;;	sbc	hl,bc		; Subtract divisor
+;;	jr	nc,DivNm.noC	; Check bit
+;;	add	hl,bc		; Make > 0
+;;	scf			; Set bit
+;;DivNm.noC:
+;;	ccf
+;;	rl	e		; Shift dividend
+;;	rl	d
+;;	dec	a
+;;	jr	nz,DivNm.loop
+;;	ex	de,hl
+;;	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% Error handlers                            %%%
+; %%% Global entry: <SP> points to error number %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+; Perform error on carry set
+;
+ErrCY:
+	ex	(sp),hl
+	inc	hl		; Fix return address
+	ex	(sp),hl
+	ret	nc		; .. no error
+	jr	ErrExe
+;
+; Perform error on carry reset
+;
+;;ErrNC:
+;;l72ce:
+;;	ex	(sp),hl
+;;	inc	hl
+;;	ex	(sp),hl
+;;	ret	c		; .. no error
+;;	jr	ErrExe
+;
+; Perform error on zero set
+;
+ErrZ:
+	ex	(sp),hl
+	inc	hl
+	ex	(sp),hl
+	ret	nz		; .. no error
+	jr	ErrExe
+;
+; Perform error on zero reset
+;
+ErrNZ:
+	ex	(sp),hl
+	inc	hl
+	ex	(sp),hl
+	ret	z		; .. no error
+ErrExe:
+	pop	hl		; .. fix stack for error
+	dec	hl
+	push	hl
+;
+; Perform error routine
+;
+ERROR:
+	pop	hl		; Get caller
+	ld	a,(hl)		; .. get error number
+.ERROR:
+	call	ChkAbort
+	ld	(ErrCode),a	; Save error
+	or	a
+	jr	z,l730c
+	CopySRC	hl		; Copy pointer
+	ld	de,l79d7
+	sbc	hl,de
+	ld	de,(l7bed)
+	ld	a,(IncFlg)	; Test INCLUDE
+	or	a
+	jr	nz,l7308
+	ld	de,(TxtBeg)	; Get start of text
+	sbc	hl,de
+	ld	de,(l7bd9)
+l7308:
+	add	hl,de
+	ld	(CTxtPtr),hl	; Set text pointer
+l730c:
+	ld	a,(CmpTyp)	; Get mode
+	dec	a
+;;	jr	nz,l731a	; .. not compiling to file
+
+	ld	de,FFCB
+	ld	c,.Close
+
+;;	call	.BDOS		; Close file
+
+	call	z,.BDOS		; Close if compiling to file
+;;l731a:
+
+	ld	sp,(SavStk)	; Get entry stack
+	ret			; .. and exit
+;
+; Compiler tables
+; Internal label table
+;
+; Special STRING entry
+;
+; -->> STRING
+;
+$STR$:
+	dw	..STRN
+$$STRN:
+	dw	.STRNG+7
+	db	'G'+MSB,'NIRTS'
+	db	0,_simple
+..STRN	equ	$-$$STRN
+;
+IntLabTop:
+;
+; -->> INTEGER
+;
+	dw	..INT
+$$INT:
+	dw	.INTEG+7
+	db	'R'+MSB,'EGETNI'
+	db	0,_simple
+..INT	equ	$-$$INT
+;
+; -->> CHAR
+;
+	dw	..CHAR
+$$CHAR:
+	dw	.CHAR+7
+	db	'R'+MSB,'AHC'
+	db	0,_simple
+..CHAR	equ	$-$$CHAR
+;
+; -->> REAL
+;
+	dw	..REAL
+$$REAL:
+	dw	.REAL+7
+	db	'L'+MSB,'AER'
+	db	0,_simple
+..REAL	equ	$-$$REAL
+;
+; -->> BOOLEAN
+;
+	dw	..BOOL
+$$BOOL:
+	dw	.BOOL+7
+	db	'N'+MSB,'AELOOB'
+	db	0,_simple
+..BOOL	equ	$-$$BOOL
+;
+; -->> TEXT
+;
+	dw	..TEXT
+$$TEXT:
+	dw	.DEVPB+7
+	db	'T'+MSB,'XET'
+	db	0,_simple
+..TEXT	equ	$-$$TEXT
+;
+; -->> BYTE
+;
+	dw	..BYTE
+$$BYTE:
+	dw	.BYTE+7
+	db	'E'+MSB,'TYB'
+	db	0,_simple
+..BYTE	equ	$-$$BYTE
+;
+; -->> TRUE
+;
+	dw	..TRUE
+$$TRUE:
+	dw	.TRUE
+	db	_Bool
+	db	'E'+MSB,'URT'
+	db	0,_const
+..TRUE	equ	$-$$TRUE
+;
+; -->> FALSE
+;
+	dw	..FALSE
+$$FALSE:
+	dw	FALSE
+	db	_Bool
+	db	'E'+MSB,'SLAF'
+	db	0,_const
+..FALSE	equ	$-$$FALSE
+;
+; -->> MAXINT
+;
+	dw	..MXINT
+$$MAXINT:
+	dw	maxint
+	db	_Integ
+	db	'T'+MSB,'NIXAM'
+	db	0,_const
+..MXINT	equ	$-$$MAXINT
+;
+; -->> PI
+;
+	dw	..PI
+$$PI:
+	db	082h,021h,0a2h,0dah,00fh,049h
+	db	_Real
+	db	'I'+MSB,'P'
+	db	0,_const
+..PI	equ	$-$$PI
+;
+; -->> OUTPUT
+;
+	dw	..OUTP
+$$OUTP:
+	dw	.DEVPB+7
+	dw	StdIOdev
+	db	0
+	db	'T'+MSB,'UPTUO'
+	db	0,_pointer
+..OUTP	equ	$-$$OUTP
+;
+; -->> INPUT
+;
+	dw	..INPT
+$$INPT:
+	dw	.DEVPB+7
+	dw	StdIOdev
+	db	0
+	db	'T'+MSB,'UPNI'
+	db	0,_pointer
+..INPT	equ	$-$$INPT
+;
+; -->> CON
+;
+	dw	..CON
+$$CON:
+	dw	.DEVPB+7
+	dw	BaseFIB
+	db	0
+	db	'N'+MSB,'OC'
+	db	0,_pointer
+..CON	equ	$-$$CON
+;
+; -->> TRM
+;
+	dw	..TRM
+$$TRM:
+	dw	.DEVPB+7
+	dw	BaseFIB
+	db	0
+	db	'M'+MSB,'RT'
+	db	0,_pointer
+..TRM	equ	$-$$TRM
+;
+; -->> KBD
+;
+	dw	..KBD
+$$KBD:
+	dw	.DEVPB+7
+	dw	ConinFIB
+	db	0
+	db	'D'+MSB,'BK'
+	db	0,_pointer
+..KBD	equ	$-$$KBD
+;
+; -->> LST
+;
+	dw	..LST
+$$LST:
+	dw	.DEVPB+7
+	dw	LstFIB
+	db	0
+	db	'T'+MSB,'SL'
+	db	0,_pointer
+..LST	equ	$-$$LST
+;
+; -->> AUX
+;
+	dw	..AUX
+$$AUX:
+	dw	.DEVPB+7
+	dw	AuxFIB
+	db	0
+	db	'X'+MSB,'UA'
+	db	0,_pointer
+..AUX	equ	$-$$AUX
+;
+; -->> USR
+;
+	dw	..USR
+$$USR:
+	dw	.DEVPB+7
+	dw	UsrFIB
+	db	0
+	db	'R'+MSB,'SU'
+	db	0,_pointer
+..USR	equ	$-$$USR
+;
+; -->> BUFLEN
+;
+	dw	..BUFL
+$$BUFL:
+	dw	.BYTE+7
+	dw	BufLen
+	db	0
+	db	'N'+MSB,'ELFUB'
+	db	0,_pointer
+..BUFL	equ	$-$$BUFL
+;
+; -->> HEAPPTR
+;
+	dw	..HEAP
+$$HEAP:
+	dw	.INTEG+7
+	dw	HeapPtr
+	db	0
+	db	'R'+MSB,'TPPAEH'
+	db	0,_pointer
+..HEAP	equ	$-$$HEAP
+;
+; -->> RECURPTR
+;
+	dw	..RECUR
+$$RECUR:
+	dw	.INTEG+7
+	dw	RecurPtr
+	db	0
+	db	'R'+MSB,'TPRUCER'
+	db	0,_pointer
+..RECUR	equ	$-$$RECUR
+;
+; -->> CONSTPTR
+;
+	dw	..CONSP
+$$CONSP:
+	dw	.INTEG+7
+	dw	XConstat+1
+	db	0
+	db	'R'+MSB,'TPTSNOC'
+	db	0,_pointer
+..CONSP	equ	$-$$CONSP
+;
+; -->> CONINPTR
+;
+	dw	..CONIP
+$$CONIP:
+	dw	.INTEG+7
+	dw	XConin+1
+	db	0
+	db	'R'+MSB,'TPNINOC'
+	db	0,_pointer
+..CONIP	equ	$-$$CONIP
+;
+; -->> CONOUTPTR
+;
+	dw	..CONOP
+$$CONOP:
+	dw	.INTEG+7
+	dw	XConout+1
+	db	0
+	db	'R'+MSB,'TPTUONOC'
+	db	0,_pointer
+..CONOP	equ	$-$$CONOP
+;
+; -->> LSTOUTPTR
+;
+	dw	..LSTOP
+$$LSTOP:
+	dw	.INTEG+7
+	dw	XList+1
+	db	0
+	db	'R'+MSB,'TPTUOTSL'
+	db	0,_pointer
+..LSTOP	equ	$-$$LSTOP
+;
+; -->> AUXINPTR
+;
+	dw	..AUXIP
+$$AUXIP:
+	dw	.INTEG+7
+	dw	LoadTemp
+	db	0
+	db	'R'+MSB,'TPNIXUA'
+	db	0,_pointer
+..AUXIP	equ	$-$$AUXIP
+;
+; -->> AUXOUTPTR
+;
+	dw	..AUXOP
+$$AUXOP:
+	dw	.INTEG+7
+	dw	XAuxout+1
+	db	0
+	db	'R'+MSB,'TPTUOXUA'
+	db	0,_pointer
+..AUXOP	equ	$-$$AUXOP
+;
+; -->> USRINPTR
+;
+	dw	..USRIP
+$$USRIP:
+	dw	.INTEG+7
+	dw	XConinx+1
+	db	0
+	db	'R'+MSB,'TPNIRSU'
+	db	0,_pointer
+..USRIP	equ	$-$$USRIP
+;
+; -->> USROUTPTR
+;
+	dw	..USROP
+$$USROP:
+	dw	.INTEG+7
+	dw	XConoutx+1
+	db	0
+	db	'R'+MSB,'TPTUORSU'
+	db	0,_pointer
+..USROP	equ	$-$$USROP
+;
+; -->> ERRORPTR
+;
+	dw	..ERRPT
+$$ERRPT:
+	dw	.INTEG+7
+	dw	ErrorPtr
+	db	0
+	db	'R'+MSB,'TPRORRE'
+	db	0,_pointer
+..ERRPT	equ	$-$$ERRPT
+;
+; -->> CBREAK
+;
+	dw	..CBRK
+$$CBRK:
+	dw	.BOOL+7
+	dw	CBreak
+	db	0
+	db	'K'+MSB,'AERBC'
+	db	0,_pointer
+..CBRK	equ	$-$$CBRK
+IntLabTab:
+LenLab	equ	IntLabTab-IntLabTop
+;
+; Standard type length table
+; Note HI-LO entries of definition words
+;
+
+dww	macro	val
+	db	HIGH val
+	db	LOW  val
+	endm
+
+.INTEG:
+	dww	2		; Length for this type
+	dww	maxint		; Max value
+	dww	(-maxint-1)	; Min value
+	dww	_Integ		; Type
+.CHAR:
+	dww	1
+	dww	255
+	dww	0
+	dww	_Char
+.REAL:
+	dww	6
+	dww	0
+	dww	0
+	dww	_Real
+.BOOL:
+	dww	1
+	dww	.TRUE
+	dww	FALSE
+	dww	_Bool
+.DEVPB:
+	dww	(FIBlen+RecLng)
+	dww	0
+	dww	0
+	dww	_TxtF
+.BYTE:
+	dww	1
+	dww	255
+	dww	0
+	dww	_Integ
+.STRNG:
+	dww	(DefSTR+1)
+	dww	0
+	dww	0
+	dww	_String
+.TYPE:
+	ds	8,0
+;
+; Table of reserved words
+;
+$RESERVED:
+	db	0
+	dw	$PROGRAM
+	db	_Byte
+	dw	$LABEL
+	db	_Addr
+	dw	$STMT1
+	db	_Byte
+	dw	$DOWN.TO
+	db	_Byte
+	dw	$LOGIC
+	db	_Byte
+	dw	$..OR
+	db	_Byte
+	dw	$IN
+	db	-1
+;
+; Keywords
+;
+$PROGRAM:
+	dc	'PROGRAM'
+$END:
+	dc	'END'
+$FORWARD:
+	dc	'FORWARD'
+$EXTERNAL:
+	dc	'EXTERNAL'
+$PACKED:
+	dc	'PACKED'
+$ARRAY:
+	dc	'ARRAY'
+$FILE:
+	dc	'FILE'
+$SET:
+	dc	'SET'
+$RECORD:
+	dc	'RECORD'
+$STRING:
+	dc	'STRING'
+$OF:
+	dc	'OF'
+$ABSOLUTE:
+	dc	'ABSOLUTE'
+$THEN:
+	dc	'THEN'
+$ELSE:
+	dc	'ELSE'
+$DO:
+	dc	'DO'
+$UNTIL:
+	dc	'UNTIL'
+$NOT:
+	dc	'NOT'
+$NIL:
+	dc	'NIL'
+	db	eot
+$..:
+	dc	'..'
+$ass:
+	dc	':='
+;
+; Main block table
+; -->> Code is type
+;
+$LABEL:
+	dc	'LABEL'
+	db	_Label
+	dc	'CONST'
+	db	_Const
+	dc	'TYPE'
+	db	_Type
+$VAR:
+	dc	'VAR'
+	db	_Var
+	dc	'BEGIN'
+	db	_Begin
+$OVERLAY:
+	dc	'OVERLAY'
+	db	_Overly
+$ROUTINE:
+	dc	'PROCEDURE'
+	db	_Proc
+	dc	'FUNCTION'
+	db	_Func
+	db	eot
+;
+; Statement table
+;
+$STMT1:
+	dc	'BEGIN'
+	dw	.BEGIN
+	dc	'IF'
+	dw	.IF
+	dc	'WHILE'
+	dw	.WHILE
+	dc	'REPEAT'
+	dw	.REPEAT
+	dc	'FOR'
+	dw	.FOR
+$CASE:
+	dc	'CASE'
+	dw	.CASE
+	dc	'GOTO'
+	dw	.GOTO
+	dc	'WITH'
+	dw	.WITH
+	dc	'INLINE'
+	dw	.INLINE
+	db	eot
+$DOWN.TO:
+	dc	'TO'
+	db	.INC.HL
+	dc	'DOWNTO'
+	db	.DEC.HL
+	db	eot
+$MATH:
+	dc	'*'
+	db	0
+	dc	'/'
+	db	1
+$LOGIC:
+	dc	'AND'
+	db	2
+	dc	'DIV'
+	db	3
+	dc	'MOD'
+	db	4
+	dc	'SHL'
+	db	5
+	dc	'SHR'
+	db	6
+	db	eot
+$INC.DEC:
+	dc	'+'
+	db	0
+	dc	'-'
+	db	1
+$..OR:
+	dc	'OR'
+	db	2
+	dc	'XOR'
+	db	3
+	db	eot
+$OPERS:
+	dc	'='
+	db	00000000b
+	dc	'<>'
+	db	00001000b
+	dc	'>='
+	db	00010000b
+	dc	'<='
+	db	00011000b
+	dc	'>'
+	db	00100000b
+	dc	'<'
+	db	00101000b
+$IN:
+	dc	'IN'
+	db	11111111b
+	db	eot
+$STMT2:
+	dc	'WRITELN'
+	dw	.WRITELN
+	dc	'WRITE'
+	dw	.WRITE
+	dc	'READLN'
+	dw	.READLN
+	dc	'READ'
+	dw	.READ
+	dc	'DELETE'
+	dw	..DELETE
+	dc	'INSERT'
+	dw	.INSERT
+	dc	'ASSIGN'
+	dw	.ASSIGN
+	dc	'RESET'
+	dw	.RESET
+	dc	'REWRITE'
+	dw	.REWRITE
+	dc	'APPEND'
+	dw	.APPEND
+	dc	'CLOSE'
+	dw	..CLOSE
+	dc	'ERASE'
+	dw	.ERASE
+	dc	'RENAME'
+	dw	..RENAME
+	dc	'SEEK'
+	dw	.SEEK
+	dc	'GETMEM'
+	dw	.GETMEM
+	dc	'NEW'
+	dw	.NEW
+	dc	'FREEMEM'
+	dw	.FREEMEM
+	dc	'DISPOSE'
+	dw	.DISPOSE
+	dc	'MARK'
+	dw	.MARK
+	dc	'RELEASE'
+	dw	.RELEASE
+	dc	'OVRDRIVE'
+	dw	.OVRDRIVE
+	dc	'CRTINIT'
+	dw	.CRTINIT
+	dc	'CRTEXIT'
+	dw	.CRTEXIT
+	dc	'GOTOXY'
+	dw	.GOTOXY
+	dc	'CLRSCR'
+	dw	.CLRSCR
+	dc	'CLREOL'
+	dw	.CLREOL
+	dc	'NORMVIDEO'
+	dw	.NORMVIDEO
+	dc	'HIGHVIDEO'
+	dw	.NORMVIDEO
+	dc	'LOWVIDEO'
+	dw	.LOWVIDEO
+	dc	'INSLINE'
+	dw	.INSLINE
+	dc	'DELLINE'
+	dw	.DELLINE
+	dc	'WINDOW'
+	dw	.WINDOW
+	dc	'DELAY'
+	dw	.DELAY
+	dc	'BLOCKREAD'
+	dw	.BLOCKREAD
+	dc	'BLOCKWRITE'
+	dw	.BLOCKWRITE
+	dc	'RANDOMIZE'
+	dw	.RANDOMIZE
+	dc	'MOVE'
+	dw	.MOVE
+	dc	'FILLCHAR'
+	dw	.FILLCHAR
+	dc	'EXIT'
+	dw	.EXIT
+	dc	'HALT'
+	dw	.HALT
+	dc	'PORT'
+	dw	.PORT
+	dc	'STACKPTR'
+	dw	.STACKPTR
+	dc	'FLUSH'
+	dw	.FLUSH
+	dc	'EXECUTE'
+	dw	.EXECUTE
+	dc	'CHAIN'
+	dw	.CHAIN
+	dc	'STR'
+	dw	.STR
+	dc	'VAL'
+	dw	.VAL
+	dc	'BDOS'
+	dw	..BDOS
+	dc	'BIOS'
+	dw	.BIOS
+	dc	'DEC'
+	dw	.DEC
+	dc	'INC'
+	dw	.INC
+	dc	'GETENV'
+	dw	.GETENV
+	dc	'SETENV'
+	dw	.SETENV
+	db	eot
+$FUNC:
+	dc	'CHR'
+	dw	.CHR
+	dc	'ORD'
+	dw	.ORD
+	dc	'COPY'
+	dw	.COPY
+	dc	'LENGTH'
+	dw	.LENGTH
+	dc	'POS'
+	dw	.POS
+	dc	'CONCAT'
+	dw	.CONCAT
+	dc	'SUCC'
+	dw	.SUCC
+	dc	'PRED'
+	dw	.PRED
+	dc	'UPCASE'
+	dw	.UPCASE
+	dc	'TRUNC'
+	dw	.TRUNC
+	dc	'ROUND'
+	dw	.ROUND
+	dc	'ODD'
+	dw	.ODD
+	dc	'ABS'
+	dw	.ABS
+	dc	'SQR'
+	dw	.SQR
+	dc	'SQRT'
+	dw	.SQRT
+	dc	'SIN'
+	dw	.SIN
+	dc	'COS'
+	dw	.COS
+	dc	'ARCTAN'
+	dw	.ARCTAN
+	dc	'LN'
+	dw	.LN
+	dc	'EXP'
+	dw	.EXP
+	dc	'INT'
+	dw	.INT
+	dc	'FRAC'
+	dw	.FRAC
+	dc	'RANDOM'
+	dw	.RANDOM
+	dc	'PARAMCOUNT'
+	dw	.PARAMCOUNT
+	dc	'PARAMSTR'
+	dw	.PARAMSTR
+	dc	'LO'
+	dw	.LO
+	dc	'HI'
+	dw	.HI
+	dc	'SWAP'
+	dw	.SWAP
+	dc	'PTR'
+	dw	.PTR
+	dc	'IORESULT'
+	dw	.IORESULT
+	dc	'EOF'
+	dw	.EOF
+	dc	'EOLN'
+	dw	.EOLN
+	dc	'SEEKEOF'
+	dw	.SEEKEOF
+	dc	'SEEKEOLN'
+	dw	.SEEKEOLN
+	dc	'FILESIZE'
+	dw	.FILESIZE
+	dc	'FILEPOS'
+	dw	.FILEPOS
+	dc	'KEYPRESSED'
+	dw	.KEYPRESSED
+	dc	'MEMAVAIL'
+	dw	.MEMAVAIL
+	dc	'MAXAVAIL'
+	dw	.MAXAVAIL
+	dc	'PORT'
+	dw	.PORT.
+	dc	'STACKPTR'
+	dw	.STACKPTR.
+	dc	'ADDR'
+	dw	.ADDR
+	dc	'SIZEOF'
+	dw	.SIZEOF
+	dc	'BDOSHL'
+	dw	..BDOS
+	dc	'BDOS'
+	dw	.BDOS.
+	dc	'BIOSHL'
+	dw	.BIOS
+	dc	'BIOS'
+	dw	.BIOS.
+	dc	'EXIST'
+	dw	.EXIST
+	dc	'WHEREX'
+	dw	.WHEREX
+	dc	'WHEREY'
+	dw	.WHEREY
+	dc	'GETMAXX'
+	dw	.GETMAXX
+	dc	'GETMAXY'
+	dw	.GETMAXY
+	dc	'FINDFIRST'
+	dw	.FINDFIRST
+	dc	'FINDNEXT'
+	dw	.FINDNEXT
+	db	eot
+$MEM:
+	dc	'MEM'
+	db	eot
+	dw	0
+;
+; Start of dynamic data
+; - originally at page boundary - here : 7900h
+;
+; Dynamic data area starts - shared by editor and compiler most
+;
+CCPFlg:
+	db	FALSE		; TRUE for copy complete CCP
+	dseg
+_T:
+CmpTyp:
+	ds	1		; 0 Compile to memory
+				; 1 Compile to file
+				; 2 Search for error
+ErrCode:
+	ds	1
+CodePC:
+	ds	2
+CodeBeg:
+	ds	2
+CodeEnd:
+	ds	2
+DataBeg:
+	ds	2
+DataEnd:
+	ds	2
+CTxtPtr:
+	ds	2		; Error text pointer
+IncFlg:
+	db	1
+CFCB:
+	ds	FCBlen
+FFCB:
+	ds	FCBlen
+TmpBuff:
+	ds	RecLng
+;
+; ++++++ COMPILING TO MEMORY STARTS HERE ++++++
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+l79d7:
+	ds	RecLng
+l7a57:
+	ds	RecLng
+WrkLine:
+	ds	RecLng
+;
+; $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+; TYPE Environment 1
+;
+Envir1:
+l7b57:
+	ds	1
+TypVal:
+	ds	1		; Operand in type
+Ahead:
+	ds	1		; Start editor's ahead buffer
+TypeTable:
+	ds	2
+;
+; Next 8 locations must be contiguous
+;
+Type:				; \
+	ds	1		; | Type of TYPE
+l7b5d:				; |
+	ds	1		; |
+Low.Rng:			; |
+	ds	2		; |
+High.Rng:			; |
+	ds	2		; |
+TypLen:				; |
+	ds	2		; / Length of TYPE
+;
+; TYPE Environment 2
+;
+Envir2:
+l7b64:
+	ds	1
+l7b65:
+	ds	4
+;
+; Next 8 locations must be contiguous
+; Will be compared to above one
+;
+l7b69:				; \
+	ds	2		; |
+l7b6b:				; |
+	ds	2		; |
+LastAdr:			; |
+	ds	2		; |
+l7b6f:				; |
+	ds	2		; /
+_ENVlen	equ	$-Envir2
+;
+; End of TYPE environments
+; $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+;
+SavStk:
+	ds	1		; Two bytes requested
+DelimP:
+	ds	1
+LabPtr:
+	ds	1
+EDLine:
+	ds	1		; ---- Goes 127 characters deep
+PrevLabPtr:			; ----
+	ds	2		; ----
+l7b77:
+	ds	2
+l7b79:
+	ds	2
+CurLab:
+	ds	2
+l7b7d:
+	ds	2
+l7b7f:
+	ds	2
+l7b81:
+	ds	2
+l7b83:
+	ds	2
+l7b85:
+	ds	2
+l7b87:
+	ds	1
+l7b88:
+	ds	1
+l7b89:
+	ds	2
+l7b8b:
+	ds	2
+l7b8d:
+	ds	2
+l7b8f:
+	ds	1
+l7b90:
+	ds	1
+l7b91:
+	ds	1
+l7b92:
+	ds	1
+l7b93:
+	ds	1
+l7b94:
+	ds	1
+l7b95:
+	ds	1
+OvlNum:
+	ds	1
+l7b97:
+	ds	1
+BlockCheck:
+	ds	1
+l7b99:
+	ds	1
+l7b9a:
+	ds	1
+l7b9b:
+	ds	1
+l7b9c:
+	ds	1
+Options:
+	ds	1		; Options, bitwise
+LocOpt:
+	ds	1		; Local options, dto.
+l7b9f:
+	ds	1
+BRKmode:
+	ds	1		; 0 is {$U-} else {$U+}
+FacSgn:
+	ds	1
+EOFflg:
+	ds	1
+NL.mode:
+	ds	1		; 0 for READ/WRITE else ..LN
+l7ba4:
+	ds	2
+l7ba6:
+	ds	1
+l7ba7:
+	ds	2
+l7ba9:
+	ds	2
+OVL.dat:
+	ds	5
+OVL.len:
+	ds	2
+OvlFil:
+	ds	Fname+Fext
+AdrMode:
+	ds	1
+;;--ArrMod:				;; Array address flag
+;;--	ds	1		;; .. for INC - DEC access
+VarAdr:
+	ds	2
+FirstVAR:
+	ds	1
+l7bc1:
+	ds	1
+l7bc2:
+	ds	2
+l7bc4:
+	ds	2
+l7bc6:
+	ds	1
+WithDp:
+	ds	1
+l7bc8:
+	ds	1
+l7bc9:
+	ds	1
+l7bca:
+	ds	2
+l7bcc:
+	ds	9
+Env.PC:
+	ds	2
+SrcPtr:
+	ds	2
+l7bd9:
+	ds	2
+RRN.stat:
+	ds	1
+RecPtr:
+	ds	1
+RRN.off:
+	ds	2
+Mem$Top:
+	ds	2
+COM$Top:
+	ds	2
+BackLevel:
+	ds	1
+Inc.DMA:
+	ds	2
+INC$Top:
+	ds	2
+Inc.recs:
+	ds	1
+Inc.read:
+	ds	1
+INC.ptr:
+	ds	2
+l7beb:
+	ds	2
+l7bed:
+	ds	2
+LinCnt:
+	ds	6
+TOP:				; Free memory starts here
+

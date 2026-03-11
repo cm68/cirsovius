@@ -1,0 +1,1886 @@
+	title	LINK - DR Link
+	name	('LINK')
+
+; DASMed version of DR LINK.COM
+; By W. Cirsovius
+
+; %%%% Fix up LINK revision NOTE: Base 1.31
+
+LINKver	macro
+	db	'1.36'
+	endm
+
+; Note the following BOOLEAN manipulations
+
+; ACCU=FF if ACCU=x	ACCU=00 if ACCU=x
+
+; sub x			sub x
+; sub 1			add a,-1
+; sbc a,a		sbc a,a
+
+; Main differences in this program:
+
+;  1 - Allow option [OX] for .RSX file generation
+
+;  2 - Give help on empty command line
+
+;  3 - Select .IRL file on [S] option
+
+;  4 - Allow break by request only
+
+;  5 - Disable MPM LIBRRAY ?FPBNX to be solved
+
+;  6 - Display messages in lower case, too
+
+;  7 - Use LDIR instead of move code
+
+;  8 - Parse via BDOS
+
+;  9 - Shorten code by deleting unnecessaries
+
+; 10 - Optimize routines
+
+; 11 - Optimize option parser
+
+; 12 - Enhance error message on memory full
+
+; 13 - Simple bug fix displaying current logged disk
+
+; Optional functions to be selected:
+
+; Boolean	Description
+; =======	===========
+
+; @@VERB	Allow option [V] for verbose loading
+
+; @@DU		Allow ZCPR DU: style drive and user
+
+; @@DST		Fix destination from source on only D(U): given
+
+; @@HASH	Disable special symbol prefix #
+
+; @@BIOS	Disable option [B]
+
+; @@SYS		Disable option [OR]
+
+; %%%% Set to -1 to enable a mod
+
+@@VERB	equ	-1		;; Verbose loading
+@@DU	equ	-1		;; ZCPR DU
+@@DST	equ	-1		;; Fix destination
+@@HASH	equ	-1		;; # in symbols
+@@BIOS	equ	-1		;; Disable option [B]
+@@SYS	equ	-1		;; Disable option [OR]
+
+; %%%% Set to 0 to disable a mod (DEFAULT)
+
+; Tested (+ means YES)	:
+
+;@@VERB	equ	 0	; -
+;@@DU	equ	 0	; -
+;@@DST	equ	 0	; -
+;HASH	equ	 0	; -
+;@@BIOS	equ	 0	; -
+;@@SYS	equ	 0	; -
+
+Move	MACRO	src,dest,len
+	ld	hl,src
+	ld	de,dest
+	ld	bc,len
+	ldir
+	ENDM
+
+FALSE	equ	0
+TRUE	equ	1
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPAtop	equ	BDOS+1
+FCB	equ	005ch
+DMA	equ	0080h
+CCPbuf	equ	DMA
+TPA	equ	0100h
+
+RecLng	equ	128		; Length of one record
+ExtLng	equ	128		; Length of one extent
+BufLen	equ	128
+PageLen	equ	256		; page length
+HashLen	equ	128
+HeadLen	equ	 12		; Header length on prefix
+
+Bits	equ	8
+.Byte	equ	8
+
+MaxCR	equ	128		; Max current record
+MaxChIx	equ	  8
+IDXend	equ	0feh
+	
+OSErr	equ	255
+
+.conout	equ	  2
+.lstout	equ	  5
+.condir	equ	  6
+.string	equ	  9
+.gtlin	equ	 10
+.consta	equ	 11
+.vers	equ	 12
+.open	equ	 15
+.close	equ	 16
+.delete	equ	 19
+.rdseq	equ	 20
+.wrseq	equ	 21
+.make	equ	 22
+.renam	equ	 23
+.getdsk	equ	 25
+.setdma	equ	 26
+.usrcod	equ	 32
+.parse	equ	152
+
+C.in	equ	0ffh
+
+_get	equ	-1
+
+_MaxUsr	equ	15
+
+.Rd	equ	0
+.Wr	equ	1
+
+CPM3	equ	030h
+
+BFlen1	equ	 256
+BFlen2	equ	 512
+BFlen3	equ	1024
+BFlen4	equ	6144
+BFlen5	equ	8192
+
+@nam	equ	 8
+@ext	equ	 3
+
+.nam	equ	 1
+.ext	equ	 9
+.ex	equ	12
+.eg	equ	14
+.cr	equ	32
+FCBent	equ	32
+
+.JP	equ	0c3h
+
+@abs	equ	00b
+@c.rel	equ	01b
+@d.rel	equ	10b
+@COMM	equ	11b
+$$PcRef	equ	4
+
+$$Files	equ	4
+
+; XX.. PB structure
+
+X$.amnt	equ	 2
+X$.len	equ	 4
+X$.buf	equ	 6
+X$.high	equ	 8
+X$.low	equ	10
+X$.RD	equ	12
+X$.WR	equ	13
+IF	@@DU
+X$.FCB	equ	15
+ELSE
+X$.FCB	equ	14
+ENDIF	;@@DU
+
+; YY.. PB structure
+
+Y$.buf	equ	0
+Y$.cur	equ	2
+Y$.len	equ	4
+Y$.WR	equ	6
+IF	@@DU
+Y$.FCB	equ	8
+ELSE
+Y$.FCB	equ	7
+ENDIF	;@@DU
+
+null	equ	00h
+CtrlC	equ	'C'-'@'
+tab	equ	09h
+lf	equ	0ah
+ff	equ	0ch
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+SpcChar	equ	'#'		; Denotes special symbol prefix
+Q.mark	equ	'?'
+
+MSB	equ	10000000b
+NoMSB	equ	01111111b
+LSB	equ	00000001b
+LoMask	equ	00001111b
+HiMask	equ	11110000b
+
+$$LSB	equ	0
+$$MSB	equ	7
+
+.ENTRY	equ	0000b
+.ModNam	equ	0010b
+.COMMON	equ	0101b
+.EntPnt	equ	0111b
+.ModEnd	equ	1110b
+.EndFil	equ	1111b
+
+.COMM	equ	1
+.noCOMM	equ	0
+.ENT	equ	1
+.noENT	equ	0
+
+.OC	equ	0
+.OP	equ	1
+IF	@@SYS
+.OS	equ	2
+.OY	equ	3
+.OX	equ	4
+ELSE
+.OR	equ	2
+.OS	equ	3
+.OY	equ	4
+.OX	equ	5
+ENDIF	;@@SYS
+
+; Symbol table structure
+
+;    0     1     2     3     4     5     6 ...             N
+; +-----+-----+-----+-----+-----+-----+-----...---+-----+-----+
+; |  Chain    | Tlen|   Offset  | Slen| Symbol ...|   COsize  |
+; +-----+-----+-----+-----+-----+-----+-----...---+-----+-----+
+;
+; Chain		Chain address
+; Tlen		Total length of symbol entry (N)
+;		Total length + code
+;		code bits 76xx.xxxx
+;		Bit 7 - LIB REQ
+;		Bit 6 - Symbol fixed bit
+; Offset	Offset within segment
+; Slen		Symbol length + code
+;		code bits MBBx.xxxx
+;		BB address mode ------------------++
+;		code	00	External	0.00
+;			A0	Entry, CSEG	1.01
+;			C0	Entry, DSEG	1.10
+;			E0	COMMON		1.11
+;		MSB set at COMMON and ENTRY ----^
+; Symbol	The symbol itself
+; COsize	Holds size of COMMON block
+
+.SymOff	equ	3
+.SymCtr	equ	5
+.SymLab	equ	6
+.SymHed	equ	6
+
+$$ENT	equ	7
+
+X$$LIB	equ	7
+X$$fix	equ	6
+
+X@@LIB	equ	1 SHL X$$LIB
+X@@fix	equ	1 SHL X$$fix
+
+X@@mod	equ	00000011b
+
+.SymLen	equ	00011111b
+.ItmLen	equ	00111111b
+.ItmBit	equ	10011111b
+
+; Temporary (Y) table structure
+
+;    0     1     2     3     4     5     6     7     8
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+; | Sta |    Adr    |    Val    |   Lnk     |    Off    |
+; +-----+-----+-----+-----+-----+-----+-----+-----+-----+
+;
+; Sta		Status of entry
+;		Bit 0,1	Address mode
+;		Bit  2	Solve chain flag
+;		Bit  3	Offset flag
+;		Bit  4	Offset sign
+; Adr		Current address
+; Val		Current value
+; Lnk		Link pointer - end with zero
+; Off		Offset - if defined
+
+.Y$Val	equ	3
+.Y$Lnk	equ	5
+.Y$Off	equ	7
+
+Y$$Offs	equ	4
+Y$$Off	equ	3
+Y$$solv	equ	2
+
+Y@@Offs	equ	1 SHL Y$$Offs
+Y@@Off	equ	1 SHL Y$$Off
+Y@@solv	equ	1 SHL Y$$solv
+
+Y@@mod	equ	00000011b
+
+Y.eof	equ	-1
+
+MaxOVL	equ	5
+
+_LabLen	equ	6
+BFbits	equ	3
+
+ColMask	equ	00000011b
+LabCol	equ	9
+LabDel	equ	3
+UnkMask	equ	00000111b
+
+;
+; ====================
+; || START THE CODE ||
+; ====================
+;
+A.opt:
+	db	0
+Dsk$ABS:
+	dw	BFlen3
+Dsk$PRG:
+	dw	BFlen5
+Dsk$DAT:
+	dw	BFlen4
+Dsk$COM:
+	dw	BFlen2
+$OVL:
+	db	'OVL'
+$LINKING:
+	db	cr,lf,cr,lf,'Linking ',eot
+$CR.LF:
+	db	cr,lf,eot
+$EMP.EXT:
+	db	'   '
+;
+; %%%%%%%%%%%%%%%%%%%%%
+; %% MAIN PROCESSING %%
+; %%%%%%%%%%%%%%%%%%%%%
+;
+LINK.GO:
+	ld	a,FALSE
+	call	SampFiles	; Check syntax of command line
+	ld	a,(O.opt)	; Verify overlay only on .COM
+	sub	.OC
+	add	a,-1
+	sbc	a,a
+	ld	hl,OvlFlg
+	and	(hl)
+	rra
+	jp	c,EchoCmd	; .. should be
+	call	InitLINK	; Init linker
+	ld	a,(A.opt)	; Test A.dditional memory
+	rra
+	jr	nc,NoADD.Mem
+	ld	hl,BFlen3	; Make disk buffer shorter
+	ld	(Dsk$PRG),hl
+	ld	(Dsk$DAT),hl
+	ld	hl,BFlen1
+	ld	(Dsk$ABS),hl
+	ld	(Dsk$COM),hl
+NoADD.Mem:
+	call	SetMem		; Set up memory space
+	ld	hl,(TPAtop)
+	ld	(FixTop),hl	; Set top of memory
+	ld	(MemTop),hl
+	ld	a,(interdrv)	; Test intermediate drive
+	or	a
+	call	nz,InitInter	; .. set up temporay drives
+	ld	de,(Dsk$COM)
+	ld	hl,(X$COM$buf)
+	add	hl,de
+	ld	(SymTop),hl	; Init symbol table
+	ld	(SymBeg),hl
+	ld	bc,MemTop
+	ld	de,SymBeg
+	call	SUB.@DE.@BC	; Test enough memory
+	ld	de,$INSUFF
+	jp	nc,AbortString	; .. bad, abort
+	ld	bc,SymTop
+	ld	de,MemTop
+	call	SUB.@DE.@BC	; Get gap
+	ld	(FreeMem),hl	; .. as free memory
+	call	Set$X		; Set up temporary
+	ld	a,TRUE
+	call	SampFiles	; Process files
+	call	EpiLog		; .. give end
+	ld	a,(OvlFlg)	; Test overlay
+	rra
+	call	c,TellTop	; Tell top of module if so
+	jp	OS		; .. end of LINK
+;
+; Give character to selected device
+; ENTRY	Reg E holds character
+;
+comout:
+	ld	a,(console)
+	cp	'X'		; Test console
+	jp	z,conout	; .. put to console
+	cp	'Y'		; Test printer
+	jp	nz,lstout	; .. put to printer
+	ret
+;
+; Output string to device
+; ENTRY	Reg DE points to string closed by $
+;
+string:
+	ld	a,(de)
+	cp	eot		; Test end
+	ret	z
+	push	de
+	ld	e,a
+	call	comout		; Put to device
+	pop	de
+	inc	de
+	jr	string
+;
+; Give banner to printer
+;
+banner:
+	ld	a,(console)
+	cp	'Y'		; Test printer
+	ret	nz
+	ld	hl,pageflag
+	ld	(hl),0		; Clear page
+	ld	de,NewPage	; Give FF and head
+	call	string
+	ret
+;
+; Put character to device with possible banner
+; ENTRY	Reg E holds character
+;
+BannChar:
+	push	de		; Save character
+	ld	a,(pageflag)
+	rra			; Test banner requested
+	call	c,banner	; .. give it
+	pop	de
+	call	comout		; Put to device
+	ret
+;
+; Print string on device
+; ENTRY	Reg DE points to string closed by $
+;
+CtrlString:
+	push	de		; Save pointer
+	ld	a,(pageflag)
+	rra			; Test banner requested
+	call	c,banner	; .. put banner
+	pop	de
+	call	string		; .. put string
+	ret
+;
+; Set up memory space
+;
+SetMem:
+	ld	a,(A.opt)	; Test A.dditional memory
+	rra
+	jr	nc,SetM.noAdd
+	ld	hl,(CmdPtr)
+	inc	hl
+	ld	(Y$ABS$buf),hl	; Set temp buffers
+	ld	bc,(Y$ABS$len)
+	add	hl,bc
+	ld	(Y$PRG$buf),hl
+	ld	bc,(Y$PRG$len)
+	add	hl,bc
+	ld	(Y$DAT$buf),hl
+	ld	bc,(Y$DAT$len)
+	add	hl,bc
+	ld	(Y$COM$buf),hl
+SetM.noAdd:
+	ld	hl,(Dsk$ABS)	; Set lengthes
+	dec	hl
+	ld	(X$ABS$maxlen),hl
+	ld	hl,(Dsk$ABS)
+	ld	(X$ABS$len),hl
+	ld	a,(A.opt)	; Test additional memory
+	rra
+	jr	nc,SetM.skpAdd
+	ld	de,(Y$COM$len)
+	ld	hl,(Y$COM$buf)	; Set temp buffers
+	add	hl,de
+	jr	SetM.go
+SetM.skpAdd:
+	ld	hl,(CmdPtr)
+	inc	hl
+SetM.go:
+	ld	(X$ABS$buf),hl
+	ld	hl,(Dsk$PRG)	; Proceed setting
+	dec	hl
+	ld	(X$PRG$maxlen),hl
+	ld	hl,(Dsk$PRG)
+	ld	(X$PRG$len),hl
+	ld	de,(Dsk$ABS)
+	ld	hl,(X$ABS$buf)
+	add	hl,de
+	ld	(X$PRG$buf),hl
+	ld	hl,(Dsk$DAT)
+	dec	hl
+	ld	(X$DAT$maxlen),hl
+	ld	hl,(Dsk$DAT)
+	ld	(X$DAT$len),hl
+	ld	de,(Dsk$PRG)
+	ld	hl,(X$PRG$buf)
+	add	hl,de
+	ld	(X$DAT$buf),hl
+	ld	hl,(Dsk$COM)
+	dec	hl
+	ld	(X$COM$maxlen),hl
+	ld	hl,(Dsk$COM)
+	ld	(X$COM$len),hl
+	ld	de,(Dsk$DAT)
+	ld	hl,(X$DAT$buf)
+	add	hl,de
+	ld	(X$COM$buf),hl
+	ret
+;
+; Set up temporary tables
+;
+Set$X:
+	ld	hl,X$Cnt
+	ld	(hl),0
+Set$X.loop:
+	ld	a,$$Files-1
+	cp	(hl)		; Test done
+	ret	c
+	ld	a,(hl)
+	call	Save$X		; Save PB
+	call	Clr$X$Buf	; .. clear buffer
+	ld	hl,X$Cnt
+	inc	(hl)		; Bump count
+	jr	Set$X.loop
+;
+; Init temporary drives
+;
+InitInter:
+	ld	a,(interdrv)
+	ld	(FCB$X$ABS),a	; Set temporary drives
+	ld	(FCB$X$PRG),a
+	ld	(FCB$X$DAT),a
+	ld	(FCB$X$COM),a
+	ld	(FCB$Y$ABS),a
+	ld	(FCB$Y$PRG),a
+	ld	(FCB$Y$DAT),a
+	ld	(FCB$Y$COM),a
+	ret
+;
+; Init LINK
+;
+InitLINK:
+	xor	a		; Reset ..
+	ld	hl,P.opt	; .. [P] option
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a		; .. [D] option
+	inc	hl
+	ld	(hl),a		; .. [G] option
+	inc	hl
+	ld	(hl),a		; .. [O] option
+	ld	(libdrv),a	; Set default drives
+	ld	(symdrv),a
+	ld	(objdrv),a
+	ld	a,TRUE		; Set quiet
+	ld	(Q.opt),a
+	ld	a,'X'		; Set console CRT
+	ld	(console),a
+	ld	hl,TPA
+	ld	(loadaddr),hl	; Init load address
+	ld	hl,0
+	ld	(memsize),hl	; Clear memory size
+	ret
+;
+; Init overlay fields
+;
+IniOVL:
+	ld	hl,-1		; Clear
+	ld	(ABS.beg),hl	; .. start of ABSOLUTE
+	ld	(HeapTop),hl	; .. top
+	inc	hl		; -->> ZERO
+	ld	(ABS.chn),hl	; .. absolute chain
+	ld	(CS.chn),hl	; .. code chain
+	ld	(DS.chn),hl	; .. data chain
+	ld	(CM.chn),hl	; .. COMMON chain
+	ld	(ABS.len),hl	; .. absolute length
+	ld	(CS.len),hl	; .. code length
+	ld	(DS.len),hl	; .. data length
+	ld	(CM.len),hl	; .. COMMON length
+	ld	(Alen),hl	; .. module absolute length
+	ld	(Clen),hl	; .. module code length
+	ld	(Dlen),hl	; .. module data length
+	ld	(CMlen),hl	; .. module COMMON length
+	ld	(ABS.strt),hl	; .. absolute start
+	ld	(CS.strt),hl	; .. code start
+	ld	(DS.strt),hl	; .. data start
+	ld	(CM.strt),hl	; .. COMMON start
+	ld	(ABS.sym),hl	; .. absolute symbols
+	ld	(CS.sym),hl	; .. code symbols
+	ld	(DS.sym),hl	; .. data symbols
+	ld	(CM.sym),hl	; .. COMMON symbols
+	ld	(X$ABS$low),hl	; .. low limits
+	ld	(X$PRG$low),hl
+	ld	(X$DAT$low),hl
+	ld	(X$COM$low),hl
+	ld	(ABS.end),hl	; .. end of ABSOLUTE
+	ld	(Y$ABS$ptr),hl	; .. and Y temp pointer
+	ld	(Y$PRG$ptr),hl
+	ld	(Y$DAT$ptr),hl
+	ld	(Y$COM$ptr),hl
+	ld	(X$ABS$amount),hl
+	ld	(X$PRG$amount),hl
+	ld	(X$DAT$amount),hl
+	ld	(X$COM$amount),hl
+	inc	hl		; -->> ONE
+	ld	(X$ABS$high),hl
+	ld	(X$PRG$high),hl
+	ld	(X$DAT$high),hl
+	ld	(X$COM$high),hl
+	xor	a
+	ld	(P.opt),a	; Clear options
+	ld	(D.opt),a
+	ld	(G.opt),a
+	ld	(XFerFlg),a	; Clear transfer flag
+	ld	hl,ObjTable
+	ld	(hl),a		; Clear object table
+	inc	hl
+	ld	(hl),@c.rel	; .. set types
+	inc	hl
+	ld	(hl),@d.rel
+	inc	hl
+	ld	(hl),@COMM
+	ld	hl,(FixTop)
+	ld	(MemTop),hl	; .. set back top
+	ld	hl,(Dsk$ABS)	; Get lengthes
+	dec	hl
+	ld	(X$ABS$maxlen),hl
+	ld	hl,(Dsk$PRG)
+	dec	hl
+	ld	(X$PRG$maxlen),hl
+	ld	hl,(Dsk$DAT)
+	dec	hl
+	ld	(X$DAT$maxlen),hl
+	ld	hl,(Dsk$COM)
+	dec	hl
+	ld	(X$COM$maxlen),hl
+	call	Set$X		; Set up temporary
+	ret
+;
+; Get start of symbol table
+; EXIT	Reg HL holds base of current symbol table
+;
+GetSymBeg:
+	ld	a,(OVLlevel)	; Check overlay
+	or	a
+	ld	hl,(SymBeg)	; Return start of table
+	ret	z
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	ld	bc,OVLTab-2	; Get table pointer
+	add	hl,bc
+	ld	bc,2
+	add	hl,bc		; Adjust for symbol table
+	ld	e,(hl)		; .. fetch
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Fix overlay table
+; ENTRY	Reg BC points to overlay symbol table
+;
+FixOVL:
+	ld	(FO.ptr),bc
+	ld	hl,FO.cnt
+	ld	(hl),0
+FOT.loop:
+	ld	a,HashLen-1
+	cp	(hl)
+	ret	c
+FOT.nxt:
+	ld	hl,(FO.cnt)
+	ld	h,0
+	ld	bc,HashTab
+	add	hl,hl
+	add	hl,bc
+	ex	de,hl
+	ld	bc,FO.ptr
+	call	SUB.@DE.@BC	; Test difference
+	jr	c,FOT.skp
+	ld	hl,(FO.cnt)
+	ld	h,0
+	ld	bc,HashTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ld	(SymPtr),de	; Set current
+	call	GetSymCHN	; Get symbol chain
+	push	hl
+	ld	hl,(FO.cnt)
+	ld	h,0
+	ld	bc,HashTab
+	add	hl,hl
+	add	hl,bc
+	pop	bc
+	ld	(hl),c		; Store chain
+	inc	hl
+	ld	(hl),b
+	jr	FOT.nxt
+FOT.skp:
+	ld	hl,FO.cnt
+	inc	(hl)		; Bump count
+	jr	FOT.loop
+;
+; Put overlay
+;
+PutOVL:
+	ld	hl,(OVLlevel)
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	ld	bc,OVLTab
+	add	hl,bc
+	ld	bc,2
+	add	hl,bc
+	ld	de,(SymTop)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	de,RecLng-1
+	ld	hl,(CurAdr)	; Set address
+	add	hl,de
+	ld	a,RecLng
+	and	l
+	ld	l,a
+	ld	(loadaddr),hl	; .. as record boundary
+	push	hl
+	ld	hl,(OVLlevel)
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	ld	bc,OVLTab
+	add	hl,bc
+	pop	bc
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Bump overlay count
+;
+NextOVL:
+	ld	a,(OVLlevel)
+	inc	a		; .. bump
+	ld	(OVLlevel),a
+	ld	c,a
+	ld	a,MaxOVL	; Test max
+	cp	c
+	ret	nc
+	jp	EchoCmd		; .. overflow
+;
+; Fetch overlay
+;
+GetOVL:
+	ld	a,(OVLlevel)
+	dec	a		; Fix balance
+	ld	(OVLlevel),a
+	cp	-1		; Test underflow
+	jp	z,EchoCmd	; .. error
+	ld	a,(FirstFlg)	; Test flag
+	rra
+	ret	nc		; .. end if syntax check only
+	ld	hl,(OVLlevel)
+	ld	h,0
+	add	hl,hl		; Level * 4
+	add	hl,hl
+	ld	bc,OVLTab
+	push	hl
+	add	hl,bc		; Point into table
+	ld	e,(hl)		; Fetch load address
+	inc	hl
+	ld	d,(hl)
+	ld	(loadaddr),de	; .. save
+	pop	hl
+	add	hl,bc
+	ld	bc,2
+	add	hl,bc
+	ld	c,(hl)		; Fetch top
+	inc	hl
+	ld	b,(hl)
+	ld	(SymTop),bc
+	call	FixOVL		; .. fix
+	ret
+;
+; Set up overlay
+; Check syntax if FIRSTFLG=00
+;
+SetOVL:
+	ld	hl,OvlFlg
+	ld	(hl),TRUE	; Set overlay request
+	ld	a,(FirstFlg)
+	rra			; Check 1st time
+	call	c,IniOVL	; Init overlay fields
+	call	GetFCB.opt	; Get FCB
+	;;	Copy FCB
+IF	@@DU
+	Move	FCB-1,$$FCB-1,1+1+@nam+@ext
+ELSE
+	Move	FCB,$$FCB,1+@nam+@ext
+ENDIF	;@@DU
+	ld	a,($$FCB+.ext)	; Test blank extension
+	cp	' '
+	jr	nz,SetO..noExt
+	;;	Set default .OVL
+	Move	$OVL,$$FCB+.ext,@ext
+SetO..noExt:
+	ld	a,(FirstFlg)	; Test flag
+	rra
+	jr	nc,SetO..quiet
+	ld	de,$LINKING	; Tell action
+	call	CtrlString
+	ld	bc,$$FCB
+	call	PrFN		; Give file name
+	ld	de,$CR.LF
+	call	CtrlString
+SetO..quiet:
+	call	GetChar
+	cp	'='		; Test assignment
+SetO..noRead:
+	call	z,GetFCB.opt	; Get source if so
+	ld	a,(FirstFlg)	; Test flag
+	rra
+	call	c,ReadFile	; Read if not 1st
+	call	GetChar
+	sub	'('		; Test parentheses
+	add	a,-1
+	sbc	a,a
+	push	af
+	call	GetChar
+	sub	')'
+	add	a,-1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	nc,SetO..noPar	; .. either ( or )
+	call	GetChar
+	cp	','		; Must be comma
+	jr	z,SetO..noRead
+	jp	EchoCmd
+SetO..noPar:
+	ld	a,(FirstFlg)	; Test flag
+	rra
+	ret	nc
+	call	SolveLBRQ	; Solve externals
+	call	Set$OVLA0	; Set external ?OVLA0
+	ld	hl,O.opt
+	ld	(hl),.OY
+	call	ClsSess		; Close session
+	call	PutOVL		; Put overlay
+	ret
+;
+; Sample files from command line
+; ENTRY	Accu determines checking syntax only (if FALSE)
+;
+SampFiles:
+	ld	(FirstFlg),a	; Save flag
+	ld	hl,cmdbuff
+	ld	(CmdPtr),hl	; Init buffer
+	call	GetFCB.opt	; Get FCB and options
+	;;	Copy FCB
+IF	@@DU
+	Move	FCB-1,$$FCB-1,1+1+@nam+@ext
+ELSE
+	Move	FCB,$$FCB,1+@nam+@ext
+ENDIF	;@@DU
+	call	GetChar
+	cp	'='		; .. test assignment
+	jr	nz,SF.Module
+	call	GetFCB.opt	; Get source if so
+IF	@@DST
+	ld	a,($$FCB+1)	; Test source file given
+	cp	' '
+	jr	nz,SF.loop	; .. yeap
+	Move	FCB+1,$$FCB+1,@nam
+ENDIF	;@@DST
+	jr	SF.loop
+SF.Module:
+	;;	Clear extension of file
+	Move	$EMP.EXT,$$FCB+.ext,@ext
+SF.loop:
+	ld	a,(FirstFlg)	; Test 1st time sample
+	rra
+	call	c,ReadFile	; .. read file if run
+	call	GetChar		; Test EOL
+	sub	null
+	add	a,-1
+	sbc	a,a
+	push	af
+	call	GetChar		; .. or (
+	sub	'('
+	add	a,-1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	nc,SF.eol	; .. either EOL or (
+	call	GetChar
+	cp	','		; Test comma
+	jp	nz,EchoCmd	; .. should be
+	call	GetFCB.opt	; So get next
+	jr	SF.loop
+SF.eol:
+	ld	a,(objdrv)
+	ld	(OvlDrv),a	; Save drive
+	ld	a,(FirstFlg)	; Test flag
+	rra
+	jr	nc,SF.SkpOvlTst	; Skip if 1st time
+	ld	a,(OvlFlg)
+	rra
+	call	c,Set$OVLAY	; Set external ?OVLAY
+	call	SolveLBRQ	; Solve externals
+	ld	a,(OvlFlg)
+	rra
+	call	c,Set$OVLA0	; Set external ?OVLA0
+IF	NOT @@SYS
+	ld	a,(O.opt)
+	sub	.OR		; Test .RSP
+	sub	1
+	sbc	a,a
+	push	af
+ENDIF	;NOT @@SYS
+	ld	a,(O.opt)
+	sub	.OS		; .. or .SPR
+	sub	1
+	sbc	a,a
+IF	NOT @@SYS
+	pop	bc
+	ld	c,b
+	or	c
+ENDIF	;NOT @@SYS
+	rra
+	jr	nc,SF.NotPC.0
+	ld	hl,0		; Clear load address if either
+	ld	(loadaddr),hl
+SF.NotPC.0:
+	call	ClsSess		; Close session
+	ld	a,(O.opt)
+	ld	(Oopt.sav),a
+	ld	hl,(loadaddr)
+	ld	(LAdr.sav),hl
+	call	PutOVL		; Put overlay
+SF.SkpOvlTst:
+	call	GetChar
+	cp	'('		; Test overlay follows
+	jr	nz,SF.CmdEnd
+SF.OvlLoop:
+	call	GetChar
+	cp	null		; Test end of line
+	jr	z,SF.CmdEnd
+	call	NextOVL		; Bump count
+	call	SetOVL		; Set up overlay
+SF.AddOvl:
+	call	GetChar
+	cp	')'
+	jr	nz,SF.TstEndOvl
+	call	GetOVL		; Fetch overlay
+	call	SkpBlank
+	jr	SF.AddOvl
+SF.TstEndOvl:
+	call	GetChar		; Test EOL
+	sub	null
+	add	a,-1
+	sbc	a,a
+	push	af
+	call	GetChar
+	sub	'('		; .. or (
+	add	a,-1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	nc,SF.OvlLoop
+	jp	EchoCmd		; Should not be
+SF.CmdEnd:
+	ld	a,(OVLlevel)
+	or	a		; Test balanced
+	ret	z
+	jp	EchoCmd		; Should be
+;
+; Get more command after ampersand
+;
+MoreCmd:
+	ld	e,'*'
+	call	BannChar	; Indicate command mode
+	ld	de,CCPbuf
+	ld	a,126
+	ld	(de),a		; Set length
+	call	getline		; Fill a line
+	ld	hl,CCPbuf+1
+	ld	c,(hl)
+	ld	b,0
+	inc	bc
+	add	hl,bc
+	ld	(hl),null	; Close end
+	ld	de,(CmdPtr)	; Get current pointer
+	inc	de
+	ld	hl,CCPbuf+2
+	ldir			; .. unpack
+	call	NL		; .. close line
+	ret
+;
+; Get UPPER case character
+; ENTRY	Accu holds character
+; EXIT	Accu holds UPPER case or CR on control
+;
+UPcase:
+	ld	c,a
+	cp	' '		; Test control
+	ld	a,cr		; .. return CR if so
+	ret	c
+	ld	a,c
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	01011111b	; Mask for A..Z
+	ret
+;
+; Echo LINK command line and abort
+;
+EchoCmd:
+	ld	hl,cmdbuff+1	; Init pointer
+	ld	(CmdTmp),hl
+echoloop:
+	ld	de,CmdPtr
+	ld	bc,CmdTmp
+	call	SUB.@DE.@BC	; Test end
+	jr	c,echoend
+	ld	hl,(CmdTmp)
+	ld	a,(hl)
+	push	hl
+	push	af
+	call	UPcase		; Get UPPER case
+	ld	e,a
+	call	BannChar	; .. echo
+	pop	af
+	cp	'&'		; Test new line
+	jr	nz,echonext
+	call	NL		; .. close ole one
+	ld	e,'*'
+	call	BannChar
+echonext:
+	pop	hl
+	inc	hl		; Bump pointer
+	ld	(CmdTmp),hl
+	jr	echoloop	; .. get next
+echoend:
+	ld	de,what
+	jp	AbortString	; Give message and abort
+;
+what:
+	db	'?',eot
+;
+; Legal delimiters
+;
+DelimTable:
+	db	cr,' =.:<>[],()'
+..delim	equ	$-DelimTable
+ParsDelTab:
+	db	cr,' =[],()',null
+..Pdel1	equ	$-ParsDelTab
+	db	tab,'.:;<>|'
+..Pdel2	equ	$-ParsDelTab
+;
+; Check delimiter
+; EXIT	Zero flag set if delimiter found
+;
+ChkDelim:
+	ld	a,..delim	; Set length
+	ld	hl,cmdchar	; .. and pointer
+;
+; Check parse delimiter found
+; ENTRY	Reg HL points to current character location
+;	Accu holds length to be searched for
+; EXIT	Zero flag set if delimiter found
+;
+ChkPDelim:
+	push	hl
+	push	bc
+	ld	c,a		; Set length
+	ld	b,0
+	ld	a,(hl)		; Get character
+	ld	hl,ParsDelTab
+	cpir			; Compare
+	pop	bc
+	pop	hl
+	ret
+;
+; Get character from command buffer
+; EXIT	Accu holds character
+;	Reg HL holds pointer
+;
+GetChar:
+	ld	hl,(CmdPtr)	; Get pointer
+	ld	a,(hl)		; .. and character
+	ret
+;
+; Get character from command line
+; EXIT	CMDCHAR and Accu hold character
+;
+GetCmdChar:
+	push	hl
+	ld	hl,(CmdPtr)	; Get pointer
+	call	..GetChr
+	ld	(CmdPtr),hl	; .. fix it
+	ld	(cmdchar),a	; .. save UPPER case
+	pop	hl
+	ret
+..GetChr:
+	inc	hl
+	ld	a,(hl)		; .. get character
+	call	UPcase
+	cp	'&'		; Test more
+	jr	z,..GetChr	; .. yeap
+	ret
+;
+; Skip blanks
+; EXIT	Accu holds character
+;
+SkpBlank:
+	call	GetCmdChar	; Get character
+	cp	' '		; Test blank
+	jr	z,SkpBlank	; .. wait for none
+	ret
+;
+; Parse file name into standard FCB
+; EXIT	Reg HL holds -1 on error
+;	Reg HL holds  0 on success
+;
+Parse:
+	ld	hl,(CmdPtr)
+	ld	de,ParsBuff
+IF	@@DU
+	ld	(ParsePB),de	; Init buffer start
+	ld	b,4+@nam+1+@ext
+ELSE
+	ld	b,2+@nam+1+@ext
+ENDIF	;@@DU
+	dec	hl
+SkpPars:
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Skip blanks
+	jr	z,SkpPars
+	cp	','		; .. commas
+	jr	z,SkpPars
+	cp	'('		; .. parans
+	jr	z,SkpPars
+	cp	'='
+	jr	z,SkpPars	; .. equate
+NxtParse:
+	ld	a,..Pdel1
+	call	ChkPDelim	; Check delimiter
+	jr	z,StrtParse	; .. start if so
+	inc	hl
+	cp	'&'		; Test more
+	jr	z,NxtParse
+	ld	(de),a		; Unpack
+	inc	de
+	djnz	NxtParse
+	ld	(CmdPtr),hl
+	jp	EchoCmd		; .. error
+StrtParse:
+	xor	a
+	ld	(de),a		; .. close line
+	ld	(CmdPtr),hl	; Save pointer
+	ld	a,(hl)		; .. get character
+	ld	(cmdchar),a	; .. save
+	ld	de,ParsePB
+IF	@@DU
+	call	GetDU
+ENDIF	;@@DU
+	call	CnvFCB		; Convert to FCB
+IF	@@DU
+	call	SetDU
+ENDIF	;@@DU
+	ld	a,l
+	and	h		; Test -1
+	inc	a
+	ret	z
+	ld	hl,0
+	ret
+ParsePB:
+	dw	ParsBuff
+	dw	FCB
+ParsBuff:
+	ds	2+@nam+1+@ext+1
+IF	@@DU
+;
+; Get disk and user from string
+; ENTRY	Reg DE points to parameter block
+;
+GetDU:
+	push	ix
+	push	de
+	push	de		; .. copy PB
+	pop	ix
+	ld	l,(ix+2)	; Get address of FCB
+	ld	h,(ix+3)
+	ld	(DU.FCB),hl
+	ld	l,(ix+0)	; Get address of string
+	ld	h,(ix+1)
+	call	FetchDU		; .. get drive and user
+	ld	(DU),bc		; .. save drive and user
+	ld	(ix+0),l	; Set address of string
+	ld	(ix+1),h
+	pop	de
+	pop	ix
+	ret
+;
+; Set disk and user into FCB
+;
+SetDU:
+	push	hl
+	ld	hl,(DU.FCB)	; Get FCB
+	ld	bc,(DU)
+	ld	(hl),b		; Set disk
+	dec	hl
+	ld	(hl),c		; .. and user
+	pop	hl
+	ret
+;
+; Get disk and user from string
+; ENTRY	Reg HL points to string
+; EXIT	Reg B  holds drive
+;	Reg C  holds user
+;	Carry set on error
+;
+FetchDU:
+	dec	hl
+FDU.blnk:
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Skip leading blanks
+	jr	z,FDU.blnk
+	push	hl
+	ld	b,4		; Set length of max DU:
+TestDU:
+	ld	a,..Pdel2
+	call	ChkPDelim	; Find delimiter
+	jr	z,ItIsDU	; .. yeap
+	inc	hl
+	djnz	TestDU		; Test more
+DefDU:
+	pop	hl
+	call	UsrGet		; Get user
+..D:
+	ld	a,(LogDsk)	; .. and drive
+	ld	b,a
+	or	a
+	ret
+ItIsDU:
+	cp	':'		; Verify expected one
+	jr	nz,DefDU	; .. nope
+	ld	e,0		; .. set no drive and user
+	ld	c,0		; .. clear user
+	pop	hl		; Get back pointer
+UsrLoop:
+	ld	a,..Pdel2
+	call	ChkPDelim	; Test delimiter
+	inc	hl
+	jr	z,DUend		; .. yeap
+	sub	'0'		; Strip off ASCII offset
+	jr	c,ParseErr	; .. invalid range
+	cp	9+1		; Test possible drive
+	jr	nc,IsDrv?	; .. maybe
+	ld	d,a
+	ld	a,c
+	add	a,a		; .. old *10
+	add	a,a
+	add	a,c
+	add	a,a
+	add	a,d		; .. add new
+	ld	c,a
+	cp	_MaxUsr+1	; Test range
+	jr	nc,ParseErr	; .. error
+	set	1,e		; Set user
+	bit	2,e		; Verify no previous user
+	jr	z,UsrLoop
+	jr	ParseErr	; .. should *NOT* be
+IsDrv?:
+	bit	1,e		; Test user
+	jr	z,NoUsr
+	set	2,e		; .. set it
+NoUsr:
+	sub	'A'-'0'		; Test range of drive
+	jr	c,ParseErr	; .. error
+	cp	'P'-'A'+1
+	jr	nc,ParseErr
+	bit	0,e		; Verify default drive
+	jr	nz,ParseErr	; .. should be
+	inc	a		; .. fix
+	ld	b,a		; .. set drive
+	set	0,e
+	jr	UsrLoop		; Try user
+ParseErr:
+	scf			; Set error
+	ret
+DUend:
+	bit	0,e		; Test drive
+	call	z,..D		; .. get current
+	bit	1,e		; Test user
+	ld	a,c	
+	call	z,UsrGet	; .. get if not
+	ld	c,a
+	or	a
+	ret
+UsrGet:
+	ld	a,(LogUsr)	; Get user
+	ld	c,a
+	ret
+LogUsr:				; \
+	db	0		; |
+LogDsk:				; |
+	db	0		; /
+DU.FCB:
+	dw	0
+DU:
+	dw	0
+ENDIF	;@@DU
+;
+; Check legal hex character
+; ENTRY	Accu holds character
+; EXIT	Reg BC holds digit as 16 bit value
+;	Zero flag set if hex
+;
+IsHex:
+	push	hl
+	ld	hl,$HEX.DIG+HexLen-1
+	ld	bc,HexLen
+	cpdr			; Get digit
+	pop	hl
+	ret
+$HEX.DIG:
+	db	'0123456789ABCDEF'
+HexLen	equ	$-$HEX.DIG
+;
+; Get hex value from command line
+; EXIT	Reg HL holds hex number
+;
+GetHexOpt:
+	ld	hl,0		; Clear result
+HexGetLoop:
+	push	hl
+	call	GetCmdChar	; Get character
+	call	ChkDelim	; Check delimiter
+	pop	hl
+	ret	z		; .. go away if so
+	call	IsHex		; Test legal hex digit
+	jp	nz,EchoCmd	; .. nope
+	add	hl,hl		; Ole value *16
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,bc		; Add digit
+	jr	HexGetLoop
+;
+; Check legal selected drive
+; EXIT	Carry set on invalid drive
+;
+ChkLegDrv:
+	call	GetCmdChar	; Get character
+	cp	'A'		; Test A..P
+	ret	c		; .. invalid
+	cp	'P'+1
+	ccf			; .. fix flag
+	ret
+;
+; Get drive
+; EXIT	Accu holds drive code 01 ->> A
+;
+GetDrv:
+	call	ChkLegDrv	; Test legal drive
+	jp	c,EchoCmd	; .. illegal
+SetDrv:
+	sub	'A'-1		; Fix 1 relative
+	ret
+;
+; Get drive, allow byte bucket
+; EXIT	Accu holds drive code 01 ->> A or 'Z'
+;
+GetDrvZero:
+	call	ChkLegDrv	; Test legal drive A..P
+	jr	nc,SetDrv	; .. yeap
+	cp	'Z'		; Test bucket
+	jp	nz,EchoCmd	; .. should be
+	ret
+;
+; Get console device
+; EXIT	Accu holds X, Y or Z
+;
+GetConsole:
+	call	GetCmdChar
+	cp	'X'		; Test legal device code
+	jp	c,EchoCmd
+	cp	'Z'+1
+	jp	nc,EchoCmd
+	ret
+;
+; Option tables
+;
+OptTab:
+	db	'SPDLMAQGNO$'
+IF	@@VERB
+	db	'V'
+ENDIF	;@@VERB
+IF	NOT @@BIOS
+	db	'B'
+ENDIF	;NOT @@BIOS
+OptLen	equ	$-OptTab
+OptXtab:
+	dw	Sopt,Popt,Dopt,Lopt,Mopt
+	dw	Aopt,Qopt,Gopt,Nopt,Oopt,$opt
+IF	@@VERB
+	dw	Vopt
+ENDIF	;@@VERB
+IF	NOT @@BIOS
+	dw	Bopt
+ENDIF	;NOT @@BIOS
+NOptTab:
+	db	'LR'
+NOptLen	equ	$-NOptTab
+NOptXtab:
+	dw	NLopt,NRopt
+OOptTab:
+	db	'CPSX'
+IF	NOT @@SYS
+	db	'R'
+ENDIF	;NOT @@SYS
+OOptLen	equ	$-OOptTab
+OOptXtab:
+	dw	OCopt,OPopt,OSopt,OXopt
+IF	NOT @@SYS
+	dw	ORopt
+ENDIF	;NOT @@SYS
+$OptTab:
+	db	'CILOS'
+$OptLen	equ	$-$OptTab
+$OptXtab:
+	dw	$Copt,$Iopt,$Lopt,$Oopt,$Sopt
+;
+; Sample options from command line
+;
+GetOptions:
+	ld	a,(CmdChar)
+	cp	cr		; Test end of line
+	ret	z
+	cp	']'		; ..or end of option
+	jp	z,GetCmdChar
+	call	SkpBlank
+	ld	de,OptXtab
+	ld	hl,OptTab+OptLen-1
+	ld	bc,OptLen
+	call	GetTab		; Get from table
+	ld	hl,GetOptions	; Set return address
+	push	hl
+	push	de		; Set execution address
+	ret			; .. go
+;
+; Get valid address from table
+; ENTRY	Accu holds option searched for
+;	Reg HL points to last element in the list
+;	Reg BC holds length of list
+;	Reg DE points to execution address table
+; EXIT	Reg DE holds execution address
+;
+GetTab:
+	cpdr			; Find right character
+	jp	nz,EchoCmd	; .. nope, error
+	ex	de,hl
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)		; Fetch option routine
+	inc	hl
+	ld	d,(hl)
+	ret
+;
+; ####################
+; >>> MAIN OPTIONS <<<
+; ####################
+;
+Sopt:
+	ld	hl,S.opt	; S.earch
+	jr	Opt.Set
+IF	@@VERB
+Vopt:
+	ld	hl,V.opt	; V.erbose
+	jr	Opt.Set
+ENDIF	;@@VERB
+IF	NOT @@BIOS
+Bopt:
+	ld	a,.OS		; B.IOS link
+	ld	(O.opt),a	; Force .SPR file
+	ld	hl,B.opt
+	jr	Opt.Set
+ENDIF	;NOT @@BIOS
+Aopt:
+	ld	hl,A.opt	; A.dditional memory
+Opt.Set:
+	ld	(hl),TRUE	; .. set flag
+OptNextO:
+	call	GetCmdChar	; Get next character
+	ret
+.OptNextO:
+	ld	(hl),a		; Set O option
+	jr	OptNextO
+Qopt:
+	ld	a,FALSE
+	ld	(Q.opt),a	; Reset Q.uiet
+	jr	OptNextO
+Popt:
+	ld	hl,P.opt	; P.rogram origin
+	ld	(hl),TRUE	; .. set it
+	call	GetHexOpt	; Get hex address
+	ld	(PrgOrig),hl
+	ret
+Dopt:
+	ld	hl,D.opt	; D.ata origin
+	ld	(hl),TRUE	; .. set it
+	call	GetHexOpt	; Get hex address
+	ld	(DatOrig),hl
+	ret
+Lopt:
+	call	GetHexOpt	; L.oad address
+	ld	(LoadAddr),hl	; Set hex
+	ret
+Mopt:
+	call	GetHexOpt	; M.emory size
+	ld	(MemSize),hl	; Set hex
+	ret
+Gopt:
+	ld	hl,G.opt
+	ld	(hl),TRUE	; Set it
+	ld	bc,256*(_LabLen+1)
+	ld	hl,optLlabel	; .. and pointer
+OptLnext:
+	call	GetCmdChar	; Get character
+	call	ChkDelim	; Test delimiter
+	jr	z,OptLend	; .. yeap
+	ld	(hl),a		; .. store
+	inc	hl
+	inc	c
+	djnz	OptLnext
+	jp	EchoCmd		; .. too long
+OptLend:
+	ld	a,c
+	ld	(OptLlen),a	; Set length
+	ret
+;
+; ######################
+; >>> THE Nx OPTIONS <<<
+; ######################
+;
+Nopt:
+	call	GetCmdChar	; Get character
+	ld	de,NOptXtab
+	ld	hl,NOptTab+NOptLen-1
+	ld	bc,NOptLen
+	call	GetTab		; Get from table
+	ld	hl,OptNextO	; Set return address
+	push	hl
+	push	de		; Set execution address
+	ret			; .. go
+NLopt:
+	ld	hl,Console
+	ld	(hl),'Z'	; Set N.o L.ist
+	ret
+NRopt:
+	ld	hl,SymDrv
+	ld	(hl),'Z'	; Set N.o symbol R.ecord
+	ret
+;
+; ######################
+; >>> THE Ox OPTIONS <<<
+; ######################
+;
+Oopt:
+	call	GetCmdChar	; Get next character
+	ld	de,OOptXtab
+	ld	hl,OOptTab+OOptLen-1
+	ld	bc,OOptLen
+	call	GetTab		; Get from table
+	ld	hl,.OptNextO	; Set return address
+	push	hl
+	push	de		; Set execution address
+	ld	hl,O.opt
+	ret			; .. go
+OCopt:
+	ld	a,.OC		; Set O.utput C.OM file
+	ret
+OPopt:
+	ld	a,.OP		; Set O.utput P.RL file
+	ret
+IF	NOT @@SYS
+ORopt:
+	ld	a,.OR		; Set O.utput R.SP file
+	ret
+ENDIF	;NOT @@SYS
+OSopt:
+	ld	a,.OS		; Set O.utput S.PR file
+	ret
+OXopt:
+	ld	a,.OX		; Set O.utput RS.X file
+	ret
+;
+; ######################
+; >>> THE $x OPTIONS <<<
+; ######################
+;
+$opt:
+	call	SkpBlank
+	cp	','		; Test ,
+	ret	z
+	cp	']'		; .. or end of option
+	ret	z
+	ld	de,$OptXtab
+	ld	hl,$OptTab+$OptLen-1
+	ld	bc,$OptLen
+	call	GetTab		; Get from table
+	ld	hl,$opt		; Set return address
+	push	hl
+	push	de		; Set execution address
+	ret			; .. go
+$Copt:
+	call	GetConsole	; $C.onsole
+	ld	(Console),a	; Set character
+	ret
+$Iopt:
+	call	GetDrv		; $I.ntermidiate
+	ld	(InterDrv),a	; Set drive
+	ret
+$Lopt:
+	call	GetDrv		; $L.ibrary
+	ld	(LibDrv),a	; Set drive
+	ret
+$Oopt:
+	call	GetDrvZero	; $O.bject
+	ld	(ObjDrv),a	; Set drive
+	ret
+$Sopt:
+	call	GetDrvZero	; $S.ymbol
+	ld	(SymDrv),a	; Set drive
+	ret
+;
+; Get FCB and options
+;
+GetFCB.opt:
+	ld	hl,S.opt
+	ld	(hl),FALSE	; Clear S.earch lib
+	call	Parse		; Parse
+	inc	hl
+	ld	a,h		; Test error
+	or	l
+	jp	z,EchoCmd	; .. error
+	call	GO.blnk		; Skip blanks
+	cp	'['		; Test options
+	call	z,GetOptions	; .. get them
+GO.blnk:
+	ld	a,(cmdchar)
+	cp	' '
+	call	z,SkpBlank	; Leave unblanked
+	ret
+;
+; Read a byte from index file
+; EXIT	Accu holds byte
+;
+Rd.IRL.Byte:
+	ld	de,(I.bfp)
+	inc	de		; Bump pointer
+	ld	(I.bfp),de
+	ld	hl,I.max
+	call	SUB.DE.@HL	; Test buffer done
+	jr	c,RIB.get
+	ld	hl,0
+	ld	(I.bfp),hl	; Clear pointer
+	ld	hl,I.buf
+	ld	bc,(I.max)	; Get length
+	ld	de,I.FCB
+	call	DiskRd		; Read from disk
+RIB.get:
+	ld	hl,(I.bfp)
+	ld	bc,I.buf
+	add	hl,bc		; Get disk buffer
+	ld	a,(hl)		; .. load byte
+	ret
+;
+; Load file values from index file
+;
+IRL.FilVal:
+	call	Rd.IRL.Byte
+	ld	hl,IRL.ex.
+	add	a,(hl)		; Add to extent
+	ld	(IRL.ex),a
+	call	Rd.IRL.Byte
+	ld	hl,IRL.rec.
+	add	a,(hl)		; Add to record
+	ld	(IRL.rec),a
+	cp	MaxCR		; Test in range
+	jr	c,IFV.low
+	ld	a,(IRL.rec)
+	sub	MaxCR		; Fix record
+	ld	(IRL.rec),a
+	ld	hl,IRL.ex
+	inc	(hl)		; Bump extent
+IFV.low:
+	call	Rd.IRL.Byte
+	ld	(IRL.byt),a	; Get byte offset
+	ret
+;
+; Read entry from index file
+;
+IRL.entry:
+	call	IRL.FilVal	; Load file values
+	ld	hl,BF.Len
+	ld	(hl),0		; Clear length
+IE.loop:
+	call	Rd.IRL.Byte
+	cp	IDXend		; Test end of item
+	ret	nc
+	ld	hl,(BF.Len)
+	ld	h,0
+	ld	bc,BF.Name
+	add	hl,bc		; Get pointer
+	ld	(hl),a		; Store entry name
+	ld	a,(BF.Len)
+	inc	a		; .. bump counter
+	ld	(BF.Len),a
+	cp	MaxChIx		; Test max
+	jr	c,IE.loop
+	ld	de,$IDXERR	; .. error
+	jp	AbortString
+;
+; Position within .IRL file
+;
+PosIRL:
+	ld	hl,(IRL.ex)	; Get extent
+	ld	h,0
+	call	MulRec		; .. get resulting record
+	ld	bc,(IRL.rec)	; Get record
+	ld	b,0
+	add	hl,bc		; .. combine current record
+	ld	(CurRec),hl
+	ex	de,hl
+	ld	hl,RecSet	; Check if in window
+	call	SUB.DE.@HL	; .. check bottom
+	sbc	a,a
+	cpl
+	ld	de,RecRead	; .. and top
+	ld	bc,CurRec
+	push	af
+	call	SUB.@DE.@BC
+	sbc	a,a
+	cpl
+	pop	bc
+	ld	c,b
+	and	c
+	rra
+	jr	nc,PI.new	; .. out of window
+	ld	bc,RecSet
+	ld	de,CurRec
+	call	SUB.@DE.@BC	; Get gap
+	call	MulRec		; .. as record
+	ld	bc,(IRL.byt)
+	ld	b,0
+	add	hl,bc		; Add byte offset
+	dec	hl
+	ld	(InBfp),hl	; Set as input pointer
+	ret
+PI.new:
+	ld	hl,FCB+.ex
+	ld	a,(IRL.ex)
+	cp	(hl)		; Test same extent
+	jr	z,PI.sameEX
+	ld	(hl),a		; .. set new
+	ld	de,FCB
+	call	open		; Position file
+	cp	OSErr
+	ld	de,$IDXERR	; .. Error
+	jp	z,AbortString
+	ld	hl,FCB+.cr
+	ld	(hl),-1
+PI.sameEX:
+	ld	a,(IRL.rec)	; Set record
+	ld	(FCB+.cr),a
+	call	RdRec		; Read records
+	ld	hl,(IRL.byt)	; Get byte offset
+	ld	h,0
+	dec	hl
+	ld	(InBfp),hl	; Set as input pointer
+	ret
+;
+; Load .IRL file
+;
+LoadIRLfile:
+	ld	hl,(I.max)	; Init pointer
+	ld	(I.bfp),hl
+SIex.loop:
+	call	IRL.entry	; Get symbol
+	ld	a,0
+	ld	hl,BF.Len
+	cp	(hl)		; Test zero
+	ret	nc
+	ld	hl,ExtFlg
+	ld	(hl),0
+	call	LNK.0		; Find label
+	ld	a,(ExtFlg)	; Test external
+	rra
+	jr	nc,SIex.loop	; .. no, skip
+	call	PosIRL		; Position module
+	call	LoadModule	; Load it
+	jr	SIex.loop
+IF	@@VERB
+;
+; Print name of module
+;
+PrMod:
+	ld	a,(V.opt)	; Test verbose enabled
+	rra
+	ret	nc		; .. nope
+	ld	a,'['
+	call	BannOut		; Indicate module
+	ld	a,(BF.Len)	; .. init a bit
+	ld	b,a
+	ld	de,BF.Name
+..PrMod:
+	ld	a,(de)
+	call	BannOut		; Print module
+	inc	de
+	djnz	..PrMod
+	ld	a,']'
+	call	BannOut
+	ld	a,'/'
+	call	BannOut
+;
+; Print name of file
+;
+PrFCB:
+	ld	a,(V.opt)	; Test verbose enabled
+	rra
+	ret	nc		; .. nope
+	ld	bc,FCB
+	call	PrFN		; .. print name
+	ld	de,$CR.LF
+	call	CtrlString
+	ret
+ENDIF	; @@VERB
+

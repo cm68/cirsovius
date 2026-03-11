@@ -1,0 +1,215 @@
+	title	TURBO PASCAL-80 3.0 Compiler
+	name	('TCOMP')
+
+	maclib	turbo.lib
+
+;
+; The compiler part of the TURBO PASCAL-80 V3.0 Compiler
+;
+_RD	equ	0
+_WR	equ	1
+;
+; ++++++++++ COMPILER MACROS ++++++++++
+;
+; Load reg BC with two bytes
+;
+_BC	macro	x,y
+	ld	bc,x*256+y
+	endm
+;
+; Load reg DE with two bytes
+;
+_DE	macro	x,y
+	ld	de,x*256+y
+	endm
+;
+; ===>>> Compiler uses reg IY as PC <<<====
+;
+; Store reg B to PC
+;
+StPC	macro
+	ld	(iy),b
+	endm
+;
+; Increment PC
+;
+IncPC	macro
+	inc	iy
+	endm
+;
+; Copy PC to reg pair
+;
+CopyPC	macro	r
+	push	iy
+	pop	r
+	endm
+;
+; Get PC from reg HL
+;
+SetPC	macro
+	push	hl
+	pop	iy
+	endm
+;
+; Push PC to stack
+;
+PushPC	macro
+	push	iy
+	endm
+;
+; Get PC from stack
+;
+PopPC	macro
+	pop	iy
+	endm
+;
+; Save PC into ADR
+;
+SavPC	macro	adr
+	ld	(adr),iy
+	endm
+;
+; ===>>> Compiler uses reg IX as source pointer <<<====
+;
+; Store byte to source
+;
+LdiSRC	macro	val
+	ld	(ix),val
+	endm
+;
+; Increment source
+;
+IncSRC	macro
+	inc	ix
+	endm
+;
+; Push source
+;
+PushSRC	macro
+	push	ix
+	endm
+;
+; Pop source
+;
+PopSRC	macro
+	pop	ix
+	endm
+;
+; Copy source to reg pair
+;
+CopySRC	macro	r
+	push	ix
+	pop	r
+	endm
+;
+; Copy source from reg pair
+;
+SetSRC	macro	r
+	push	r
+	pop	ix
+	endm
+;
+; Save source into ADR
+;
+PutSRC	macro	adr
+	ld	(adr),ix
+	endm
+;
+; Load source from ADR
+;
+GetSRC	macro	adr
+	ld	ix,(adr)
+	endm
+;
+; Load source with ADR
+;
+LdaSRC	macro	adr
+	ld	ix,adr
+	endm
+;
+; Load reg from source
+;
+LdSRC	macro	r
+	ld	r,(ix)
+	endm
+;
+; Store accu to source
+;
+StSRC	macro
+	ld	(ix),a
+	endm
+;
+; Load accu from next source
+;
+NxtSRC	macro
+	ld	a,(ix+1)
+	endm
+;
+; Compare against source
+;
+CmpSRC	macro
+	cp	(ix)
+	endm
+;
+; +++++++++++++++++++++++++++++++++++++
+;
+; Linkage to editor part
+;
+	ext	TxtEnd,TxtBeg,TopMem,SetPAS,PrInt,YesNo
+;
+; Linkage from run-time part
+;
+	ext	Append,Exist,WhereX,WhereY,MaxX,MaxY,Window
+	ext	String,Delay,ClrScr,delline,insline
+	ext	LowVideo,NormVideo,clreol,CrtInit,crtexit
+	ext	IniPrg,ChrPutCon,DoUPcase,rangchk,RecOn
+	ext	RecOff,RecExt,getreal,assanystring,strtostack
+	ext	settostack,SetInit,SetElement,SetContigous
+	ext	putreal,asstr,AsStrg,SetAssign,SetAsg,SetSet
+	ext	indexcheck,rangechk,toset,downtoset,eqinteger
+	ext	eqreal,eqstring,neinteger,nereal,nestring
+	ext	gteinteger,gtereal,gtestring,lteinteger
+	ext	ltereal,ltestring,gtinteger,gtreal,gtstring
+	ext	ltinteger,ltreal,ltstring,sqrint,multint
+	ext	divint,RndmOf,modint,shlft,shrgt,absint,odd
+	ext	cnv.int,addstr,copy,length,pos,delete,insert
+	ext	AssChr,ChrAss,addreal,subreal,sqr,multreal
+	ext	divreal,exp,int,frac,sqrt,cos,sin,ln,arctan
+	ext	random,round,trunc,IntFlt,cnv.flp,set.NEQ
+	ext	set.EQ,SetSb2,SetSb1,set.add,set.sub,SetInt
+	ext	SetIn,AssTxt,AssUntype,RwrText,resettext
+	ext	closetext,Input,setreadtext,SWrTxt,readln,read
+	ext	RdChar,RdByte,RdInt,RdReal,RdString,endread
+	ext	WrChar,WrInt,WrReal,WrBool,WrString,WrImStr
+	ext	writelntext,SeekLn,eolnfile,seekeof,eoffile
+	ext	RwrRecord,resetrecord,closerecord,SWrRec
+	ext	RdRecord,writerecord,flush,seekrec,eofunt
+	ext	filepos,filesize,RWrUntype,resetuntyp
+	ext	closeuntyp,BlkWr,BlkRd,BlkWrR,BlkRdR,rename
+	ext	seek,erase,execute,chain,overlay,ovrdrive
+	ext	new,dispose,memavail,maxavail,mark,release
+	ext	strreal,strinteger,valreal,valinteger,Rndmize
+	ext	fillchar,move,paramstr,paramcount,gotoxy
+	ext	upcase,bios,iorget,ioerrchk,halt,.BDOS
+	ext	FndNxt,FndFrs,GetEnv,SetEnv,paraminit
+IF	@@DU
+	ext	FGetEnv,FSetEnv
+ENDIF	;@@DU
+;
+; Linkage to the rest of the world
+;
+	entry	COMPILE,_T,CmpTyp,ErrCode
+	entry	CTxtPtr,IncFlg,CFCB,FFCB,TmpBuff
+	entry	Ahead,DelimP,EDLine,TOP,CCPFlg
+	entry	WrkLine,LastAdr,CodeEnd,DataBeg
+	entry	DataEnd,CodePC,CodeBeg
+
+	include	tcn.001
+	include	tcn.002
+	include	tcn.003
+	include	tcn.004
+	include	tcn.005
+	include	tcn.006
+
+	end
+

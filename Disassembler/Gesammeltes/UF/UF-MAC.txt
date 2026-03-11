@@ -1,0 +1,745 @@
+	title	Fast Unsqueeze Utility
+	name	('UF')
+
+; DASMed version of UF.COM
+; By W. Cirsovius
+
+BDOS	equ	0005h
+FCB	equ	005ch
+DMA	equ	0080h
+
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.setdma	equ	26
+
+OSerr	equ	255
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_DIRlen	equ	16
+FCBlen	equ	36
+
+reclng	equ	128
+
+srecs	equ	 32		; Records for source file
+drecs	equ	128		; Records for destination file
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+dle	equ	90h		; Special character
+
+NoMSB	equ	01111111b
+
+_JP	equ	0c3h
+
+SQchk	equ	2		; Pointer to checksum
+SQfn	equ	4		; Pointer to file name
+
+USQTYP	equ	76ffh
+LEAFEND	equ	0feh
+
+UFgap	equ	 10		; Space for program
+MAXFILE	equ	400		; Max number of files to search
+
+	.z80
+	aseg
+	org	0100h
+
+	jp	UFstart
+;
+; Next used as local stack
+;
+StkSav:
+	db	'Copyright (c) Steven Greenberg '
+	db	'6/28/86  201-670-8724; '
+	db	'may be copied for non-profit use only'
+LocStk	equ	$
+;
+UFstart:
+	ld	a,7fh
+	add	a,a		; Verify Z80 CPU
+	jp	pe,UF.Z80
+	ld	de,$NOZ80
+	jp	Abort		; It's not - so abort
+UF.Z80:
+	ld	(StkSav),sp	; Save caller's stack
+	ld	sp,LocStk	; Get local stack
+	ld	a,(BDOS+2)	; Get page of OS
+	sub	HIGH FreeTPA + UFgap
+	jr	nc,UF.memory
+	ld	de,$NOMEM
+	jp	FinalMsg	; Not enough memory
+UF.memory:
+	ld	de,$UF.ID
+	call	NLString	; Give ID
+	ld	a,(FCB+.drv)
+	cp	' '		; Test filename given
+	jr	nz,UF.input
+	ld	de,$HELP
+	jp	FinalMsg	; Give help and exit
+UF.input:
+	ld	a,'Q'		; Set sQueeze
+	ld	(FCB+.drv+.nam+1),a
+	ld	de,FCB
+	ld	hl,FileLst
+	call	SrcFiles	; Find file(s)
+	jr	z,NoFile	; Not on board
+	ld	de,MAXFILE
+	and	a
+	sbc	hl,de		; Test max files
+	jr	nc,TooMany	; Too many files
+	ld	hl,FileLst	; Init heap
+	ld	(FilePtr),hl
+	ld	a,(FCB+_DIRlen)
+	ld	(DstFCB),a	; Set destination drive
+;
+; ++++++++++++++++++
+; ++ UF main loop ++
+; ++++++++++++++++++
+;
+UFmain:
+	xor	a
+	ld	(EOFflg),a	; Clear end of file
+	ld	de,FCB+.drv
+	push	de
+	call	PrepFCB		; Prepare FCB
+	ld	hl,(FilePtr)	; Get current file pointer
+	pop	de
+	push	hl
+	ld	bc,.nam+.ext
+	inc	hl
+	ldir			; Unpack FCB
+	ld	de,DstFCB+.drv
+	call	PrepFCB		; Prepare FCB
+	pop	hl
+	ld	de,_DIRlen
+	add	hl,de		; Fix pointer
+	ld	(FilePtr),hl
+	ld	de,FCB
+	ld	c,.open
+	call	SYSCALL		; Open file
+	inc	a
+	jr	nz,ProcFile	; Ok, process this one
+NoFile:
+	ld	de,$NOFILE
+	jp	FinalMsg	; No file found
+TooMany:
+	ld	de,$TOOMANY
+	jp	FinalMsg	; Too many files
+;
+; Process one file
+;
+ProcFile:
+	ld	de,$NL
+	call	String		; Give new line
+	ld	hl,FCB
+	call	PrFCB		; Print name of source file
+	ld	hl,Leaf
+	ld	de,UTree
+	ld	bc,CELlen
+	ldir			; Unpack base cell into high memory
+	ld	hl,UTree
+	ld	bc,CELlen*(256-1)
+	ldir			; Then move the rest of it
+	call	RdBuff		; Read buffer from file
+	xor	a
+	ld	(EOFflg),a	; Clear end of file
+	ld	a,(hl)		; Get type - expect 0x76FF
+	cp	HIGH USQTYP	; Test hi
+	jr	nz,NotSQ
+	inc	l		; Fix pointer
+	inc	(hl)		; Test low
+NotSQ:
+	ld	de,$NOTSQ
+	jp	nz,FinalMsg	; Not a squeezed file
+	ld	de,$ARROW
+	call	String		; Give delimiter
+	ld	hl,(IBuff+SQchk); Get checksum
+	ld	(ChkSum),hl	; Save it
+	ld	hl,IBuff+SQfn-1	; Point to filename
+	ld	de,DstFCB+.drv
+	ld	b,.nam+.ext
+PrFn:
+	inc	l		; Advance pointer
+	ld	a,(hl)		; Get character
+	or	a		; Test end of name
+	jr	z,EndPrfn	; Yeap
+	and	NoMSB		; No HI bit
+	call	UpCase		; Get as upper case
+	cp	'.'		; Test delimiter
+	jr	z,PrFex
+	ld	(de),a		; Unpack name
+	inc	de
+	djnz	PrFn
+	inc	hl
+	jr	EndPrfn
+PrFex:
+	ld	de,DstFCB+.drv+.nam
+	ld	b,.ext		; Change for extension
+	jr	PrFn
+EndPrfn:
+	push	hl
+	ld	hl,DstFCB
+	call	PrFCB		; Print name of destination file
+	pop	hl
+	ld	de,DstFCB
+	ld	c,.delete
+	call	SYSCALL		; Delete file
+	ld	c,.make
+	call	SYSCALL		; Create new file
+	inc	a		; Test success
+	jr	nz,GoSQ		; Ok
+	ld	de,$OPNERR
+	jp	FinalMsg	; Tell file open error
+;
+; ###########################
+; Cell moved into high memory
+;
+Leaf:
+	srl	b		; 0, 1
+	call	z,Fget		; 2, 3, 4
+	jr	c,LeafC		; 5, 6
+LCod	equ	$-Leaf
+	ld	a,$-$		; 7, 8		-->> May changed to JP cell
+	ret			; 9
+LeafC:
+	ld	a,$-$		; 10, 11	-->> May changed to JP cell
+	ret			; 12
+;
+CELpad	equ	$
+	db	0,0,0		; 13, 14, 15	-->> Pad bytes
+CELzero	equ	$-CELpad
+CELlen	equ	$-Leaf
+;
+; ###########################
+;
+; Start unsqueeze
+;
+GoSQ:
+	inc	l
+	ld	e,(hl)		; Fetch decode size
+	inc	l
+	ld	d,(hl)
+	inc	l
+	ld	a,d
+	sub	HIGH (258) + 1	; Test correct version
+	jp	nc,NotSQ	; Nope
+	exx
+	ld	de,CELzero+LCod	; Init increment
+	ld	hl,UTree+LCod	; Init destination
+	exx
+LeafLoop:
+	call	BldLeaf		; Build leaf pairs
+	call	BldLeaf
+	exx
+	add	hl,de		; Update cell pointer
+	exx
+	dec	de		; Count down decode size
+	ld	a,d
+	or	e		; Test any left
+	jr	nz,LeafLoop	; Yeap
+	jr	USQstr		; Now do the real job
+;
+; Update cell
+;
+BldLeaf:
+	ld	c,(hl)		; Fetch index or character
+	inc	hl
+	ld	a,(hl)		; Get control
+	inc	hl
+	or	a		; Test index
+	jp	m,CellCheck	; Nope
+;
+; Get index into cell - remember length of one cell is 16 bytes
+;
+	sla	c		; * 2
+	rla
+	sla	c		; * 4
+	rla
+	sla	c		; * 8
+	rla
+	sla	c		; *16
+	rla			; Results in cell address
+	add	a,HIGH UTree	; Calculate page
+	ld	b,a
+CellAddr:
+	push	bc
+	exx
+	ld	(hl),_JP	; Set JP cell
+	inc	l
+	pop	bc
+	ld	(hl),c		; Set address
+	inc	l
+	ld	(hl),b
+	inc	l
+	exx
+	ret
+CellCheck:
+	cp	LEAFEND		; Test end
+	jr	z,CellEnd	; Yeap
+	ld	a,c
+	cpl			; Build complement
+	exx
+	inc	l
+	ld	(hl),a		; Store as result into cell
+	inc	l
+	inc	l
+	exx
+	ret
+CellEnd:
+	ld	bc,USQend	; Store end of decoding
+	jr	CellAddr
+;
+; Get next byte from sqeezed file
+;
+Fget:
+	inc	l		; Update pointer
+	jr	z,GetBuffer	; Got page boundary
+GetMem:
+	ld	b,(hl)		; Fetch pattern
+	scf
+	rr	b
+	ret
+GetBuffer:
+	inc	h		; Update page
+	ld	a,HIGH OBuff
+	cp	h		; Test buffer scanned
+	call	z,RdBuff	; Read next buffer from file if so
+	jr	GetMem
+;
+; Cells are updated, now unsqueeze the bit stream
+;
+USQstr:
+	exx
+	ld	hl,OBuff	; Init buffer address
+	ld	bc,0
+	exx
+	dec	hl		; Fix pointer
+	ld	de,0		; Init checksum
+	ld	b,d		; Init bit pattern
+USQloop:
+	call	UTree		; Start decoding
+	call	UFbyte		; Process result
+	jr	USQloop
+;
+; Read entire buffer into memory
+;
+RdBuff:
+	push	af
+	push	bc
+	push	de
+	ld	b,srecs/2	; Set record count
+	ld	d,HIGH IBuff	; Init buffer page
+RdBfLoop:
+	ld	e,0		; Set page boundary
+	call	RdRec		; Read record
+	jr	nz,RdEOF	; End of file
+	ld	e,reclng	; Set record boundary
+	call	RdRec		; Read record
+	jr	nz,RdEOF	; End of file
+	inc	d		; Next page
+	djnz	RdBfLoop
+RdEOF:
+	pop	de
+	pop	bc
+	pop	af
+	ld	hl,IBuff	; Return buffer address
+	ret
+;
+; Read record from file into ^DE
+;
+RdRec:
+	push	de
+	ld	c,.setdma
+	call	SYSCALL		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rdseq
+	call	SYSCALL		; Read record
+	pop	de
+	or	a
+	ret	z
+	ld	a,(EOFflg)	; Test end of file
+	or	a
+	jr	nz,UnexEOF	; Yeap, tell unexpected
+	cpl
+	ld	(EOFflg),a	; Set end of file
+	or	a
+	ret
+UnexEOF:
+	ld	de,$UNEXEOF
+	jp	FinalMsg
+;
+; End of unsqueezing chain
+;
+USQend:
+	inc	sp		; Fix call level
+	inc	sp
+	ld	a,(ChkSum)
+	cp	e		; Verify valid checksum
+	jr	nz,IllCks	; No match
+	ld	a,(ChkSum+1)
+	cp	d
+	jr	z,CksOk
+IllCks:
+	ld	de,$ILLCKS
+	call	NLString	; Checksum error
+CksOk:
+	exx			; Get back final buffer address
+	and	a
+	ld	de,OBuff-reclng+1
+	sbc	hl,de		; Strip off offset
+	sla	l		; Calculate record count
+	rl	h
+	ld	b,h
+	call	WrBUff		; Write buffer to file
+	exx
+	ld	de,DstFCB
+	ld	c,.close
+	call	SYSCALL		; Close destination file
+	ld	de,FCB
+	ld	c,.close
+	call	SYSCALL		; Close source file
+	ld	hl,(FileCnt)	; Get file count
+	dec	hl		; Count down
+	ld	(FileCnt),hl
+	ld	a,h		; Test more
+	or	l
+	jp	nz,UFmain	; Yeap
+	ld	sp,(StkSav)	; Get back caller's stack
+	ret
+;
+; Write buffer to file - Reg B holds number of records to write
+;
+WrBUff:
+	ld	a,b		; Get count
+	or	a		; Test any to write
+	ret	z		; Nope
+	ld	de,OBuff	; Init buffer address
+WrLoop:
+	ld	c,.setdma
+	call	SYSCALL		; Set disk buffer
+	push	de
+	ld	de,DstFCB
+	ld	c,.wrseq
+	call	SYSCALL		; Write to file
+	or	a
+	jr	nz,WrErr	; Error
+	pop	de
+	djnz	WrRec
+	ret
+WrRec:
+	ld	e,reclng	; Set record boundary
+	ld	c,.setdma
+	call	SYSCALL		; Set disk buffer
+	push	de
+	ld	de,DstFCB
+	ld	c,.wrseq
+	call	SYSCALL		; Write to file
+	or	a
+	jr	nz,WrErr	; Error
+	pop	de
+	inc	d
+	ld	e,0		; Set page boundary
+	djnz	WrLoop
+	ret
+;
+; BDOS call preserving all registers
+;
+SYSCALL:
+	exx
+	push	bc
+	push	de
+	push	hl
+	exx
+	push	bc
+	push	de
+	push	hl
+	call	BDOS		; Simple call
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	ret
+;
+; Output file error
+;
+WrErr:
+	ld	de,$WRERR	; Output error
+;
+; Print final message and exit
+;
+FinalMsg:
+	call	NLString	; Print message
+	ld	de,$NL
+	call	String		; Give new line
+	ld	sp,(StkSav)	; Get back caller's stack
+	ret			; And exit
+;
+; Close line and print message ^DE on console
+;
+NLString:
+	ex	de,hl
+	ld	de,$NL
+	ld	c,.string
+	call	SYSCALL		; Give new line
+	ex	de,hl
+;
+; Print string ^DE on console; preserving registers
+;
+String:
+	ld	c,.string
+	jp	SYSCALL		; Just do it
+;
+; Print string ^DE on console
+;
+Abort:
+	ld	c,.string
+	jp	BDOS		; Just do it
+;
+; Process byte
+;
+UFbyte:
+	exx
+	srl	b		; Test previous special
+	jr	c,DLEtst	; May be
+	cp	dle		; Test special
+	jr	z,DLE1		; Yeap
+	ld	c,a		; Save character
+	call	Fput		; Store byte in buffer
+	exx
+	ret
+DLE1:
+	inc	b		; Indicate special
+	exx
+	ret
+DLEtst:
+	or	a		; Verify special
+	jr	z,DLEput	; Yeap
+	dec	a		; Fix count
+	ld	b,a
+	ld	a,c
+Mput:
+	call	Fput		; Store byte sequence in buffer
+	djnz	Mput
+	exx
+	ret
+DLEput:
+	ld	a,dle
+	call	Fput		; Store special in buffer
+	exx
+	ret
+;
+; Store byte in buffer
+;
+Fput:
+	exx
+	ld	c,a		; Save entry
+	add	a,e		; Add byte to checksum
+	ld	e,a
+	jr	nc,StPag
+	inc	d		; Remember carry
+StPag:
+	ld	a,c		; Get back entry
+	exx
+	ld	(hl),a		; Store it
+	inc	l		; Update pointer
+	ret	nz		; No page boundary
+	inc	h		; Next page
+	ld	l,a
+	ld	a,HIGH FreeTPA
+	cp	h
+	ld	a,l
+	ld	l,0
+	ret	nz
+	push	af
+	push	bc
+	ld	b,drecs
+	call	WrBUff		; Write buffer to file
+	pop	bc
+	pop	af
+	ld	hl,OBuff	; Return buffer address
+	ret
+;
+; Prepare FCB ^DE
+;
+PrepFCB:
+	ld	b,.nam+.ext
+	ld	a,' '		; Blank 1st part
+	call	ConFB
+	ld	b,FCBlen-.drv-.nam-.ext
+	xor	a		; Zero 2nd part
+ConFB:
+	ld	(de),a
+	inc	de
+	djnz	ConFB
+	ret
+;
+; Print name of file ^HL
+;
+PrFCB:
+	ld	a,(hl)		; Get drive
+	inc	hl
+	or	a		; Test default
+	jr	z,SkpDrv	; Yeap, skip
+	add	a,'A'-1		; Map A..P
+	call	Conout		; Output it
+	ld	a,':'
+	call	Conout		; Give delimiter
+SkpDrv:
+	ld	b,.nam+1+.ext	; Set length
+FCBloop:
+	ld	a,(hl)		; Get name
+	cp	' '		; Ignore blanks
+	jr	z,SkpBlnk
+FCBout:
+	call	Conout
+SkpBlnk:
+	dec	b		; Count down
+	ret	z		; End
+	ld	a,b
+	cp	1+.ext		; Test extension
+	jr	nz,FCBex
+	ld	a,'.'
+	jr	FCBout		; Indicate it
+FCBex:
+	inc	hl
+	jr	FCBloop
+;
+; Put character in Accu to console
+;
+Conout:
+	ld	c,.conout
+	ld	e,a		; Get character
+	call	SYSCALL
+	ret
+;
+; Find file(s) ^DE, sample into ^HL
+; Z set indicates no file found, HL holds file count
+;
+SrcFiles:
+	ld	(FilePtr),hl	; Init file buffer
+	ld	hl,0
+	ld	(FileCnt),hl	; Init file count
+	ld	c,.srcfrs
+	call	SYSCALL		; Search for first file
+	cp	OSerr		; Test file found
+	ret	z		; Nope
+	call	StList		; Move file name to buffer
+SrcLoop:
+	ld	c,.srcnxt
+	call	SYSCALL		; Search next file
+	cp	OSerr		; Test more files found
+	jr	z,SrcEnd	; Nope
+	call	StList		; Move file name to buffer
+	jr	SrcLoop
+SrcEnd:
+	or	a
+	ld	hl,(FileCnt)	; Get back resulting count
+	ret
+;
+; Move file name to buffer
+;
+StList:
+	push	de
+	ld	hl,(FilePtr)	; Get file buffer
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,a		; *16
+	add	a,a		; *32
+	add	a,DMA		; Build source pointer
+	ld	c,a
+	ld	b,0
+	ld	d,_DIRlen	; Set length to copy
+FCBcopy:
+	ld	a,(bc)
+	ld	(hl),a		; Copy it
+	inc	hl
+	inc	bc
+	dec	d
+	jr	nz,FCBcopy
+	ld	(FilePtr),hl	; Update file buffer
+	pop	de
+	ld	hl,(FileCnt)	; Get file count
+	inc	hl		; Advance it
+	ld	(FileCnt),hl
+	ret
+;
+; Convert character to upper case
+;
+UpCase:
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; Convert it
+	ret
+;
+$UF.ID:
+	db	'Fast Unsqueezer v2.0'
+	db	cr,lf,eot
+$NOFILE:
+	db	'Input file not found.',eot
+$OPNERR:
+	db	'File open error.',eot
+$TOOMANY:
+	db	'Too many matching files.',eot
+$ARROW:
+	db	' ---> ',eot
+$NOMEM:
+	db	'Out of memory.',eot
+$NOTSQ:
+	db	'Not a squeezed file.',eot
+$ILLCKS:
+	db	'Checksum error detected.',eot
+$NOZ80:
+	db	'Program needs Z-80.',eot
+$WRERR:
+	db	'Output error.',eot
+$UNEXEOF:
+	db	'Unexpected EOF encountered.$'
+$HELP:
+	db	'Usage: UF  [d:] <afn> [d:]'
+	db	cr,lf
+	db	' optional drive specs are source & dest. respectively.',eot
+$NL:
+	db	cr,lf,eot
+FilePtr:
+	dw	0		; File buffer
+FileCnt:
+	dw	0		; File count
+ChkSum	equ	$		; Checksum
+EOFflg	equ	ChkSum+2	; End of file flag
+DstFCB	equ	EOFflg+1	; Destination file
+FileLst	equ	DstFCB+FCBlen	; Start of file list
+
+heap	equ	FileLst+_DIRlen*MAXFILE
+heapg	equ	heap AND 0FF00h
+heapt	equ	heap AND 000FFh
+
+	IF	(heapt) GT 0
+UTree	equ	heapg+256		; Cells start at page boundary
+	ELSE
+UTree	equ	heapt
+	ENDIF
+
+IBuff	equ	UTree+256*CELlen	; Read buffer
+OBuff	equ	IBuff+srecs*reclng	; Write buffer
+FreeTPA	equ	OBuff+drecs*reclng	; End of data
+
+	end
+

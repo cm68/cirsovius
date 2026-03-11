@@ -1,0 +1,7157 @@
+;
+; This file is the original Run Time Library of TURBO PASCAL 3.0
+;
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+.TRUE	equ	1
+
+_RST	equ	7		; ** CAUTION **
+@RST	equ	_RST SHL 3	; RST address     (0x0038H)
+RST	equ	11000111b + @RST; RST instruction (0xFFH)
+
+OS	equ	0000h
+DU	equ	0004h
+BDOS	equ	0005h
+TPAtop	equ	BDOS+1
+STDFCB	equ	005ch
+Number	equ	005dh
+CCP	equ	0080h
+
+TPA	equ	0100h
+
+.resdsk	equ	13
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.rename	equ	23
+.retdsk	equ	25
+.setdma	equ	26
+.getalv	equ	27
+.getdpb	equ	31
+.rndrd	equ	33
+.rndwr	equ	34
+.filsiz	equ	35
+
+RecLng		equ	128	; Standard record length
+Dirlng		equ	15
+
+MaxParams	equ	31
+
+@const		equ	 2
+@conin		equ	 3
+@conout		equ	 4
+@list		equ	 5
+@auxout		equ	 6
+@auxin		equ	 7
+
+..const		equ	(@const-1)*3
+..conin		equ	(@conin-1)*3
+..conout	equ	(@conout-1)*3
+..list		equ	(@list-1)*3
+..auxout	equ	(@auxout-1)*3
+..auxin		equ	(@auxin-1)*3
+
+Fdrv		equ	 1
+Fname		equ	 8
+Fext		equ	 3
+_SYS		equ	10
+_ex		equ	12
+DIRlen		equ	16
+_rrn		equ	33
+FCBlen		equ	36
+
+FIB.rec		equ	4		; Pointer #records
+FIB.reclen	equ	6		; Pointer record length
+FIB.cur		equ	8		; Pointer to current record
+FIB.FCB		equ	12		; Pointer to FCB
+FIBlen		equ	FIB.FCB+FCBlen	; FIB length less buffer
+FIB.buff	equ	FIBlen		; Pointer to buffer
+
+FIBtype		equ	00001111b
+
+rd.bit		equ	4
+wr.bit		equ	5
+out.bit		equ	6
+in.bit		equ	7
+
+..in		equ	10000000b
+..out		equ	01000000b
+..read		equ	00010000b
+
+FixRecLen	equ	4	; Fixed record length
+Rec.Wr.bit	equ	0
+Rec.New.bit	equ	1
+Rec.Wr		equ	01b
+Rec.New		equ	10b
+
+RAMdevice	equ	6
+
+HeapLen		equ	4	; Heap administration
+HeapLOadr	equ	0	; Address location
+HeapHIadr	equ	1
+HeapLOlen	equ	2	; Length location
+HeapHIlen	equ	3
+
+null	equ	00h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+esc	equ	1bh
+CtrlC	equ	'C'-'@'
+Xoff	equ	'S'-'@'
+@CAN	equ	'U'-'@'
+CtrlX	equ	'X'-'@'
+DEL	equ	7fh
+
+LoMask	equ	00001111b
+DPBMASK	equ	00011111b
+NOMSB	equ	01111111b
+MSB	equ	10000000b
+LSB	equ	00000001b
+@MSB	equ	1000000000000000b
+
+MINWID	equ	56			; Min width for filename
+
+MAXINT	equ	32767
+DefSTR	equ	8
+
+_LB	equ	0
+_MB	equ	7
+
+sgn.bit		equ	7
+sign.bit	equ	10000000b
+
+mant.len	equ	5		; Byte length  of mantissa
+Real.Len	equ	6		; Length of real
+bit.len		equ	8		; Bits in a byte
+exp.offset	equ	080h		; Offset in exponent
+Exp.One		equ	exp.offset+1	; Exponent for >=1.0
+int.max		equ	exp.offset+15	; Max exponent for an integer
+mant.bits	equ	mant.len*bit.len
+real.dig	equ	24		; Length of mantissa
+real.field	equ	7		; Real field size
+real.ASCII	equ	12		; Decimal places
+ExpFix		equ	77		; Exponent fix for real to ASCII
+ExpRange	equ	0d9h		; Exponent range
+sqr.exp		equ	014h		; SQRT exponent fix
+sin.min		equ	06ch		; SIN/COS minimum exponent
+ln.min		equ	067h		; LN  minimum exponent
+exp.max		equ	088h		; EXP maximum exponent
+
+dot.bit		equ	6		; Status of dot in real
+exps.bit	equ	5		; Sign of exponent
+exp.bit		equ	4		; Exponent
+
+l00fe	equ	254		; Mystery editor size
+
+MEMGAP	equ	 708		; Memory gap at top of memory
+StkSpc	equ	1024		; Stack space
+_SavLen	equ	8192
+
+@OVLADR	equ	9000h		; Overlay load address
+
+.LD.A		equ	03eh	; LD A,xx
+.LD.BC		equ	001h	; LD BC,xxxx
+.LD.DE		equ	011h	; LD DE,xxxx
+.LD.HL		equ	021h	; LD HL,xxxx
+.LD.SP		equ	031h	; LD SP,xxxx
+.LD@DE		equ	5bedh	; LD DE,(xxxx)
+.LD@HL		equ	02ah	; LD HL,(xxxx)
+.LDHL@		equ	022h	; LD (xxxx),HL
+.LDA@		equ	032h	; LD (xxxx),A
+.JP		equ	0c3h	; JP xxxx
+.CALL		equ	0cdh	; CALL addr
+.JPZ		equ	0cah	; JP Z,xxxx
+.EXX		equ	0d9h	; EXX
+.POP.HL		equ	0e1h	; POP HL
+.PUSH.HL	equ	0e5h	; PUSH HL
+.INC.HL		equ	023h	; PUSH HL
+.DEC.HL		equ	02bh	; PUSH HL
+;
+skip		equ	03eh	; LD A,xx
+skip.2		equ	001h	; LD BC,xx
+skip.3		equ	011h	; LD DE,xx
+
+_LinLen		equ	127
+
+.MaxBuf		equ	126	; Max line input
+.MaxSamp	equ	 30	; Max sample input
+
+_Ahead		equ	20	; Size of ahead buffer
+
+set.len		equ	32
+
+DefWITH		equ	2
+
+_Byte		equ	1
+_Addr		equ	2
+
+_Array		equ	 1
+_Record		equ	 2
+_Set		equ	 3
+_Ptr		equ	 4
+_RecF		equ	 5
+_TxtF		equ	 6
+_UntF		equ	 7
+_String		equ	 8
+_Real		equ	 9
+_Integ		equ	10
+_Bool		equ	11
+_Char		equ	12
+
+_Label		equ	1
+_Const		equ	2
+_Type		equ	3
+_Var		equ	4
+_Proc		equ	5
+_Overly		equ	7
+_Begin		equ	8
+;
+; Option selection bits
+;
+_Ropt		equ	00000010b
+_Uopt		equ	00001000b
+;
+.Iopt		equ	0
+.Ropt		equ	1
+.Aopt		equ	2
+.Uopt		equ	3
+.Xopt		equ	4
+.Vopt		equ	5
+.Bopt		equ	6
+.Copt		equ	7
+;
+; Search option list
+;
+_W		equ	0
+_N		equ	1
+_U		equ	2
+_G		equ	3
+_B		equ	4
+;
+; Error levels
+;
+_BRK		equ	0	; User break
+_IO		equ	1	; I/O error
+_RT		equ	2	; Run time error
+;
+; BREAK error
+;
+_CBRK		equ	1
+;
+; Compiler errors
+;
+_ColExp		equ	  1
+_SemiExp	equ	  2
+_CommaExp	equ	  3
+_LftPar		equ	  4
+_RgtPar		equ	  5
+_EquExp		equ	  6
+_AssigExp	equ	  7
+_LftBrExp	equ	  8
+_RgtBrExp	equ	  9
+_DotExp		equ	 10
+_TwoDots	equ	 11
+_BEGINexp	equ	 12
+_NoDO		equ	 13
+_End		equ	 14
+_NoOF		equ	 15
+_SUBexp		equ	 16
+_StrIdx		equ	 17
+_NoDOWN_TO	equ	 18
+_BoolExp	equ	 20
+_FileVarExp	equ	 21
+_IntConst	equ	 22
+_IntExpr	equ	 23
+_IntVarExp	equ	 24
+_IntRealCexp	equ	 25
+_NumExprExp	equ	 26
+_NumVarExp	equ	 27
+_PtrVarExp	equ	 28
+_RecVarExp	equ	 29
+_SimTyp		equ	 30
+_SimpExpr	equ	 31
+_StrgConExp	equ	 32
+_StrgExpExp	equ	 33
+_StrgVarExp	equ	 34
+_MustTextFile	equ	 35
+_TypeExp	equ	 36
+_UntFileExp	equ	 37
+_UnkLabel	equ	 40
+_Undef		equ	 41
+_InkPointer	equ	 42
+_DoubleLab	equ	 43
+_InvType	equ	 44
+_ConstRange	equ	 45
+_IllCASE	equ	 46
+_IllOps		equ	 47
+_InvResult	equ	 48
+_IllStrgLen	equ	 49
+_StrConst	equ	 50
+_IllSkalar	equ	 51
+_IllLimit	equ	 52
+_ResWord	equ	 53
+_IllAss		equ	 54
+_StrConLong	equ	 55
+_IntegErr	equ	 56
+_RealErr	equ	 57
+_IllChar	equ	 58
+_IllConst	equ	 60
+_InvFilPtr	equ	 61
+_NoStruktVar	equ	 62
+_IllTxtFile	equ	 63
+_IllFileType	equ	 64
+_NoUntypeFile	equ	 65
+_InvIO		equ	 66
+_VarFile	equ	 67
+_FileF		equ	 68
+_InvSetOrder	equ	 69
+_IllSetRange	equ	 70
+_IllGOTO	equ	 71
+_IllLabel	equ	 72
+_UndefFORW	equ	 73
+_IllINLINE	equ	 74
+_InvalABS	equ	 75
+_OvlFORW	equ	 76
+_OvlDirErr	equ	 77
+_NoFileErr	equ	 90
+_IllSrcEnd	equ	 91
+_NoOvl		equ	 92
+_CompDirec	equ	 93	;;--
+_INCLerr	equ	 96	;;--
+_TooManyWITH	equ	 97
+_MemOvfl	equ	 98
+_CompOvfl	equ	 99
+_IndxErr	equ	144
+_RngErr		equ	145
+_ABORT		equ	202
+_FndRTerr	equ	200
+_DskFull	equ	250
+;
+; Run-Time errors
+;
+_FLPovfl	equ	  1	; 0x01
+_DivZero	equ	  2	; 0x02
+_NegSqrt	equ	  3	; 0x03
+_LNerr		equ	  4	; 0x04
+_StrLenErr	equ	 16	; 0x10
+_TruncOvl	equ	146	; 0x92
+_OVLerr		equ	240	; 0xf0
+_HeapErr	equ	255	; 0xff
+;
+; Run-Time I/O errors
+;
+_NoFile		equ	  1	; 0x01
+_NoRead		equ	  2	; 0x02
+_NoWrite	equ	  3	; 0x03
+_BlkErr		equ	  4	; 0x04
+_IllNum		equ	 16	; 0x10
+_IllIO		equ	 32	; 0x20
+_DirErr		equ	 33	; 0x21
+_StdAssErr	equ	 34	; 0x22
+_InvRec		equ	144	; 0x90
+_SeekEOF	equ	145	; 0x91
+_IllEOF		equ	153	; 0x99
+_WrErr		equ	240	; 0xF0
+_DirFull	equ	241	; 0xF1
+_OvflErr	equ	242	; 0xF2
+_NoClose	equ	255	; 0xFF
+
+TPhead		equ	21	; Header code length for ERROR
+
+_Video		equ	7	; Status
+
+@DUMMY	equ	04d2h
+
+l0300	equ	0300h
+l0800	equ	0800h
+l07d0	equ	07d0h
+
+l00a0	equ	00a0h		; Keypressed
+l00a3	equ	00a3h		; Read KBD
+l00a6	equ	00a6h		; Console output
+l00a9	equ	00a9h		; List output
+l00ac	equ	00ach		; Auxiliary output
+l00af	equ	00afh		; Auxiliary input
+l00b2	equ	00b2h		; Console output
+l00b5	equ	00b5h		; Read USR
+l00b8	equ	00b8h		; Base FIB
+l00ba	equ	00bah		; ConinFIB
+l00bc	equ	00bch		; LstFIB
+l00be	equ	00beh		; AuxFIB
+l00c0	equ	00c0h		; UsrFIB
+l00c2	equ	00c2h		; StdIOdev
+l00c4	equ	00c4h		; Heap pointer
+l00c6	equ	00c6h		; Recursion pointer
+l00c8	equ	00c8h		; Four byte random value
+l00cc	equ	00cch		; Base PC
+l00ce	equ	00ceh		; Current PC
+l00d0	equ	00d0h		; I/O result
+l00d1	equ	00d1h		; Buffer length
+l00d2	equ	00d2h		; RTL top of memory
+l00d4	equ	00d4h		; Current pointer
+l00d6	equ	00d6h		; Top pointer
+l00d8	equ	00d8h		; Run mode
+l00d9	equ	00d9h		; + JP xxxx
+l00da	equ	00dah		; + Restart vector
+l00dc	equ	00dch		; Overlay drive
+l00dd	equ	00ddh		; $C mode
+l00e0	equ	00e0h		; Video mode
+l00e8	equ	00e8h		; Pointer ????
+l00f4	equ	00f4h		; Available memory
+
+l0000	equ	00h
+l0001	equ	01h
+l0002	equ	02h
+l0005	equ	05h
+l0008	equ	08h
+l000c	equ	0ch
+l000d	equ	0dh
+l0015	equ	15h
+l0019	equ	19h
+l0024	equ	24h
+l0030	equ	30h
+l005c	equ	5ch
+l0080	equ	80h
+l0081	equ	81h
+
+l00b0	equ	00b0h
+l00de	equ	0deh
+l00e2	equ	0e2h
+l00e4	equ	0e4h
+l00e6	equ	0e6h
+l00e9	equ	0e9h
+l00ea	equ	0eah
+l00ec	equ	0ech
+l00ed	equ	0edh
+l00f0	equ	0f0h
+l00f2	equ	0f2h
+l00f6	equ	0f6h
+l00f8	equ	0f8h
+
+lfff3	equ	0fff3h
+lfffc	equ	0fffch
+lffff	equ	0ffffh
+
+l0100:
+	jp	l20e2		; Jump over Run Time Library
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% RUN TIME ROUTINES %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%
+;
+	db	0cdh,0abh
+	db	'Copyright (C) 1985 BORLAND Inc',null
+l0124:
+	db	4		; CPU speed
+	db	0,0a1h,'B'
+;
+; &&&&&&&&&&&&&&&&&&
+; &&& PATCH AREA &&&
+; &&&&&&&&&&&&&&&&&&
+;
+l0128:
+	ds	43
+;
+l0153::
+	db	TermLen
+	db	'Schneider Joyce'
+TermLen	equ	$-l0153-1
+	db	'12864'
+l0168:
+	db	90		; Screen columns
+l0169:
+	dw	31		; Screen lines
+;
+; Lead in sequence: Leave 24x80 mode
+;
+l016b:
+	db	2,esc,'y'
+;
+	db	1bh,'Y  ',1,1,1dh
+	db	3,3,1bh,1bh,1bh,0d5h
+;
+; Lead out sequence: Enter 24x80 mode
+;
+l017b:
+	db	2,esc,'x'
+;
+	db	0,0,1ch,0,17h,17h
+	db	1dh,17h,17h,0efh,9eh,0cdh,0bdh
+l018b:
+	db	4,esc,'Y',0,0
+	ds	11
+ll018b	equ	$-l018b
+l019b:
+	db	1		; Binary indicator (1 is binary)
+l019c:
+	db	' '		; Offset for column
+l019d:
+	db	' '		; Offset for row
+l019e:
+	db	4		; Position of column
+l019f:
+	db	3		; Position of row
+l01a0:
+	dw	0
+;
+; Clear display
+;
+l01a2:
+	db	2,esc,'E'
+	ds	3
+;
+; Home cursor
+;
+l01a8:
+	db	2,esc,'H'
+	ds	3
+;
+; Insert line
+;
+l01ae:
+	db	2,esc,'L'
+	ds	3
+;
+; Delete line
+;
+l01b4:
+	db	2,esc,'M'
+	ds	3
+l01ba:
+	dw	0
+;
+; Clear to end of line
+;
+l01bc:
+	db	2,esc,'K'
+	ds	3
+;
+; Turn off inverse
+;
+l01c2:
+	db	2,esc,'q'
+	ds	3
+;
+; Turn on inverse
+;
+l01c8:
+	db	2,esc,'p'
+	ds	3
+l01ce:
+	dw	0
+;
+; Print control string ^HL on console
+; C set if control not defined
+;
+l01d0:
+	ld	a,(hl)		; Get character
+	or	a		; Test defined
+	scf
+	ret	z		; Nope as C set says
+l01d4:
+	inc	hl
+	push	af
+	push	hl
+	ld	a,(hl)		; Get character
+	call	l01e8		; Put to console
+	pop	hl
+	pop	af
+	dec	a
+	ret	z
+	jr	l01d4
+;
+; Give new line on console
+;
+l01e1:
+	call	l0200
+	db	cr,lf,null
+	ret
+;
+; Put character on console
+;
+l01e8:
+	ld	l,a
+	push	hl		; Push onto stack
+	call	l00a6		; Put to console
+	ret
+;
+; Check character for attribute
+; MSB set for normal output
+;
+l01ee:
+	cp	MSB		; Test attribute set
+	call	c,l026b		; Nope, set invers video
+	call	nc,l0284	; Yeap, set normal video
+	and	NOMSB		; Strip off attribute
+	jr	l01e8
+;
+; Print immediate control string on console
+;
+l01fa:
+	push	hl
+	ld	hl,l01ee	; Get new output routine
+	jr	l0204
+;
+; Print immediate string on console
+;
+l0200:
+	push	hl
+	ld	hl,l01e8	; Get new output routine
+l0204:
+	ld	(l0213),hl	; Change output vector
+	pop	hl
+	ex	(sp),hl		; Get pointer to string
+	push	af
+	push	bc
+	push	de
+l020c:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	jr	z,l0218		; Yeap
+	push	hl
+l0213	equ	$+1
+	call	@DUMMY		; Process output
+	pop	hl
+	jr	l020c
+l0218:
+	pop	de
+	pop	bc
+	pop	af
+	ex	(sp),hl
+	ret
+;
+; Delay by value in reg HL
+;
+l021d:
+	ld	a,l
+	or	h		; Test any value given
+	ret	z		; Nope
+	ld	a,(l0124)	; Get CPU speed
+	add	a,a
+	add	a,a
+	add	a,a		; Build delay value
+l0226:
+	ex	(sp),hl		;  5 cycles
+	ex	(sp),hl		; 10 cycles
+	ex	(sp),hl		; 15 cycles
+	ex	(sp),hl		; 20 cycles
+	push	bc		; 23 cycles
+	ld	bc,1234		; 26 cycles
+	pop	bc		; 29 cycles
+	dec	a		; 30 cycles
+	jr	nz,l0226
+	dec	hl
+	jr	l021d
+;
+; Give control and delay if control defined
+;
+l0235:
+	call	l01d0		; Give control
+	ret	c		; Not defined
+	ld	hl,(l01ce)	; Get value
+	jr	l021d		; Delay
+;
+; Clear screen
+;
+l023e:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,l01a8
+	call	l0235		; Home cursor
+	ld	hl,l01a2
+l024b:
+	call	l01d0		; Clear display
+	ld	hl,(l01ba)
+	call	nc,l021d	; Delay if defined
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Delete line
+;
+l0259:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,l01b4
+	jr	l024b		; Delete line
+;
+; Insert line
+;
+l0262:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,l01ae
+	jr	l024b		; Insert line
+;
+; Set low video
+;
+l026b:
+	push	af
+	ld	a,(l00e0)	; Get video mode
+	or	a		; Test low mode already set
+	jr	z,l0282		; Yeap, skip
+	push	bc
+	push	de
+	push	hl
+	xor	a
+	ld	(l00e0),a	; Set video mode	
+	ld	hl,l01c8	; Set attribute
+l027c:
+	call	l0235		; Give control
+	pop	hl
+	pop	de
+	pop	bc
+l0282:
+	pop	af
+	ret
+;
+; Set normal video
+;
+l0284:
+	push	af
+	ld	a,(l00e0)	; Get video mode
+	cp	-1		; Test normal mode already set
+	jr	z,l0282		; Yeap, skip
+	push	bc
+	push	de
+	push	hl
+	ld	a,-1
+	ld	(l00e0),a	; Set video mode
+	ld	hl,l01c2	; Reset attribute
+	jr	l027c
+;
+; Erase to end of line
+;
+l0299:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,l01bc	; Clear to end of line
+	jr	l027c
+;
+; Position cursor with X (column) in reg H and y (row) in reg L
+;
+l02a2:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	push	hl
+	ld	de,l00f0
+	ld	hl,l018b
+	ld	bc,ll018b
+	ldir			; Unpack control string
+	pop	de		; Get back coordinates
+	ld	a,(l019e)	; Get position of column
+	ld	c,a
+	ld	a,(l019c)	; Get offset for column
+	add	a,d		; Build real value
+	push	de
+	call	l02dc		; Store it
+	pop	de
+	ld	a,(l019f)	; Get position of row
+	ld	c,a
+	ld	a,(l019d)	; Get offset for row
+	add	a,e		; Build real value
+	call	l02dc		; Store it
+	ld	hl,l00f0
+	call	l01d0		; Give control
+	ld	hl,(l01a0)	; Get delay value
+	call	l021d		; Delay a bit
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Store Accu in position in reg C
+;
+l02dc:
+	ld	hl,l00f0
+	ld	b,0
+	add	hl,bc		; Position in string
+	ex	de,hl
+	ld	hl,l019b
+	inc	(hl)		; Test binary
+	dec	(hl)
+	jr	z,l02ec		; Nope, build ASCII
+	ld	(de),a		; Store value
+	ret
+l02ec:
+	dec	de		; Fix for hi ASCII
+	dec	de
+	ld	hl,l0307+3	; Point to divisor
+	ld	b,3		; Set length
+l02f3:
+	dec	hl
+	ld	c,'0'-1		; Init ASCII
+l02f6:
+	inc	c		; Fix quotient
+	sub	(hl)		; Divide
+	jr	nc,l02f6
+	add	a,(hl)		; Build last value
+	push	af
+	ld	a,c
+	cp	'0'		; Test zero
+	jr	z,l0302		; Skip if so
+	ld	(de),a		; Store ASCII
+l0302:
+	inc	de
+	pop	af
+	djnz	l02f3
+	ret
+;
+l0307:
+	db	1,10,100
+;
+; Set lead in
+;
+l030a:
+	ld	hl,l016b		; Give lead in
+	jp	l0235
+;
+; Set lead out
+;
+l0310:
+	ld	hl,l017b		; Give lead out
+	jp	l0235
+;
+; Test key pressed
+; EXIT	Reg HL holds 1 if key pressed
+;
+l0316:
+	ld	de,..const
+	call	l035f		; Get state
+	and	1		; Extract the bit
+	jr	l0326
+;
+; Read character from console
+; EXIT	Reg HL holds character
+;
+l0320:
+	ld	de,..conin
+l0323:
+	call	l035f		; Get input
+l0326:
+	ld	l,a		; Expand result to 16 bit
+	ld	h,0
+	ret
+;
+; Read character from auxiliary device
+; EXIT	Reg HL holds character
+;
+l032a:
+	ld	de,..auxin	; Set function
+	jr	l0323		; Do thru BIOS
+;
+; Write character to list device
+; ENTRY	Character on stack
+;
+l032f:
+	ld	de,..list	; Set function
+	jr	l033c		; Do thru BIOS
+;
+; Write character to auxiliary device
+; ENTRY	Character on stack
+;
+l0334:
+	ld	de,..auxout	; Set function
+	jr	l033c		; Do thru BIOS
+;
+; Write character to console
+; ENTRY	Character on stack
+;
+l0339:
+	ld	de,..conout	; Set function
+l033c:
+	pop	hl
+	pop	bc		; Get character
+	push	hl
+	ld	a,(l00dd)	; Get $C mode
+	or	a
+	jr	z,l035f		; $C-, so skip testing
+	push	de
+	push	bc
+	call	l00a0		; Test key pressed
+	ld	a,h
+	or	l		; Nope
+	jr	z,l035d
+	call	l03e1		; Read character
+	cp	Xoff		; Test XOFF
+	jr	nz,l035d
+	call	l03e1
+	cp	CtrlC		; Test abort
+	jp	z,l20d4		; Halt if so
+l035d:
+	pop	bc
+	pop	de
+;
+; Do BIOS internal call
+;
+l035f:
+	ld	hl,(OS+1)	; Fetch base vector
+	add	hl,de		; Add osffset
+	jp	(hl)		; Go
+;
+; Init TURBO program
+; ENTRY	Reg HL holds top of RAM
+;	Reg B holds break mode
+;		($C- B=00)
+;		($C+ B=FF)
+;	Reg C holds interrupt mode
+;		($U- C=00)
+;		($U+ C=rst)
+;	[rst may be the opcode for the requested
+;	 RST opcode, typically F7 or EF]
+;
+l0364:
+	ld	(l00d2),hl	; Save address
+	ld	a,b
+	ld	(l00dd),a	; Set $C mode
+	ld	a,c		; Get $U
+	or	a
+	jr	z,l037a		; No interrupt
+	ld	a,.JP		; Set JP to interrupt
+	ld	(@RST),a
+	ld	hl,l1ffb
+	ld	(@RST+1),hl	; Change vector
+l037a:
+	ld	hl,l03a5
+	ld	de,l00a0
+	ld	bc,ll0018
+	ldir			; Unpack I/O
+	ld	hl,l03bd
+	ld	de,l00b8
+	ld	bc,ll000c
+	ldir			; Init FIB
+	xor	a
+	ld	l,a
+	ld	h,a
+	ld	(l00d0),a	; Clear I/O error
+	ld	(l00d4),hl	; Clear some pointers
+	ld	(l00d6),hl
+	ld	a,.MaxBuf
+	ld	(l00d1),a	; Set buffer length
+	ld	(l00e0),a	; Set video mode
+	ret
+;
+; Character I/O table moved into 0x00A0
+;
+l03a5:
+	jp	l0316		; 0x00A0 : Keypressed
+	jp	l0320		; 0x00A3 : Read KBD
+	jp	l0339		; 0x00A6 : Console output
+	jp	l032f		; 0x00A9 : List output
+	jp	l0334		; 0x00AC : Auxiliary output
+	jp	l032a		; 0x00AF : Auxiliary input
+	jp	l0339		; 0x00B2 : Console output
+	jp	l0320		; 0x00B5 : Read KBD
+ll0018	equ	$-l03a5
+;
+; Standard IO control table
+;
+l03bd:
+	db	11000001b	; 0x00B8 : Input Output for CON
+	db	0
+	db	10000010b	; 0x00BA : Input for KBD
+	db	0
+	db	01000011b	; 0x00BC : Output for LST
+	db	0
+	db	11000100b	; 0x00BE : Input Output for AUX
+	db	0
+	db	11000101b	; 0x00C0 : Input Output for USR
+	db	0
+	db	11000001b	; 0x00C2 : Input Output for CON
+	db	0
+ll000c	equ	$-l03bd
+;
+; Put chracater to console
+;
+l03c9:
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	push	af
+	ld	l,a
+	ld	h,0
+	push	hl
+	call	l00a6		; Put to console
+	pop	af
+l03d9:
+	pop	iy
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Read character from keyboard
+;
+l03e1:
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	call	l00a3		; Read KBD
+	ld	a,l
+	jr	l03d9
+;
+; Parse file, allow wildcards
+;
+l03ee:
+	ld	c,NOT FALSE	; Set flag
+	jr	l03fe
+;
+; Parse file, wildcards not allowed
+;
+l03f2:
+	ld	c,FALSE
+	ld	de,(l00d2)	; Get top of memory for input
+l03f8:
+	inc	de
+	ld	a,(de)
+	cp	' '		; Skip blanks
+	jr	z,l03f8
+l03fe:
+	ld	hl,l005c+Fdrv+Fname
+	ld	b,Fext
+	call	l047b		; Blank extension
+l0406:
+	ld	a,(de)		; Get character
+	call	l04a6		; Convert to upper case
+	cp	'A'		; Test posible drive
+	jr	c,l0420
+	cp	'P'+1
+	jr	nc,l0420
+	ld	b,a		; Save drive
+	inc	de
+	ld	a,(de)
+	cp	':'		; Verify drive
+	jr	nz,l041f
+	ld	a,b
+	sub	'A'-1		; Make binary
+	inc	de
+	jr	l0421
+l041f:
+	dec	de
+l0420:
+	xor	a		; Set default drive
+l0421:
+	ld	hl,l005c
+	ld	(hl),a		; Save drive
+	inc	hl
+	inc	c		; Test wildcards allowed
+	dec	c
+	jr	z,l0443		; Nope
+	ld	a,(de)		; Get character
+	call	l0482		; Test delimiter
+	jr	nz,l0443	; Nope
+	cp	'?'		; Test single wildcard
+	jr	z,l0443		; Yeap
+	cp	'*'		; Test wildcard
+	jr	z,l0443		; Yeap
+	cp	'.'		; Test dot
+	jr	z,l0443		; Yeap
+	ld	b,Fname+Fext
+	call	l0477		; Set wildcard
+	jr	l0453		; Go init remainder
+l0443:
+	ld	b,Fname
+	call	l045e		; Parse name
+	ld	a,(de)
+	cp	'.'		; Test extension delimiter
+	jr	nz,l0453	; Nope
+	inc	de
+	ld	b,Fext
+	call	l045e		; Parse extension
+l0453:
+	ld	hl,l005c+_ex
+	ld	b,FCBlen-_ex
+l0458:
+	ld	(hl),0		; Clear remainder of FCB
+	inc	hl
+	djnz	l0458
+	ret
+;
+; Parse B characters
+;
+l045e:
+	ld	a,(de)		; Get character
+	inc	c		; Test wildcard allowed
+	dec	c
+	jr	z,l046b		; Nope
+	cp	'?'		; Test single wildcard
+	jr	z,l0470		; Save it
+	cp	'*'		; Test multiple wildcards
+	jr	z,l0476		; Map them
+l046b:
+	call	l0482		; Test delimiter
+	jr	z,l047b		; Yeap
+l0470:
+	ld	(hl),a		; Store character
+	inc	hl
+	inc	de
+	djnz	l045e
+	ret
+l0476:
+	inc	de
+;
+; Set B wildcards
+;
+l0477:
+	ld	a,'?'		; Set wildcard character
+	jr	l047d
+;
+; Blank B positions in ^HL
+;
+l047b:
+	ld	a,' '
+l047d:
+	ld	(hl),a		; Save character
+	inc	hl
+	djnz	l047d
+	ret
+;
+; Test delimiter
+; Z set says yes
+;
+l0482:
+	call	l04a6		; Convert to upper case
+	cp	' '		; Test control
+	jr	c,l0496		; Yeap, it's a delimiter
+	push	hl
+	push	bc
+	ld	hl,l0498
+	ld	bc,ll0498
+	cpir			; Find in table
+	pop	bc
+	pop	hl
+	ret
+l0496:
+	cp	a
+	ret
+;
+l0498:
+	db	' .,;:=?*[]<>{}'
+ll0498	equ	$-l0498
+;
+; Convert character to UPPER case
+;
+l04a6:
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; Convert to upper case
+	ret
+;
+; Print hex word in reg HL
+;
+l04af:
+	ld	a,h		; Get hi
+	call	l04b4		; Print it
+	ld	a,l		; Followed by lo
+;
+; Print hex byte in Accu
+;
+l04b4:
+	push	af
+	rra			; Isolate hi bits
+	rra
+	rra
+	rra
+	call	l04bd		; Convert them
+	pop	af
+l04bd:
+	and	LoMask		; Mak bits
+	add	a,090h		; Dirty trick
+	daa
+	adc	a,040h
+	daa
+	jp	l03c9		; Put to console
+;
+; Get byte from 16 bit
+; ENTRY	Reg HL holds 16 bit signed integer
+; EXIT	Accu holds 0 and carry set if HL<0
+;	Accu holds -1 and carry reset if HL>256
+;	Accu holds low part and carry reset else
+;
+l04c8:
+	xor	a
+	scf
+	bit	7,h		; Test sign bit
+	ret	nz		; Return 0 and C set if HL<0
+	ld	a,h
+	or	a
+	ld	a,l
+	ret	z		; Return LO if HI=0
+	ld	a,-1		; Else return -1
+	ret
+;
+; Test enough space
+; ENTRY	Reg HL holds 1st free address
+;	Reg DE holds last free address
+;	Reg BC holds top of ram
+;	Accu holds run mode
+;
+l04d4:
+	ld	(l00d8),a	; Re/Set runmode (0 is TP menue)
+	push	bc
+	call	l1eaf		; Init heap
+	pop	bc
+	ld	hl,(TPAtop)
+	or	a
+	sbc	hl,bc		; Test memory available
+	jp	c,l20a8		; Nope, exit
+	ex	de,hl
+	pop	de		; Get caller
+	ld	sp,hl		; Set new stack
+	ld	bc,-StkSpc
+	add	hl,bc		; Allow some stack space
+	ld	(l00c6),hl	; Set recursion pointer
+	xor	a
+	ld	l,a
+	ld	h,a
+	ld	(l00ce),hl	; Reset current PC
+	ld	(l00dc),a	; Reset overlay drive
+	ld	a,.JP
+	ld	(l00d9),a	; Init restart
+	ld	hl,l20de
+	ld	(l00da),hl	; Set error vector
+	ex	de,hl
+	ld	(l00cc),hl	; Set base PC
+	jp	(hl)		; Jump back to caller
+;
+; Start of recursive procedure or function
+; ENTRY	Reg BC holds bytes to be preserved
+;	Reg HL holds address of save area
+;
+l0508:
+	push	hl
+	ld	hl,(l00c6)	; Get recursion pointer
+	or	a
+	sbc	hl,bc		; Calculate new pointer
+	ld	(l00c6),hl
+	ld	de,(l00c4)	; Get heap pointer
+	or	a
+	sbc	hl,de		; Test against it
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	jp	c,l1d75		; Error if overlapping
+	ldir
+	ret
+;
+; End of recursive procedure or function
+; ENTRY	Reg BC holds bytes to be preserved
+;	Reg DE holds address of save area
+;
+l0522:
+	ld	hl,(l00c6)	; Get recursion pointer
+	ldir			; Reload code
+	ld	(l00c6),hl	; Update pointer
+	exx
+	ret
+;
+; Load real into registers
+; ENTRY	Reg HL points to real variable
+; EXIT	Regs HL,DE,BC hold number
+;
+l052c:
+	ld	e,(hl)		; Get exponent
+	inc	hl
+	ld	d,(hl)		; Get LSB
+	inc	hl
+	push	de
+	ld	e,(hl)		; Get 4th mantissa byte
+	inc	hl
+	ld	d,(hl)		; Get 3rd mantissa byte
+	inc	hl
+	ld	c,(hl)		; Get 2nd mantissa byte
+	inc	hl
+	ld	b,(hl)		; Get MSB
+	pop	hl
+	ret
+;
+; Move string to stack
+; ENTRY	Reg HL points to string
+;
+l053a:
+	pop	ix		; Get caller
+	ex	de,hl
+	ld	a,(de)		; Get length of string
+	ld	c,a
+	ld	b,0
+	cpl			; Negate
+	ld	l,a
+	ld	h,-1
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ex	de,hl
+	inc	bc
+	ldir			; Move to stack
+	jp	(ix)		; Exit
+;
+; Move immediate string to stack
+; ENTRY	String started with length after caller
+;
+l054d:
+	pop	de		; Get string pointer
+	ld	a,(de)		; Get length
+	ld	c,a
+	ld	b,0		; Expand for 16 bit
+	cpl			; Negate
+	ld	l,a
+	ld	h,-1
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ex	de,hl
+	inc	bc
+	ldir			; Move to stack
+	jp	(hl)
+;
+; Push set onto stack
+; ENTRY	Reg HL points to set variable
+;	Reg C holds set length in bits
+;	Reg B holds set to be cleared
+;
+l055d:
+	pop	ix		; Get caller
+	ex	de,hl
+	ld	hl,-set.len
+	add	hl,sp		; Adjust stack for max set length
+	ld	sp,hl
+	ex	de,hl
+	push	bc
+	inc	b		; Test bits to clear
+	dec	b
+	jr	z,l0570		; Nope
+	xor	a
+l056c:
+	ld	(de),a		; Clear a part
+	inc	de
+	djnz	l056c
+l0570:
+	ldir			; Save set on stack
+	pop	bc
+	ld	a,set.len
+	sub	b
+	sub	c		; Test remaining bits to clear
+	jr	z,l057f		; Nope
+	ld	b,a
+	xor	a
+l057b:
+	ld	(de),a		; Clear bits
+	inc	de
+	djnz	l057b
+l057f:
+	jp	(ix)
+;
+; Initialize a set on stack
+;
+l0581:
+	pop	ix		; Get caller
+	ld	hl,-set.len
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ld	b,set.len	; Set count
+	xor	a
+l058b:
+	ld	(hl),a		; Init set
+	inc	hl
+	djnz	l058b
+	jp	(ix)
+;
+; Init one set element
+; ENTRY	Reg HL holds set value to be set
+;
+l0591:
+	pop	ix
+	ld	b,l		; Get value
+	call	l05ba		; Get bit
+l0597:
+	or	(hl)		; Insert it
+	ld	(hl),a
+l0599:
+	jp	(ix)
+;
+; Init a contiguous set value
+; ENTRY	Reg HL holds upper limit
+;	On stack pushed lower limit
+;
+l059b:
+	pop	ix
+	pop	de		; Get lower limit
+	ld	a,l
+	sub	e
+	jr	c,l0599		; Out of range
+	inc	a
+	ld	c,a
+	ld	b,e		; Get low value
+	call	l05ba		; Get bit
+	ld	e,a
+	ld	b,c		; Copy loop value
+	xor	a
+l05ab:
+	or	e
+	sla	e		; Shift bit
+	jr	nc,l05b6
+	or	(hl)		; Insert
+	ld	(hl),a
+	inc	hl		; Point to next
+	xor	a
+	ld	e,1		; Init low bit for next
+l05b6:
+	djnz	l05ab
+	jr	l0597		; Set final one
+;
+; Access one set bit
+; ENTRY	Reg B holds numeric value of set element
+; EXIT	Accu holds bit
+;	Reg HL points to set loacation
+;
+l05ba:
+	ld	a,b		; Get value
+	and	11111000b	; Mask it
+	rrca			; Divide by eight
+	rrca
+	rrca
+	add	a,2		; Fix position for stack
+	ld	l,a
+	ld	h,0
+	add	hl,sp		; Get position
+	ld	a,b
+	and	00000111b	; Mask bits
+	inc	a
+	ld	b,a
+	xor	a
+	scf			; Init 1
+l05cd:
+	rla			; Shift bit into correct position
+	djnz	l05cd
+	ret
+;
+; Save real number
+; ENTRY	Reg HL points to real variable
+;	Alternative regs HL,DE,BC hold number
+;
+l05d1:
+	push	hl		; Save pointer
+	exx
+	ex	de,hl
+	ex	(sp),hl		; Get back pointer
+	ld	(hl),e		; Save exponent
+	inc	hl
+	ld	(hl),d		; Save LSB
+	inc	hl
+	pop	de
+	ld	(hl),e		; Save 4th mantissa byte
+	inc	hl
+	ld	(hl),d		; Save 3rd byte
+	inc	hl
+	ld	(hl),c		; Save 2nd byte
+	inc	hl
+	ld	(hl),b		; Save MSB
+	ret
+;
+; Assign string from stack
+; ENTRY	Reg HL points to string to be assigned
+;	Reg B holds max length of this string
+;
+l05e2:
+	pop	ix		; Get caller
+	ld	a,b		; Get max
+	ex	de,hl		; Swap pointer
+	ld	hl,0
+	ld	b,h
+	add	hl,sp		; Fix stack for start of string
+	ld	c,(hl)		; Get this length
+	push	hl
+	add	hl,bc		; Calculate new stack
+l05ee:
+	inc	hl
+	ex	(sp),hl
+	cp	c		; Test length
+	jr	c,l05f4
+	ld	a,c		; Get smaller one
+l05f4:
+	ld	(de),a		; Unpack length
+	inc	de
+	inc	hl
+	or	a		; Test any character
+	jr	z,l05fd		; Nope
+	ld	c,a
+	ldir			; Unpack if so
+l05fd:
+	pop	hl
+	ld	sp,hl
+	jp	(ix)
+;
+; Assign string from stack
+; ENTRY	Reg B holds max length of string
+;
+l0601:
+	pop	ix		; Get caller
+	ld	a,b		; Get max
+	ld	hl,0
+	ld	b,h
+	add	hl,sp		; Fix stack for start of string
+	ld	c,(hl)		; Get this length
+	push	hl
+	add	hl,bc		; Calculate new stack
+	inc	hl
+	ld	e,(hl)		; Fetch address of string
+	inc	hl
+	ld	d,(hl)
+	jr	l05ee		; Unpack it
+;
+; Assign set variable
+; ENTRY	Reg HL points to variable
+;	Reg BC holds length of set
+;
+l0612:
+	pop	ix		; Get caller
+	ex	de,hl
+	ld	l,b		; Copy length
+	ld	h,0
+	ld	b,h
+	add	hl,sp		; Point to start location
+	ldir			; Unpack set variable
+	ld	hl,set.len
+l061f:
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	jp	(ix)		; Exit
+;
+; Assign set variable
+; ENTRY	Reg BC holds length of set
+;
+l0623:
+	pop	ix		; Get caller
+	ld	hl,set.len
+	add	hl,sp		; Point to destination
+	ld	e,(hl)		; Get it
+	inc	hl
+	ld	d,(hl)
+	ld	l,b		; Copy length
+	ld	h,0
+	ld	b,h
+	add	hl,sp		; Point to start location
+	ldir
+	ld	hl,set.len+2	; Remember address
+	jr	l061f		; Fix stack
+;
+; Set set to stack
+; ENTRY	Reg HL holds address of set
+;	Reg B  holds length of set
+;
+l0638:
+	pop	ix		; Get caller
+	ex	de,hl		; Swap source
+	ld	a,b
+	cpl
+	ld	l,a
+	ld	h,-1		; Get -length
+	add	hl,sp		; Fix stack
+	ld	sp,hl		; Set new
+	ld	(hl),b		; Set length
+	inc	hl
+	ld	c,b		; Expand length
+	ld	b,0
+	ex	de,hl		; Get back source
+	ldir			; Move to stack
+	jp	(ix)
+;
+; Index check on compiler directive {$R+}
+; ENTRY	Reg HL holds current index
+;	Reg DE holds max index
+;
+l064c:
+	or	a
+	sbc	hl,de		; Verify limit ok
+	add	hl,de
+	ret	c		; Yeap
+	ld	a,_IndxErr
+	jp	l2027		; Else process error
+;
+; Range check on compiler directive {$R+}
+; ENTRY	Reg HL holds actual value
+;	Reg DE holds low limit
+;	Reg BC holds range of value
+;
+l0656:
+	or	a
+	sbc	hl,de
+	or	a
+	sbc	hl,bc		; Test max
+	jr	nc,l0661	; Error
+	add	hl,bc		; Restore value
+	add	hl,de
+	ret
+l0661:
+	ld	a,_RngErr
+	jp	l2027		; Set error
+;
+; Set up FOR .. TO loop
+; ENTRY	Reg DE holds start value
+;	Reg HL holds end value
+; EXIT	Reg DE holds loops
+;	Reg HL holds start value
+;
+l0666:
+	or	a
+	sbc	hl,de		; Get difference
+	ex	de,hl		; Into reg DE
+l066a:
+	inc	de		; Fix loop count
+	jp	pe,l0671	; Check any loop
+	ret	p
+	jr	l0672
+l0671:
+	ret	m
+l0672:
+	ld	de,0		; Set no loop
+	ret
+;
+; Set up FOR .. DOWNTO loop
+; ENTRY	Reg DE holds start value
+;	Reg HL holds end value
+; EXIT	Reg DE holds loops
+;	Reg HL holds start value
+;
+l0676:
+	push	de
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Get difference
+	ex	de,hl
+	pop	hl
+	jr	l066a		; Build loop
+;
+; ################## The comparison package ###################
+; # TRUE set (=1 on TURBO) if relation matches                #
+; #                                                           #
+; # On all relational functions the assignment is as follows: #
+; #                                                           #
+; # INTEGER : DE:HL                                           #
+; # REAL    : (Regs):(Regs)'                                  #
+; # STRING  : (Stack):(next_stack)                            #
+; #                                                           #
+; #############################################################
+;
+; ********************************
+; ********** Relation = **********
+; ********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+l067f:
+	or	a
+	sbc	hl,de		; Get difference
+l0682:
+	ld	hl,.TRUE	; Init TRUE
+	ret	z		; Ok, same
+	dec	hl		; Fix for FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+l0688:
+	call	l0bdf		; Compare
+	jr	l0682		; Set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+l068d:
+	call	l09b0		; Compare
+	jr	l0682		; Set result
+;
+; *********************************
+; ********** Relation <> **********
+; *********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+l0692:
+	or	a
+	sbc	hl,de		; Get difference
+l0695:
+	ld	hl,.TRUE	; Init TRUE
+	ret	nz		; Ok, not same
+	dec	hl		; Fix for FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+l069b:
+	call	l0bdf		; Compare
+	jr	l0695		; Set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+l06a0:
+	call	l09b0		; Compare
+	jr	l0695		; Set result
+;
+; *********************************
+; ********** Relation >= **********
+; *********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+l06a5:
+	call	l0772		; Check operands
+l06a8:
+	ld	hl,.TRUE	; Init TRUE
+	ret	nc		; Ok if .GTE.
+	dec	hl		; Else fix for FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+l06ae:
+	call	l0bdf		; Compare
+	jr	l06a8		; Set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+l06b3:
+	call	l09b0		; Compare
+	jr	l06a8		; Set result
+;
+; *********************************
+; ********** Relation <= **********
+; *********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+l06b8:
+	call	l0772		; Check operands
+l06bb:
+	ld	hl,.TRUE	; Init TRUE
+	ret	z		; Ok if .EQ.
+	ret	c		; Ok if .LT.
+	dec	hl		; Else fix for FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+l06c2:
+	call	l0bdf		; Compare
+	jr	l06bb		; Set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+l06c7:
+	call	l09b0		; Compare
+	jr	l06bb		; Set result
+;
+; ********************************
+; ********** Relation > **********
+; ********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+l06cc:
+	call	l0772		; Check operands
+l06cf:
+	ld	hl,FALSE	; Init FALSE
+	ret	z		; Ok if .EQ.
+	ret	c		; Ok if .LT.
+	inc	hl		; Else fix for TRUE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+l06d6:
+	call	l0bdf		; Compare
+	jr	l06cf		; Set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+l06db:
+	call	l09b0		; Compare
+	jr	l06cf		; Set result
+;
+; ********************************
+; ********** Relation < **********
+; ********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+l06e0:
+	call	l0772		; Check operands
+l06e3:
+	ld	hl,.TRUE	; Init TRUE
+	ret	c		; Ok if .LT.
+	dec	hl		; Else fix for FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+l06e9:
+	call	l0bdf		; Compare
+	jr	l06e3		; Set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+l06ee:
+	call	l09b0		; Compare
+	jr	l06e3		; Set result
+;
+; ################# End of comparison package #################
+;
+; Function SQR(integer):integer;
+; ENTRY	Reg HL holds number
+; EXIT	Reg HL holds power
+;
+l06f3:
+	ld	d,h		; Copy number
+	ld	e,l
+;
+; Operator *
+; Multiply signed integers
+; ENTRY	Reg DE holds multiplicand
+;	Reg HL holds multiplier
+; EXIT	Reg HL holds product
+;
+l06f5:
+	ld	c,e		; Copy multiplicand
+	ld	b,d
+	ex	de,hl
+	ld	hl,0		; Init product
+	ld	a,d
+	or	a		; Test word
+	ld	a,16
+	jr	nz,l0704	; Yeap, set bit count
+	ld	d,e
+	ld	a,8		; Change bit count
+l0704:
+	add	hl,hl		; Do the multiplication
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jr	nc,l070b
+	add	hl,bc
+l070b:
+	dec	a
+	jr	nz,l0704
+	ret
+;
+; Operator DIV
+; Divide signed integers
+; ENTRY	Reg DE holds dividend
+;	Reg HL holds divisor
+; EXIT	Reg HL holds quotient
+; 	Reg DE holds remainder
+;
+l070f:
+	ld	a,h		; Test zero divisor
+	or	l
+	jp	z,l0a03		; Divide by zero
+	ld	a,h
+	xor	d		; Calculate sign
+	push	af
+	call	l0780		; Make both numbers positive
+	ex	de,hl
+	call	l0780
+	ex	de,hl
+	ld	b,h		; Copy divisor
+	ld	c,l
+	xor	a
+	ld	h,a		; Clear result
+	ld	l,a
+	ld	a,17		; Set bit count
+l0726:
+	adc	hl,hl		; Perform division
+	sbc	hl,bc
+	jr	nc,l072e
+	add	hl,bc
+	scf
+l072e:
+	ccf
+	rl	e
+	rl	d
+	dec	a		; Test done
+	jr	nz,l0726	; Nope, loop on
+	ex	de,hl
+	pop	af		; Get resulting sign
+	ret	p
+	jr	l0783		; Negate result
+;
+; Function RANDOM(integer):integer
+; ENTRY	Reg HL holds integer limit
+; EXIT	Reg HL holds random
+;
+l073b:
+	push	hl
+	call	l0792		; Get random value
+	srl	h		; Make positive, dividing by 2
+	rr	l
+	pop	de
+	ex	de,hl
+;
+; Operator MOD
+; Get modulo of signed integers
+; ENTRY	Reg DE holds dividend
+;	Reg HL holds divisor
+; EXIT	Reg HL holds remainder
+;
+l0745:
+	call	l070f		; HL:=DE DIV HL;DE:=DE MOD HL
+	ex	de,hl		; Swap remainder
+	bit	7,d		; Test result
+	ret	z
+	jr	l0783		; Negate
+;
+; Operator SHL
+; Shift left number
+; ENTRY	Reg DE holds number to be shifted
+;	Reg HL holds shift count
+; EXIT	Reg HL holds result
+;
+l074e:
+	call	l0761		; Get shift values
+	ret	z		; End on zero
+l0752:
+	add	hl,hl		; Shift
+	djnz	l0752
+	ret
+;
+; Operator SHR
+; Shift right number
+; ENTRY	Reg DE holds number to be shifted
+;	Reg HL holds shift count
+; EXIT	Reg HL holds result
+;
+l0756:
+	call	l0761		; Get shift values
+	ret	z		; End on zero
+l075a:
+	srl	h		; Shift
+	rr	l
+	djnz	l075a
+	ret
+;
+; Set shift values
+; ENTRY	Reg HL holds number to be shifted
+;	Reg DE holds shift count
+; EXIT	Reg B holds shift count
+;	Zero flag set on nothing to be shifted
+;	Reg HL may be preset to zero
+;
+l0761:
+	ex	de,hl		; Swap factor
+	ld	a,d		; Test hi zero value
+	or	a
+	jr	nz,l076e	; Nope, should be
+	ld	a,e
+	cp	16		; Test max length
+	jr	nc,l076e	; Overflow
+	ld	b,a
+	or	a
+	ret
+l076e:
+	xor	a
+	ld	h,a		; Clear result
+	ld	l,a
+	ret
+;
+; Compare signed integers
+; ENTRY	Reg DE holds 1st number
+;	Reg HL holds 2nd number
+; EXIT	Zero  flag set if DE=HL
+;	Carry flag set if DE<HL
+;
+l0772:
+	ex	de,hl
+	ld	a,h
+	xor	d		; Test same signs
+	ld	a,h
+	jp	m,l077e		; Nope, fix carry
+	cp	d		; Compare hi
+	ret	nz
+	ld	a,l
+	cp	e		; Compare lo if hi is same
+	ret
+l077e:
+	rla			; Get sign of first number
+	ret
+;
+; Function ABS(integer):integer;
+; ENTRY	Reg HL holds signed integer
+; EXIT	Reg HL holds positive integer
+;
+l0780:
+	bit	_MB,h		; Test sign
+	ret	z		; Already positive
+l0783:
+	ld	a,h		; Build one's complement
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl		; Fix for two's complement
+	ret
+;
+; Function ODD(integer):boolean
+;
+l078b:
+	ld	a,l		; Get lo byte
+	and	LSB		; Extract bit
+	ld	l,a		; Expand to 16 bit
+	ld	h,0
+	ret
+;
+; Get random value
+; EXIT	Regs BC and HL hold byte 3 and 4 of resulting random
+;	Reg  DE holds middle part of real number
+;
+l0792:
+	ld	bc,(l00c8+2)	; Load old values
+	ld	de,(l00c8)
+	push	bc		; Save them
+	push	de
+	ld	a,b		; Expand to 40 bits
+	ld	b,c
+	ld	c,d
+	ld	d,e
+	ld	e,0
+	rra			; Shift them all
+	rr	b
+	rr	c
+	rr	d
+	rr	e
+	pop	hl
+	add	hl,de		; Add to old
+	ex	de,hl
+	pop	hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	ld	hl,0110001011101001b
+	add	hl,de		; Fix them - add 62E9H
+	ld	(l00c8),hl	; Save new values
+	ex	de,hl
+	ld	hl,0011011000011001b
+	adc	hl,bc		; Add 3619H
+	ld	(l00c8+2),hl
+	ld	b,h		; Copy result
+	ld	c,l
+	ret
+;
+; Convert positive integer to ASCII number
+; ENTRY	Reg IX points to ASCII buffer
+; 	Reg HL holds integer
+; EXIT	Buffer filled
+;
+l07c6:
+	ld	b,0		; Init flag
+	ld	de,10000
+	call	l07e2		; Start with 10000s
+	ld	de,1000
+	call	l07e2		; Then 1000s
+	ld	de,100
+	call	l07e2		; Then 100s
+	ld	e,10
+	call	l07e2		; Then 10s
+	ld	a,l		; Get remainder
+	jr	l07ef
+l07e2:
+	xor	a		; Clear quotient
+l07e3:
+	inc	a		; Advance quotient
+	sbc	hl,de		; Divide
+	jr	nc,l07e3	; Still positive
+	add	hl,de		; Fix for last number
+	inc	b		; Access flag
+	dec	a		; Test zero digit
+	jr	nz,l07ef	; Nope, so store result
+	dec	b		; Test flag
+	ret	z		; No leading zeroes
+l07ef:
+	add	a,'0'		; Make ASCII
+	ld	(ix+0),a	; Save it
+	inc	ix		; Advance buffer
+	ret
+;
+; Convert ASCII number to integer
+; ENTRY	Reg IX points to ASCII number
+; EXIT	Reg HL holds integer
+;	Carry set on overflow
+;
+l07f7:
+	ld	a,(ix+0)
+	sub	'$'		; Test hex indicator
+	ld	c,a		; Save flag
+	ld	hl,0		; Init result
+	jr	nz,l0804
+l0802:
+	inc	ix		; Skip indicator
+l0804:
+	ld	a,(ix+0)
+	call	l04a6		; Convert to upper case
+	sub	'0'		; Strip off offset
+	jr	c,l0837		; Out of range
+	cp	9+1		; Test decimal
+	jr	c,l0820		; Yeap
+	inc	c		; Test hex allowed
+	dec	c
+	jr	nz,l0837	; Nope
+	sub	'A'-'0'-10	; Fix hex offset
+	cp	10		; Verify correct range
+	jr	c,l0837
+	cp	15+1
+	jr	nc,l0837
+l0820:
+	ld	d,h		; Copy current number
+	ld	e,l
+	add	hl,hl		; * 2
+	ret	c		; Overflow
+	add	hl,hl		; * 4
+	ret	c
+	inc	c		; Test hex
+	dec	c
+	jr	nz,l082c
+	ld	d,h		; Copy * 4
+	ld	e,l
+l082c:
+	add	hl,de		; * 5 or * 8
+	ret	c
+	add	hl,hl		; * 10 or * 16
+	ret	c
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Insert new digit
+	ret	c
+	jr	l0802
+l0837:
+	ld	a,c
+	or	a		; Test hex
+	ret	z		; Yeap
+	ld	a,h
+	add	a,a		; Get MSB into carry if decimal
+	ret
+;
+; Add two strings
+; ENTRY	Stack holds strings
+; EXIT	Stack holds combined string
+;
+l083d:
+	pop	ix		; Get caller
+	pop	hl
+	push	hl
+	ld	a,l		; Get length of 1st
+	ld	h,0
+	inc	hl
+	add	hl,sp		; Point to 2nd
+	ld	c,(hl)
+	add	a,c		; Add lengthes
+	jr	c,l0866		; Too long
+	ld	(hl),a		; Set new length
+	ex	de,hl
+	ld	hl,0
+	ld	b,h
+	sbc	hl,bc		; Prepare moving strings
+	add	hl,sp
+	ld	sp,hl
+	ex	de,hl
+	push	hl
+	inc	bc
+	ldir			; Move into right place
+	ex	de,hl
+	pop	hl
+	dec	hl
+	dec	de
+	ld	c,a
+	inc	bc
+	lddr
+	ex	de,hl
+	inc	hl
+	ld	sp,hl
+	jp	(ix)
+l0866:
+	ld	a,_StrLenErr	; Set error
+	jp	l2029
+;
+; Function COPY(string,start,length):string
+; ENTRY	Start on stack, followed by string
+;	Reg HL holds length
+; EXIT	Substring on stack
+;
+l086b:
+	pop	ix		; Get caller
+	call	l04c8		; Get length byte from integer
+	ld	d,a
+	pop	hl		; Get start
+	call	l09dd		; Verify 1..255
+	ld	e,a
+	pop	hl		; Get length ( - and 1st character)
+	push	hl
+	ld	a,l
+	sub	e		; Test against start
+	jr	c,l0896		; Out of bounds
+	inc	d		; Test zero length
+	dec	d
+	jr	z,l0896		; Yeap, done
+	cp	d		; Compare against length
+	jr	c,l0899		; Nothing to move
+	ld	c,d		; Fix a bit
+	ld	b,0
+	ld	h,b
+	add	hl,sp
+	ld	a,e
+	add	a,d
+	ld	d,h
+	ld	e,l
+	dec	a
+	ld	l,a
+	ld	h,b
+	add	hl,sp
+	ld	a,c
+	lddr			; Then move down
+	ex	de,hl
+	jr	l089f
+l0896:
+	xor	a		; Set zero length
+	jr	l089c
+l0899:
+	inc	a		; Fix length
+	ld	l,e
+	dec	l		; Fix position
+l089c:
+	ld	h,0
+	add	hl,sp		; Copy position
+l089f:
+	ld	(hl),a		; Store length
+	ld	sp,hl		; Get stack
+	jp	(ix)		; Exit
+;
+; Function LENGTH(string):integer
+; ENTRY	String on stack
+; EXIT	Reg HL holds length
+;
+l08a3:
+	pop	ix		; Get caller
+	pop	hl		; Get length ( - and 1st character)
+	push	hl
+	ld	a,l		; Save length
+	ld	h,0
+	inc	hl
+	add	hl,sp
+	ld	sp,hl		; Fix stack
+	ld	l,a		; Get 16 bit length
+	ld	h,0
+	jp	(ix)		; Exit
+;
+; Function POS(substring,string):integer
+; ENTRY	String on stack, followed by substring
+; EXIT	Reg HL holds position, 0 is not found
+;
+l08b2:
+	pop	ix		; Get caller
+	ld	hl,0
+	ld	d,h
+	add	hl,sp		; Copy stack
+	ld	e,(hl)		; Get length of main_string
+	ld	c,e
+	inc	hl
+	push	hl
+	add	hl,de		; Point to sub_string
+	ld	e,(hl)		; Get length of sub_string
+	ld	b,e
+	inc	hl
+	push	hl
+	add	hl,de		; Point to end of both
+	push	hl
+	pop	iy		; Copy address
+	pop	de		; Get sub_string
+	pop	hl		; Get main_string
+	ld	a,c
+	sub	b		; Test range
+	jr	c,l08dc		; Sub_string > main_string - no match
+	inc	a		; Fix count
+	ld	c,a
+l08ce:
+	push	bc
+	push	de
+	push	hl
+l08d1:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	z,l08e1		; Maybe success
+	pop	hl
+	pop	de
+	pop	bc
+	inc	hl
+	dec	c		; Test more to search
+	jr	nz,l08ce	; Ok, then try next
+l08dc:
+	ld	hl,0		; Set zero result
+	jr	l08ef
+l08e1:
+	inc	hl
+	inc	de
+	djnz	l08d1		; Loop thru sub_string
+	pop	de
+	pop	hl
+	pop	bc
+	ld	hl,0
+	add	hl,sp		; Get pointers
+	ex	de,hl
+	sbc	hl,de		; Calculate resulting position
+l08ef:
+	ld	sp,iy		; Set stack
+	jp	(ix)		; Exit
+;
+; Procedure DELETE(string,start,length)
+; ENTRY	Start on stack, followed by string
+; 	Reg HL holds length
+;
+l08f3:
+	pop	ix		; Get caller
+	call	l04c8		; Get length byte from integer
+	ld	c,a
+	pop	hl
+	call	l09dd		; Verify length in range 1..255
+	ld	e,a
+	pop	hl		; Get start_string
+	ld	a,(hl)		; Get length
+	sub	e		; Test start > length
+	jr	c,l091e		; Exit if so
+	inc	c
+	dec	c		; Test any length
+	jr	z,l091e		; Nope, exit
+	sub	c		; Test remaining count
+	jr	c,l091c		; Nope, done
+	push	af
+	ld	a,(hl)
+	sub	c
+	ld	(hl),a
+	ld	b,0
+	ld	d,b
+	add	hl,de		; Point to destination
+	ld	d,h
+	ld	e,l
+	add	hl,bc		; Point to source
+	pop	af
+	inc	a
+	ld	c,a
+	ldir			; Unpack
+	jr	l091e
+l091c:
+	dec	e		; Adjust length
+	ld	(hl),e		; Store it
+l091e:
+	jp	(ix)		; Exit
+;
+; Procedure INSERT(string,substring,start)
+; ENTRY	Pointer of substring on stack, followed by string
+; 	Reg HL holds start
+;	Reg B holds max length of string
+;
+l0920:
+	pop	ix		; Get caller
+	call	l09dd		; Verify start in range 1..255
+	ld	c,a
+	pop	de		; Get sub_string
+	ld	(l00e8),de
+	ld	hl,0
+	add	hl,sp		; Get string pointer
+	ld	a,(de)
+	push	af
+	add	a,(hl)		; Get combined length
+	jr	c,l0937		; Truncate on overflow
+	cp	b		; Compare against max
+	jr	c,l0938		; Ok
+l0937:
+	ld	a,b		; Set max defualt
+l0938:
+	ld	(de),a		; Save combined length
+	pop	af		; Get length of substring
+	ld	d,a
+	ld	e,(hl)
+	sub	c		; Get remainder
+	jr	c,l096e		; Skip
+	inc	a
+	ld	l,a
+	ld	a,d
+	add	a,e
+	jr	c,l0949
+	cp	b
+	ld	a,l
+	jr	c,l0951
+l0949:
+	ld	a,b
+	sub	e
+	jr	c,l0973
+	sub	c
+	jr	c,l0973
+	inc	a
+l0951:
+	or	a
+	jr	z,l0973
+	push	bc
+	push	de
+	ld	hl,(l00e8)	; Get back sub_string pointer
+	ld	e,a
+	dec	e
+	ld	d,0
+	ld	b,d
+	add	hl,de
+	add	hl,bc
+	pop	de
+	push	de
+	push	hl
+	ld	d,b
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	c,a
+	lddr			; Move down
+	pop	de
+	pop	bc
+	jr	l0973
+l096e:
+	ld	a,d
+	inc	a
+	jr	z,l098b
+	ld	c,a
+l0973:
+	ld	a,b
+	sub	c
+	inc	a
+	cp	e
+	jr	c,l097a
+	ld	a,e
+l097a:
+	or	a
+	jr	z,l098b
+	ld	hl,(l00e8)	; Get sub_string pointer
+	ld	b,0
+	add	hl,bc
+	ex	de,hl
+	ld	hl,1
+	add	hl,sp
+	ld	c,a
+	ldir			; Move
+l098b:
+	ld	hl,0
+	ld	d,h
+	add	hl,sp		; Fix stack
+	ld	e,(hl)
+	inc	de
+	add	hl,de
+	ld	sp,hl		; Set stack
+	jp	(ix)		; Exit
+;
+; Check assignment of string to character
+; EXIT	Reg L holds character
+;
+l0996:
+	pop	ix		; Get caller
+	pop	hl		; Get length and character
+	dec	l		; Verify character only
+	jp	nz,l0866	; Error if not
+	ld	l,h		; Unpack character
+	ld	h,0
+	jp	(ix)		; Exit
+;
+; Set character into string
+;
+l09a2:
+	ld	hl,2
+	ld	d,h
+	add	hl,sp		; Point to string
+	ld	e,(hl)		; Get length
+	inc	de
+	add	hl,de		; Point to top
+	ld	a,(hl)		; Get character
+	ld	(hl),1		; Set length
+	inc	hl
+	ld	(hl),a		; Store character
+	ret
+;
+; Compare two strings
+; ENTRY	1st stack 1st pushed, 2nd stack 2nd pushed
+; EXIT	Carry flag set if 1st<2nd
+;	Zero  flag set if 1st=2nd
+;
+l09b0:
+	ld	hl,2*2		; Note 2nd level call
+	ld	d,h
+	add	hl,sp		; Point to 2nd string
+	ld	e,(hl)		; Get length
+	ld	c,e
+	inc	hl
+	push	hl
+	add	hl,de		; Point to first string
+	ld	e,(hl)		; Get length
+	ld	b,e
+	inc	hl
+	push	hl
+	add	hl,de		; Set return stack
+	push	hl
+	pop	iy		; Copy into reg IY
+	pop	de		; Get 1st string
+	pop	hl		; Get 2nd string
+l09c4:
+	xor	a		; Try zero length
+	cp	b
+	jr	z,l09cc
+	cp	c		; Test on both
+	jr	nz,l09d3
+	ld	a,b
+l09cc:
+	cp	c
+l09cd:
+	pop	hl		; Get back callers
+	pop	de
+	ld	sp,iy		; Set new stack
+	push	de		; Set 2nd kevel caller
+	jp	(hl)		; Exit
+l09d3:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l09cd	; No match
+	inc	hl
+	inc	de
+	dec	b
+	dec	c
+	jr	l09c4
+;
+; Verify value in reg HL in range 1..255
+;
+l09dd:
+	ld	a,h		; Verify < 256
+	or	a
+	jr	nz,l09e4
+	ld	a,l
+	or	a		; Verify <> 0
+	ret	nz
+l09e4:
+	ld	a,_StrIdx
+	jp	l2029
+;
+; Function ADD:real
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold sum
+;
+l09e9:
+	call	l0a0d		; Add
+l09ec:
+	ret	nc		; Check result
+	ld	a,_FLPovfl
+	jp	l2027		; Set error and abort
+;
+; Function SUBTRACT:real
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold difference
+;
+l09f2:
+	call	l0a81		; Subtract
+	jr	l09ec		; Check result
+;
+; Function SQR(real):real
+; ENTRY	Regs (HL,DE,BC) hold number
+; EXIT	Regs (HL,DE,BC) hold square
+;
+l09f7:
+	call	l0fac		; Copy number, then multiply
+;
+; Function MULTIPLY:real
+; ENTRY	Regs (HL,DE,BC)  hold multiplicand
+; 	Regs (HL,DE,BC)' hold multiplier
+; EXIT	Regs (HL,DE,BC)  hold product
+;
+l09fa:
+	call	l0a97		; Multiply
+	jr	l09ec		; Check result
+;
+; Function DIVIDE:real
+; ENTRY	Regs (HL,DE,BC)  hold 1st dividend
+; 	Regs (HL,DE,BC)' hold 2nd divisor
+; EXIT	Regs (HL,DE,BC)  hold quotient
+;
+l09ff:
+	exx			; Get divisor
+	ld	a,l
+	or	a		; Verify not zero
+	exx
+l0a03:
+	ld	a,_DivZero
+	jp	z,l2027		; Error if division by zero
+	call	l0af5		; Divide
+	jr	l09ec		; Check result
+;
+; Add reals
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold sum
+;	Carry set on overflow
+;
+l0a0d:
+	exx
+	bit	sgn.bit,b	; Test sign of 2nd number
+	exx
+	jp	nz,l0a88	; Subtract if less 0
+l0a14:
+	exx
+	ld	a,l		; Test 2nd number zero
+	or	a
+	exx
+	ret	z		; Ok, result is the 1st number
+	exx
+	push	bc		; Save 1st number
+	push	de
+	push	hl
+	exx
+	ld	a,l
+	or	a		; Test 1st number zero
+	jr	nz,l0a27	; Nope
+	exx
+	res	sgn.bit,b	; Clear sign
+	jr	l0a7b		; Get 2nd number as result
+l0a27:
+	push	bc
+	set	sgn.bit,b	; Force bit set
+	xor	a
+	ex	af,af'
+	exx
+	set	sgn.bit,b
+	ld	a,l
+	exx
+	sub	l		; Test same exponents
+	jr	z,l0a47		; Yeap
+	jr	nc,l0a3c
+	neg
+	ex	af,af'
+	dec	a
+	ex	af,af'
+	exx
+l0a3c:
+	call	l0b7a		; Shift mantissa right
+	inc	l		; Bump exponent
+	dec	a
+	jr	nz,l0a3c
+	ex	af,af'
+	jr	z,l0a47
+	exx
+l0a47:
+	pop	af		; Get back mantissa MSB
+	and	sign.bit	; Test sign
+	jr	nz,l0a5b	; It's negative
+	call	l0b92		; Add mantissas
+	jr	nc,l0a76	; Test bit out
+	call	l0b7b		; Rotate mantissa right
+	or	a
+	inc	l		; Fix exponent
+	jr	nz,l0a76	; Test underflow
+	scf
+	jr	l0a7b
+l0a5b:
+	call	l0bc6		; Compare mantissas
+	ccf
+	push	af
+	jr	z,l0a72		; It's same
+	jr	c,l0a65		; It's less
+	exx
+l0a65:
+	call	l0bac		; Subtract mantissas
+l0a68:
+	bit	sgn.bit,b	; Test normalized
+	jr	nz,l0a75	; Yeap
+	call	l0b86		; Shift left
+	dec	l
+	jr	nz,l0a68
+l0a72:
+	call	l0b72		; Zero result
+l0a75:
+	pop	af
+l0a76:
+	jr	c,l0a7a		; Test sign
+	res	sgn.bit,b	; Reset if positive
+l0a7a:
+	or	a
+l0a7b:
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	ret
+;
+; Subtract reals
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold difference
+;	Carry set on overflow
+;
+l0a81:
+	exx
+	bit	sgn.bit,b	; Test sign of 2nd number
+	exx
+	jp	nz,l0a14	; Add if less 0
+l0a88:
+	call	l0a8f		; Negate
+	call	l0a14		; Then add
+	ret	c
+;
+; Negate real
+; ENTRY	Regs HL,DE,BC hold real number
+; EXIT	Sign changed if real > 0
+;
+l0a8f:
+	inc	l		; Test exponent zero
+	dec	l
+	ret	z		; Exit if so
+	ld	a,b
+	xor	sign.bit	; Change sign bit
+	ld	b,a
+	ret
+;
+; Multiply reals
+; ENTRY	Regs (HL,DE,BC)  hold multiplicand
+; 	Regs (HL,DE,BC)' hold multiplier
+; EXIT	Regs (HL,DE,BC)  hold product
+;	Carry set on overflow
+;
+l0a97:
+	exx
+	ld	a,l
+	or	a		; Test zero multiplier
+	exx
+	jp	z,l0b72		; Return 0.0 if so
+	ld	a,l
+	or	a
+	ret	z		; Return if multiplicand zero
+	exx
+	add	a,l		; Add exponents
+	exx
+	call	l0b4d		; Fix exponent
+	push	bc		; Save number
+	push	de
+	push	hl
+	add	ix,sp
+	call	l0b72		; Prepare result
+	exx
+	ld	l,mant.len	; Set mantissa count
+	exx
+l0ab3:
+	ld	a,bit.len	; Set bit count
+	inc	ix
+	ld	l,(ix+0)
+l0aba:
+	ex	af,af'
+	rr	l		; Shift bit
+	jr	nc,l0ac2
+	call	l0b92		; Add mantissa if bit out
+l0ac2:
+	call	l0b7b		; Rotate mantissa right
+	ex	af,af'
+	dec	a		; Go thru all bits
+	jr	nz,l0aba
+	exx
+	dec	l
+	exx
+	jr	nz,l0ab3
+	ld	l,(ix-mant.len)	; Get byte back
+	bit	sgn.bit,b	; Test sign
+	jr	nz,l0ade
+	ex	af,af'
+	call	l0b87		; Get bit
+	inc	l
+	dec	l
+	jr	z,l0ade
+	dec	l
+l0ade:
+	pop	af		; Clean stack
+	pop	af
+	pop	af
+l0ae1:
+	or	a
+l0ae2:
+	ex	af,af'
+	pop	af
+	exx
+	pop	bc
+	pop	hl
+	exx
+	pop	ix
+	res	sgn.bit,b	; Reset hi bit
+	or	b
+	ld	b,a		; Insert sign
+	inc	l
+	dec	l
+	call	z,l0b72		; Clear if underflow
+	ex	af,af'
+	ret
+;
+; Divide reals
+; ENTRY	Regs (HL,DE,BC)  hold 1st dividend
+; 	Regs (HL,DE,BC)' hold 2nd divisor
+; EXIT	Regs (HL,DE,BC)  hold quotient
+;	Carry set on overflow
+;
+l0af5:
+	ld	a,l
+	or	a		; Test zero divisor
+	ret	z
+	exx
+	sub	l		; Get resulting exponent
+	exx
+	ccf
+	call	l0b4d		; Fix it
+	push	hl
+	push	hl
+	push	hl
+	add	ix,sp
+	exx
+	ld	l,mant.len	; Get complete count
+	exx
+	ld	a,bit.len	; Set bit count
+l0b0a:
+	ex	af,af'
+	call	l0bc6		; Compare mantissas
+	jr	c,l0b13
+	call	l0bac		; Subtract mantissas
+l0b13:
+	ccf
+	rl	l
+	ex	af,af'
+	dec	a		; Go thru the bits
+	jr	nz,l0b26
+	ld	(ix+mant.len),l	; Set result
+	dec	ix
+	exx
+	dec	l		; Go thru the mantissa
+	exx
+	jr	z,l0b32		; Total end
+	ld	a,bit.len	; Reset bit count
+l0b26:
+	call	l0b86		; Shift left
+	jr	nc,l0b0a
+	ex	af,af'
+	call	l0bac		; Subtract mantissas
+	or	a
+	jr	l0b13
+l0b32:
+	call	l0b86		; Shift left
+	jr	c,l0b3b
+	call	l0bc6		; Compare mantissas
+	ccf
+l0b3b:
+	pop	hl
+	pop	de
+	pop	bc
+	bit	sgn.bit,b	; Test bit
+	jr	nz,l0b47
+	call	l0b87		; Shift in
+	jr	l0ae1
+l0b47:
+	inc	l		; Test ok
+	jr	nz,l0ae1
+	scf
+	jr	l0ae2
+;
+; Fix exponent
+; ENTRY	Accu and Carry reflect state of addition or
+;	subtraction of exponents
+;
+l0b4d:
+	jr	c,l0b55		; Test bit out
+	add	a,exp.offset	; Add offset
+	jr	c,l0b59		; Test bit
+	jr	l0b70
+l0b55:
+	add	a,exp.offset
+	jr	c,l0b70
+l0b59:
+	ld	l,a		; Set new exponent
+	ex	(sp),ix		; Get caller
+	exx
+	push	hl
+	push	bc
+	ld	a,b
+	set	sgn.bit,b	; Set bit
+	exx
+	xor	b
+	and	sign.bit	; Get result
+	push	af
+	set	sgn.bit,b	; Second, too
+	push	ix		; Bring back caller
+	ld	ix,0		; Return IX=0
+	ret
+l0b70:
+	pop	hl
+	ret	c
+;
+; Clear real number
+; EXIT	Regs (HL,DE,BC) hold zero
+;
+l0b72:
+	xor	a
+	ld	l,a		; Clear all involved bytes
+	ld	b,a
+	ld	c,a
+	ld	d,a
+	ld	e,a
+	ld	h,a
+	ret
+;
+; Shift mantissa right
+;
+l0b7a:
+	or	a		; Clear carry
+;
+; Rotate mantissa right
+;
+l0b7b:
+	rr	b		; Shift 5 bytes right
+	rr	c
+	rr	d
+	rr	e
+	rr	h
+	ret
+;
+; Shift mantissa left
+;
+l0b86:
+	or	a		; Clear carry
+;
+; Rotate mantissa left
+;
+l0b87:
+	rl	h		; Shift 5 bytes left
+	rl	e
+	rl	d
+	rl	c
+	rl	b
+	ret
+;
+; Add mantissas
+;
+l0b92:
+	ld	a,h		; Get 1st
+	exx			; Then second
+	add	a,h		; Add
+	exx
+	ld	h,a		; Into 1st
+	ld	a,e
+	exx
+	adc	a,e
+	exx
+	ld	e,a
+	ld	a,d
+	exx
+	adc	a,d
+	exx
+	ld	d,a
+	ld	a,c
+	exx
+	adc	a,c
+	exx
+	ld	c,a
+	ld	a,b
+	exx
+	adc	a,b
+	exx
+	ld	b,a
+	ret
+;
+; Subtract mantissas
+;
+l0bac:
+	ld	a,h		; Get 1st
+	exx			; Then second
+	sub	h		; Subtract
+	exx
+	ld	h,a		; Into 1st
+	ld	a,e
+	exx
+	sbc	a,e
+	exx
+	ld	e,a
+	ld	a,d
+	exx
+	sbc	a,d
+	exx
+	ld	d,a
+	ld	a,c
+	exx
+	sbc	a,c
+	exx
+	ld	c,a
+	ld	a,b
+	exx
+	sbc	a,b
+	exx
+	ld	b,a
+	ret
+;
+; Compare mantissas
+;
+l0bc6:
+	ld	a,b		; Get 1st
+	exx			; Then second
+	cp	b		; Compare
+	exx
+	ret	nz		; Exit if .NE. zero
+	ld	a,c
+	exx
+	cp	c
+	exx
+	ret	nz
+	ld	a,d
+	exx
+	cp	d
+	exx
+	ret	nz
+	ld	a,e
+	exx
+	cp	e
+	exx
+	ret	nz
+	ld	a,h
+	exx
+	cp	h
+	exx
+	ret
+;
+; Compare two reals
+; ENTRY	1st real in register set
+;	2nd real in alternative set
+; EXIT	Carry flag set if 1st<2nd
+;	Zero  flag set if 1st=2nd
+;
+l0bdf:
+	exx
+	ld	a,b		; Get sign
+	exx
+	xor	b		; Test same signs
+	jp	p,l0be9		; Yeap
+	ld	a,b		; Get 1st sign
+	rla			; Calculate result
+	ret
+l0be9:
+	bit	sgn.bit,b	; Test 1st > 0
+	jr	z,l0bf3		; Yeap
+	call	l0bf3		; Compare
+	ret	z
+	ccf
+	ret
+l0bf3:
+	ld	a,l		; Get exponent
+	exx
+	cp	l		; Compare
+	exx
+	ret	nz		; Not same
+	or	a		; Test zero
+	ret	z
+	jp	l0bc6		; Compare mantissas
+;
+; Function INT(real):real
+;
+l0bfd:
+	ld	a,l
+	sub	Exp.One		; Test >= 1
+	jp	c,l0b72		; Nope, return 0.0
+	inc	a		; Fix count
+	cp	mant.bits	; Test fraction
+	ret	nc		; No, that's it
+	exx
+	push	bc		; save 2nd
+	push	de
+	push	hl
+	ex	af,af'
+	call	l0b72		; Init result
+	ex	af,af'
+l0c10:
+	scf
+	call	l0b7b		; Rotate mantissa right
+	dec	a
+	jr	nz,l0c10
+	exx
+	ld	a,h		; Mask result
+	exx
+	and	h
+	exx
+	ld	h,a
+	ld	a,e
+	exx
+	and	e
+	exx
+	ld	e,a
+	ld	a,d
+	exx
+	and	d
+	exx
+	ld	d,a
+	ld	a,c
+	exx
+	and	c
+	exx
+	ld	c,a
+	ld	a,b
+	exx
+	and	b
+	exx
+	ld	b,a
+l0c31:
+	jp	l0a7b
+;
+; Function FRAC(real):real
+;
+l0c34:
+	exx
+	push	bc
+	push	de
+	push	hl
+	exx
+	call	l0fac		; Copy number
+	exx
+	call	l0bfd		; Get integer part
+	exx
+	call	l0a81		; Subtract from original number
+	jr	l0c31
+;
+; Function SQRT(real):real
+;
+l0c46:
+	ld	a,l		; Test zero operand
+	or	a
+	ret	z		; Ok, that's it
+	bit	sgn.bit,b	; Verify operand >= 0
+	ld	a,_NegSqrt
+	jp	nz,l2027	; Should be
+	call	l0fac		; Copy number
+	ld	a,l
+	add	a,exp.offset
+	sra	a		; Fix resulting exponent
+	add	a,exp.offset
+	ld	l,a
+	sub	sqr.exp		; Fix exponent
+	push	af
+	exx
+l0c5f:
+	push	bc
+	push	de
+	push	hl
+	call	l0af5		; Divide reals
+	call	l0a0d		; Add reals
+	dec	l		; Exponent - 1
+	push	bc
+	push	de
+	push	hl
+	call	l0a81		; Subtract reals
+	ld	a,l
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	ex	(sp),hl
+	cp	h		; Test ready
+	ex	(sp),hl
+	jr	nc,l0c5f	; Loop on
+	pop	af
+	exx
+	ret
+;
+; Function COS(real):real
+;
+l0c7f:
+	exx
+	call	l0f8e		; Load constant PI
+	dec	l		; Make 90 degrees
+	call	l0a81		; Subtract reals
+;
+; Function SIN(real):real
+;
+l0c87:
+	exx
+	call	l0f8e		; Load constant PI
+	inc	l		; Make 360 degrees
+	exx
+	ld	a,l
+	cp	sin.min		; Test underflow
+	ret	c
+	push	bc
+	res	sgn.bit,b	; Clear sign
+	call	l0bdf		; Compare against period
+	pop	bc
+	jr	c,l0ca3
+	call	l0af5		; Divide reals
+	call	l0c34		; Get fraction
+	call	l0a97		; Multiply reals
+l0ca3:
+	bit	sgn.bit,b	; Test sign
+	jr	z,l0caa
+	call	l0a0d		; Add reals
+l0caa:
+	exx
+	dec	l		; Make 180 degrees
+	exx
+	call	l0bdf		; Test within 180 degrees
+	push	af
+	jr	c,l0cb6
+	call	l0a81		; Subtract reals
+l0cb6:
+	exx
+	dec	l		; Make 90 degrees
+	exx
+	call	l0bdf		; Test within 90 degrees
+	jr	c,l0cc3
+	exx
+	inc	l		; Make 180 degrees
+	call	l0a81		; Subtract reals
+l0cc3:
+	ld	a,l
+	cp	sin.min		; Test underflow
+	jr	c,l0d03
+	exx
+	ld	bc,02aaah	; Set 1/3
+	ld	de,0aaaah
+	ld	hl,0aa7fh
+	call	l0a97		; Multiply reals (Divide by 3)
+	push	ix
+	ld	ix,l0d0d-Real.Len
+	ld	a,Trg.Len
+	call	l0f34		; Do the TAYLOR loop
+	pop	ix
+	call	l0fac		; Copy number
+	call	l0a97		; Multiply reals
+	call	l0a97		; Multiply reals
+	push	bc
+	push	de
+	push	hl
+	exx
+	call	l0fac		; Copy number
+	dec	l		; Divide by 4
+	dec	l
+	exx
+	dec	l		; Divide by 2
+	call	l0a0d		; Add reals
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	call	l0a81		; Subtract reals
+	inc	l		; Multiply by 4
+	inc	l
+l0d03:
+	pop	af
+	inc	l		; Test zero
+	dec	l
+	ret	z
+	ret	c		; Check sign
+	ld	a,b
+	xor	sign.bit	; Toggle it
+	ld	b,a
+	ret
+;
+; Taylor series for SINE and COSINE
+;
+l0d0d:
+	db	067h,0aah,03fh,02bh,032h,0d7h	; -1/11!
+	db	06eh,0b6h,02ah,01dh,0efh,038h	;  1/9!
+	db	074h,00dh,0d0h,000h,00dh,0d0h	; -1/7!
+	db	07ah,088h,088h,088h,088h,008h	;  1/5!
+	db	07eh,0abh,0aah,0aah,0aah,0aah	; -1/3!
+Trg.Len	equ	($-l0d0d)/Real.Len
+;
+; Function LN(real):real
+;
+l0d2b:
+	inc	l
+	dec	l		; Check zero
+	ld	a,_LNerr
+	jp	z,l2027		; Error if so
+	bit	sgn.bit,b
+	jp	nz,l2027	; If negative, too
+	exx
+	call	l0f98		; Load constant SQRT(2)
+	exx
+	ld	a,l
+	ld	l,Exp.One	; Fix exponent
+	sub	l
+	push	af
+	call	l0af5		; Divide reals
+	exx
+	call	l0f86		; Load constant 1.0
+	exx
+	call	l0a81		; Subtract reals
+	push	bc
+	push	de
+	push	hl
+	exx
+	inc	l		; Number times 2
+	call	l0a0d		; Add reals
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	call	l0af5		; Divide reals
+	push	ix
+	ld	ix,l0d92-Real.Len
+	ld	a,LN.len
+	call	l0f34		; Do the TAYLOR loop
+	pop	ix
+	inc	l		; Number times 2
+	exx
+	call	l0fa2		; Load constant LN(2)
+	dec	l		; Halve it
+	exx
+	call	l0a0d		; Add reals
+	pop	af
+	push	bc
+	push	de
+	push	hl
+	ld	l,a
+	ld	h,0
+	jr	nc,l0d7c
+	dec	h		; Set -1
+l0d7c:
+	call	l1008		; Convert to real
+	exx
+	inc	l		; Number times 2
+	call	l0a97		; Multiply reals
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	call	l0a0d		; Add reals
+	ld	a,l
+	cp	ln.min		; Test underflow
+	jp	c,l0b72		; Return 0.0 if so
+	ret
+;
+; Taylor series for Natural Logarithm
+;
+l0d92:
+	db	07dh,08ah,09dh,0d8h,089h,01dh	; 1/13
+	db	07dh,0e9h,0a2h,08bh,02eh,03ah	; 1/11
+	db	07dh,08eh,0e3h,038h,08eh,063h	; 1/9
+	db	07eh,049h,092h,024h,049h,012h	; 1/7
+	db	07eh,0cdh,0cch,0cch,0cch,04ch	; 1/5
+	db	07fh,0abh,0aah,0aah,0aah,02ah	; 1/3
+LN.len	equ	($-l0d92)/Real.Len
+;
+; Function EXP(real):real
+;
+l0db6:
+	exx
+	call	l0fa2		; Load constant LN(2)
+	exx
+	or	a
+	bit	sgn.bit,b
+	push	af		; Save sign
+	res	sgn.bit,b	; Clear it
+	call	l0af5		; Divide reals
+	ld	a,l
+	cp	exp.max		; Test overflow
+	jr	nc,l0e10
+	push	bc
+	push	de
+	push	hl
+	inc	l		; Times 2
+	call	l0fd0		; Get integer
+	push	hl
+	srl	h		; Divide by 2
+	rr	l
+	ld	a,l
+	pop	hl
+	push	af
+	call	l1008		; Back to real
+	inc	l		; Test zero
+	dec	l
+	jr	z,l0de0
+	dec	l		; Fix if not
+l0de0:
+	exx
+	pop	af
+	pop	hl
+	pop	de
+	pop	bc
+	push	af
+	call	l0a81		; Subtract reals
+	push	ix
+	ld	ix,l0e16-Real.Len
+	ld	a,EXP.Len
+	call	l0f49		; Do the TAYLOR loop
+	pop	ix
+	pop	af
+	jr	nc,l0e03
+	push	af
+	exx
+	call	l0f98		; Load constant SQRT(2)
+	exx
+	call	l0a97		; Multiply reals
+	pop	af
+l0e03:
+	add	a,l		; Build resulting exponent
+	ld	l,a
+	jr	c,l0e10		; Overflow
+	pop	af		; Test sign
+	ret	z
+	exx
+	call	l0f86		; Load constant 1.0
+	jp	l0af5		; Divide reals (1/number)
+l0e10:
+	pop	hl
+	ld	a,_FLPovfl	; Error
+	jp	l2027
+;
+; Taylor series for natural EXPonetiation
+;
+l0e16:
+	db	06dh,02eh,01dh,011h,060h,031h	; 1.3215 E-6
+	db	070h,046h,02ch,0feh,0e5h,07fh	; 1.5252 E-5
+	db	074h,036h,07ch,089h,084h,021h	; 1.5403 E-4
+	db	077h,053h,03ch,0ffh,0c3h,02eh	; 1.3333 E-3
+	db	07ah,0d2h,07dh,05bh,095h,01dh	; 9.6181 E-3
+	db	07ch,025h,0b8h,046h,058h,063h	; 5.5504 E-2
+	db	07eh,016h,0fch,0efh,0fdh,075h	; 2.4022 E-1
+	db	080h,0d2h,0f7h,017h,072h,031h	; 6.9314 E-1
+EXP.Len	equ	($-l0e16)/Real.Len
+;
+; Function ARCTAN(real):real
+;
+l0e46:
+	ld	a,l
+	or	a		; Test zero
+	ret	z
+	push	ix
+	exx
+	call	l0f86		; Load constant 1.0
+	exx
+	xor	a
+	bit	sgn.bit,b	; Test sign
+	jr	z,l0e58
+	inc	a
+	res	sgn.bit,b	; Make absolute
+l0e58:
+	push	af
+	call	l0bdf		; Compare against 1.0
+	jr	c,l0e66
+	exx
+	call	l0af5		; Divide reals (1/number)
+	pop	af
+	set	sgn.bit,a	; Indicate reverse
+	push	af
+l0e66:
+	exx
+	ld	bc,006cfh	; Load 0.13165
+	ld	de,0e98eh
+	ld	hl,04a7eh
+	exx
+	call	l0bdf		; Compare reals
+	jr	nc,l0e7b
+	call	l0f2e		; Build TAYLOR series
+	jr	l0eca
+l0e7b:
+	ld	ix,l0ee0-3*Real.Len
+	ld	a,2		; Set loop
+l0e81:
+	ex	af,af'
+	exx
+	ld	de,3*Real.Len
+	add	ix,de
+	call	l0f73		; Get value from table
+	exx
+	call	l0bdf		; Compare reals
+	jr	c,l0e9c
+	ex	af,af'
+	dec	a		; Go thru the loop
+	jr	nz,l0e81
+	exx
+	ld	de,2*Real.Len
+	add	ix,de		; Fix table
+	exx
+l0e9c:
+	exx
+	call	l0f6e		; Get next from table
+	set	sgn.bit,b	; Make negative
+	call	l0a0d		; Add reals
+	push	bc
+	push	de
+	push	hl
+	call	l0f73		; Get value back
+	call	l0a97		; Multiply reals
+	exx
+	call	l0f86		; Load constant 1.0
+	call	l0a0d		; Add reals
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	call	l0af5		; Divide reals
+	push	ix
+	call	l0f2e		; Do TAYLOR
+	pop	ix
+	exx
+	call	l0f6e		; Get from table
+	call	l0a0d		; Add reals
+l0eca:
+	pop	af
+	rla			; Get sign bit
+	jr	nc,l0ed8
+	push	af
+	exx
+	call	l0f8e		; Load constant PI
+	dec	l		; Make 90 degrees
+	call	l0a81		; Subtract reals
+	pop	af
+l0ed8:
+	pop	ix
+	bit	1,a		; Test operand sign
+	ret	z
+	set	sgn.bit,b	; Set negative
+	ret
+;
+; 2nd Taylor series for ARCTangent
+;
+l0ee0:
+	db	07fh,0e7h,0cfh,0cch,013h,054h	; 4.1421 E-1
+	db	07fh,0f6h,0f4h,0a2h,030h,009h	; 2.6794 E-1
+	db	07fh,06ah,0c1h,091h,00ah,006h	; 2.6179 E-1
+	db	080h,0b5h,09eh,08ah,06fh,044h	; 7.6732 E-1
+	db	080h,082h,02ch,03ah,0cdh,013h	; 5.7735 E-1
+	db	080h,06ah,0c1h,091h,00ah,006h	; 5.2359 E-1
+	db	081h,000h,000h,000h,000h,000h	; 1.0000
+	db	080h,021h,0a2h,0dah,00fh,049h	; 7.8539 E-1
+;
+; Taylor series for ARCTangent
+;
+l0f10:
+	db	07dh,0e8h,0a2h,08bh,02eh,0bah	; -1/11
+	db	07dh,08eh,0e3h,038h,08eh,063h	;  1/9
+	db	07eh,049h,092h,024h,049h,092h	; -1/7
+	db	07eh,0cdh,0cch,0cch,0cch,04ch	;  1/5
+	db	07fh,0abh,0aah,0aah,0aah,0aah	; -1/3
+AT.Len	equ	($-l0f10)/Real.Len
+;
+; Perform TAYLOR series
+; Calculate SERIES(x^2)*x
+;
+l0f2e:
+	ld	ix,l0f10-Real.Len
+	ld	a,AT.Len
+l0f34:
+	push	bc
+	push	de
+	push	hl
+	push	af
+	call	l0fac		; Copy number
+	call	l0a97		; Multiply reals [^2]
+	pop	af
+	call	l0f49		; Do the TAYLOR loop
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	jp	l0a97		; Multiply reals
+;
+; The TAYLOR series loop
+; ENTRY	Reg IX points to table
+;	Accu holds loop count
+; Calculate : 1-(1/3!)x+..+/-..-(1/11!)x^8
+;
+l0f49:
+	push	af
+	exx
+	call	l0f6e		; Load from table
+	jr	l0f60		; Skip addition this time
+l0f50:
+	push	af
+	exx
+	push	bc
+	push	de
+	push	hl
+	call	l0f6e		; Get next value from table
+	call	l0a0d		; Add reals
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+l0f60:
+	call	l0a97		; Multiply reals
+	pop	af
+	dec	a		; Test done
+	jr	nz,l0f50	; Nope
+	exx
+	call	l0f86		; Load constant 1.0
+	jp	l0a0d		; Add reals
+;
+; Load next real from table
+; ENTRY	Reg IX points to table
+; EXIT	Regs (HL,DE,BC) hold real
+;
+l0f6e:
+	ld	de,Real.Len
+	add	ix,de		; Point to nexr
+;
+; Load real from table
+; ENTRY	Reg IX points to table
+; EXIT	Regs (HL,DE,BC) hold real
+;
+l0f73:
+	ld	l,(ix+0)	; Get exponent
+	ld	h,(ix+1)	; Mantissa LSB
+	ld	e,(ix+2)
+	ld	d,(ix+3)
+	ld	c,(ix+4)
+	ld	b,(ix+5)	; Mantissa MSB
+	ret
+;
+; Load constant 1.0
+;
+l0f86:
+	ld	hl,Exp.One	; Load 6 bytes 2^0
+	ld	b,h
+	ld	c,h
+	ld	d,h
+	ld	e,h
+	ret
+;
+; Load constant PI=3.141592654
+;
+l0f8e:
+	ld	bc,0490fh	; Load 6 bytes
+	ld	de,0daa2h
+	ld	hl,02182h
+	ret
+;
+; Load constant SQRT (2)=1.414213562
+;
+l0f98:
+	ld	bc,03504h	; Load 6 bytes
+	ld	de,0f333h
+	ld	hl,0fa81h
+	ret
+;
+; Load constant LN (2)=0.693147181
+;
+l0fa2:
+	ld	bc,03172h	; Load 6 bytes
+	ld	de,017f7h
+	ld	hl,0d280h
+	ret
+;
+; Copy real number
+; ENTRY	Regs (HL,DE,BC) hold number
+; EXIT	Number copied to alternating regs (HL,DE,BC)'
+;
+l0fac:
+	push	bc		; Push onto stack
+	push	de
+	push	hl
+	exx			; Copy into alternate registers
+	pop	hl		; Pop back
+	pop	de
+	pop	bc
+	ret
+;
+; Function RANDOM:real;
+; EXIT	Regs (HL,DE,BC) hold number
+;
+l0fb4:
+	call	l0792		; Get random value
+	ld	hl,exp.offset	; Init exponent and count
+	ld	a,mant.bits-bit.len
+l0fbc:
+	bit	sgn.bit,b	; Test MSB set
+	jr	nz,l0fcd
+	sla	e		; Shift left if not
+	rl	d
+	rl	c
+	rl	b
+	dec	l		; Count down exponent
+	dec	a
+	jr	nz,l0fbc
+	ld	l,a
+l0fcd:
+	res	sgn.bit,b	; .. make 1.0> x >=0.0
+	ret
+;
+; Function ROUND(real):integer
+;
+l0fd0:
+	bit	sgn.bit,b	; Attache sign
+	exx
+	call	l0f86		; Load constant 1.0
+	jr	z,l0fda		; Test < 0
+	set	sgn.bit,b	; make constant -1.0
+l0fda:
+	dec	l		; Set +-0.5
+	call	l0a0d		; Add reals
+;
+; Function TRUNC(real):integer
+;
+l0fde:
+	or	a
+	bit	sgn.bit,l	; Test exponent < 0
+	jr	z,l0fff		; Return zero if so
+	bit	sgn.bit,b	; Mark sign
+	ex	af,af'
+	set	sgn.bit,b	; Set bit
+l0fe8:
+	ld	a,int.max
+	cp	l
+	jr	c,l1003		; Test overflow
+	jr	z,l0ff5		; Or end of conversion
+	call	l0b7a		; Shift mantissa right
+	inc	l		; Bump exponent
+	jr	l0fe8
+l0ff5:
+	call	l0b7a		; Shift mantissa right
+	ex	af,af'
+	ld	h,b		; Get result
+	ld	l,c
+	ret	z		; End if > 0
+	jp	l0783		; Negate
+l0fff:
+	ld	hl,0		; Return 0
+	ret
+l1003:
+	ld	a,_TruncOvl
+	jp	l2027		; Set error
+;
+; Convert integer to floating point
+; ENTRY	Reg HL holds signed integer
+; EXIT	Regs (HL,DE,BC) hold real
+;
+; NOTE:	ON INTEGER 8000H AND ONLY ON THIS NUMBER
+;	THIS ROUTINE WILL LOOP FOREVER !!!!!!!!
+;
+l1008:
+	ld	a,h		; Test Zero
+	or	l
+	jp	z,l0b72		; Set 0.0 if so
+	bit	sgn.bit,h	; Test sign
+	ex	af,af'
+	call	l0780		; Make number positive
+	ld	a,int.max+1	; Init exponent
+l1015:
+	add	hl,hl		; Shift mantissa
+	dec	a		; Fix exponent
+	bit	sgn.bit,h	; Test ready
+	jr	z,l1015		; Nope, wait for bit
+	ld	b,h		; Get into hi part of mantissa
+	ld	c,l
+	ld	de,0		; Clear lo part
+	ld	h,d
+	ld	l,a
+	ex	af,af'		; Test sign
+	ret	nz
+	res	sgn.bit,b	; Set > 0
+	ret
+;
+; Convert real to formatted ASCII string
+; ENTRY	Reg HL holds fix comma places (-1 on none)
+;	Reg DE holds decimal places
+;	Regs (HL,BC,DE)' hold real number
+;	Reg IX points to ASCII buffer
+;
+l1027:
+	call	l04c8		; Get fix comma places
+	ex	de,hl
+	ld	e,0
+	jr	c,l1033		; Integer was < 0, no places
+	cp	real.dig+1	; Test max digits
+	jr	c,l104b
+l1033:
+	dec	e
+	call	l04c8		; Get decimal places
+	exx
+	bit	sgn.bit,b	; Test sign
+	exx
+	ld	d,real.field	; Init field size
+	jr	z,l1040
+	inc	d		; Fix for sign < 0.0
+l1040:
+	sub	d		; Test against field length
+	jr	nc,l1044
+	xor	a
+l1044:
+	cp	real.field+2	; Test max
+	jr	c,l104a
+	ld	a,real.field+2
+l104a:
+	inc	a
+l104b:
+	ld	d,a
+	push	de
+	exx
+	ld	iy,number
+	push	ix
+	call	l10eb		; Prepare conversion
+	pop	ix
+	pop	de
+	ld	c,a		; Save result exponent
+	ld	a,d
+	inc	a
+	bit	sgn.bit,e	; Test sign
+	jr	nz,l1071	; < 0
+	add	a,c		; Fix exponent
+	jp	p,l106b
+	ld	(iy),0		; Clear entry
+	jr	l1076
+l106b:
+	cp	real.ASCII	; Test decimal places
+	jr	c,l1071
+	ld	a,real.ASCII-1	; Truncate it
+l1071:
+	push	de
+	call	l1180		; Normalize ASCII
+	pop	de
+l1076:
+	bit	sgn.bit,b	; Test sign
+	jr	z,l107f
+	ld	a,'-'
+	call	l10e5		; Set sign
+l107f:
+	bit	sgn.bit,e	; Test sign
+	jr	z,l1086
+	ld	h,c		; Unpack
+	ld	c,0
+l1086:
+	bit	sgn.bit,c	; Test sign
+	jr	z,l108f
+	call	l10e3		; Set 0
+	jr	l1096
+l108f:
+	call	l10d9		; Copy ASCII
+	dec	c		; Bump down
+	jp	p,l108f
+l1096:
+	ld	a,d		; Test mantissa
+	or	a
+	jr	z,l10b1		; None
+	ld	a,'.'
+	call	l10e5		; Set decimal dot
+l109f:
+	inc	c		; Fix exponent
+	jr	z,l10a8
+	call	l10e3		; Set 0
+	dec	d
+	jr	nz,l109f
+l10a8:
+	dec	d
+	jp	m,l10b1
+	call	l10d9		; Copy ASCII
+	jr	l10a8
+l10b1:
+	bit	sgn.bit,e	; Test exponent
+	ret	z		; Nope
+	ld	a,'E'
+	call	l10e5		; Set 'E'xponent
+	ld	a,'+'
+	bit	sgn.bit,h	; Test bit
+	jr	z,l10c5
+	ld	a,h
+	neg			; Make exponent > 0
+	ld	h,a
+	ld	a,'-'
+l10c5:
+	call	l10e5		; Store sign of exponent
+	ld	a,h		; Get exponent
+	ld	b,'0'-1		; Init HI
+l10cb:
+	inc	b		; Fix result
+	sub	10		; Divide by 10
+	jr	nc,l10cb
+	add	a,'9'+1		; Make remainder ASCII
+	ld	(ix),b		; save HI
+	inc	ix
+	jr	l10e5		; Store LO
+;
+; Copy from buffer, set 0 if end
+;
+l10d9:
+	ld	a,(iy)		; Get number
+	inc	iy
+	or	a		; Test end
+	jr	nz,l10e5	; Nope
+	dec	iy		; Fix for zero storage
+;
+; Store ASCII zero into number
+;
+l10e3:
+	ld	a,'0'		; Set zero
+;
+; Store ASCII into number
+;
+l10e5:
+	ld	(ix),a		; Store number
+	inc	ix		; Update pointer
+	ret
+;
+; Prepare ASCII for real to formatted ASCII conversion
+; ENTRY	Reg IY points to ASXII buffer
+;	Regs (HL,BC,DE) hold real number
+; EXIT	Buffer pre-filled
+;	Accu holds exponent equivalent
+;
+l10eb:
+	push	iy		; save buffer
+	inc	l		; Test zero number
+	dec	l
+	jr	nz,l10ff
+	ld	b,real.ASCII	; Set length
+l10f3:
+	ld	(iy),'0'	; Clear ASCII number
+	inc	iy
+	djnz	l10f3
+	xor	a
+	jp	l117d
+l10ff:
+	push	bc		; Save sign
+	res	sgn.bit,b	; Reset sign
+	ld	a,l
+	exx
+	sub	exp.offset	; Strip off offset
+	ld	l,a
+	sbc	a,a		; Expand to signed 16 bit
+	ld	h,a
+	ld	de,ExpFix
+	call	l06f5		; HL:=HL*DE
+	ld	de,10 / 2
+	add	hl,de		; Gix exponent
+	ld	a,h
+	cp	ExpRange	; Test range
+	jr	nz,l1119
+	inc	a		; Fix result
+l1119:
+	ld	(iy),a		; Store into buffer
+	neg
+	call	l1240
+	ld	a,l
+	cp	Exp.One		; Test exponent
+	jr	nc,l112c
+	call	l12b3		; Fix mantissa
+	dec	(iy)		; Fix exponent
+l112c:
+	set	sgn.bit,b	; Set bit
+	ld	a,exp.offset+4
+	sub	l		; Test exponent
+	ld	l,0
+	jr	z,l113d
+l1135:
+	call	l0b7a		; Shift mantissa right
+	rr	l
+	dec	a
+	jr	nz,l1135
+l113d:
+	ld	a,(iy)		; Get exponent
+	push	af
+	ld	a,real.ASCII	; Set count
+l1143:
+	ex	af,af'
+	ld	a,b		; Get MSB
+	rra			; Isolate hi
+	rra
+	rra
+	rra
+	and	LoMask		; Mask bits
+	add	a,'0'		; Make ASCII
+	ld	(iy),a
+	inc	iy
+	ld	a,b
+	and	LoMask
+	ld	b,a
+	push	bc
+	push	de
+	push	hl
+	sla	l
+	call	l0b87		; Rotate mantissa left *2
+	sla	l
+	call	l0b87		; * 4
+	ex	de,hl
+	ex	(sp),hl
+	add	hl,de		; * 5
+	pop	de
+	ex	(sp),hl
+	adc	hl,de
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	sla	l
+	call	l0b87		; *10
+	ex	af,af'
+	dec	a
+	jr	nz,l1143
+	pop	af
+	pop	bc
+l117d:
+	pop	iy
+	ret
+;
+; Normalize ASCII number
+; ENTRY	Accu holds length of number
+;
+l1180:
+	push	iy
+	pop	hl		; Copy buffer
+	ld	e,a
+	ld	d,0
+	add	hl,de
+	ld	a,(hl)		; Get last digit
+	ld	(hl),0
+	cp	'5'		; Test to be normalized
+	ret	c		; Nope
+l118d:
+	dec	e		; Count down
+	jp	m,l119c
+	dec	hl		; Get previous
+	ld	a,(hl)
+	inc	a		; Advance digit
+	ld	(hl),a
+	cp	'9'+1		; Test in range
+	ret	c		; Yeap
+	ld	(hl),0		; Clear this one
+	jr	l118d
+l119c:
+	ld	(hl),'1'	; Set carry
+	inc	hl
+	ld	(hl),0		; Clear next
+	inc	c
+	ret
+;
+; Convert ASCII string to Floating Point number
+; ENTRY	Reg IX points to ASCII number
+; EXIT	Regs HL,DE,BC hold real
+;	Carry set indicates conversion error
+;
+l11a3:
+	exx
+	ld	bc,0		; Reset flags
+	exx
+	call	l0b72		; Init 0.0
+l11ab:
+	ld	a,(ix)		; Get character
+	call	l04a6		; Convert to upper case
+	cp	'.'		; Test decimal point
+	jr	nz,l11c1
+	exx
+	bit	dot.bit,b	; Test already selected
+	scf
+	ret	nz		; Error if so
+	set	dot.bit,b	; Indicate dot
+	exx
+l11bd:
+	inc	ix		; Skip character
+	jr	l11ab		; Get next
+l11c1:
+	cp	'E'		; Test exponent
+	jr	z,l11e6		; Yeap, process it
+	call	l1239		; Test digit
+	jr	nc,l121e	; Nope
+	ex	af,af'
+	call	l12b3		; Convert mantissa
+	ret	c		; Error
+	ex	af,af'
+	exx
+	push	bc
+	ld	l,a		; Build integer
+	ld	h,0
+	call	l1008		; Convert to floating point
+	call	l09e9		; Add reals
+	exx
+	pop	bc
+	ret	c		; End if overflow
+	bit	dot.bit,b	; Test decimal point
+	jr	z,l11e3
+	dec	c		; Fix length if so
+l11e3:
+	exx
+	jr	l11bd
+;
+; Found 'E'xponent
+;
+l11e6:
+	call	l121e		; Fix mantissa
+	ret	c		; Overflow
+	exx
+	set	exp.bit,b	; Set bit
+	inc	ix
+	ld	a,(ix)
+	cp	'+'		; Test any sign
+	jr	z,l11fc		; Skip plus
+	cp	'-'
+	jr	nz,l11fe
+	set	exps.bit,b	; Indicate negative exponent
+l11fc:
+	inc	ix
+l11fe:
+	call	l1236		; Get 1st digit
+	ccf
+	ret	c		; Invalid
+	ld	c,a
+	inc	ix
+	call	l1236		; Get 2nd digit
+	jr	nc,l1215	; Only one
+	inc	ix
+	ld	d,a
+	ld	a,c		; Get first one - it's tens
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,c		; * 5
+	add	a,a		; *10
+	add	a,d		; Insert 2nd
+	ld	c,a
+l1215:
+	bit	exps.bit,b	; Test exponent < 0
+	jr	z,l121d		; Nope
+	ld	a,c
+	neg			; Change it if so
+	ld	c,a
+l121d:
+	exx
+l121e:
+	exx
+	ld	a,c		; Get exponent
+	add	a,exp.offset	; Set offset
+	cp	05ah		; Check range
+	ret	c		; Underflow
+	cp	0a6h
+	ccf
+	ret	c		; Overflow
+	push	bc
+	push	ix
+	ld	a,c
+	call	l1240		; Fix exponent
+	pop	ix
+	exx
+	pop	bc		; Fix stack
+	exx
+	ret
+;
+; Get character and test if digit
+; ENTRY	Reg IX points to character
+; EXIT	Accu holds character
+;	Carry reset if in range
+;
+l1236:
+	ld	a,(ix)		; Get character
+;
+; Test character a digit - C set if so
+; ENTRY	Accu holds character
+; EXIT	Carry reset if in range
+;
+l1239:
+	sub	'0'		; Strip off offset
+	ccf
+	ret	nc		; Out of range
+	cp	9+1
+	ret
+;
+; Fix exponent for real to ASCII conversion
+; ENTRY	Accu holds exponent equivalent
+; EXIT	Real fixed
+;
+l1240:
+	push	af		; Save exponent
+	or	a		; Test sign
+	jp	p,l1247
+	neg			; Make >0
+l1247:
+	push	af
+	srl	a		; Shift
+	srl	a
+	inc	a		; Then fix
+	ld	hl,-Real.Len	; Init index
+	ld	de,Real.Len
+l1253:
+	add	hl,de		; Fix index
+	dec	a
+	jr	nz,l1253
+	ex	de,hl
+	ld	ix,l1277	; Point to table
+	add	ix,de
+	call	l0f73		; Get number from table
+	pop	af
+	and	11b		; Get MOD 4
+	jr	z,l126e
+l1266:
+	push	af
+	call	l12b3		; Fix mantissa
+	pop	af
+	dec	a
+	jr	nz,l1266
+l126e:
+	pop	af		; Get back exponent
+	or	a
+	jp	p,l0a97		; Multiply reals if > 0
+	exx
+	jp	l0af5		; Divide reals if < 0
+;
+; Fix up table
+;
+l1277:
+	db	081h,000h,000h,000h,000h,000h	; 1 E 0
+	db	08eh,000h,000h,000h,040h,01ch	; 1 E 4
+	db	09bh,000h,000h,020h,0bch,03eh	; 1 E 8
+	db	0a8h,000h,010h,0a5h,0d4h,068h	; 1 E12
+	db	0b6h,004h,0bfh,0c9h,01bh,00eh	; 1 E16
+	db	0c3h,0ach,0c5h,0ebh,078h,02dh	; 1 E20
+	db	0d0h,0cdh,0ceh,01bh,0c2h,053h	; 1 E24
+	db	0deh,0f9h,078h,039h,03fh,001h	; 1 E28
+	db	0ebh,02bh,0a8h,0adh,0c5h,01dh	; 1 E32
+	db	0f8h,0c9h,07bh,0ceh,097h,040h	; 1 E36
+;
+; Fix mantissa for real to ASCII conversion
+; ENTRY	Regs (BC,DE,HL) hold real
+; EXIT	Real fixed
+;
+l12b3:
+	ld	a,l		; Test exponent
+	or	a
+	ret	z		; Zero
+	set	_MB,b		; Set bit
+	push	bc
+	push	de
+	ld	a,h
+	call	l0b7a		; Shift mantissa right
+	call	l0b7a		; Two places
+	add	a,h		; Add LSB
+	ld	h,a
+	ex	(sp),hl		; Get middle part
+	adc	hl,de		; Add it
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	adc	hl,bc		; Same for hi part
+	ld	b,h		; Copy to high
+	ld	c,l
+	pop	hl		; Get back old hi
+	jr	nc,l12d6
+	call	l0b7b		; Rotate mantissa right
+	inc	l		; Fix exponent
+	scf
+	ret	z
+l12d6:
+	ld	a,l
+	add	a,3		; Fix exponent
+	ld	l,a
+	res	_MB,b		; Clear bit
+	ret
+;
+; Test sets not equal (<>)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+l12dd:
+	ld	c,.TRUE		; Set flag
+	jr	l12e3		; Compare
+;
+; Test sets equal (=)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+l12e1:
+	ld	c,FALSE
+l12e3:
+	call	l133f		; Get sets
+l12e6:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l12f2	; Not equal
+	inc	hl
+	inc	de
+	djnz	l12e6
+	ld	a,c
+	xor	.TRUE		; Zoggle flag if equal
+	ld	c,a
+l12f2:
+	ld	hl,2*set.len
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ld	l,c		; Get state
+	ld	h,0
+	jp	(ix)		; Exit
+;
+; Test two sets included (1st in 2nd, <=)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+l12fc:
+	ld	c,.TRUE		; Set flag
+	jr	l1302
+;
+; Test two sets included (2nd in 1st, >=)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+l1300:
+	ld	c,FALSE
+l1302:
+	call	l133f		; Get sets
+	dec	c		; Test comparision mode
+	jr	nz,l1309
+	ex	de,hl
+l1309:
+	ld	c,FALSE
+l130b:
+	ld	a,(de)
+	or	(hl)		; Combine
+	cp	(hl)		; Compare
+	jr	nz,l12f2
+	inc	hl
+	inc	de
+	djnz	l130b
+	ld	c,.TRUE		; Return TRUE
+	jr	l12f2
+;
+; Combine two sets (add, +)
+; ENTRY	Both sets on stack
+; EXIT	Combined set on stack
+;
+l1318:
+	call	l133f		; Get sets
+l131b:
+	ld	a,(de)
+	or	(hl)		; Combine sets
+	ld	(hl),a
+	inc	hl
+	inc	de
+	djnz	l131b
+l1322:
+	ex	de,hl
+	ld	sp,hl
+	jp	(ix)
+;
+; Combine two sets (subtract, -)
+; ENTRY	Both sets on stack
+; EXIT	Combined set on stack
+;
+l1326:
+	call	l133f		; Get sets
+l1329:
+	ld	a,(de)
+	cpl			; Complement
+	and	(hl)		; Mask bits
+	ld	(hl),a
+	inc	hl
+	inc	de
+	djnz	l1329
+	jr	l1322
+;
+; Combine two sets (intersection, *)
+; ENTRY	Both sets on stack
+; EXIT	Combined set on stack
+;
+l1333:
+	call	l133f		; Get sets
+l1336:
+	ld	a,(de)
+	and	(hl)		; Mask
+	ld	(hl),a
+	inc	hl
+	inc	de
+	djnz	l1336
+	jr	l1322
+;
+; Get addresses of sets
+; ENTRY	Both sets on stack
+; EXIT	Regs HL and DE point to sets
+;	Reg  IX holds caller address
+;	Reg  B  holds set length
+;
+l133f:
+	pop	iy		; Get last caller
+	pop	ix		; Get caller before last one
+	ld	hl,0
+	add	hl,sp
+	ex	de,hl		; Get 1st set
+	ld	hl,set.len
+	ld	b,l		; Get length
+	add	hl,sp		; Get 2nd set
+	jp	(iy)		; Return
+;
+; Test element in set (IN)
+; ENTRY	Both sets on stack
+; EXIT	Reg HL holds boolean result
+;
+l134f:
+	pop	ix		; Get caller
+	ld	hl,set.len+1
+	add	hl,sp		; Get pointer to set
+	ld	a,(hl)
+	or	a		; Test any set
+	jr	z,l135c
+	xor	a
+	jr	l1362		; Force FALSE
+l135c:
+	dec	hl
+	ld	b,(hl)
+	call	l05ba		; Get bit state
+	and	(hl)
+l1362:
+	ld	hl,set.len+2
+	add	hl,sp
+	ld	sp,hl		; Set return stack
+	ld	hl,FALSE	; Init FALSE
+	jr	z,l136d		; Test result
+	inc	hl		; Set TRUE
+l136d:
+	jp	(ix)
+;
+; Procedure ASSIGN(file,filename)
+; ENTRY	Filenname as string on stack
+;	FIB followed string
+;
+; Assign text file
+;
+l136f:
+	db	skip		; Set non zero
+;
+; Assign (un)typed file
+;
+l1370:
+	xor	a		; Set zero
+	ld	(l00e8),a	; Put into mode
+	pop	iy		; Get back caller
+	ld	hl,(l00d2)	; Get top of memory
+	ld	b,16		; And max length
+	call	l05e2		; Assign string from stack
+	xor	a
+	ld	(de),a		; Close it
+	pop	hl		; Fetch FIB
+	ld	(l00e2),hl	; Put into device
+	push	iy		; Bring back caller
+	ld	a,h		; Verify not standard but file
+	or	a
+	jr	nz,l1390
+	ld	a,_StdAssErr	; Set illegal FIB
+	ld	(l00d0),a
+	ret
+l1390:
+	ld	a,(l00e8)	; Get back mode
+	or	a		; Test text file
+	jr	z,l13a0		; Nope
+	call	l13b6		; Find standard device
+	jr	nz,l13a0	; Nope
+	ld	hl,(l00e2)	; Get back FIB
+	ld	(hl),a		; Set flag
+	ret
+l13a0:
+	call	l03f2		; Parse file
+	ld	hl,(l00e2)
+	ld	(hl),0
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB part
+	ex	de,hl
+	ld	hl,l005c
+	ld	bc,FCBlen
+	ldir			; Move FCB to FIB
+	ret
+;
+; Find standard IO device
+; ENTRY	TOPRAM filled with device string
+; EXIT	Zero flag set if device found
+;	Accu holds FIB flag if so
+;
+l13b6:
+	ld	b,Std.Len	; Init length
+	ld	hl,l13e6	; Get table address
+l13bb:
+	push	bc
+	push	hl
+	ld	b,Std.Itm-1	; Set length of one item
+	ld	de,(l00d2)	; Get top of memory
+l13c3:
+	inc	de
+	ld	a,(de)
+	cp	' '		; Skip leading blanks
+	jr	z,l13c3
+l13c9:
+	ld	a,(de)		; Get character
+	call	l04a6		; Convert to upper case
+	sub	(hl)		; Compare
+	jr	z,l13da		; Maybe a hit
+	pop	hl
+	pop	bc
+	ld	de,Std.Itm
+	add	hl,de		; Point to next entry
+	djnz	l13bb		; Try more
+	or	a
+	ret
+l13da:
+	inc	hl
+	inc	de
+	djnz	l13c9		; Loop until all found
+	pop	bc
+	pop	bc
+	ld	a,(de)
+	cp	':'		; Verify standard device
+	ret	nz
+	ld	a,(hl)		; Get flag if so
+	ret
+;
+; Standard character I/O devices
+;
+l13e6:
+	db	'CON'
+	db	11000001b	; Input output for CON	
+Std.Itm	equ	$-l13e6
+	db	'TRM'
+	db	11000001b	; Input output for TRM
+	db	'KBD'
+	db	10000010b	; Input for KBD
+	db	'LST'
+	db	01000011b	; Output for LST
+	db	'AUX'
+	db	11000100b	; Input output for AUX
+	db	'USR'
+	db	11000101b	; Input output for USR
+Std.Len	equ	($-l13e6) / Std.Itm
+;
+; Prepare files
+; ENTRY	Reg HL points to FIB
+;
+; Procedure REWRITE(text_file)
+;
+l13fe:
+	db	skip
+;
+; Procedure RESET(text_file)
+;
+l13ff:
+	xor	a
+	ld	(l00e8),a	; Set mode (0=RESET)
+	call	l1469		; Close open file
+	ld	a,(l00d0)
+	or	a		; Test error
+	ret	nz		; End if so
+	ld	hl,(l00e2)	; Get FIB
+	res	wr.bit,(hl)	; Reset write flag
+	ld	a,(hl)
+	and	FIBtype		; Get type
+	ret	nz		; Exit on standard device
+	call	l1430		; Prepare file operation
+	ld	a,(l00d0)
+	or	a		; Test error
+	ret	nz		; Exit if so
+	ld	hl,(l00e2)	; Get back FIB
+	ld	a,(l00e8)	; Get file mode
+	or	a		; Test RESET
+	ld	bc,RecLng*256+..in
+	jr	z,l142b		; Yeap
+	ld	bc,0*256+..out
+l142b:
+	ld	(hl),c		; Set flag
+	inc	hl
+	inc	hl
+	ld	(hl),b		; Set buffer pointer
+	ret
+;
+; Prepare file operation for current FIB
+;
+l1430:
+	call	l145a		; Clear FCB of this FIB
+	ld	hl,(l00e2)	; Get FIB
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	a,(l00e8)	; Get file mode
+	or	a		; Test RESET
+	ld	bc,_NoFile*256+.open
+	jr	z,l144e		; Yeap, go open file
+	push	de
+	ld	c,.delete
+	call	BDOS		; Delete file before rewrite
+	pop	de
+	ld	bc,_DirFull*256+.make
+l144e:
+	push	bc
+	call	BDOS		; Now open or make file
+	pop	bc
+	inc	a		; Test success
+	ret	nz		; Yeap
+	ld	a,b
+	ld	(l00d0),a	; Set error if not
+	ret
+;
+; Clear FCB of current FIB
+;
+l145a:
+	ld	hl,(l00e2)	; Get FIB
+	ld	de,FIB.FCB+_ex
+	add	hl,de		; Point to EX filed
+	ld	b,FCBlen-_ex	; Set length
+l1463:
+	ld	(hl),0		; Clear it
+	inc	hl
+	djnz	l1463
+	ret
+;
+; Close text file
+;
+; Procedure CLOSE(text_file)
+;
+; ENTRY	Reg HL holds FIB
+;
+l1469:
+	ld	(l00e2),hl	; Save FIB for current device
+	ld	a,(hl)
+	and	FIBtype		; Get type
+	ret	nz		; Exit if not a file
+	bit	out.bit,(hl)	; Test output
+	jr	z,l147e		; Skip if not
+	ld	a,eof
+	call	l16c6		; Close file by EOF
+	call	l170c		; Then flash buffer
+	jr	l1481
+l147e:
+	bit	in.bit,(hl)	; Test input
+	ret	z		; Nope, end
+l1481:
+	ld	hl,(l00e2)	; Get FIB
+	push	hl
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	c,.close
+	call	BDOS		; Close file
+	pop	hl
+	inc	a		; Test success 
+	jr	nz,l1498	; Yeap
+	ld	a,_NoClose
+	ld	(l00d0),a	; Set error
+l1498:
+	ld	(hl),0		; Reset FIB flag
+	ret
+;
+; Set standard device
+;
+l149b:
+	ex	(sp),hl
+	ld	(l00e4),hl	; Save caller
+	ex	(sp),hl
+	push	hl
+	ld	hl,l00c2
+	ld	(l00e2),hl	; Set standard as FIB
+	pop	hl
+	ret
+;
+; Check file before read
+; ENTRY	Reg HL points to FIB
+;
+l14a9:
+	ex	(sp),hl
+	ld	(l00e4),hl	; Save caller for error
+	ex	(sp),hl
+	ld	(l00e2),hl	; Save FIB
+	bit	in.bit,(hl)	; Test read allowed
+	ret	nz		; Yeap
+	ld	a,_NoRead
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Check file before write
+; ENTRY	Reg HL points to FIB
+;
+l14ba:
+	ex	(sp),hl
+	ld	(l00e4),hl	; Save caller for error
+	ex	(sp),hl
+	ld	(l00e2),hl	; Save FIB
+	bit	out.bit,(hl)	; Test write allowed
+	ret	nz		; Yeap
+	ld	a,_NoWrite
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Function READLN(var)
+; ENTRY	Reg HL points to variable
+;
+l14cb:
+	db	skip
+;
+; Function READ(var)
+; ENTRY	Reg HL points to variable
+; EXIT	Reg HL points to variable
+;
+l14cc:
+	xor	a
+	ex	(sp),hl		; Get caller
+	ld	(l00e4),hl	; Save it
+	ex	(sp),hl
+	push	hl
+	ld	hl,l00c2
+	ld	(l00e2),hl	; Set standard device
+	res	wr.bit,(hl)	; Reset write bit
+	push	af		; Save mode
+	call	l14e8		; Read a line
+	pop	af
+	or	a		; Test READLN
+	jr	z,l14e6
+	call	l01e1		; Give new line if so
+l14e6:
+	pop	hl
+	ret
+;
+; Read a line from keyboard
+;
+l14e8:
+	ld	b,0		; Reset flag
+l14ea:
+	ld	hl,l00d1	; Point to buffer length
+	ld	a,(hl)		; Get buffer length
+	cp	.MaxBuf+1	; Verify in range
+	jr	c,l14f4
+	ld	a,.MaxBuf	; Truncate if not
+l14f4:
+	ld	c,a
+	ld	(hl),.MaxBuf	; Set default length
+	ld	hl,(l00d2)	; Get top of memory
+	ld	(l00d4),hl	; Unpack it
+l14fd:
+	ld	d,0		; Reset character count
+l14ff:
+	call	l03e1		; Read character
+	ld	(hl),a		; Unpack it
+	ld	e,1		; Init flag
+	cp	bs		; Test backspace
+	jr	z,l153f
+	cp	DEL		; Test delete
+	jr	z,l153f
+	dec	e
+	cp	CtrlX		; Test ^X
+	jr	z,l153f
+	cp	esc		; Test escape
+	jr	z,l153f
+	cp	eof		; Test end of file
+	jr	z,l1550
+	cp	cr		; Test end of line
+	jr	z,l1556
+	cp	' '		; Test printable
+	jr	nc,l1533
+	cp	CtrlC		; Test ^C
+	jr	nz,l14ff
+	ld	a,(l00dd)	; Get $C mode
+	or	a		; Test abort
+	jr	z,l14ff		; $C- - so ignore
+	ld	ix,(l00e4)
+	jp	l2016		; Abort
+;
+; Found printable character
+;
+l1533:
+	ld	a,c		; Get max
+	cp	d		; Test against count
+	jr	z,l14ff		; Yeap, ignore
+	ld	a,(hl)		; Get character
+	inc	d		; Advance counter
+	inc	hl		; Point to next storage location
+	call	l03c9		; Put to console
+	jr	l14ff
+;
+; Special control detected: Backspace, DELete, ^X, ESCape
+;
+l153f:
+	dec	d		; Fix count
+	jp	m,l14fd		; Ignore if at 1st position
+	dec	hl
+	call	l0200		; Position cursor left
+	db	bs,' ',bs
+	db	null
+	dec	e		; Test backspace or delete
+	jr	z,l14ff		; Yeap
+	jr	l153f		; Else delete two characters on screen
+;
+; Found EOF
+;
+l1550:
+	inc	b		; Test flag
+	dec	b
+	jr	z,l14ff		; Ignore input
+	jr	l155a		; Close input line
+;
+; Found CR
+;
+l1556:
+	inc	b		; Test flag
+	dec	b
+	jr	nz,l155e	; Ignore EOF
+l155a:
+	ld	(hl),eof	; Close line
+	jr	l1566
+l155e:
+	call	l01e1		; Give new line
+	ld	(hl),cr		; Close line
+	inc	hl
+	ld	(hl),lf
+l1566:
+	inc	hl
+	ld	(l00d6),hl	; Set top pointer
+	ret
+;
+; Get character from file or console buffer
+;
+l156b:
+	ld	hl,(l00e2)	; Get FIB
+	ld	a,(l00d0)
+	or	a		; Test error
+	jr	nz,l15ed	; Force EOF if so
+	ld	a,(hl)
+	bit	wr.bit,a	; Test preread
+	jr	nz,l15e9	; Fetch if so
+	and	FIBtype		; Test device
+	jr	nz,l15ab	; Yeap, standard I/O
+	inc	hl		; Point to sector buffer
+	inc	hl
+	ld	a,(hl)
+	or	a		; Test filled
+	jp	p,l1597		; Not yet
+	ld	c,.rdseq
+	push	hl
+	call	l19ba		; Read sector
+	pop	hl
+	jr	z,l1595		; Read was successfull
+	push	hl
+	ld	de,FIB.buff-2
+	add	hl,de		; Point to buffer
+	ld	(hl),eof	; Set EOF
+	pop	hl
+l1595:
+	xor	a
+	ld	(hl),a		; Reset buffer pointer
+l1597:
+	inc	(hl)		; Bump pointer
+	add	a,FIB.buff-2
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Calculate current buffer
+	ld	a,(hl)
+	cp	eof		; Test EOF
+	jr	nz,l15e0	; Nope
+	ld	hl,(l00e2)
+	inc	hl
+	inc	hl
+	dec	(hl)		; Fix pointer if eof found
+	jr	l15e0
+l15ab:
+	dec	a		; Test CON:
+	jr	nz,l15c9
+	ld	hl,(l00d4)	; Get current ppinter
+	ld	de,(l00d6)	; Get top pointer
+	or	a
+	sbc	hl,de		; Test more in buffer
+	jr	c,l15bf		; Ok
+	ld	b,-1
+	call	l14ea		; Else get more
+l15bf:
+	ld	hl,(l00d4)	; Get current pointer
+	ld	a,(hl)
+	inc	hl		; Bump
+	ld	(l00d4),hl
+	jr	l15e0
+l15c9:
+	dec	a		; Test KBD:
+	jr	nz,l15d2
+	call	l00a3		; Read KBD
+	ld	a,l
+	jr	l15e0
+l15d2:
+	dec	a		; Test AUX:
+	dec	a
+	jr	nz,l15dc
+	call	l00af		; Get from auxiliary
+	ld	a,l
+	jr	l15e0
+l15dc:
+	call	l00b5		; Read USR
+	ld	a,l
+l15e0:
+	ld	hl,(l00e2)	; Get back FIB
+	set	wr.bit,(hl)	; Set preread flag
+	inc	hl
+	ld	(hl),a		; Save character
+	dec	hl
+	ret
+l15e9:
+	inc	hl		; Point to character buffer
+	ld	a,(hl)		; Get character
+	dec	hl
+	ret
+l15ed:
+	ld	a,eof		; Return EOF
+	ret
+;
+; Get character from current device
+; Fix up controls
+;
+l15f0:
+	push	hl
+	ld	hl,(l00e2)	; Get FIB
+	ld	a,(hl)
+	and	FIBtype		; Get device
+	cp	RAMdevice	; Test RAM
+	jr	z,l1622
+l15fb:
+	call	l156b		; Get character from device
+	cp	' '+1		; Test control
+	jr	nc,l160a	; Nope
+	cp	eof		; Test EOF
+	jr	z,l160a		; Yeap
+	res	wr.bit,(hl)	; Reset preread
+	jr	l15fb		; Then synchronize
+l160a:
+	ld	de,Number	; Set buffer
+	ld	b,.MaxSamp	; Set max
+l160f:
+	push	bc
+	push	de
+	call	l156b		; Get character from device
+	pop	de
+	pop	bc
+	cp	' '+1		; Test control
+	jr	c,l1620		; Yeap, end if so
+	res	wr.bit,(hl)	; No preread
+	ld	(de),a		; save character
+	inc	de
+	djnz	l160f
+l1620:
+	xor	a
+	ld	(de),a		; Close buffer
+l1622:
+	pop	hl
+	ret
+;
+; Check negative sign of ASCII number
+; ENTRY	Location NUMBER filled
+; EXIT	Reg IX points to number buffer
+;	Reg B holds 0 on no negative sign
+;	        and 1 on negative sign found
+;	Zero flag indicates empty buffer
+;
+l1624:
+	ld	ix,Number	; Init pointer
+	ld	a,(ix)		; Get character
+	or	a
+	ret	z		; Exit if zero
+	ld	b,0
+	cp	'-'		; Test negative sign
+	ret	nz		; Nope
+	inc	b		; Fix result
+	inc	ix		; Skip pointer
+	ret
+;
+; Fix number conversion for error
+; ENTRY	Reg IX points behind number
+;	Carry set reflects overflow
+; EXIT	Carry set indicates error
+;	IORESULT set to error 010H
+;
+l1636:
+	jr	c,l163d		; Fall into error
+	ld	a,(ix)		; Test correct end
+	or	a
+	ret	z		; Yeap
+l163d:
+	ld	a,_IllNum
+	ld	(l00d0),a	; Set error
+	scf
+	ret
+;
+; Get character from input READ(char)
+; ENTRY	Reg HL points to character variable
+;
+l1644:
+	push	hl		; Save pointer
+	call	l156b		; Get character
+	res	wr.bit,(hl)	; Reset preread
+	pop	hl		; Get back pointer
+	ld	(hl),a		; Save character
+	ret
+;
+; Get byte from input READ(byte)
+; ENTRY	Reg HL points to byte variable
+;
+l164d:
+	db	skip		; Set byte flag
+;
+; Get integer from input READ(integer)
+; ENTRY	Reg HL points to integer variable
+;
+l164e:
+	xor	a		; Reset byte flag
+	ld	c,a
+	push	bc
+	call	l15f0		; Get number input
+	pop	bc
+	call	l1624		; Test sign
+	ret	z		; Empty number, exit
+	push	bc
+	push	hl
+	call	l07f7		; Convert ASCII to integer
+	pop	de
+	pop	bc
+	call	l1636		; Test error
+	ret	c		; Yeap, exit
+	dec	b		; Test negative sign
+	call	z,l0783		; Negate if so
+	ex	de,hl
+	ld	(hl),e		; Save low or byte
+	inc	c
+	dec	c		; Test byte
+	jr	nz,l1670	; Skip if so
+	inc	hl
+	ld	(hl),d		; Save high on integer
+l1670:
+	ex	de,hl
+	ret
+;
+; Get real from input READ(real)
+; ENTRY	Reg HL points to real variable
+;
+l1672:
+	call	l15f0		; Get ASCII number
+	call	l1624		; Test sign
+	ret	z		; Empty number, exit
+	push	bc
+	push	hl
+	call	l11a3		; Convert to real
+	exx
+	pop	hl
+	pop	bc
+	call	l1636		; Test error
+	ret	c		; Yeap, exit
+	dec	b		; Test negative sign
+	exx
+	call	z,l0a8f		; Negate if so
+	exx
+	jp	l05d1		; Save real number
+;
+; Get string from input READ(string[max])
+; ENTRY	Reg HL points to string variable
+;	Reg B holds max characters in string
+;
+l168e:
+	push	hl		; Save pointer
+	ex	de,hl
+	ld	c,0		; Clear character count
+l1692:
+	push	bc
+	push	de
+	call	l156b		; Get character
+	pop	de
+	pop	bc
+	cp	cr		; Test end of line
+	jr	z,l16a8
+	cp	eof		; Test end of file
+	jr	z,l16a8
+	res	wr.bit,(hl)	; Reset preread
+	inc	c		; Advance count
+	inc	de		; Advance pointer
+	ld	(de),a
+	djnz	l1692
+l16a8:
+	pop	hl		; Get back pointer
+	ld	(hl),c		; Set length
+	ret
+;
+; Handle end of line after READLN from file
+;
+l16ab:
+	call	l156b		; Get character
+	cp	eof		; Test end of file
+	jr	z,l16c5
+	res	wr.bit,(hl)	; Reset preread
+	cp	lf		; Test new line
+	jr	z,l16c5
+	cp	cr		; Wait for end of line
+	jr	nz,l16ab
+	call	l156b
+	cp	lf		; Maybe new line
+	jr	nz,l16c5
+	res	wr.bit,(hl)	; Reset preread if so
+l16c5:
+	ret
+;
+; Output character to device
+; ENTRY	Accu holds character
+;
+l16c6:
+	ld	hl,(l00e2)	; Get FIB
+	ld	c,a		; Save character
+	ld	a,(l00d0)
+	or	a		; Test I/O error
+	ret	nz		; Exit if so
+	ld	a,(hl)		; Get type
+	and	FIBtype		; Test device
+	jr	nz,l16e4	; Yeap
+	inc	hl		; Point to sector buffer
+	inc	hl
+	push	hl
+	ld	a,(hl)		; Get pointer
+	add	a,FIB.buff-2
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Make pointer absolute
+	ld	(hl),c		; Save character
+	pop	hl
+	inc	(hl)		; Advance count
+	ret	p		; Still in range
+	jr	l170c		; Write record
+l16e4:
+	cp	RAMdevice	; Test store to RAM
+	jr	z,l16fd		; Yeap
+	pop	hl
+	ld	b,0
+	push	bc
+	push	hl
+	dec	a		; 1=CON:
+	jp	z,l00a6		; Put to console
+	dec	a		; 3=LST:
+	dec	a
+	jp	z,l00a9		; Put to printer
+	dec	a		; 4=AUX:
+	jp	z,l00ac		; Put to auxiliary
+				; 5=USR:
+	jp	l00b2		; Put to console
+l16fd:
+	ld	hl,(l00e8)	; Get string pointer
+	ld	a,(l00ea)	; Get max length
+	cp	(hl)		; Test in range
+	ret	z		; Nope, exit
+	inc	(hl)		; Bump count
+	ld	e,(hl)
+	ld	d,0
+	add	hl,de		; Build address
+	ld	(hl),c		; Store character
+	ret
+;
+; Write sector to file if any item in buffer
+;
+l170c:
+	ld	hl,(l00e2)	; Get FIB
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get record pointer
+	or	a		; Test any in buffer
+	ret	z		; Nope, exit
+	ld	(hl),0		; Clear pointer
+	ld	c,.wrseq
+	call	l19ba		; Write record
+	ret	z		; Ok, no errr
+	ld	a,_WrErr
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Write character to device
+; WRITE(char)
+; ENTRY	Reg L holds character
+;
+l1722:
+	ld	a,l		; Get character
+	jp	l16c6		; Put it
+;
+; Write integer to device
+; WRITE(int)
+; WRITE(int:m)
+; ENTRY	Integer on stack
+;	Reg HL holds digit count (zero without count)
+;
+l1726:
+	pop	bc
+	pop	de
+	push	bc
+	ld	ix,(l00d2)	; Get top of memory for buffer
+	bit	sgn.bit,h	; Test sign of count
+	jr	z,l1737		; >= 0
+	call	l0783		; Negate
+	ex	de,hl		; Swap values
+	jr	l1745
+l1737:
+	ex	de,hl
+	bit	sgn.bit,h	; Test sign of number
+	jr	z,l1745		; >= 0
+	call	l0783		; Negate
+	ld	(ix),'-'	; Init sign
+	inc	ix
+l1745:
+	push	de
+	call	l07c6		; Convert integer to ASCII
+l1749:
+	pop	hl
+	call	l04c8		; Get byte from integer
+	ld	de,(l00d2)	; Get back top of memory
+	push	ix
+	pop	hl
+	or	a
+	sbc	hl,de		; Calculate length of string
+	ld	c,l
+	ex	de,hl
+l1759:
+	sub	c		; Test against count
+	jr	c,l176a		; Ignore if out of range
+	jr	z,l176a
+	ld	b,a		; Save count
+	push	hl
+l1760:
+	ld	a,' '
+	push	bc
+	call	l16c6		; Blank leading places
+	pop	bc
+	djnz	l1760
+	pop	hl
+l176a:
+	ld	b,c		; Get back length
+	inc	b
+l176c:
+	dec	b
+	ret	z
+	ld	a,(hl)
+	push	bc
+	push	hl
+	call	l16c6		; Type digits
+	pop	hl
+	pop	bc
+	inc	hl
+	jr	l176c
+;
+; Formatted write
+; WRITE(real)
+; WRITE(real:n)
+; WRITE(real:n:m)
+; ENTRY	Reg HL holds fix comma places (-1 on none)
+;	Stack holds decimal places and real
+;	(Without decimal places defaults to 24)
+;
+l1779:
+	pop	bc
+	pop	de		; Get places
+	exx
+	pop	hl		; Get number
+	pop	de
+	pop	bc
+	exx
+	push	bc
+	ld	ix,(l00d2)	; Get top of memory for buffer
+	push	de
+	call	l1027		; Convert real to ASCII
+	jr	l1749
+;
+; Boolean write
+; WRITE(bool)
+; WRITE(bool:m)
+; ENTRY	Reg HL holds places (0 on none)
+;	Stack holds boolean
+;
+l178b:
+	pop	bc
+	pop	de		; Get boolean
+	push	bc
+	call	l04c8		; Get byte from integer
+	bit	_LB,e		; Test bit
+	ld	hl,l17a1
+	ld	c,l17a1.l
+	jr	nz,l1759	; It is TRUE
+	ld	hl,l17a5
+	ld	c,l17a5.l
+	jr	l1759		; Tell FALSE
+;
+l17a1:
+	db	'TRUE'
+l17a1.l	equ	$-l17a1
+l17a5:
+	db	'FALSE'
+l17a5.l	equ	$-l17a5
+;
+; String and formatted character write
+; WRITE(string)
+; WRITE(string:m)
+; WRITE(char:m)
+; ENTRY	Reg HL holds places (0 on none)
+;	Stack holds string (chracter=string with length=1)
+;
+l17aa:
+	call	l04c8		; Get byte from integer for places
+	ld	hl,2
+	add	hl,sp		; Fix stack
+	ld	c,(hl)		; Get length
+	inc	hl
+	call	l1759		; Print right justified
+	pop	de		; Get back caller
+	ld	sp,hl		; Reset stack
+	push	de
+	ret
+;
+; Immediate string write
+; WRITE('string')
+; ENTRY	Stack holds string starting with length
+;
+l17ba:
+	pop	hl		; Get pointer to string
+	ld	a,(hl)		; Get length
+	inc	hl
+	or	a		; Test any
+	jr	z,l17cc
+	ld	b,a		; save length if so
+l17c1:
+	ld	a,(hl)		; Get character
+	push	bc
+	push	hl
+	call	l16c6		; Write it
+	pop	hl
+	pop	bc
+	inc	hl
+	djnz	l17c1
+l17cc:
+	jp	(hl)
+;
+; Give new line
+; WRITELN{...}
+;
+l17cd:
+	ld	a,cr
+	call	l16c6		; Give return
+	ld	a,lf
+	jp	l16c6		; Followed by line feed
+;
+; The logical delimiter functions
+; Function SEEKEOLN(device):boolean
+; ENTRY	Reg HL points to FIB
+; EXIT	Reg HL holds TRUE or FALSE
+;
+l17d7:
+	ld	de,1*256+cr	; Set CR
+	jr	l17e9
+;
+; Function EOLN(device):boolean
+;
+l17dc:
+	ld	de,cr
+	jr	l17e9
+;
+; Function SEEKEOF(device):boolean
+;
+l17e1:
+	ld	de,1*256+eof	; Set EOF
+	jr	l17e9
+;
+; Function EOF(device):boolean
+;
+l17e6::
+	ld	de,eof
+l17e9:
+	ld	(l00e2),hl	; Set device
+	bit	in.bit,(hl)	; Test input possible
+	jr	z,l180c		; Nope
+l17f0:
+	push	de
+	call	l156b		; Get character
+	pop	de
+	cp	e		; Test end found
+	jr	z,l1808		; Yeap
+	cp	eof		; Test end of file
+	jr	z,l1808		; Force TRUE if so
+	cp	' '+1		; Test control
+	jr	nc,l180c	; Nope
+	inc	d		; Test control to be checked
+	dec	d
+	jr	z,l180c		; Yeap
+	res	wr.bit,(hl)	; Reset preread
+	jr	l17f0
+l1808:
+	ld	hl,.TRUE	; Return TRUE
+	ret
+l180c:
+	ld	hl,FALSE	; Return FALSE
+	ret
+;
+; Prepare typed files
+; Procedure REWRITE(typed_file)
+; ENTRY	Reg HL points to FIB
+;	Reg DE holds length of record
+;
+l1810:
+	db	skip
+;
+; Procedure RESET(typed_file)
+;
+l1811:
+	xor	a
+	ld	(l00e8),a	; Set mode (0=RESET)
+	ld	(l00e6),de	; Save record length
+	call	l187a		; Close file
+	ld	a,(l00d0)	; Test error
+	or	a
+	ret	nz		; End if so
+	call	l1430		; Set up FIB
+	ld	a,(l00d0)	; Test error
+	or	a
+	ret	nz		; End if so
+	ld	hl,(l00e2)	; Init FIB flag
+	ld	(hl),..in+..out+..read
+	inc	hl
+	inc	hl
+	ld	(hl),a		; Init record pointer
+	ld	de,FIB.cur-2
+	add	hl,de		; Point to current record
+	ld	(hl),a		; Clear it
+	inc	hl
+	ld	(hl),a
+	ld	de,FIB.FCB+_rrn-FIB.cur-1
+	add	hl,de		; Point to random record
+	ld	(hl),a		; Clear it
+	inc	hl
+	ld	(hl),a
+	ld	de,FIB.rec-FIB.FCB-_rrn-1
+	add	hl,de		; Point to FIB record
+	ld	a,(l00e8)
+	or	a		; Test mode
+	jr	nz,l1864	; Skip RESET
+;
+; Perform RESET
+;
+	push	hl
+	ld	bc,FixRecLen	; Set four bytes
+	xor	a
+	call	l1909		; Prepare read
+	pop	hl
+	inc	hl
+	inc	hl
+	ld	c,(hl)		; Point to max records
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(l00e6)
+	or	a
+	sbc	hl,bc		; Test agianst tem in file
+	ret	z		; Correct value
+	ld	a,_InvRec
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Perform REWRITE
+;
+l1864:
+	push	hl
+	xor	a
+	ld	(hl),a		; Clear record
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	de,(l00e6)	; Fetch length
+	ld	(hl),e		; Store into FIB
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	ld	bc,FixRecLen
+	ld	a,Rec.New+Rec.Wr
+	jp	l1909		; Prepare write
+;
+; Procedure CLOSE(typed_file)
+; ENTRY	Reg HL points to FIB
+;
+l187a:
+	ld	(l00e2),hl	; Save FIB
+	ld	a,(hl)		; Get state
+	and	..in+..out	; Test any action
+	ret	z		; Nope
+	call	l19ae		; Write record if requested
+	ld	hl,(l00e2)	; Get FIB
+	ld	de,FIB.FCB+_rrn
+	add	hl,de		; Point to random recird
+	xor	a
+	ld	(hl),a		; Clear it
+	inc	hl
+	ld	(hl),a
+	ld	de,-FIB.FCB-_rrn+1
+	add	hl,de		; Point to record
+	ld	(hl),a		; Clear it
+	inc	hl
+	inc	hl
+	ld	bc,FixRecLen
+	ld	a,Rec.Wr
+	call	l1909		; Prepare write
+	call	l19ae		; Write if requested
+	jp	l1481		; Close file
+;
+; Prepare write to record file
+; ENTRY	Reg HL points to FIB
+;
+l18a4:
+	ex	(sp),hl
+	ld	(l00e4),hl	; Save caller
+	ex	(sp),hl
+	ld	(l00e2),hl	; Save FIB
+	ld	a,(hl)
+	and	..in+..out	; Test I/O allowed
+	ret	nz		; Yeap
+l18b0:
+	ld	a,_BlkErr
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Get structure from input READ(type)
+; ENTRY	Reg HL points to FIB
+;
+l18b6:
+	ld	a,(l00d0)	; Get error
+	or	a		; Test previous
+	ret	nz		; Yeap
+	push	hl
+	call	l1a5a		; Get record data
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Test against last record
+	pop	hl
+	jr	nc,l18d6	; Error
+	xor	a
+	call	l1909		; Read
+l18ca:
+	ld	hl,(l00e2)	; Get back FIB
+	ld	de,FIB.cur
+	add	hl,de
+	inc	(hl)		; Bump record
+	ret	nz
+	inc	hl
+	inc	(hl)
+	ret
+l18d6:
+	ld	a,_IllEOF
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Put structure to output WRITE(type)
+; ENTRY	Reg HL points to FIB
+;
+l18dc:
+	ld	a,(l00d0)	; Get error
+	or	a		; Test previous
+	ret	nz		; Yeap
+	push	hl
+	call	l1a5a		; Get record data
+	or	a
+	sbc	hl,de		; Test same size
+	ld	a,Rec.Wr
+	jr	nz,l18fc
+	ld	hl,(l00e2)
+	ld	de,FIB.rec
+	add	hl,de		; Point to record
+	inc	(hl)		; Bump it
+	jr	nz,l18fa
+	inc	hl
+	inc	(hl)
+	jr	z,l1902		; Overflow error
+l18fa:
+	ld	a,Rec.New+Rec.Wr
+l18fc:
+	pop	hl
+	call	l1909		; Execute write
+	jr	l18ca
+l1902:
+	pop	hl
+	ld	a,_OvflErr
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Perform record IO
+; ENTRY	Reg HL points to FIB record field
+;	Reg BC holds record length
+;	(Four on CLOSE, RESET and REWRITE)
+;	Accu holds code :
+;		0 : On RESET and READ
+;		1 : On CLOSE and WRITE
+;		3 : On WRITE and REWRITE
+;
+l1909:
+	ld	(l00e9),a	; Save code
+	ex	de,hl
+l190d:
+	ld	hl,(l00e2)	; Get FIB
+	bit	rd.bit,(hl)	; Test known buffer
+	jr	z,l1943		; Nope
+	res	rd.bit,(hl)	; Reset bit
+	ld	a,(l00e9)	; Get mode
+	bit	Rec.Wr.bit,a	; Test write
+	jr	z,l1935		; Nope, so read
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get record pointer
+	dec	hl
+	dec	hl
+	or	a
+	jr	nz,l1935	; Not empty, so read
+	ld	a,(l00e9)	; Get code
+	bit	Rec.New.bit,a	; Test new
+	jr	nz,l1943	; Yeap
+	ld	a,b		; Get counter
+	or	a
+	jr	nz,l1943
+	ld	a,c		; Test new
+	or	a
+	jp	m,l1943
+l1935:
+	push	bc
+	push	de
+	ld	c,.rndrd
+	call	l19ba		; Read record
+	pop	de
+	pop	bc
+	jr	nz,l1991	; Error return
+	ld	hl,(l00e2)	; Get back FIB
+l1943:
+	ld	a,(l00e9)	; Get mode
+	bit	Rec.Wr.bit,a	; Test write allowed
+	jr	z,l194c		; Nope
+	set	wr.bit,(hl)	; Set bit
+l194c:
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get pointer to buffer
+	add	a,FIB.buff-2
+	push	de
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Get address of buffer
+	pop	de
+	sub	FIB.buff-2	; Reset pointer
+	call	l199a		; Swap pointer
+l195c:
+	ldi			; Move bytes
+	jp	po,l1966	; Test done
+	inc	a		; Bump pointer
+	jp	p,l195c		; Test done
+	dec	a
+l1966:
+	inc	a
+	call	l199a		; Swap back
+	ld	hl,(l00e2)	; Get FIB
+	inc	hl
+	inc	hl
+	and	NOMSB		; Test remainder in buffer
+	ld	(hl),a
+	jr	nz,l198a	; Yeap
+	push	bc
+	push	de
+	push	hl
+	call	l19ae		; Write record
+	pop	hl
+	pop	de
+	pop	bc
+	jr	nz,l1994	; Error return
+	push	de
+	ld	de,FIB.FCB+_rrn-2
+	add	hl,de		; Point to record
+	pop	de
+	inc	(hl)		; Advance it
+	jr	nz,l198a
+	inc	hl
+	inc	(hl)
+l198a:
+	ld	a,b		; Test all done
+	or	c
+	jp	nz,l190d	; Nope
+	ex	de,hl
+	ret
+l1991:
+	ld	a,_IllEOF
+	db	skip.2
+l1994:
+	ld	a,_WrErr
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Swap record pointers on request
+; ENTRY	Reg HL and DE hold pointer
+; EXIT	Register swapped on write selected
+;
+l199a:
+	push	af
+	ld	a,(l00e9)	; Get mode
+	bit	Rec.Wr.bit,a	; Test selection
+	jr	z,l19a3
+	ex	de,hl		; Swap
+l19a3:
+	pop	af
+	ret
+;
+; Force record write
+; Procedure FLUSH(type)
+; ENTRY	Reg HL holds FIB
+;
+l19a5:
+	ld	(l00e2),hl	; Save FIB
+	call	l19ae		; Write if possible
+	ret	z
+	jr	l1994		; Set error
+;
+; Write random record if select, set read
+;
+l19ae:
+	ld	c,.rndwr	; Set OS function
+	ld	hl,(l00e2)	; Get FIB
+	set	rd.bit,(hl)	; Set read bit
+	bit	wr.bit,(hl)	; Test write
+	ret	z		; Nope
+	res	wr.bit,(hl)	; Reset and write
+;
+; Execute file function
+; ENTRY	Reg C holds file function
+; EXIT	Zero flag reflects state of function
+;	Accu holds BDOS code
+;
+l19ba:
+	ld	hl,(l00e2)	; Load FIB
+	push	hl
+	push	bc
+	ld	de,FIB.buff
+	add	hl,de		; Point to buffer
+	ex	de,hl
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	pop	bc
+	pop	hl
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	call	BDOS		; Execute OS function
+	or	a		; Build result
+	ret
+;
+; Procedure SEEK(file,record)
+; ENTRY	Reg HL holds record seeked for
+;	FIB pushed onto stack
+;
+l19d5:
+	pop	bc
+	pop	de
+	ld	(l00e2),de	; Save FIB
+	push	bc
+	push	hl
+	call	l1a5a		; Get FIB data
+	pop	de
+	or	a
+	sbc	hl,de		; Test record less size
+	jr	c,l1a26		; Error if so
+	ld	hl,(l00e2)	; Get FIB
+	ld	bc,FIB.reclen	; Point to length of record
+	add	hl,bc
+	ld	c,(hl)		; Get record
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	(hl),e		; Save record number
+	inc	hl
+	ld	(hl),d
+	call	l1a2c		; Multiply it
+	ld	bc,FixRecLen
+	add	hl,bc		; Adjust for header
+	jr	nc,l19fe
+	inc	de
+l19fe:
+	ld	a,l
+	and	NOMSB		; Get record pointer
+	add	hl,hl		; * 2
+	ex	de,hl
+	adc	hl,hl
+	ex	de,hl
+	ld	d,e		; / 256
+	ld	e,h
+	ld	hl,(l00e2)	; Get FIB
+	inc	hl
+	inc	hl
+	ld	(hl),a		; Store record pointer
+	ld	bc,FIB.FCB+_rrn-2
+	add	hl,bc		; Point to random record
+	ld	c,(hl)		; Get it
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+	or	a
+	sbc	hl,bc		; Test record already set
+	add	hl,bc
+	ret	z		; Yeap
+	push	de
+	push	hl
+	call	l19ae		; Write record
+	pop	de
+	pop	hl
+	ld	(hl),d		; Set current record
+	dec	hl
+	ld	(hl),e
+	ret
+l1a26:
+	ld	a,_SeekEOF
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Multiply record number by record length
+; ENTRY	Reg BC holds length of record
+;	Reg DE holds number of record
+; EXIT	Reg HL holds the product of both
+;
+l1a2c:
+	push	de		; Copy number
+	exx
+	pop	hl		; Get copy
+	exx
+	ld	hl,0		; Init result
+	ld	d,h
+	ld	e,l
+	ld	a,16		; Set bit length
+l1a37:
+	add	hl,hl		; Shift result
+	ex	de,hl
+	adc	hl,hl		; Treat as 32 bit number
+	ex	de,hl
+	exx
+	add	hl,hl		; Shift number
+	exx
+	jr	nc,l1a45
+	add	hl,bc		; Fix for carry
+	jr	nc,l1a45
+	inc	de
+l1a45:
+	dec	a
+	jr	nz,l1a37	; Loop on
+	ret
+;
+; Function EOF(device):boolean (untyped)
+;
+l1a49::
+	call	l1a5d		; Get size of file
+	or	a
+	sbc	hl,de		; Test end
+	ld	hl,FALSE
+	ret	nz		; Return FALSE if not
+	inc	hl		; Fix for TRUE
+	ret
+;
+; Get record position of file
+; Function FILEPOS(file):integer
+; ENTRY	Reg HL holds FIB
+; EXIT	Reg HL holds current record
+;
+l1a55:
+	call	l1a5d		; Get size of file
+	ex	de,hl		; Into integer result
+	ret
+;
+; Get record data of file
+; EXIT	Reg HL holds size of file
+;	Reg DE holds current record
+;	Reg BC holds record length
+;
+l1a5a:
+	ld	hl,(l00e2)	; Load FIB
+;
+; Get size of file
+; Function FILESIZE(file):integer
+; ENTRY	Reg HL holds FIB
+; EXIT	Reg HL holds size of file in terms of records
+;	Reg DE holds current record
+;	Reg BC holds length of record
+;
+l1a5d:
+	ld	de,FIB.rec
+	add	hl,de		; Point to records
+	ld	e,(hl)		; Get number of records
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	de
+	ld	c,(hl)		; Get record length
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	e,(hl)		; Get current record
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ret
+;
+; Prepare untyped files
+; Procedure REWRITE(un_typed_file)
+; ENTRY	Reg HL points to FIB
+;
+l1a6f:
+	db	skip
+;
+; Procedure RESET(un_typed_file)
+;
+l1a70:
+	xor	a
+	ld	(l00e8),a	; Save mode (0=RESET)
+	call	l1ab0		; Close open file
+	ld	a,(l00d0)
+	or	a		; Test error
+	ret	nz		; Exit if so
+	call	l1430		; Fix FIB
+	ld	a,(l00d0)
+	or	a		; Test error
+	ret	nz		; Exit if so
+	ld	hl,(l00e2)	; Get FIB
+	ld	(hl),..in+..out	; Set flag
+	push	hl
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	c,.filsiz
+	call	BDOS		; Get size of file
+	pop	hl
+	ld	de,FIB.FCB+_rrn
+	add	hl,de		; Point to size
+	xor	a
+	ld	c,(hl)		; Get size
+	ld	(hl),a		; Reset size
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),a
+	ld	de,FIB.rec-FIB.FCB-_rrn-1
+	add	hl,de		; Point to recird number
+	ld	(hl),c		; Set it
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	(hl),RecLng	; Set standard record
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a		; Init current record
+	inc	hl
+	ld	(hl),a
+	ret
+;
+; Close untyped file
+; ENTRY	Reg HL holds FIB
+;
+; Procedure CLOSE(un_typed_file)
+;
+l1ab0:
+	ld	(l00e2),hl	; Save FIB
+	ld	a,(hl)		; Get mode
+	and	..in+..out	; Test access
+	ret	z		; Nope
+	jp	l1481		; Close it
+;
+; Write block to untyped file
+; Procedure BLOCKWRITE(file,buffer,count)
+; ENTRY	Reg HL holds number of records to be written
+;	On stack FIB and buffer
+;
+l1aba:
+	ld	a,.rndwr	; Set function code
+	jr	l1ac0
+;
+; Read block from untyped file
+; Procedure BLOCKREAD(file,buffer,count)
+; ENTRY	Reg HL holds number of records to be read
+;	On stack FIB and buffer
+;
+l1abe:
+	ld	a,.rndrd	; Set function code
+l1ac0:
+	ld	b,h		; Copy count
+	ld	c,l
+	ld	hl,l00f0	; Point to scratch
+	ld	(l00e6),hl	; Set for record
+	pop	ix
+	pop	de		; Get buffer
+	pop	hl		; Get FIB
+	push	ix
+	push	bc
+	call	l1afd		; Execute block I/O
+	pop	bc
+	ld	a,(l00d0)
+	or	a		; Test error
+	ret	nz		; Exit if so
+	ld	hl,(l00f0)
+	sbc	hl,bc		; Test all records processed
+	ret	z		; Yeap
+	ld	a,(l00e9)	; Get file function
+	cp	.rndrd		; Test read
+	ld	a,_IllEOF
+	jr	z,l1ae9
+	ld	a,_WrErr
+l1ae9:
+	ld	(l00d0),a	; Set error code accordingly
+	ret
+;
+; Write block to untyped file
+; Procedure BLOCKWRITE(file,buffer,count,result)
+; ENTRY	Reg HL points to result
+;	On stack FIB, buffer and number of records
+;
+l1aed:
+	ld	a,.rndwr	; Set function
+	jr	l1af3
+;
+; Rad block from untyped file
+; Procedure BLOCKREAD(file,buffer,count,result)
+; ENTRY	Reg HL points to result
+;	On stack FIB, buffer and number of records
+;
+l1af1:
+	ld	a,.rndrd	; Set function
+l1af3:
+	ld	(l00e6),hl	; Save result pointer
+	pop	ix
+	pop	bc		; Get count
+	pop	de		; Get buffer
+	pop	hl		; Get FIB
+	push	ix
+;
+; Perform block IO
+; ENTRY	Accu holds file function
+;	Reg HL holds FIB
+;	Reg DE holds buffer
+;
+l1afd:
+	ld	(l00e9),a	; Save function
+	ld	(l00e2),hl	; Save FIB
+	ld	a,(hl)		; Get mode
+	and	..in+..out	; Test IO allowed
+	jp	z,l18b0		; Nope
+	ld	hl,(l00e6)	; Get record address
+	xor	a
+	ld	(hl),a		; Clear record
+	inc	hl
+	ld	(hl),a
+l1b10:
+	ld	a,b
+	or	c		; Test all done
+	jr	z,l1b4d		; Yeap
+	push	bc
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	hl,(l00e2)	; Get back FIB
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	a,(l00e9)	; Get file function
+	ld	c,a
+	call	BDOS		; Execute I/O
+	pop	de
+	pop	bc
+	or	a		; Test result
+	jr	nz,l1b4d	; Not good
+	push	de
+	ld	hl,(l00e2)	; Get FIB again
+	ld	de,FIB.FCB+_rrn
+	add	hl,de		; Point to record
+	inc	(hl)		; Advance record
+	jr	nz,l1b3c
+	inc	hl
+	inc	(hl)
+l1b3c:
+	pop	de
+	ld	hl,RecLng
+	add	hl,de		; Advance buffer
+	ex	de,hl
+	ld	hl,(l00e6)
+	inc	(hl)		; Advance record count
+	jr	nz,l1b4a
+	inc	hl
+	inc	(hl)
+l1b4a:
+	dec	bc		; Count down requested length
+	jr	l1b10
+l1b4d:
+	ld	hl,(l00e2)	; Get FIB
+	ld	de,FIB.FCB+_rrn
+	add	hl,de		; Point to last record
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	de,FIB.cur-FIB.FCB-_rrn-1
+	add	hl,de		; Point to FIB record
+	ld	(hl),c		; Save record number
+	inc	hl
+	ld	(hl),b
+	ld	de,-FIB.rec
+	add	hl,de		; Point to record
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	or	a
+	sbc	hl,bc		; Test against last record
+	ret	nc
+	ex	de,hl
+	ld	(hl),c		; Save new max record
+	inc	hl
+	ld	(hl),b
+	ret
+;
+; Procedure SEEK(file,record)
+; ENTRY	Reg HL holds record seeked for
+;	FIB pushed onto stack
+;
+l1b6f:
+	pop	bc
+	pop	de
+	ld	(l00e2),de	; Save FIB
+	push	bc
+	push	hl
+	call	l1a5a		; Get record data
+	pop	de
+	or	a
+	sbc	hl,de		; Test position
+	jp	c,l1a26		; Error if overflow
+	ld	hl,(l00e2)	; Get FIB
+	ld	bc,FIB.cur
+	add	hl,bc
+	ld	(hl),e		; Save new position
+	inc	hl
+	ld	(hl),d
+	ld	bc,FIB.FCB+_rrn-FIB.cur-1
+	add	hl,bc
+	ld	(hl),e		; Save in FCB, too
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Delete file
+; Procedure ERASE(file)
+; ENTRY	Reg HL holds FIB
+;
+l1b93:
+	call	l1c4c		; Check legal FIB
+	ret	nz		; Nope
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ex	de,hl
+	ld	c,.delete
+	call	BDOS		; Delete file
+	inc	a
+	ret	nz
+	jr	l1be4		; Set error if unknown
+;
+; Rename file
+; Procedure RENAME(file,newname)
+; ENTRY	FIB and name on stack
+;
+l1ba5:
+	pop	iy
+	ld	hl,(l00d2)	; Get top of memory for buffer
+	ld	b,16		; Set max
+	call	l05e2		; Assign string from stack
+	xor	a
+	ld	(de),a
+	pop	hl		; Load FIB
+	push	iy
+	call	l1c4c		; Check legal FIB
+	ret	nz		; Nope
+	push	hl
+	call	l03f2		; Parse file
+	pop	hl
+	push	hl
+	ld	de,FIB.FCB+DIRlen
+	add	hl,de		; Point to 2nd FCB
+	ex	de,hl
+	ld	hl,l005c
+	ld	bc,Fdrv+Fname+Fext
+	ldir			; Move new name
+	pop	hl
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	push	hl
+	ex	de,hl
+	ld	c,.rename
+	call	BDOS		; Rename
+	pop	de
+	inc	a		; Test success
+	jr	z,l1be4		; Nope
+	ld	hl,l005c
+	ld	bc,FCBlen
+	ldir			; Unpack new file
+	ret
+l1be4:
+	ld	a,_NoFile	; Set error
+l1be6:
+	ld	(l00d0),a
+	ret
+;
+; Perform executing new programs
+; Procedure EXECUTE(File)
+; ENTRY	Reg HL points to FIB
+;
+l1bea:
+	db	skip
+;
+; Procedure CHAIN(File)
+;
+l1beb:
+	xor	a
+	ld	(l00e8),a	; Set mode (0=CHAIN)
+	call	l1c4c		; Test device ok
+	ret	nz		; Nope
+	ld	a,(l00d8)	; Test run mode
+	or	a
+	ld	a,_DirErr
+	jr	z,l1be6		; Must *NOT* be direct mode
+	ld	hl,(l00e2)	; Get FIB
+	ld	de,FIB.FCB
+	add	hl,de		; Point to FCB
+	ld	de,l005c
+	ld	bc,FCBlen
+	ldir			; Move to standard FCB
+	ld	de,l005c
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a
+	jr	z,l1be4		; File not found
+	ld	hl,l1c33	; Point to loader
+	ld	de,l00b0
+	ld	bc,l0019
+	ldir			; Move loader to temporary location
+	ld	de,TPA		; Init loader address
+	ld	a,(l00e8)	; Test mode
+	or	a
+	jr	nz,l1c2d
+	ld	de,(TPA+1)	; Change address for CHAIN
+l1c2d:
+	ld	sp,TPA		; Get local stack
+	jp	l00b0		; Go load
+;
+; ############### Start of loader ###############
+;
+; Loader will be moved into 00B0H temporary loaction
+;
+l1c33:
+	.phase	l00b0
+.l1c33:
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l005c
+	ld	c,.rdseq
+	call	BDOS		; Read a code record
+	pop	de
+	ld	hl,RecLng
+	add	hl,de		; Bump address
+	ex	de,hl
+	or	a		; Test more
+	jr	z,.l1c33
+	jr	TPA		; Start after loading
+l0019	equ	$-.l1c33
+	.dephase
+;
+; ################ End of loader ################
+;
+; Check legal device for file operation
+; ENTRY	Reg HL points to FIB
+; EXIT	Zero flag set if legal device
+;	If illegal, IOerror 20H will be set
+;
+l1c4c:
+	ld	(l00e2),hl	; Save FIB
+	ld	a,(hl)		; Get flag
+	and	FIBtype		; Mask it
+	ret	z		; 0000 menas file
+	ld	a,_IllIO
+	ld	(l00d0),a	; Set error
+	ret
+;
+; Load overlay file
+; ENTRY	Reg HL holds record procedure starts with
+;	Reg DE holds number of records to be read
+;
+; Overlay call follows:
+;	    2 Bytes hold last sector read
+;	   11 Bytes NAME.EXT of file
+;	n*128 Bytes record(s)
+;
+l1c59:
+	ld	(l00e6),hl	; Save record
+	ld	(l00e8),de	; Save record count
+	ex	de,hl
+	pop	hl
+	ld	(l00e2),hl	; Save caller
+	ld	c,(hl)		; Fetch last sector
+	ld	(hl),e		; Set new one
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),d
+	ex	de,hl		; Compare bew:old
+	or	a
+	sbc	hl,bc
+	jr	z,l1cca		; Overlay already in memory
+	ex	de,hl
+	inc	hl
+	ld	de,l005c
+	ld	a,(l00dc)	; Get overlay drive
+	ld	(de),a		; Store into standard FCB
+	inc	de
+	ld	bc,Fname+Fext
+	ldir			; Move name to standard FCB
+	ld	b,FCBlen-_ex
+	xor	a
+l1c82:
+	ld	(de),a		; Clear remainder of FCB
+	inc	de
+	djnz	l1c82
+	push	hl		; Save address of buffer
+	ld	de,l005c
+	ld	c,.open
+	call	BDOS		; Open file
+	pop	de		; Get back buffer address
+	inc	a		; Test success
+	jr	z,l1cd2		; Nope
+	ld	hl,(l00e6)	; Get start record
+	ld	(l005c+_rrn),hl	; Set for random record
+	ld	bc,(l00e8)	; Get record count
+l1c9d:
+	push	bc
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l005c
+	ld	c,.rndrd
+	call	BDOS		; Read from file
+	pop	de
+	pop	bc
+	or	a		; Verify no error
+	jr	nz,l1cd2	; Error
+	ld	hl,(l005c+_rrn)
+	inc	hl		; Bump record
+	ld	(l005c+_rrn),hl
+	ld	hl,RecLng
+	add	hl,de		; Get next address
+	ex	de,hl
+	dec	bc
+	ld	a,b		; Test done
+	or	c
+	jr	nz,l1c9d	; Nope
+	ld	de,l005c
+	ld	c,.close
+	call	BDOS		; Close file
+l1cca:
+	ld	hl,(l00e2)	; Get caller
+	ld	de,2+Fname+Fext
+	add	hl,de		; Skip header
+	jp	(hl)		; Enter overlay
+l1cd2:
+	ld	ix,(l00e2)	; Get caller's PC
+	ld	a,_OVLerr
+	jp	l2029		; Abort
+;
+; Procedure OVRDRIVE(drive)
+; ENTRY	Reg HL holds drive (1=A, 2=B, etc)
+;
+l1cdb:
+	call	l04c8		; Get byte from integer
+	cp	'P'-'@'+1	; Test max
+	ret	nc		; Exit on range error
+	ld	(l00dc),a	; Set overlay drive
+	ret
+;
+; Procedure NEW(pointer)
+; Procedure GETMEM(pointer,space)
+; ENTRY	Reg HL holds space required
+;	Variable pointer on stack
+;
+l1ce5:
+	ld	(l00f0),hl	; Save space required
+	ex	de,hl
+	pop	hl
+	ex	(sp),hl
+	ld	(l00f2),hl	; Save address of variable
+	inc	de
+	inc	de
+	inc	de
+	ld	a,e
+	and	-HeapLen	; Get modulo 4
+	ld	e,a
+	ld	hl,l00de
+	ld	(l00f8),hl	; Init pointer
+	ld	ix,(l00de)	; Get pointer to 1st free address
+l1cff:
+	ld	l,(ix+HeapLOlen)
+	ld	h,(ix+HeapHIlen)
+	ld	a,l		; Test assignment
+	or	h
+	jr	z,l1d51		; Maybe free
+	sbc	hl,de		; Test gap
+	jr	nc,l1d1c
+	ld	l,(ix+HeapLOadr); Get next address
+	ld	h,(ix+HeapHIadr)
+	push	hl
+	ld	(l00f8),ix	; Save last address
+	pop	ix		; Copy chain
+	jr	l1cff
+l1d1c:
+	jr	nz,l1d28	; Not same gap length
+	ld	e,(ix+HeapLOadr); Get address if so
+	ld	d,(ix+HeapHIadr)
+	push	ix
+	jr	l1d43		; Save state
+l1d28:
+	ld	c,l		; Copy length
+	ld	b,h
+	ld	l,(ix+HeapLOadr); Get address
+	ld	h,(ix+HeapHIadr)
+l1d30:
+	push	ix		; Save pointer
+	add	ix,de		; Advance
+	ld	(ix+HeapLOadr),l; Set start values
+	ld	(ix+HeapHIadr),h
+	ld	(ix+HeapLOlen),c
+	ld	(ix+HeapHIlen),b
+	push	ix
+	pop	de		; Copy pointer
+l1d43:
+	ld	hl,(l00f8)	; Get pointer
+	ld	(hl),e		; Set new link
+	inc	hl
+	ld	(hl),d
+	pop	de
+	ld	hl,(l00f2)
+	ld	(hl),e		; Set into vriable
+	inc	hl
+	ld	(hl),d
+	ret
+l1d51:
+	push	ix
+	pop	hl
+	add	hl,de
+	ld	(l00c4),hl	; Set new heap pointer
+	ld	hl,(l00f0)	; Get space
+	ld	bc,HeapLen
+	add	hl,bc		; Get complete length
+	push	ix
+	pop	bc
+	add	hl,bc
+	jp	c,l1d75		; Error if overlapping
+	ld	bc,(l00c6)	; Get recursion pointer
+	sbc	hl,bc		; Test against it
+	ld	bc,0
+	ld	hl,0
+	jp	c,l1d30
+;
+; Heap error
+;
+l1d75:
+	ld	a,_HeapErr
+	jp	l2027		; Set error
+;
+; Procedure DISPOSE(pointer)
+; Procedure FREEMEM(pointer,space)
+; ENTRY	Reg HL holds space
+;	Variable pointer on stack
+;
+l1d7a:
+	ex	de,hl		; Save space
+	pop	hl
+	ex	(sp),hl		; Get variable pointer
+	ld	a,(hl)		; Get dynamic pointer
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	de		; Fix space
+	inc	de
+	inc	de
+	ld	a,e
+	and	-HeapLen	; Get modulo 4
+	ld	e,a
+	ex	de,hl
+	ld	(l00f0),hl	; Save length
+	ld	hl,(l00de)	; Load pointer to free heap
+	push	hl
+	pop	ix
+	or	a
+	sbc	hl,de		; Check pointer addresses
+	jr	nc,l1de9
+l1d97:
+	ld	l,(ix+HeapLOadr); Get address
+	ld	h,(ix+HeapHIadr)
+	push	hl
+	or	a
+	sbc	hl,de		; Compare
+	jr	nc,l1da7
+	pop	ix
+	jr	l1d97
+l1da7:
+	pop	hl
+	push	de
+	pop	iy
+	ld	bc,(l00f0)	; Get length
+	ld	(iy+HeapLOlen),c; Store it
+	ld	(iy+HeapHIlen),b
+	ld	(iy+HeapLOadr),l; Store address, too
+	ld	(iy+HeapHIadr),h
+	ld	(ix+HeapLOadr),e
+	ld	(ix+HeapHIadr),d
+	push	ix
+	pop	hl
+	ld	c,(ix+HeapLOlen); Get old length
+	ld	b,(ix+HeapHIlen)
+	call	l1e04		; Compare
+	jr	z,l1dd8		; Match
+	ld	e,(ix+HeapLOadr); Get address
+	ld	d,(ix+HeapHIadr)
+	push	de
+	pop	ix
+l1dd8:
+	push	ix
+	pop	hl
+	ld	c,(ix+HeapLOlen)
+	ld	b,(ix+HeapHIlen)
+	ld	e,(ix+HeapLOadr)
+	ld	d,(ix+HeapHIadr)
+	jr	l1e04
+l1de9:
+	ld	hl,(l00de)	; Get pointer to free heap
+	ld	(l00de),de	; Set new address
+	push	de
+	pop	ix
+	ld	(ix+HeapLOadr),l; Set chain
+	ld	(ix+HeapHIadr),h
+	ld	bc,(l00f0)	; Get length
+	ld	(ix+HeapLOlen),c
+	ld	(ix+HeapHIlen),b
+	ex	de,hl
+l1e04:
+	add	hl,bc		; Bump next
+	or	a
+	sbc	hl,de		; Test same
+	ret	nz
+	push	de
+	pop	iy		; Copy pointer
+	ld	hl,(l00c4)	; Get heap pointer
+	or	a
+	sbc	hl,de		; Test top found
+	jr	z,l1e2f
+	ld	a,(iy+HeapLOadr); Unpack address
+	ld	(ix+HeapLOadr),a
+	ld	a,(iy+HeapHIadr)
+	ld	(ix+HeapHIadr),a
+	ld	l,(iy+HeapLOlen)
+	ld	h,(iy+HeapHIlen)
+	add	hl,bc
+	ld	(ix+HeapLOlen),l; Unpack new length
+	ld	(ix+HeapHIlen),h
+	xor	a
+	ret
+l1e2f:
+	push	ix
+	pop	hl
+	ld	(l00c4),hl	; Set new top heap pointer
+	ld	b,HeapLen
+l1e37:
+	ld	(hl),0		; Clear top
+	inc	hl
+	djnz	l1e37
+	ret
+;
+; Get free memory
+; Function MEMAVAIL:integer
+; EXIT	Reg HL holds free memory in bytes
+;
+l1e3d:
+	call	l1e4b		; Get memory
+	ld	hl,(l00f4)	; Get available memory
+	ret
+;
+; Get max free memory
+; Function MAXAVAIL:integer
+; EXIT	Reg HL holds free memory in bytes
+;
+l1e44:
+	call	l1e4b		; Get memory
+	ld	hl,(l00f6)	; Get max memory
+	ret
+;
+; Get free memory
+;
+l1e4b:
+	ld	hl,0
+	ld	(l00f4),hl	; Init available memory
+	ld	(l00f6),hl
+	ld	ix,(l00de)	; Get pointer to free heap
+l1e58:
+	ld	c,(ix+HeapLOlen)
+	ld	b,(ix+HeapHIlen)
+	ld	a,c
+	or	b		; Test end of chain
+	jr	z,l1e80
+	ld	hl,(l00f4)	; Get old available memory
+	add	hl,bc		; Add length
+	ld	(l00f4),hl
+	ld	hl,(l00f6)	; Get max
+	or	a
+	sbc	hl,bc		; Check it
+	jr	nc,l1e75
+	ld	(l00f6),bc	; Set new max
+l1e75:
+	ld	l,(ix+HeapLOadr); Get chain
+	ld	h,(ix+HeapHIadr)
+	push	hl
+	pop	ix
+	jr	l1e58		; Loop
+l1e80:
+	ld	hl,(l00c6)	; Get recursion pointer
+	ld	bc,-5
+	add	hl,bc		; Build free address
+	ld	de,(l00c4)	; Get heap pointer
+	or	a
+	sbc	hl,de		; Test any free
+	ret	c
+	ex	de,hl
+	ld	hl,(l00f4)	; Get available memory
+	add	hl,de		; Add gap
+	ld	(l00f4),hl
+	ld	hl,(l00f6)	; Get max
+	or	a
+	sbc	hl,de		; Subtract
+	ret	nc
+	ld	(l00f6),de	; Set new
+	ret
+;
+; Mark heap
+; Procedure MARK(pointer)
+; ENTRY	Reg HL holds pointer
+;
+l1ea3:
+	ld	de,(l00c4)	; Get heap pointer
+	ld	(hl),e		; Store into variable
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Release heap
+; Procedure RELEASE(pointer)
+; ENTRY	Reg HL holds pointer
+;
+l1eab:
+	ld	e,(hl)		; Load heap from variable
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+;
+; Init heap
+; ENTRY	Reg HL points to 1st free location
+;
+l1eaf:
+	ld	(l00c4),hl	; Set heap pointer
+	ld	(l00de),hl
+	ld	b,HeapLen
+l1eb7:
+	ld	(hl),0		; Clear 4 bytes
+	inc	hl
+	djnz	l1eb7
+	ret
+;
+; Convert number to string
+; Procedure STR(real,string)
+; ENTRY	Real pushed onto stack with formatting data
+;	Reg HL points to string
+;	Reg B holds length of string
+;
+l1ebd:
+	db	skip
+;
+; Procedure STR(integer,string)
+; ENTRY	Integer pushed onto stack with digit count
+;	Reg HL points to string
+;	Reg B holds length of string
+;
+l1ebe:
+	xor	a
+	ld	c,a		; Save mode
+	ld	(l00e8),hl	; Save string
+	xor	a
+	ld	(hl),a		; Init to empty string
+	ld	(l00d0),a	; Clear error
+	ld	a,b
+	ld	(l00ea),a	; Save max length
+	ld	hl,(l00e2)
+	ld	(l00ed),hl	; Save current FIB
+	ld	hl,l1f46
+	ld	(l00e2),hl	; Set RAM device
+	pop	hl		; Get caller
+	ld	(l00e4),hl
+	pop	hl		; Get digit count/comma places
+	inc	c		; Test mode
+	dec	c
+	jr	nz,l1ee6
+	call	l1726		; Get integer string
+	jr	l1ee9
+l1ee6:
+	call	l1779		; Get real string
+l1ee9:
+	ld	hl,(l00ed)
+	ld	(l00e2),hl	; Restore FIB
+	ld	hl,(l00e4)	; Get caller
+	jp	(hl)
+;
+; Convert string to number
+; Procedure VAL(string,real,result)
+; ENTRY	String and address of real pushed onto stack
+;	Reg HL points to result
+;
+l1ef3:
+	db	skip
+;
+; Procedure VAL(string,integer,result)
+; ENTRY	String and address of integer pushed onto stack
+;	Reg HL points to result
+;
+l1ef4:
+	xor	a
+	ld	(l00ec),a	; Save mode
+	ld	(l00e8),hl	; Save result
+	ld	hl,(l00e2)
+	ld	(l00ed),hl	; Save current FIB
+	ld	hl,l1f46
+	ld	(l00e2),hl	; Set RAM FIB
+	pop	hl
+	ld	(l00e4),hl	; Save caller
+	pop	hl
+	ld	(l00ea),hl	; Save integer/real address
+	ld	hl,l005c
+	ld	b,1eh
+	call	l05e2		; Assign string from stack
+	xor	a
+	ld	(de),a
+	ld	hl,(l00ea)	; Get back variable pointer
+	ld	a,(l00ec)	; Test mode
+	or	a
+	jr	nz,l1f27
+	call	l164e		; Convert to integer
+	jr	l1f2a
+l1f27:
+	call	l1672		; Convert to real
+l1f2a:
+	ld	hl,l00d0
+	ld	a,(hl)		; Get IOResult
+	ld	(hl),0		; Clear
+	or	a
+	ld	h,a
+	ld	l,a
+	jr	z,l1f3d		; Test error
+	push	ix
+	pop	hl		; Get last address
+	ld	de,l005c
+	sbc	hl,de		; Get relative string error
+l1f3d:
+	ex	de,hl
+	ld	hl,(l00e8)	; Point to result
+	ld	(hl),e		; Save error or success
+	inc	hl
+	ld	(hl),d
+	jr	l1ee9		; Exit
+;
+; FIB for RAM storage
+;
+l1f46:
+	db	..in+..out+RAMdevice
+	db	0
+;
+; Procedure RANDOMIZE
+;
+l1f48:
+	ld	a,r		; Get refresh counter
+	ld	(l00c8+3),a	; Set for random
+	ret
+;
+; Fill variable with constant value
+; Procedure FILLCHAR(var,num,val)
+; ENTRY	Reg HL holds value
+;	Count and variable address pushed onto stack
+;
+l1f4e:
+	ex	de,hl
+	pop	ix
+	pop	bc		; Get count
+	pop	hl		; Get address
+	ld	a,b
+	or	c		; Test count zero
+	jr	z,l1f62		; Skip if so
+	ld	(hl),e		; Store value
+	dec	bc		; Fix count
+	ld	a,b
+	or	c		; Test count one
+	jr	z,l1f62		; Skip if so
+	ld	d,h		; Copy address
+	ld	e,l
+	inc	de
+l1f60:
+	ldir			; Move value for fill
+l1f62:
+	jp	(ix)
+;
+; Move variable to another
+; Procedure MOVE(var1,var2,len)
+; ENTRY	Reg HL holds count
+;	Variables pushed onto stack
+;
+l1f64:
+	ld	b,h		; Copy count
+	ld	c,l
+	pop	ix
+	pop	de		; Get 2nd var
+	pop	hl		; Get 1st one
+	ld	a,b
+	or	c
+	jr	z,l1f62		; Test zero length
+	sbc	hl,de
+	add	hl,de		; Test overlapping
+	jr	nc,l1f60	; Move up if so
+	dec	bc
+	add	hl,bc		; Point to top
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	inc	bc
+	lddr			; Move down
+	jp	(ix)
+;
+; Get string from OS command line
+; Function PARAMSTR(num):any_string
+; ENTRY	Reg HL holds number of substring
+; EXIT	Selected string on stack
+;
+l1f7d:
+	ld	d,l		; Get number
+	inc	d
+	dec	d
+	jr	z,l1f85		; Skip if none
+	call	l1f9d
+l1f85:
+	pop	ix		; Free stack
+	ld	c,a		; Get length of string
+	ld	b,0
+	cpl
+	ld	l,a
+	ld	h,-1
+	add	hl,sp		; Build address on stack
+	ld	sp,hl
+	ld	(hl),c		; Store length
+	inc	hl
+	ex	de,hl
+	inc	c		; Test any selected
+	dec	c
+	jr	z,l1f99		; Nope
+	ldir			; Unpack it
+l1f99:
+	jp	(ix)
+;
+; Get number of parameters in OS command line
+; Function PARAMCOUNT:integer;
+;
+l1f9b:
+	ld	d,0		; Set dummy selection
+;
+; Get parameters of OS command line
+; ENTRY	Reg D holds number of substring selected
+; EXIT	Reg DE points to selected substring
+;	Accu   holds length of substring
+;	Reg HL holds index of substring
+;
+l1f9d:
+	ld	hl,l0080	; Init pointer
+	ld	a,MaxParams	; Test parameter count
+	ld	b,(hl)
+	cp	b
+	jr	nc,l1fa8
+	ld	b,MaxParams	; Truncate to max
+l1fa8:
+	inc	hl
+	ld	c,0		; Init count
+l1fab:
+	inc	b
+	dec	b		; Test end
+	jr	z,l1fbc		; Yeap
+	ld	a,(hl)
+	cp	' '
+	jr	z,l1fb8		; Skip white spaces
+	cp	tab
+	jr	nz,l1fbc
+l1fb8:
+	inc	hl
+	dec	b
+	jr	l1fab
+l1fbc:
+	ld	e,l		; Save pointer
+l1fbd:
+	inc	b
+	dec	b		; Test done
+	jr	z,l1fce		; Yeap
+	ld	a,(hl)
+	cp	' '
+	jr	z,l1fce		; Find white space
+	cp	tab
+	jr	z,l1fce
+	inc	hl
+	dec	b
+	jr	l1fbd
+l1fce:
+	ld	a,l
+	sub	e		; Test same position
+	jr	z,l1fd6
+	inc	c		; Count up index
+	dec	d		; Test found
+	jr	nz,l1fab
+l1fd6:
+	ld	l,c		; Get selected or last index
+	ld	h,0		; Make pointer relative
+	ld	d,h
+	ret
+;
+; Procedure GOTOXY(x_val,y_val)
+; ENTRY	Reg HL holds y_val
+;	x_val on stack
+;
+l1fdb:
+	pop	de
+	pop	bc
+	push	de
+	dec	l		; Fix row
+	ld	h,c
+	dec	h		; Fix column
+	jp	l02a2		; Position cursor
+;
+; Function UPCASE(char):char
+; ENTRY	Reg HL holds character
+; EXIT	Reg HL holds UPPER case character
+;
+l1fe4:
+	ld	a,l		; Get into accu
+	call	l04a6		; Convert to upper case
+	ld	l,a		; Bring it back
+	ret
+;
+; Execute BIOS function
+; Procedures	BIOS(func)
+;		BIOS(func,param)
+; Functions	BIOS(func):integer
+;		BIOS(func,param):integer
+;		BIOSHL(func,param):integer
+; ENTRY	Reg DE holds BIOS function
+;	Reg BC holds optional parameter
+; EXIT	Accu and reg HL hold result
+;
+l1fea:
+	ld	hl,(OS+1)	; Get base address
+	add	hl,de		; Make executable
+	add	hl,de
+	add	hl,de
+	jp	(hl)		; Execute
+;
+; Get IO result
+; Function IORESULT:integer
+; EXIT	Reg HL holds result
+;
+l1ff1:
+	ld	hl,l00d0	; Point to result
+	ld	a,(hl)		; Get it
+	ld	(hl),0		; Clear after request
+	ld	l,a
+	ld	h,0
+	ret
+;
+; Control C entry - entered via RST after each statement
+;
+l1ffb:
+	call	l0316		; Test key pressed
+	ld	a,h
+	or	l
+	ret	z		; Nope
+	ld	a,(l00dd)	; Get $C mode
+	push	af
+	xor	a
+	ld	(l00dd),a	; Set $C-
+	call	l0320		; Read from keyboard
+	pop	af
+	ld	(l00dd),a	; Reset $C mode
+	ld	a,l
+	cp	CtrlC		; Test Control-C
+	ret	nz		; Nope
+	pop	ix		; Fetch PC
+l2016:
+	ld	de,_CBRK	; Set CtrlC error
+	jr	l202c		; Enter error routine
+;
+; Check IOResult after IO operation
+; (May be turned off by {$I-})
+;
+l201b:
+	ld	a,(l00d0)	; Test any error
+	or	a
+	ret	z		; Nope
+	pop	ix		; Get caller
+	ld	e,a		; Save code
+	ld	d,_IO		; Set mode
+	jr	l202c
+l2027:
+	pop	ix		; Get caller
+l2029:
+	ld	e,a		; Save code
+	ld	d,_RT		; Set mode
+;
+; Common error handler
+; ENTRY	Reg D holds error mode
+;	Reg E holds error code
+;	Reg IX holds callers address
+;
+l202c:
+	push	de
+	call	l037a		; Reset some things
+	pop	de
+	xor	a
+	ld	(l00dd),a	; Set $C- mode
+	ld	hl,(l00ce)	; Get current PC
+	ld	a,h		; Check zero
+	or	l
+	push	ix
+	pop	hl
+	ld	bc,(l00cc)	; Get base PC
+	sbc	hl,bc		; Subtract for base
+	ld	bc,TPhead
+	add	hl,bc		; Fix for 0100h start
+	ld	(l00ce),hl	; Set current PC
+	or	a		; Look for previous zero
+	jr	nz,l2054	; Nope
+	push	de
+	push	de
+	push	hl
+	call	l00d9		; Do restart
+	pop	de
+l2054:
+	ld	a,d
+	or	a		; Test user break
+	jr	nz,l206c
+	call	l0200		; Tell control C
+	db	'^C'
+	db	cr,lf	
+	db	'User break'
+	db	null
+	jr	l2097
+l206c:
+	dec	a		; Test I/O error
+	jr	nz,l207a
+	call	l0200		; Tell I/O error
+	db	cr,lf	
+	db	'I/O'
+	db	null
+	jr	l2088
+l207a:
+	call	l0200		; Tell run time error
+	db	cr,lf	
+	db	'Run-time'
+	db	null
+l2088:
+	call	l0200
+	db	' error '
+	db	null
+	ld	a,e
+	call	l04b4		; Print error byte
+l2097:
+	call	l0200		; Tell current PC
+	db	', PC='
+	db	null
+	ld	hl,(l00ce)	; Get current PC
+	call	l04af		; Print hex
+	jr	l20bd		; Abort
+;
+; Process memory error
+;
+l20a8:
+	call	l0200		; Tell error
+	db	'Not enough memory'
+	db	null
+;
+; Error detected, tell abort and break
+;
+l20bd:
+	call	l0200		; Tell it
+	db	cr,lf	
+	db	'Program aborted'
+	db	cr,lf,null	
+;
+; Halt program
+;
+l20d4:
+	ld	a,(l00d8)	; Test run mode
+	or	a
+	jp	z,OS
+	jp	OS		; Always exit .COM file
+;
+; Restart after error
+;
+l20de:
+	pop	hl		; Get PC
+	pop	de		; Clean stack
+	pop	de
+	jp	(hl)		; Restart
+

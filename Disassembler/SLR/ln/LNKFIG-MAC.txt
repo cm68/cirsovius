@@ -1,0 +1,802 @@
+	title	SLRNK and SLRIB Config Utility
+	name	('LNKFIG')
+
+; Configurator of SLR LINK and LIB configure utility
+; DASMed by W. Cirsovius
+
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	macro
+	rst	0
+	endm
+BDOS	equ	0005h
+FCB	equ	005ch
+DMA	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.rdseq	equ	20
+.wrseq	equ	21
+.setdma	equ	26
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+
+_EX	equ	12
+_CR	equ	32
+
+RecLng	equ	128
+
+bel	equ	07h
+bs	equ	08h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+LOMASK	equ	00001111b
+NZNC	equ	11111111b
+
+$LNKver	equ	1131h		; Expected release of SLRNK
+$LIBver	equ	2130h		; Expected release of SLRIB
+
+LNKoff	equ	11		; Offset to SLRNK release
+LNKbeg	equ	13		; Start of SLRNK code
+
+LIBoff	equ	 3		; Offset to SLRIB release
+LIBbeg	equ	 5		; Start of SLRIB code
+
+CTRLEN	equ	8		; Length of control string input
+MODREC	equ	8		; Number of records to modify
+$extlen	equ	1+.ext+1
+StkDep	equ	130
+;
+; Control byte definition
+;
+_getbyt	equ	 0
+_getbol	equ	 2
+_getext	equ	 3
+_getend	equ	-1
+
+	ld	sp,LocStk	; Get local stack
+	ld	de,$HEAD
+	call	String		; Give ID message
+	ld	a,(FCB+.drv+.nam)
+	cp	' '		; Test extension given
+	jr	nz,GotExt	; Yeap
+	ld	hl,'C'+256*'O'	; Set default .COM
+	ld	(FCB+.drv+.nam),hl
+	ld	a,'M'
+	ld	(FCB+.drv+.nam+2),a
+GotExt:
+	ld	de,FCB
+	xor	a
+	ld	(FCB+_EX),a	; Clear extent
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Test success
+	jr	z,IllFile	; Nope
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	de,FCB
+	ld	c,.rdseq
+	call	BDOS		; Read first record
+	or	a		; Test success
+	jr	nz,IllFile	; Invalid if empty
+	call	RdRecs		; Get first records
+	ld	hl,(DMA+LNKoff)	; Get possible index to LNK
+	ld	de,$LNKver
+	sbc	hl,de		; Test linker
+	jr	nz,IsItLIB?	; Nope, maybe LIB
+	ld	hl,DMA+LNKbeg
+	ld	(PrgPtr),hl	; Init set up pointer
+	ld	hl,LNK.Ctrl
+	ld	(CtrlPtr),hl	; Init table pointer
+CtrlLoop:
+	call	ExecCtrl	; Process one entry
+	jr	nc,CtrlLoop	; Got more
+	xor	a
+	ld	(FCB+_CR),a
+	ld	de,DMA
+	ld	c,.setdma
+	call	BDOS		; Set default buffer
+	ld	de,FCB
+	ld	c,.wrseq
+	call	BDOS		; Write modified first record
+	call	WrRecs		; Write next records
+	ld	de,FCB
+	ld	c,.close
+	call	BDOS		; Close file
+	OS			; End of configurator
+;
+; Process invalid file error
+;
+IllFile:
+	ld	de,$ILL.FILE
+	call	String		; Tell invalid file
+	OS			; Exit
+;
+; Try LIB if LINK not found
+;
+IsItLIB?:
+	ld	hl,(DMA+LIBoff)	; Get possible LIB version
+	ld	de,$LIBver
+	or	a
+	sbc	hl,de		; Verify correct release
+	jr	nz,IllVer	; Nope, should be
+	ld	hl,DMA+LIBbeg
+	ld	(PrgPtr),hl	; Init set up pointer
+	ld	hl,LIB.Ctrl
+	ld	(CtrlPtr),hl	; Init table pointer
+	jr	CtrlLoop	; Start
+;
+; Process invalid release error
+;
+IllVer:
+	ld	de,$ILL.VER
+	call	String		; Tell invalid version
+	OS			; Exit
+;
+$ILL.FILE:
+	db	'Use Legitimate SLRNK or SLRIB file name',bel,eot
+$ILL.VER:
+	db	'Not SLRNK Release 1.31 or SLRIB Release 1.30',7,'$'
+;
+; Control tables
+; Byte  0   Type of entry
+; Byte 1,2  Message of entry
+;
+; Type byte :	 0 Get byte
+;		 1 N.C.
+;		 2 Get boolean
+;		 3 Get extension
+;		 4 N.C.
+;		 5 N.C. [Although coded]
+;		-1 End of table
+;
+LNK.Ctrl:
+	db	_getbol
+	dw	$DI$
+	db	_getbol
+	dw	$MULS$
+	db	_getbol
+	dw	$TAB$
+	db	_getbyt
+	dw	$HEXLEN$
+	db	_getbol
+	dw	$BUFF$
+	db	_getbyt
+	dw	$FILL$
+	db	_getbol
+	dw	$KEEP$
+	db	_getbol
+	dw	$ERASE$
+	db	_getbyt
+	dw	$ALT.USR$
+	db	_getbyt
+	dw	$ALT.DRV$
+	db	_getext
+	dw	$REL$
+	db	_getext
+	dw	$LIB$
+	db	_getext
+	dw	$IND$
+	db	_getext
+	dw	$SYM$
+	db	_getext
+	dw	$ABS$
+	db	_getext
+	dw	$N.ABS$
+	db	_getext
+	dw	$HEX$
+	db	_getend
+LIB.Ctrl:
+	db	_getbol
+	dw	$DI$
+	db	_getbol
+	dw	$MULS$
+	db	_getext
+	dw	$REL$
+	db	_getext
+	dw	$LIB$
+	db	_getext
+	dw	$IND$
+	db	_getend
+$TAB$:
+	db	'Use TAB as separator between Symbols in .SYM (Y for ZSID)',eot
+$DI$:
+	db	'Disable Interrupts',eot
+$MULS$:
+	db	'Use multi-sector I/O',eot
+$HEXLEN$:
+	db	'Number of bytes (1-60) per line of HEX output',eot
+$BUFF$:
+	db	'Use 2k Buffers instead of 1K',eot
+$FILL$:
+	db	'Value to use in Filling uninitialized space',eot
+$KEEP$:
+	db	'Keep Empty External Chain References',eot
+$ERASE$:
+	db	'Erase '
+	rept	3
+	dc	'$'
+	endm
+	db	'.SUB on Error',eot
+$ALT.USR$:
+	db	'Alternate search user # (0-31) ',eot
+$ALT.DRV$:
+	db	'Alternate search drive (0=Default, 1=A, etc.) ',eot
+$REL$:
+	db	'Extension for relocatable file',eot
+$LIB$:
+	db	'Extension for library file',eot
+$ABS$:
+	db	'Extension for absolute binary file',eot
+$N.ABS$:
+	db	'Extension for non-standard (non-100H) absolute binary file',eot
+$HEX$:
+	db	'Extension for Intel-Hex format file',eot
+$SYM$:
+	db	'Extension for Symbol Table file',eot
+$IND$:
+	db	'Extension for /I file',eot
+$OPEN:
+	db	' ($'
+$CLOSE:
+	db	') - $'
+;
+; Execute by control table
+; EXIT	Carry set on end of table
+;
+ExecCtrl:
+	ld	hl,(CtrlPtr)	; Get pointer
+	ld	a,(hl)		; Fetch control byte
+	rla
+	ret	c		; End if MSB set
+	rra
+	push	af		; Save control byte
+	inc	hl
+	ld	e,(hl)		; Fetch address of message
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(CtrlPtr),hl	; Save next pointer
+	call	String		; Print message
+	ld	de,$OPEN
+	call	String		; Give opening indicator
+	pop	af		; Get back control byte
+	or	a
+	jp	z,ByteIn	; Type 0 - decimal byte input
+	dec	a
+	jp	z,DmyCtrl	; Type 1 - special options
+	dec	a
+	jp	z,BoolIn	; Type 2 - boolean input
+	dec	a
+	jp	z,ExtIn		; Type 3 - input extension
+	dec	a
+	jr	z,DmyCtrl	; Type 4 - input hex word
+;
+				; Type 5 - Input control string
+				; ** NOT REQUESTED HERE **
+;
+	ld	hl,(PrgPtr)	; Get string pointer
+	ld	b,CTRLEN	; And set length
+CtrlPrLoop:
+	ld	a,(hl)		; Get control
+	cp	_getend		; Test end
+	jr	z,EndCtrl
+	call	PrHex8		; Print hex control byte
+	inc	hl
+	ld	de,$COMMA
+	call	String		; Give comma
+	djnz	CtrlPrLoop
+EndCtrl:
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	(PtrSav),hl	; Save it
+	ld	b,CTRLEN
+CtrlInLoop:
+	ld	de,$CLOSE
+	call	String		; Give closing indicator
+	call	HexBin		; Get hex byte
+	jr	z,CtrlEnd	; End of input
+	jp	c,InpErr	; Error
+	ld	hl,(PtrSav)	; Get pointer
+	ld	(hl),a		; Save byte
+	inc	hl
+	ld	(PtrSav),hl
+	cp	_getend		; Test total end
+	jr	nz,CtrlNxt
+CtrlEnd:
+	ld	b,1		; Force end
+CtrlNxt:
+	ld	de,$CRLF
+	call	String		; Give new line
+	djnz	CtrlInLoop
+	ld	hl,(PrgPtr)	; Get pointer to controls
+	ld	de,CTRLEN
+	add	hl,de		; Point to next control
+	ld	(PrgPtr),hl	; Set new pointer to controls
+;
+; Type 1 and 4 : Not requested
+;
+DmyCtrl:
+	ret
+;
+; Type 3 : Get extension
+;
+ExtIn:
+	ld	hl,(PrgPtr)	; Get control pointer
+	ld	d,h		; Copy it
+	ld	e,l
+	inc	hl		; Skip extension
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get next byte
+	ld	(hl),_getend	; Force end
+	push	af
+	push	hl
+	call	PrStrg		; Print current setting
+	ld	de,$CLOSE
+	call	String		; Print closure
+	pop	hl
+	pop	af
+	ld	(hl),a		; Restore byte
+	call	ThreeCh		; Input three characters
+	jr	z,NoExt		; No definition
+	inc	hl
+	ld	de,(PrgPtr)	; Get pointer
+	ldi			; Unpack extension
+	ldi
+	ldi
+	ld	(PrgPtr),de
+	ret
+NoExt:
+	ld	hl,(PrgPtr)	; Get string pointer
+	inc	hl		; Skip extension
+	inc	hl
+	inc	hl
+	ld	(PrgPtr),hl
+	ret
+;
+; Type 0 : Input decimal byte value
+;
+ByteIn:
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	l,(hl)		; Fetch byte
+	ld	h,0
+	ld	de,$ASCBUF
+	call	CnvHtA		; Convert to decimal ASCII
+	ld	a,eot
+	ld	(de),a		; Close number
+	ld	de,$ASCBUF
+	call	String		; Print result
+	ld	de,$CLOSE
+	call	String		; Print closure
+	call	ThreeCh		; Input three characters
+	jr	z,ByteNoIn	; No change
+	inc	hl		; Skip length byte
+	call	CnvAtH		; Convert number
+	jr	c,InpErr	; Error
+	ld	a,l		; Get number
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	(hl),a		; Store new value
+ByteNoIn:
+	ld	hl,(PrgPtr)
+	inc	hl		; Advance pointer
+	ld	(PrgPtr),hl
+	ret
+;
+; Process input error
+;
+InpErr:
+	ld	e,bel
+	ld	c,.conout
+	call	BDOS		; Indicate error
+	ld	hl,(CtrlPtr)	; Get pointer to table
+	dec	hl		; Fix for previous
+	dec	hl
+	dec	hl
+	ld	(CtrlPtr),hl	; Save pointer
+	or	a
+	ret
+;
+; Type 2 : Get boolean
+;
+BoolIn:
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	a,(hl)		; Get state
+	ld	e,'Y'		; Preset echo
+	or	a		; Test TRUE
+	jr	nz,EchoTRUE	; Yeap
+	ld	e,'N'		; Change to FALSE
+EchoTRUE:
+	ld	c,.conout
+	call	BDOS		; Echo boolean state
+	ld	de,$CLOSE
+	call	String		; Print closure
+BoolNew:
+	call	Conin		; Get character from console
+	cp	' '		; Test input requested
+	jr	c,BoolNoIn	; Nope, ignore setting
+	cp	'Y'		; Test valid input
+	ld	c,TRUE		; Preset TRUE
+	jr	z,BoolSet	; Got it
+	cp	'N'		; Verify correct selection
+	jr	nz,BoolErr	; Nope, invalid
+	inc	c		; Map to FALSE
+BoolSet:
+	ld	hl,(PrgPtr)	; Get pointer
+	ld	(hl),c		; Set new state
+BoolNoIn:
+	ld	de,$CRLF
+	call	String		; Close line
+	ld	hl,(PrgPtr)
+	inc	hl		; Advance pointer
+	ld	(PrgPtr),hl
+	or	a
+	ret
+BoolErr:
+	ld	de,$DELCH
+	call	String		; Delete character
+	jr	BoolNew		; And try again
+;
+$DELCH:
+	db	bs,' ',bs,bel,eot
+;
+; Input charater from console in UPPER case or abort
+;
+Conin:
+	push	hl
+	push	de
+	push	bc
+	ld	c,.conin
+	call	BDOS		; Get character
+	pop	bc
+	pop	de
+	pop	hl
+	cp	'a'		; Test range
+	jr	c,NoLower
+	cp	'z'+1
+	jr	nc,NoLower
+	sub	'a'-'A'		; Convert to UPPER case
+NoLower:
+	cp	'C'-'@'		; Test abort
+	ret	nz		; Nope
+	OS
+;
+; Print string on console
+; ENTRY	Reg DE points to string
+;
+String:
+	push	hl
+	push	bc
+	ld	c,.string
+	call	BDOS		; Print string
+	pop	bc
+	pop	hl
+	ret
+;
+; Convert value in reg HL to decimal ASCII in ^DE
+;
+CnvHtA:
+	ld	c,0		; Set no leading zero
+	jr	DoCnv
+;
+; -> Next entry never called
+;
+	ld	c,'0'		; Set leading zero
+DoCnv:
+	push	de
+	ld	de,-10000
+	call	Divide		; Divide by 10000
+	jr	z,Div1000	; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+Div1000:
+	ld	de,-1000
+	call	Divide		; Divide by 1000
+	jr	z,Div100	; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+Div100:
+	ld	de,-100
+	call	Divide		; Divide by 100
+	jr	z,Div10		; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+Div10:
+	ld	de,-10
+	call	Divide		; Divide by 10
+	jr	z,ModDig	; No quotient
+	pop	de
+	ld	(de),a		; Save digit
+	inc	de
+	push	de
+ModDig:
+	ld	a,l		; Get units
+	add	a,'0'		; Make ASCII
+	pop	de
+	ld	(de),a		; Store it
+	inc	de
+	ret
+;
+; Divide reg HL by reg DE
+;
+Divide:
+	xor	a
+DivLoop:
+	add	hl,de		; Divide by adding negative value
+	inc	a
+	jr	c,DivLoop
+	sbc	hl,de		; Make remainder > 0
+	dec	a		; Fix qotient
+	or	c		; Test zero result
+	ret	z		; Yeap, suppress leading zero
+	ld	c,'0'
+	or	c		; Make ASCII
+	ret
+;
+; Convert decimal number in ^HL with length in accu to HL
+; C set indicates error
+;
+CnvAtH:
+	push	de
+	push	bc
+	ex	de,hl
+	ld	hl,0		; Init result
+	jr	MulGo
+Mul10:
+	ld	a,b		; Save current length
+	add	hl,hl		; Get old * 10
+	ld	b,h
+	ld	c,l
+	add	hl,hl
+	add	hl,hl
+	add	hl,bc
+MulGo:
+	ld	b,a		; Unpack length
+	ld	a,(de)		; Get character
+	inc	de
+	sub	'0'		; Strip off offse
+	cp	9+1		; Validate correct range
+	jr	nc,DigErr	; Error
+	add	a,l		; Add digit
+	ld	l,a
+	jr	c,DigCY		; Remember carry
+DigNxt:
+	djnz	Mul10		; Next digit
+	or	a
+	pop	bc
+	pop	de
+	ret
+DigCY:
+	inc	h		; Insert carry
+	jr	DigNxt
+DigErr:
+	scf			; Indicate error
+	pop	bc
+	pop	de
+	ret
+;
+; Input three characters - Z set says no input
+;
+ThreeCh:
+	ld	b,.ext		; Set max count
+	ld	hl,'  '
+	ld	(ExtBuff+2),hl	; Blank result
+	ld	hl,ExtBuff+1	; Init pointer
+ThreeNxt:
+	call	Conin		; Get character from console
+	cp	cr		; Test early end
+	jr	z,ThreeEnd	; Yeap
+	ld	(hl),a		; Save character
+	inc	hl
+	djnz	ThreeNxt
+ThreeEnd:
+	ld	a,.ext
+	sub	b		; Calculate length
+	push	af
+	ld	de,$CRLF
+	call	String		; Give new line
+	pop	af
+	ld	hl,ExtBuff
+	ld	(hl),a		; Save length
+	ret
+;
+; Print string in ^DE closed by -1
+;
+PrStrg:
+	ld	a,(de)		; Get character
+	cp	_getend		; Test end
+	ret	z		; Yeap
+	inc	de
+	push	de
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Put to console
+	pop	de
+	jr	PrStrg
+;
+; Print hex byte
+; ENTRY	Accu holds hex byte
+;
+PrHex8:
+	push	af		; Save byte
+	rra			; Get upper bits
+	rra
+	rra
+	rra
+	call	PrNybble	; Convert
+	pop	af
+PrNybble:
+	and	LOMASK		; Mask lower bits
+	add	a,'0'		; Make ASCII
+	cp	'9'+1		; Test range
+	jr	c,PrDecDig
+	add	a,'A'-'0'-10	; Fix for hex
+PrDecDig:
+	push	hl
+	push	de
+	push	bc
+	ld	e,a
+	ld	c,.conout
+	call	BDOS		; Print hex character to console
+	pop	bc
+	pop	de
+DixErr:
+	pop	hl
+	ret
+;
+; Input hex byte
+; C set says error
+; Z set says end of input
+;
+HexBin:
+	call	DigIn		; Input hex digit
+	ret	c		; Error
+	ret	z		; End of input
+	push	bc
+	ld	c,a
+	call	DigIn		; Input next hex digit
+	jr	c,DixErr	; Error
+	jr	z,DigEnd	; End of input
+	rl	c		; Shift hi into right place
+	rl	c
+	rl	c
+	rl	c
+	or	c
+	ld	c,a		; Insert bits
+DigEnd:
+	or	NZNC		; Set result
+	ld	a,c
+	pop	bc
+	ret
+;
+; -> Next entry never called
+;
+; Input hex word
+; C set says error
+; Z set says end of input
+;
+	ld	hl,0		; Set result
+	call	DigIn		; Input first hex digit
+	jr	z,WrdNo		; Empty line
+	jr	Mul16
+WrdNxt:
+	call	DigIn		; Input next hex digit
+Mul16:
+	jr	c,WrdNo		; Error
+	jr	z,WrdOk		; Empty line
+	add	hl,hl		; Old *16
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	or	l		; Insert digit
+	ld	l,a
+	jr	WrdNxt
+WrdOk:
+	or	NZNC		; Set result
+WrdNo:
+	push	hl
+	push	af
+	ld	de,$CRLF
+	call	String		; Give new line
+	pop	af
+	pop	hl
+	ret
+;
+; Input hex digit
+; Z set says end of input
+; C set says error
+;
+DigIn:
+	call	Conin		; Get character from console
+	cp	cr		; Test end of input
+	ret	z		; Yeap
+	sub	'0'		; Strip off offset
+	ret	c		; Invalid
+	cp	9+1		; Test digit
+	jr	c,DigOk		; Ok
+	cp	'A'-'0'		; Verify A..F
+	ret	c
+	sub	'A'-'0'-10
+	cp	15+1
+	jr	c,DigOk
+	or	NZNC		; Set all bits on end
+	scf
+	ret
+DigOk:
+	ccf
+	ret
+;
+; Write modified records of file
+;
+WrRecs:
+	ld	a,.wrseq
+	ld	(IOmode),a	; Change I/O mode
+;
+; Read records to modify
+;
+RdRecs:
+	ld	b,MODREC
+	ld	de,IOBuff
+IOLoop:
+	ld	hl,RecLng
+	add	hl,de
+	push	hl
+	push	bc
+	ld	c,.setdma
+	call	BDOS
+	ld	de,FCB
+	ld	c,.rdseq
+IOmode	equ	$-1
+	call	BDOS
+	or	a
+	jp	nz,IllFile	; .. invalid on I/O error
+	pop	bc
+	pop	de
+	djnz	IOLoop
+	ret
+;
+$CRLF:
+	db	cr,lf,eot
+$COMMA:
+	db	',',eot
+$HEAD:
+	db	'SLRNK & SLRIB Configuration Utility (c) 1985 SLR Systems'
+	db	cr,lf,eot
+PrgPtr:
+	dw	0
+CtrlPtr:
+	dw	0
+PtrSav:
+	dw	0
+$ASCBUF:
+	ds	11
+ExtBuff:
+	ds	$extlen
+EndData:
+;
+; Local stack grows down
+;
+LocStk	equ	EndData+2*StkDep
+;
+; Disc buffer grows up
+;
+IOBuff	equ	LocStk
+
+	end
+

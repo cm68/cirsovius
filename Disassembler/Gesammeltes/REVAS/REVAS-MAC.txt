@@ -1,0 +1,637 @@
+	title	REVAS Disassenbler
+	name	('REVAS')
+
+	.z80
+	aseg
+	org	0100h
+
+; DASMed version of REVAS.LOD
+; the REVAS V2 Z80/8080 Disassenbler
+;
+; DASMed by W.Cirsovius
+;
+; This tool is written to confuse the russians :-)
+
+; From document CPMAN by A. E. Hawley:
+; REVAS.COM, is an executive program which manages the loading of the target 
+; program, REVAS, and the symbol tables. This file is 4 blocks 
+; (pages) long and runs at a location just below CPM's CCP section.
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+_RC	equ	15
+FCBlen	equ	33
+
+IOerr	equ	0ffh
+
+lf	equ	0ah
+cr	equ	0dh
+
+LOMASK	equ	00001111b
+
+l0000	equ	00h
+l0005	equ	05h
+l0008	equ	08h
+l000b	equ	0bh
+l005c	equ	5ch
+l0080	equ	80h
+
+l0100:
+	di
+	ld	hl,l044d	; Get pointer to bit map
+	push	hl
+	pop	ix		; Copy it
+	ld	de,l015b
+	xor	a
+	sbc	hl,de		; Calculate length
+	push	hl		; -> Length 02F2H
+	push	de		; -> Start code 015BH
+	ld	bc,l0008
+	add	hl,bc		; Let some room
+	ld	de,(l0005+1)	; Get top of memory
+	ex	de,hl
+	xor	a
+	sbc	hl,de		; Build gap
+	push	hl		; -> Start in top BB06H
+	pop	iy		; <- Start in top BB06H
+	pop	de		; <- Start code 015BH
+	xor	a
+	sbc	hl,de		; Calculate address B9ABH
+	ex	de,hl
+	exx			; BC:0008H;DE:B9ABH;HL:015BH
+	pop	bc		; <- Length 02F2H
+	ld	d,b		; Save length 02F2H
+	ld	e,c
+	exx
+	ld	sp,l015b	; Load code pointer
+;
+; Relocation loop
+;
+l012b:
+	ld	a,(ix+0)	; Get byte from bit map
+	ld	b,8		; Set length of byte
+l0130:
+	rlca			; Test bit
+	exx
+	dec	bc		; Count down length
+	exx
+	jr	c,l0139		; Got relocation bit
+	inc	sp		; Skip byte
+	jr	l0140
+l0139:
+	pop	hl
+	add	hl,de		; Relocate
+	push	hl
+	pop	hl
+	exx
+	dec	bc		; Count down length
+	exx
+l0140:
+	djnz	l0130		; Loop thru byte
+;
+	exx
+	ld	h,d		; Reload length 02F2H
+	ld	l,e
+	xor	a
+	sbc	hl,bc		; Test still in range
+	exx
+	inc	ix		; Point to next byte in bitmap
+	jr	nc,l012b
+;
+	ld	hl,l015b	; Load code pointer
+	exx
+	push	de		; -> Length 02F2H
+	exx
+	pop	bc		; <- Length 02F2H
+	push	iy		; <- Start in top BB06H
+	pop	de		; -< Start in top BB06H
+	ldir			; Move to top
+	jp	(iy)		; Jump to BB06H
+;
+; Code in high memory		  To BB06H    [BBCB->0220]
+;
+l015b:
+	ld	sp,l044d	; -> BDF8H
+	ei
+	ld	hl,l01f1
+	ld	de,l005c+.drv+.nam
+	call	l01db		; Test extension .TBL
+	jr	nz,l016f	; Nope
+l016a:
+	ld	de,l0100
+	jr	l01b6
+l016f:
+	ld	hl,l01f7
+	ld	de,l005c+.drv+.nam
+	call	l01db		; Test empty extension
+	jr	nz,l0185	; Nope
+	ld	de,l005c+.drv+.nam
+	ld	hl,l01f4
+	ld	bc,.ext
+	ldir			; Unpack .COM
+l0185:
+	ld	de,l01f7
+	ld	hl,l005c+.drv
+	ld	b,.nam
+	call	l01dd		; Test empty name
+	ld	de,l0100	; Set load address
+	ld	hl,l005c
+	jr	nz,l01a7	; Not empty name
+	exx
+	ld	hl,l01e9
+	ld	de,l005c+.drv
+	ld	bc,.nam+.ext
+	ldir			; Set special FCB
+	exx
+	jr	l01b6
+l01a7:
+	call	l02ec		; Read file into memory
+	call	l035e		; Tell name of file and message
+	bit	1,a		; Test I/O error
+	jp	nz,l0000	; Yeap, exit
+	cp	1		; Test file not found
+	jr	z,l016a		; Yeap
+l01b6:
+	push	de		; Save load address ????
+	ld	iy,l0220
+	ld	(l0220+1),sp
+	push	de
+	ld	h,d
+	ld	l,e
+	inc	hl
+	ld	(l0229),hl
+	inc	hl
+	ld	(l01d8),hl
+	ld	hl,l01ff
+	call	l02ec		; Read REVAS.LOD into memory -> Read after .COM file
+	call	l035e		; Tell name of file and message
+	jp	nz,l0000	; Exit on error
+l01d8	equ	$+2
+	ld	($-$),iy	; Save stack
+	ret			; Start disassembly [IY=BBCB in 0101]
+;
+;
+;
+l01db:
+	ld	b,.ext
+l01dd:
+	ld	a,(de)
+	cp	(hl)
+	ret	nz
+	inc	hl
+	inc	de
+	djnz	l01dd
+	xor	a
+	ret
+;
+l01e6:
+	db	'ASM'
+l01e9:
+	db	'###     '
+l01f1:
+	db	'TBL'
+l01f4:
+	db	'COM'
+l01f7:
+	db	'        '
+l01ff:
+	db	0,'REVAS   LOD'
+	ds	21			;; 		; [BBB9 if .LOD - 020E]
+;
+; Next address held in IY for REVAS.LOD [BBCB]
+;
+; Enter here after loading and relocating REVAS.LOD
+;
+l0220:
+	ld	sp,$-$		; [BDF6]
+	ei
+	call	l02d6		; Prepare default FCB.TBL
+l0227:
+l0229	equ	$+2
+	ld	de,($-$)	; [0101->12AE]
+	ld	hl,l000b
+	add	hl,de
+	push	hl		; -> 12B9
+	push	de		; -> 12AE
+	ld	de,l005c
+	push	de		; -> 005C
+	ld	c,11h
+	call	l03cf		; Find .TBL file
+	inc	a
+	pop	hl		; <- 005C
+	jr	nz,l026d	; File found
+;
+; Create .TBL file
+;
+	push	hl		; -> 005C
+	ex	de,hl
+	ld	c,16h
+	call	l03cf		; Create file
+	inc	a
+l0246:
+	ld	a,4
+	jr	nz,l024b
+	inc	a
+l024b:
+	pop	hl		; -> 005C
+	call	l035e		; Tell name of file and message
+	pop	de		; Get back disk buffer <- 12AE
+	call	l034a		; Set disk buffer
+	pop	bc		; <- 12B9
+	exx
+	ld	de,l005c
+	push	de
+	ld	c,15h
+	call	l03cf		; Write to file
+	ld	de,l0080
+	call	l034a		; Set default disk buffer
+	pop	de
+	ld	c,10h
+	call	l03cf		; Close file
+	exx
+	jr	l0296
+;
+; Load .TBL file
+;
+l026d:
+	pop	de
+	push	de
+	call	l02ec		; Read file into memory
+	call	l035e		; Tell name of file and message
+	bit	1,a		; Test I/O error
+	jp	nz,l0000	; Yeap, exit
+	pop	hl
+	inc	hl
+	pop	de
+	di
+	ld	(l0293),sp
+	ld	sp,hl
+	pop	hl
+	push	de
+	xor	a
+	ex	de,hl
+	sbc	hl,de
+	ex	de,hl
+	ld	b,2
+l028c:
+	pop	hl
+	pop	hl
+	add	hl,de
+	push	hl
+	djnz	l028c
+l0293	equ	$+1
+	ld	sp,$-$
+	ei
+;
+;
+;
+l0296:
+	call	l02d6		; Prepare default FCB
+	ld	hl,l01e6
+	ld	de,l005c+.drv+.nam
+	ld	bc,.ext
+	ldir			; Unpack .ASM
+	ld	de,l005c
+	ld	c,11h
+	call	l03cf		; Find file
+	inc	a
+	jr	nz,l02d6	; Prepare default FCB if found
+;
+; Craete .ASM filr
+;
+	ld	de,l005c
+	push	de
+	ld	c,16h
+	call	l03cf		; Create file
+	inc	a
+	ld	a,4
+	jr	nz,l02be
+	inc	a
+l02be:
+	pop	hl
+	push	hl
+	call	l035e		; Tell name of file and message
+	ld	de,l0080
+	call	l034a		; Set default disk buffer
+	pop	de
+	push	de
+	ld	c,15h
+	call	l03cf		; Write to file
+	pop	de
+	ld	c,10h
+	call	l03cf		; Close file
+;
+; Prepare default FCB
+;
+l02d6:
+	xor	a
+	ld	(l005c),a	; Set default drive
+	ld	de,l005c+.drv+.nam
+	ld	hl,l01f1
+	ld	bc,.ext
+	ldir			; Unpack .TBL
+	ld	b,FCBlen-_EX
+l02e7:
+	ld	(de),a		; Clear remainder
+	inc	de
+	djnz	l02e7
+	ret
+;
+; Read file into memory
+; ENTRY	Reg HL points to FCB
+;	Reg DE points to disk buffer
+; EXIT	Accu holds I/O result:
+;	0: Enough memory
+;	1: File not found
+;	2: Not enough memory
+;	3: File read error
+;
+l02ec:
+	push	de		; Save disk buffer
+	call	l034a		; Set disk buffer
+	ld	bc,l0080
+	call	l0316		; Check enough memory
+	push	af
+	jr	nz,l030c	; Not enough, do not load
+l02f9:
+	call	l0354		; Read record from file
+	cp	2		; Test successfull read
+	ccf
+	jr	c,l030f		; Nope, erorr
+	push	af
+	ex	de,hl
+	add	hl,bc		; Point to next buffer
+	ex	de,hl
+	call	l034a		; Set disk buffer
+	pop	af
+	or	a		; Test end of file
+	jr	z,l02f9		; Nope
+l030c:
+	pop	af
+	pop	bc
+	ret
+l030f:
+	pop	af
+	pop	bc
+	ld	a,3		; Set read error
+	or	a
+	scf
+	ret
+;
+; Check enough memory for loading file
+; ENTRY	Reg HL points to FCB
+;	Reg DE points to load address
+;	Reg BC holds ???
+; EXIT	Accu holds I/O result:
+;	0: Enough memory
+;	1: File not found
+;	2: Not enough memory
+;	Zero flag set on success
+;
+l0316:
+	push	bc
+	push	hl
+	push	de
+	ex	de,hl
+	ld	c,0fh
+	call	l03cf		; Open file
+	ld	hl,l015b	; Set start of code
+	cp	IOerr		; Test found
+	jr	nz,l032a	; Yeap
+	ld	a,1		; Set result
+	jr	l0345
+l032a:
+	pop	de
+	pop	bc		; Get FCB
+	push	bc
+	push	de
+	xor	a
+	sbc	hl,de
+	push	hl		; Calculate load address
+	ld	hl,_RC
+	add	hl,bc
+	ld	b,(hl)		; Get record count
+	pop	hl		; Get back load address
+	ld	de,l0080	; Set record size
+l033b:
+	sbc	hl,de		; Create gap for file to load
+	djnz	l033b
+	ld	a,0
+	jr	nc,l0345	; Got enough room
+	ld	a,2
+l0345:
+	or	a
+	pop	de
+	pop	hl
+	pop	bc
+	ret
+;
+; Set disk buffer
+; ENTRY	Reg DE points to buffer
+;
+l034a:
+	push	de
+	exx
+	pop	de
+	ld	c,1ah
+	call	l03cf		; Set disk buffer
+	exx
+	ret
+;
+; Read record from file
+; ENTRY	Reg HL points to FCB
+; EXIT	Accu holds I/O code
+;
+l0354:
+	push	hl
+	exx
+	pop	de
+	ld	c,14h
+	call	l03cf		; Read from file
+	exx
+	ret
+;
+; Tell name of file
+; ENTRY	Accu holds message index
+;	0: Tell loaded
+;	1: Tell not found
+;	2: Tell not enough memory
+;	3: Tell read error
+;
+l035e:
+	push	af		; Save message index
+	push	de
+	push	bc
+	ex	af,af'
+	ld	bc,256*.nam+2
+l0365:
+	inc	hl
+	ld	a,(hl)		; Get character from filename
+	cp	' '		; Test blank
+	ld	e,a
+	call	nz,l03c3	; Put to console if no blank
+	djnz	l0365
+	ld	e,'.'
+	call	l03c3		; Put delimiter to console
+	ld	b,.ext
+l0376:
+	inc	hl
+	ld	e,(hl)
+	call	l03c3		; Put character to console
+	djnz	l0376
+;
+	ex	af,af'
+	ld	c,a		; Get message index
+	ex	af,af'
+	ld	hl,l03db
+	add	hl,bc		; Position to message
+	add	hl,bc
+	ld	a,(hl)		; Get message address
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+l0389:
+	ld	e,(hl)
+	call	l03c3		; Print message on console
+	bit	7,e
+	inc	hl
+	jr	z,l0389
+	ex	af,af'
+	pop	hl
+	or	a		; Test load message
+	call	z,l03a5		; Tell start address if so
+	ld	e,cr
+	call	l03c3		; Put new line to console
+	ld	e,lf
+	call	l03c3
+	pop	de
+	pop	af
+	ret
+;
+; Put word to console
+; ENTRY	Reg HL holds word
+;
+l03a5:
+	ld	a,h		; Get hi byte
+	call	l03aa		; Put to console
+	ld	a,l		; Then lo byte
+;
+; Put byte to console
+; ENTRY	Accu holds byte
+;
+l03aa:
+	push	af		; Save byte
+	rrca			; Extract upper bits
+	rrca
+	rrca
+	rrca
+	call	l03b3		; Put hi nybble to console
+	pop	af		; Get back byte for low nybble
+;
+; Put nybble to console
+; ENTRY	Accu holds nybble
+;
+l03b3:
+	call	l03b9		; Convert nybble to ASCII digit
+	jp	l03c3		; Put it to console
+;
+; Convert nybble to ASCII digit
+; ENTRY	Accu holds bybble
+; EXIT	Reg E holds digit
+;
+l03b9:
+	and	LOMASK		; Mask nybble
+	add	a,90h		; Convert to ASCII
+	daa
+	adc	a,40h
+	daa
+	ld	e,a		; Unpack result
+	ret
+;
+; Put character to console
+; ENTRY	Reg E holds character
+;
+l03c3:
+	push	de
+	exx
+	pop	de
+	res	7,e		; No hi bit
+	ld	c,2
+	call	l03cf		; Put to console
+	exx
+	ret
+;
+; Do OS call preserving index registers
+; ENTRY	Reg C holds function
+;	Reg (D)E holds possible parameter
+; EXIT	Accu holds result
+;
+l03cf:
+	push	ix
+	push	iy
+	call	l0005		; Call it
+	pop	iy
+	pop	ix
+	ret
+;
+l03db:
+	dw	l03e7,l03f2,l03fc,l040e,l0419,l0421
+l03e7:
+	dc	' LOADED AT '
+l03f2:
+	dc	' NOT FOUND'
+l03fc:
+	dc	' NOT ENOUGH MEMORY'
+l040e:
+	dc	' READ ERROR'
+l0419:
+	dc	' CREATED'
+l0421:
+	dc	' NO DIR SPACE'
+;
+	db	0,0,0
+l0431:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0
+l043e:
+	db	0,0,0,0
+l0442:
+	db	0,0,0,0,0
+l0447:
+	db	0,0,0,0,0,0
+;
+; Bit map
+;
+l044d:
+	db	01001000b,01000000b,00100001b,00000010b,00000100b,00001000b,00000001b
+	db	00000000b,00001010b,00000000b,00010010b,00001001b,01010100b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,10000000b,00000000b,00100000b,00001000b,00000100b
+	db	10000000b,00100001b,00001000b,00010100b,00000000b,01000000b,00000000b
+	db	00000001b,01000000b,00000000b,10000000b,00010000b,00000100b,00100000b
+	db	10000100b,00000010b,00000000b,00000100b,00100001b,00000000b,00100000b
+	db	00000000b,00000000b,10100000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,01000000b,00100000b,00000000b,00100000b,10000010b,00000100b
+	db	00000010b,00000000b,10001000b,10000010b,00000010b,01010000b,00000000b
+	db	00000010b,00000000b,00000111b,11100000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+
+	db	0,0,0,0,0,0
+
+	end
+

@@ -1,0 +1,570 @@
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% DS -- Dump the symbol table %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+dmpsym::
+	call	iecnt		;Init ecnt
+	ld	hl,inbuf.3	;Pt to char after 'ds'
+	ld	a,(hl)		;Get it
+	cp	'.'		;Symbol specified?
+	jr	nz,frmbgn	;No, so dump from beginning of table
+	call	lngth		;Compute length of given symbol
+	call	plcsym		;Return ptr to this symbol in hl
+	jr	nc,frmsym	;Process normally if found
+	ld	hl,(symrkr)
+	jr	frmsym
+frmbgn:
+	ld	hl,(sym.root)	;Pt to table
+frmsym:
+	ld	e,(hl)		;Get address of symbol in de
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)		;Get length of symbol in a
+	or	a		;Done if length = 0
+	jr	z,spitcr
+	ex	de,hl		;Print value of symbol
+	call	pvalue
+	ex	de,hl
+	ld	a,'='		;Print =
+	call	cout
+	ld	b,(hl)		;Get length of symbol in b
+	ld	a,symmax+1	;Compute diff from max
+	sub	b
+	ld	c,a		;Difference in c (number of spaces after sym)
+	inc	hl
+;
+; Print the symbol pted to by HL
+; B=number of bytes long the symbol is
+;
+spit:
+	ld	a,(hl)		;Get symbol char
+	call	cout		;Print it
+	inc	hl		;Pt to next
+	djnz	spit		;Until done
+;
+; Print trailing spaces after symbol
+;
+	ld	b,c		;Sp count in b
+spit1:
+	call	space
+	djnz	spit1
+	call	spcrlf		;New line
+	call	brkchk		;Check for break
+	jr	frmsym		;Continue
+;
+; Print <CRLF> and exit
+;
+spitcr:
+	jp	getcmd.NL	;New line
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  A                    %%
+; %% Build ASCII strings using DB's %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+ascasm::
+	xor	a		;Turn off build by b command
+	ld	(build),a
+	inc	a		;Set flag
+	ld	(ascbld),a
+	jr	list1		;Perform list
+;
+; %%%%%%%%%%%%%%%%%%
+; %% Command:  B  %%
+; %% Build labels %%
+; %%%%%%%%%%%%%%%%%%
+;
+bldasm::
+	xor	a		;Turn off build by a command
+	ld	(ascbld),a
+	inc	a		;Turn on build by b command
+	ld	(build),a
+	jr	list1
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  L                     %%
+; %% Disassemble with the 'L' option %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+list::
+	xor	a		;Turn off a and b flags
+	ld	(build),a
+	ld	(ascbld),a
+list1:
+	xor	a		;Disable output to disk
+	ld	(wrtenab),a
+	ld	a,(nlines)	;Set line count
+	ld	(lctr),a
+	ld	(cntenab),a	;Enable line count
+	call	get.buf		;Do default number if eol
+	jr	z,tenl
+	cp	','		;Use current position for first arg if ','
+	jr	z,list3
+	cp	' '		;Same as ','
+	jr	z,list3
+	cp	'='		;Set default number of lines if '='
+	jr	nz,list2
+;
+; Set default number of lines for list
+;
+nwlnct:
+	inc	hl		;Pt to arg
+	call	cnvrt		;Get it in de
+	ld	a,e		;Error if zero
+	or	a
+	jp	z,what
+	ld	(nlines),a	;Set counts
+	ld	(lctr),a
+	ld	a,(hl)		;Get next char
+	inc	hl
+	cp	cr		;Done if <cr>
+	jp	z,getcmd
+	call	chk.delim
+;
+; Get first arg for L, A, or B from command line
+;
+list2:
+	call	cnvrt		;Get value in de
+	ld	(pc),de		;Set pc to it
+	cp	cr		;Done?
+	jr	z,tenl		;Do default number if so
+	call	chk.delim
+;
+; Get 2nd arg for L, A, or B command
+;
+list3:
+	inc	hl		;Pt to first char of 2nd arg
+	call	cnvrt		;Get its value in de
+	ex	de,hl
+	ld	(endlst),hl	;Set end of listing to it
+	xor	a		;Turn off line counting
+	ld	(cntenab),a
+;
+; Main processing loop for L, A, and B commands
+;
+tenl:
+	call	statchk		;Check for statistic
+	ld	a,(cntenab)	;Check for line counting in progress
+	or	a		;0 = no
+	jr	z,contl		;Continue if not
+	ld	a,(lctr)	;Get count
+	dec	a		;Count down
+	jp	m,getcmd	;Return to command processing if done
+	jr	flaga
+;
+; Compare 'endlst' with 'pc'
+;
+contl:
+	ld	hl,(endlst)	;Done with display?
+	ld	a,(pc)
+	sub	l
+	ld	a,(pc+1)
+	sbc	a,h
+	jp	nc,getcmd
+;
+; Check for A or B commands
+;
+flaga:
+	ld	a,(ascbld)	;A command if ascbld not zero
+	or	a
+	jr	z,morel
+;
+; This is the major function to build ASCII DB's
+;
+builda:
+	ld	hl,(pc)		;Hl pts to next byte (relative)
+	ld	b,8		;Look for 8 ascii chars in a row
+loop8:
+	call	fget		;Check for ascii char
+	call	isitasc		;Is it ascii?
+	jr	c,morel		;No, skip to next byte
+	inc	hl		;Yes, pt to next
+	djnz	loop8
+;
+; Find end of this ASCII string
+;
+follow:
+	call	fget		;Look until non-ascii
+	inc	hl		;Pt to next
+	call	isitasc
+	jr	nc,follow
+	dec	hl		;Pt to non-ascii char
+	push	hl		;Save ptr to byte after DB string for 'I' control
+	ld	de,(pc)		;Get value of beginning of ascii string
+	ld	a,'B'		;Set b control point
+	call	ftctl0		;A='B', DE=address
+	pop	hl
+	ld	(pc),hl		;Set new address to continue from
+	ex	de,hl
+	ld	a,'I'		;A='I', DE=address for instr control
+	call	ftctl0
+;
+; Now look for any comments at this address
+;
+morel:
+	ld	hl,(pc)		;Hl pts to pc
+	ex	de,hl		;De pts to pc
+	call	cmchk		;Check comment table for match
+	jr	c,ncmt		;No match
+	inc	hl		;Pt to char count of comment
+	inc	hl
+	ld	b,(hl)		;B=number of chars in comment
+	inc	hl		;Pt to first character
+	ld	a,(hl)		;A=first char of comment
+	cp	';'		;a ';' comment is listed after the opcode
+	dec	hl		;Pt back to char count
+	jr	nz,morel1	;Continue if no ';'
+	ld	(xcptr),hl	;Save the comment address
+	jr	ncmt
+morel1:
+	cp	'*'		; a '*' comment replaces the entire line
+	jr	nz,morel2
+	ld	(rplptr),hl
+	jr	ncmt
+;
+; Print comment pted to by HL and then new line
+;
+morel2:
+	call	nwln		;Print comment
+	call	crlf
+;
+; Now process the byte as an instruction if it is
+;
+ncmt:
+	ld	de,(pc)		;Pt to pc
+	call	schctl		;Check control table
+	dec	hl		;Pt to control mode of previous entry
+	jr	c,rdctl		;If no match, control mode of previous entry is it
+	inc	hl		;Since match, pt to control mode of matched entry
+	inc	hl
+	inc	hl
+;
+; Check control mode
+;
+rdctl:
+	ld	a,(hl)		;Get control mode
+	cp	'I'		;Is it instruction?
+	jr	z,ictl		;Process if so
+	cp	'E'		;End of program?
+	jp	z,close		;Done if so
+	push	af		;Else save control mode
+	inc	hl		;Pt to address of next control mode
+	ld	e,(hl)		;Address in de
+	inc	hl
+	ld	d,(hl)
+	push	de		;Save address of next control entry
+	ld	de,(pc)		;Pt to pc
+	call	hsym		;Print symbol if there
+	pop	de		;Hl is address of next control entry
+	ld	(nxtctl),de	;Save it
+	xor	a		;Disable write
+	ld	(wrtenab),a
+	pop	af		;Get control mode
+	cp	'S'		;DS?
+	jp	z,dsmode
+	cp	'B'		;DB?
+	jp	z,bmode
+	cp	'H'		;DB Hex?
+	jp	z,hmode
+	cp	'W'		;DW?
+	jp	z,wmode
+	call	cout		;Else print as error
+	call	pstrng
+	db	': Invalid CTL Entry',null
+	jp	getcmd.NL
+;
+; Execute here if the 'I' ctl is in effect -- interpret as
+; instruction DE pts to byte which is being processed
+;
+ictl:
+	call	dasm		;Invoke disassembler
+	xor	a		;Disable write
+	ld	(wrtenab),a
+	jp	tenl
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% DS ctl -- DE contain next ctl address %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+dsmode::
+	push	de		;Save next control
+	ld	a,(pc)		;Compute -pc in hl
+	cpl	
+	ld	l,a
+	ld	a,(pc+1)
+	cpl	
+	ld	h,a
+	inc	hl
+	add	hl,de		;Hl = length of space defined
+	ld	a,TRUE		;Enable writing
+	ld	(wrtenab),a
+	call	pstg		;Print 'ds'
+	db	'DS',tab,null
+	call	pdec
+	call	crlf
+	pop	hl		;Get ptr to next control entry
+	ld	(pc),hl		;Set pc to it
+	jp	tenl		;Continue
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% DW ctl -- process DW and look for labels %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+wmode::
+	ld	a,TRUE		;Enable writing
+	ld	(wrtenab),a
+	call	pstg		;Print 'DW'
+	db	'DW',tab,null
+	ld	hl,(pc)		;Get pc
+	push	hl
+	call	fget		;Get word
+	ld	e,a		;Set de to dw value
+	inc	hl
+	call	fget
+	ld	d,a
+	call	prntde		;Print dw value
+	call	crlf
+	pop	hl		;Advance pc to byte after dw value
+	inc	hl
+	inc	hl
+	ld	(pc),hl
+	jp	tenl		;Continue processing
+;
+; New line and continue
+;
+stpln:
+	call	crlf
+	jp	tenl
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% DB hex mode -- build hex DB's %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+hmode::
+	xor	a		;Set flag
+	jr	bmode1
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% DB mode -- build ASCII strings longer than 8 characters %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+bmode::
+	ld	a,TRUE		;Set flag for ascii
+bmode1:
+	ld	(adb),a
+	xor	a		;Init length to zero
+	ld	(blngth),a
+	ld	a,TRUE		;Enable writing
+	ld	(wrtenab),a
+	call	pstg		;Print 'DB'
+	db	'DB',tab,null
+;
+; Process bytes of DB
+;
+moreb:
+	ld	hl,(pc)		;Get relative address
+	call	fget		;Get value
+	ld	b,a
+	ld	a,(adb)		;Check for ascii build
+	or	a		;0=no
+	ld	a,b		;Get byte of db
+	jr	z,ltspc		;Xxh build
+	cp	lf		;<lf>?
+	jr	c,ltlf		;Process if less than
+	cp	' '		;<sp>
+	jr	c,ltspc		;Process if less than <sp>
+	cp	'~'+1		;<del>?
+	jp	c,ltrub		;Process if greater than
+;
+; Print byte as hex number
+;
+ltspc:
+	call	pashex		;Print byte in a as hex
+	call	prH
+	ld	a,(blngth)	;Increase length by 2
+	add	a,2
+	ld	(blngth),a
+	jr	mvup
+;
+; Char is less tahn <LF> -- make it single digit
+; (like 9 for TAB)
+;
+ltlf:
+	or	'0'		;Mask for ascii
+	call	cout		;Print digit
+;
+; Advance to next byte
+;
+mvup:
+	inc	hl		;Pt to next byte
+	ld	de,(pc)		;Pt to pc
+	inc	de		;Advance pc
+	ld	(pc),de		;De pts to pc, hl pts to next byte
+;
+; Check to see if the next control point been reached
+;
+cnxctl:
+	ld	a,(nxtctl)	;Compare against pc
+	cp	e
+	jr	nz,trysym
+	ld	a,(nxtctl+1)
+	cp	d
+	jp	z,qtb
+;
+; See if we are pointing to a symbol's address
+;
+trysym:
+	ld	de,(pc)		;Pc in de
+	call	symsch		;Look for symbol
+	jp	nc,stpln	;New line if there is a symbol
+	ld	a,(blngth)	;Increase line by 2
+	add	a,2
+	ld	(blngth),a
+	cp	symcol
+	jp	nc,stpln	;New line if string exceeds 27 chars
+	ld	a,','		;Separate by comma otherwise
+	call	cout
+	jp	moreb
+;
+; Valid char ... begin processing as quoted string
+;
+ltrub:
+	ld	a,''''		;Output quote
+	call	cout
+	ld	a,(blngth)	;Inc length
+	inc	a
+	ld	(blngth),a
+	call	fget		;Get char
+;
+; Output as ASCII chars
+;
+morasc:
+	call	cout		;Print char
+	call	fget		;Check for quote
+	cp	''''		;Compare
+	call	z,cout		;Double quote
+	inc	hl		;Pt to next char
+	ld	de,(pc)		;Incr pc
+	inc	de
+	ld	(pc),de
+	ld	a,(nxtctl)	;Check for control
+	cp	e
+	jr	nz,yet
+	ld	a,(nxtctl+1)
+	cp	d
+	jr	z,fnlqt
+;
+; Check for symbol here
+;
+yet:
+	push	hl
+	ld	de,(pc)
+	call	symsch
+	pop	hl
+	jr	nc,fnlqt	;Output ending quote and new line for symbol
+	ld	a,(blngth)	;  break
+	inc	a		;Incr line length
+;
+; Keep the lines less than 27 long
+;
+	ld	(blngth),a
+	cp	symcol+8
+	jr	nc,lastqt
+	cp	symcol
+	jr	c,still
+;
+; Over 17H characters have been quoted
+;
+	dec	hl
+	call	fget
+	inc	hl
+	cp	' '
+	jr	z,fnlqt
+still:
+	call	fget
+	cp	' '
+	jr	c,lastqt
+	cp	'~'+1
+	jp	c,morasc
+;
+; Print a trailing quote
+;
+lastqt:
+	ld	a,''''		;Print quote
+	call	cout
+	jp	cnxctl
+;
+; Print ending quote and new line
+;
+fnlqt:
+	ld	a,''''
+	call	cout
+qtb:
+	call	crlf
+	jp	tenl
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% Command:  I<address>,<offset>                           %%
+; %% Increment symbol table addresses after and on <address> %%
+; %% by <offset> for disassembly of new versions of programs %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+incmnt::
+	call	get.buf		;Error if eol
+	jp	z,what
+	call	cnvrt		;Get first value in de
+	call	chk.delim	;Check for valid delimiter
+	push	de		;Save starting address on stack
+	inc	hl		;Pt to first char after delimiter
+	call	cnvrt		;Get offset in de
+	cp	cr		;Must be eol now
+	jp	nz,what
+	ld	b,d		;Bc=offset
+	ld	c,e
+	pop	de		;De=start address
+	ld	hl,(sym.root)	;Pt to table
+;
+; Major loop for scanning symbol table
+; HL pts to low sym address byte
+;
+incm2:
+	inc	hl		;Pt to hi sym address
+	ld	a,(hl)		;Get hi
+	dec	hl		;Pt to low sym address
+	cp	d		;Compare
+	jr	c,incm4		;Skip symbol entry
+	jr	nz,incm3	;Symbol is greater so add offset to it
+	ld	a,(hl)		;Get low
+	cp	e		;Compare
+	jr	c,incm4		;Skip symbol entry
+;
+; Add offset to symbol address pted to by HL
+;
+incm3:
+	ld	a,(hl)		;Get low address byte
+	add	a,c		;Add low offset byte
+	ld	(hl),a		;Put low address byte
+	inc	hl		;Pt to hi address byte
+	ld	a,(hl)		;Get high address byte
+	adc	a,b		;Add hi offset byte
+	ld	(hl),a		;Put hi address byte
+	dec	hl		;Pt to low address byte
+;
+; Skip to next symbol -- HL pts to low address byte
+;
+incm4:
+	inc	hl		;Pt to hi address
+	inc	hl		;Pt to char count
+	ld	a,(hl)		;Get char count
+	or	a		;Done if zero
+	jp	z,getcmd
+	inc	hl		;Pt to first char of symbol
+	add	a,l		;Add symbol length to hl
+	ld	l,a
+	ld	a,0		;Add in hi now
+	adc	a,h
+	ld	h,a		;Hl pts to first byte of next symbol
+	jr	incm2		;Continue processing
+

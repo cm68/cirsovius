@@ -1,0 +1,942 @@
+	title	Library Directory - LDIR
+	name	('LDIR')
+
+; DASMed version of LDIR.COM
+; By W.Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+WHEEL	equ	003eh
+FCB	equ	005ch
+CCP	equ	0080h
+DMA	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.kbstat	equ	11
+.open	equ	15
+.rdrec	equ	20
+.setdma	equ	26
+.usrcod	equ	32
+.rndred	equ	33
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+.sys	equ	10
+.ex	equ	12
+.usr	equ	13		; ZCPR user
+.dir	equ	16
+.rrn	equ	33
+fcblen	equ	36
+
+CCPlen	equ	127
+
+INDEX	equ	12		; Pointer to LBR index
+LBRSAV	equ	21		; Bytes 1-21 to be saved on heap
+LBRDIR	equ	32		; Length of one LBR entry
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+MSB	equ	10000000b
+LOMASK	equ	00001111b
+CTRMASK	equ	00011111b
+UPPMASK	equ	01011111b
+
+LIBMEM	equ	11		; Requested memory pages
+
+TERMROW	equ	22		; Terminal lines
+
+l0006	equ	06h
+l0029	equ	29h
+l0082	equ	82h
+
+	jp	l010f
+;
+	db	'Z3ENV'
+	db	1
+l0109:
+	dw	0
+	db	0
+l010c:
+	db	TERMROW
+l010d:
+	dw	WHEEL
+;
+; ******************
+; *** MAIN ENTRY ***
+; ******************
+;
+l010f:
+	ld	(l07f9),sp	; Save stack
+	ld	sp,l0891	; Get local stack
+	ld	hl,(l0109)	; Test ZSYSTEM
+	ld	a,l
+	or	h
+	jr	z,l0149		; Nope
+;
+; ZSYSTEM check
+;
+	ld	a,(FCB+.drv+1)	; Test help request
+	cp	'/'
+	jp	z,l0375		; Yeap, give help
+	ld	a,(FCB+.usr)
+	ld	e,a
+	ld	c,.usrcod
+	call	l03f0		; Set user
+	ld	de,l0029
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	(l010d),de	; Set WHEEL address
+	ld	de,l0006
+	add	hl,de
+	ld	e,3
+	ld	a,(hl)
+	or	a
+	jr	z,l0144
+	add	hl,de
+l0144:
+	add	hl,de
+	ld	a,(hl)
+	ld	(l010c),a	; Set terminal lines
+;
+; Normal OS cont'd
+;
+l0149:
+	ld	a,(FCB+.drv)	; Test library defined
+	cp	' '
+	jp	z,l0375		; Nope, give help
+	ld	a,(BDOS+2)	; Get top page of memory
+	sub	LIBMEM		; Calculate new top page
+	ld	(l0804),a
+	ld	a,(l010c)	; Get terminal lines
+	ld	(l0805),a
+	ld	hl,'RB'		; Force .LBR
+	ld	(FCB+.drv+.nam+1),hl
+	ld	a,'L'
+	ld	(FCB+.drv+.nam),a
+	ld	hl,FCB+.dir+.drv
+	ld	de,l0806
+	ld	bc,.nam+.ext
+	ldir			; Unpack 2nd name
+	ld	de,FCB+.ex
+	ld	b,fcblen-.ex
+	xor	a
+l017b:
+	ld	(de),a		; Clear remainder of FCB
+	inc	de
+	djnz	l017b
+	ld	hl,0
+	ld	(l0800),hl	; Init member count
+	ld	de,FCB
+	ld	c,.open
+	call	l03f0		; Open library file
+	inc	a		; Test success
+	jp	z,l03d1		; Nope, library not found
+	ld	a,(FCB+.sys)
+	and	MSB		; Test SYStem file
+	jr	z,l01a0		; Nope
+	ld	hl,(l010d)	; Get WHEEL address
+	ld	a,(hl)		; Test SYStem file allowed
+	or	a
+	jp	z,l03d1		; Library file not found if not
+l01a0:
+	ld	c,.setdma
+	ld	de,DMA
+	call	l03f0		; Set default disk buffer
+	call	l03c6		; Close line
+	ld	de,l0612
+	call	l03e8		; Print library file
+	ld	hl,FCB+.drv
+	call	l044f		; Print name of file
+	ld	a,(l0806)	; Test 2nd name here
+	sub	' '
+	jr	z,l01d2		; Nope
+	call	l047b		; Print blanks
+	ld	de,l070f
+	call	l03e8		; Print parenthesis
+	ld	hl,l0806	; Point to 2nd name
+	call	l044f		; Print name of file
+	ld	a,')'
+	call	l03b0		; Close output
+l01d2:
+	call	l03c6		; Close line
+	call	l03d9		; Read 1st directory record
+	ld	hl,DMA		; Point to disk buffer
+	ld	a,(hl)		; Verify correct format
+	or	a
+	jp	nz,l0472	; File corrupt
+	ld	hl,DMA+INDEX
+	xor	a
+	cp	(hl)		; Verify INDEX zero
+	jp	nz,l0472
+	inc	hl
+	cp	(hl)
+	jp	nz,l0472
+	inc	hl
+	ld	a,(hl)		; Get LENGTH
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	or	h		; Verify non zero
+	jp	z,l0472
+	ld	(l07fb),hl	; Save length
+	ld	de,l0891	; Init heap
+	jr	l0207
+l01fe:
+	ld	hl,DMA		; Point to 1st entry
+	call	l05b6		; Find active entry
+	call	z,l0232		; Put to heap if so
+l0207:
+	ld	hl,DMA+LBRDIR	; Point to 2nd entry
+	call	l05b6
+	call	z,l0232
+	ld	hl,DMA+2*LBRDIR	; Point to 3rd entry
+	call	l05b6
+	call	z,l0232
+	ld	hl,DMA+3*LBRDIR	; Point to 4th entry
+	call	l05b6
+	call	z,l0232
+	ld	hl,(l07fb)	; Get length of library
+	dec	hl		; Count down
+	ld	a,l
+	or	h
+	jr	z,l0247		; Ok, directory read
+	ld	(l07fb),hl
+	call	l03d9		; Read next directory record
+	jr	l01fe
+;
+; Put member name ^HL to heap ^DE
+;
+l0232:
+	inc	hl		; Skip status
+	ld	bc,LBRSAV
+	ldir			; Save entry
+	ld	hl,(l0800)	; Increment member count
+	inc	hl
+	ld	(l0800),hl
+	ld	a,(l0804)	; Get top page
+	sub	d		; Test enough space
+	jp	c,l0472		; File corrupt error
+	ret
+;
+; All directory entries read, process them now
+;
+l0247:
+	ld	hl,(l0800)	; Get member count
+	ld	a,l		; Test any member found
+	or	h
+	jr	nz,l0257	; Yeap
+	ld	de,l0679
+	call	l03e8		; Print no member
+	jp	l0370
+l0257:
+	ld	de,l0753
+	call	l03e8		; Print header
+	ld	hl,l0891	; Init heap
+l0260:
+	ld	a,(l0805)	; Count down terminal lines
+	dec	a
+	ld	(l0805),a
+	call	l03fa		; Test page filled
+	ld	a,cr
+	call	l03b0		; Set cursor to left position
+	call	l044f		; Print name of file
+	call	l0480		; Print two blanks
+	ld	e,(hl)		; Fetch member index
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(l07fd),de	; Save index
+	ld	e,(hl)		; Fetch length of member
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	push	de
+	ex	de,hl
+	call	l048b		; Print records
+	ld	a,'r'
+	call	l03b0		; Indicate it
+	pop	de
+	pop	hl
+	xor	a		; Clear remainder
+	srl	d		; Divide by 8
+	rr	e
+	rra			; Get remainder bits
+	srl	d
+	rr	e
+	rra
+	srl	d
+	rr	e
+	rra			; Fix remainder for index
+	rra
+	rra
+	push	af
+	push	hl
+	ex	de,hl
+	call	l048b		; Print size
+	pop	hl
+	pop	af
+	inc	hl
+	inc	hl
+	ld	de,l07ef
+	ldi			; Save creation date
+	ldi
+	ldi			; And last change date
+	ldi
+	ld	(l0802),hl	; Save directory pointer
+	ld	h,0
+	ld	l,a		; Build index
+	ld	de,l06b4
+	add	hl,de		; Calculate address
+	ex	de,hl
+	call	l03e8		; Print fractional part
+	ld	a,(l07ff)	; Get type indicator
+	cp	'Z'		; Test crunched file
+	jr	nz,l02d2
+	call	l037d		; Position file
+	ld	de,l0706
+	jr	l02dc
+l02d2:
+	ld	de,l06fd
+	cp	'Q'		; Test squeezed file
+	jr	z,l02dc
+	ld	de,l06f4
+l02dc:
+	call	l03e8		; Print methode
+	call	l0480		; Print two blanks
+	xor	a
+	ld	(l07f3),a
+	ld	hl,(l07ef)	; Get creation date
+	call	l04f2
+	jr	c,l0320
+	call	l0303
+	ld	a,0ah
+	ld	(l07f3),a
+	ld	hl,(l07f1)	; Get last change date
+	call	l04f2
+	jr	c,l0326
+	call	l0303
+	jr	l032c
+;
+;
+;
+l0303::
+	ld	a,(l07f8)
+	call	l04d7		; Print hex byte
+	call	l0485
+	ld	de,(l07f6)
+	call	l03e8		; Print month
+	call	l0485
+	ld	a,(l07f5)
+	call	l04d7		; Print hex byte
+	call	l0480		; Print two blanks
+	ret
+;
+;
+;
+l0320:
+	ld	de,l06a1
+	call	l03e8		; Print delimiter line
+l0326:
+	ld	de,l06a1
+	call	l03e8		; Print delimiter line
+l032c:
+	ld	a,(l07ff)	; Get type indicator
+	cp	'Z'		; Test crunched file
+	jr	nz,l035e	; Nope, skip comments
+	ld	b,CCPlen
+	ld	hl,CCP		; Point to CCP
+l0338:
+	ld	a,(hl)		: Get character
+	inc	hl
+	or	a		; Test end of line
+	jr	z,l0343
+	cp	'['		; Test comment
+	jr	z,l0348		; Yeap, print it
+	djnz	l0338
+l0343:
+	call	l0394
+	jr	l035e
+l0348:
+	ld	b,13h
+	ld	c,0ffh
+l034c:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	z,l035e
+	cp	']'
+	jr	z,l035e
+	inc	c
+	call	nz,l03bd	; Convert to lower case
+	call	l03b0
+	djnz	l034c
+l035e:
+	call	l03c6		; Close line
+	ld	hl,(l0800)	; Decrement member count
+	dec	hl
+	ld	(l0800),hl
+	ld	a,h
+	or	l
+	ld	hl,(l0802)	; Get back directory pointer
+	jp	nz,l0260
+l0370:
+	ld	sp,(l07f9)	; Reload stack
+	ret
+;
+; Give help
+;
+l0375:
+	ld	de,l0715
+	call	l03e8		; Print help
+	jr	l0370
+;
+; Position member in library file
+;
+l037d:
+	ld	hl,(l07fd)	; Get member index
+	ld	(FCB+.rrn),hl	; For start record
+	xor	a
+	ld	(FCB+.rrn+2),a
+	ld	c,.rndred
+	ld	de,FCB
+	call	l03f0		; Read record from file
+	or	a		; Test success
+	jp	nz,l0472	; Nope, file corrupt
+	ret
+l0394:
+	ld	de,l070f
+	call	l03e8		; Print parenthesis
+	ld	hl,l0082
+	ld	b,0ch
+l039f:
+	ld	a,(hl)
+	inc	hl
+	cp	10h
+	jr	c,l03aa
+	call	l03b0
+	djnz	l039f
+l03aa:
+	ld	a,')'
+	call	l03b0
+	ret
+;
+; Print character on console
+;
+l03b0:
+	push	af
+	push	bc
+	push	de
+	ld	e,a
+	ld	c,.conout
+	call	l03f0		; Put to console
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Convert character to lower case
+;
+l03bd:
+	cp	'A'		; Test range
+	ret	c
+	cp	'Z'+1
+	ret	nc
+	add	a,'a'-'A'
+	ret
+;
+; Close console line
+;
+l03c6:
+	ld	a,cr
+	call	l03b0		; Simple type on console
+	ld	a,lf
+	call	l03b0
+	ret
+;
+; Process library file not found
+;
+l03d1:
+	ld	de,l0632
+	call	l03e8		; Print library file not found
+	jr	l0370
+;
+; Read record from standard FCB
+;
+l03d9:
+	push	de
+	ld	de,FCB		; Load FCB address
+	ld	c,.rdrec
+	call	l03f0		; Read record from file
+	or	a		; Test success
+	jp	nz,l0472	; Nope, file corrupt
+	pop	de
+	ret
+;
+; Print string in ^DE
+;
+l03e8:
+	push	bc
+	ld	c,.string
+	call	l03f0		; Print string
+	pop	bc
+	ret
+;
+; Perform OS call preserving all registers
+;
+l03f0:
+	push	bc
+	push	de
+	push	hl
+	call	BDOS		; Just do it
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Test page filled
+;
+l03fa:
+	push	af
+	push	bc
+	push	de
+	ld	a,(l0805)	; Get terminal lines
+	or	a		; Test still any remaining
+	jr	nz,l041e	; Yeap
+	ld	a,(l010c)	; Re-init line count
+	ld	(l0805),a
+	ld	de,l06ad
+	call	l03e8		; Print waiting for keystroke
+l040f:
+	ld	c,.kbstat
+	call	l03f0		; Test key pressed
+	or	a
+	jr	z,l040f		; Nope
+	ld	c,.conin
+	call	l03f0		; Read character
+	jr	l0433
+l041e:
+	ld	c,.kbstat
+	call	l03f0		; Test key pressed
+	or	a
+	jr	nz,l042a	; Yeap
+l0426:
+	pop	de
+	pop	bc
+	pop	af
+	ret
+l042a:
+	ld	c,.conin
+	call	l03f0		; Get character from console
+	cp	'S'-'@'		; Test stopping display
+	jr	z,l040f
+l0433:
+	cp	' '		; Test preceeding
+	jr	z,l0448
+	and	CTRMASK		; Mask, forcing control
+	cp	'C'-'@'
+	jr	z,l0445
+	cp	'K'-'@'
+	jr	z,l0445
+	cp	'X'-'@'
+	jr	nz,l0426
+l0445:
+	jp	l0370
+l0448:
+	ld	a,1
+	ld	(l0805),a	; Force line count to 1
+	jr	l0426
+;
+; Print name of file ^HL
+;
+l044f:
+	ld	b,.nam		; Set length
+l0451:
+	ld	a,(hl)		; Get character
+	inc	hl
+	call	l03b0		; Print name
+	djnz	l0451
+	ld	a,'.'
+	call	l03b0		; Give delimiter
+	ld	a,(hl)
+	inc	hl
+	call	l03b0		; Print extension
+	ld	a,(hl)
+	inc	hl
+	call	l03b0
+	and	UPPMASK
+	ld	(l07ff),a	; Save type indicator
+	ld	a,(hl)
+	inc	hl
+	call	l03b0
+	ret
+;
+; Proccess corrupted library file
+;
+l0472:
+	ld	de,l0655
+	call	l03e8		; Print file corrupt
+	jp	l0370
+l047b:
+	ld	a,' '
+	call	l03b0
+l0480:
+	ld	a,' '
+	call	l03b0
+l0485:
+	ld	a,' '
+	call	l03b0
+	ret
+;
+; Print decimal value in HL
+;
+l048b::
+	call	l04bc
+	ld	a,l
+	push	af
+	ex	de,hl
+	call	l04bc
+	ld	a,l
+	push	af
+	ex	de,hl
+	call	l04bc
+	ld	a,l
+	push	af
+	ex	de,hl
+	call	l04bc
+	ld	a,l
+	push	af
+	ex	de,hl
+	ld	b,3
+	ld	c,0efh
+l04a7:
+	pop	af
+	or	a
+	jr	z,l04ad
+	ld	c,0ffh
+l04ad:
+	add	a,'0'
+	and	c
+	call	l03b0
+	djnz	l04a7
+	pop	af
+	add	a,'0'
+	call	l03b0
+	ret
+;
+;
+;
+l04bc:
+	ex	de,hl
+	ld	hl,0		; Init result
+	ld	bc,-10
+	ld	a,17
+	jr	l04c9
+l04c7:
+	adc	hl,hl
+l04c9:
+	add	hl,bc
+	jr	c,l04cf
+	sbc	hl,bc
+	or	a
+l04cf:
+	rl	e
+	rl	d
+	dec	a
+	jr	nz,l04c7
+	ret
+;
+; Print hex byte
+;
+l04d7:
+	push	af
+	srl	a		; Get upper bits
+	srl	a
+	srl	a
+	srl	a
+	call	l04e6		; Print as hex
+	pop	af		; Get lower bits
+	and	LOMASK
+l04e6:
+	or	'0'		; Make ASCII
+	cp	'9'+1		; Test decimal
+	jr	c,l04ee
+	add	a,'A'-'0'-10	; Fix for hex
+l04ee:
+	call	l03b0		; Put to console
+	ret
+;
+; - CY set says invalid ????
+;
+l04f2::
+	ld	a,h		; Test date available
+	or	l
+	jr	z,l0572		; Nope
+	ld	a,78h		; Init start of year (1978)
+	ld	de,365		; Set days in a year
+	ld	b,28		; Set days in a month
+l04fd:
+	and	a
+	sbc	hl,de
+	jr	z,l052b
+	jr	c,l052b
+	add	a,1
+	daa
+	and	a
+	sbc	hl,de
+	jr	z,l052b
+	jr	c,l052b
+	add	a,1
+	daa
+	inc	b
+	inc	de
+	and	a
+	sbc	hl,de
+	jr	z,l052b
+	jr	c,l052b
+	add	a,1
+	daa
+	dec	de
+	dec	b
+	and	a
+	sbc	hl,de
+	jr	z,l052b
+	jr	c,l052b
+	add	a,1
+	daa
+	jr	l04fd
+l052b:
+	add	hl,de
+	ld	(l07f5),a
+	ld	a,b
+	ld	(l05db),a
+	ld	bc,l05d6
+l0536:
+	ld	a,(bc)
+	ld	e,a
+	ld	d,0
+	and	a
+	sbc	hl,de
+	jr	z,l0554
+	jr	c,l0554
+	inc	bc
+	inc	bc
+	inc	bc
+	inc	bc
+	inc	bc
+	ld	a,c
+	cp	12h
+	jr	nz,l0536
+	ld	de,l0622
+	call	l03e8		; Print program error
+	jp	l0370
+l0554:
+	add	hl,de
+	inc	bc
+	ld	(l07f6),bc
+	ld	a,l
+	cp	0ah
+	jr	c,l056d
+	add	a,6
+	cp	1ah
+	jr	c,l056d
+	add	a,6
+	cp	'*'
+	jr	c,l056d
+	add	a,6
+l056d:
+	ld	(l07f8),a
+	and	a
+	ret
+l0572:
+	ld	a,(l07ff)	; Get type indicator
+	cp	'Z'
+	jr	z,l057b
+l0579:
+	scf
+	ret
+l057b:
+	ld	hl,l0082
+	ld	a,1
+	ld	b,0dh
+l0582:
+	cp	(hl)
+	inc	hl
+	jr	z,l058c
+	jr	nc,l0579
+	djnz	l0582
+	jr	l0579
+l058c:
+	push	de
+	ld	de,(l07f3)
+	add	hl,de
+	pop	de
+	ld	a,(hl)
+	ld	(l07f5),a
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	ld	(l07f8),a
+	dec	hl
+	ld	a,(hl)
+	cp	0ah
+	jr	c,l05a5
+	sub	6
+l05a5:
+	ld	b,a
+	add	a,a
+	add	a,a
+	add	a,b
+	add	a,0d2h
+	ld	l,a
+	ld	h,5
+	jr	nc,l05b1
+	inc	h
+l05b1:
+	ld	(l07f6),hl
+	and	a
+	ret
+;
+; Find active entry ^HL - Z flag set says match
+;
+l05b6:
+	ld	a,(hl)
+	or	a
+	ret	nz
+	push	de
+	ld	de,l0806	; Test 2nd name here
+	ld	a,(de)
+	sub	' '
+	jr	z,l05d4		; Nope
+	push	hl
+	inc	hl
+	ld	b,.nam+.ext
+l05c6:
+	ld	a,(de)
+	ld	c,(hl)
+	inc	hl
+	inc	de
+	cp	'?'
+	jr	z,l05d1
+	cp	c
+	jr	nz,l05d3
+l05d1:
+	djnz	l05c6
+l05d3:
+	pop	hl
+l05d4:
+	pop	de
+	ret
+;
+;
+;
+l05d6:
+	db	31,'Jan',eot
+l05db:
+	db	28,'Feb',eot
+	db	31,'Mar',eot
+	db	30,'Apr',eot
+	db	31,'May',eot
+	db	30,'Jun',eot
+	db	31,'Jul',eot
+	db	31,'Aug',eot
+	db	30,'Sep',eot
+	db	31,'Oct',eot
+	db	30,'Nov',eot
+	db	31,'Dec',eot
+l0612:
+	db	'Library File = ',eot
+l0622:
+	db	cr,lf
+	db	'+ PGM ERR +'
+	db	cr,lf,eot
+l0632:
+	db	cr,lf
+	db	'+++ Library file not found +++'
+	db	cr,lf,eot
+l0655:
+	db	cr,lf
+	db	'+++ Library file is corrupt +++'
+	db	cr,lf,eot
+l0679:
+	db	cr,lf
+	db	'+++ No (matching) members found +++'
+	db	cr,lf,eot
+l06a1:
+	db	'-- --- --  ',eot
+l06ad:
+	db	'[more]',eot
+;
+; Due to simplicity all entries have a length of 2^3 bytes
+;
+l06b4:
+	db	'.00k ',eot,'  '
+	db	'.12k ',eot,'  '
+	db	'.25k ',eot,'  '
+	db	'.37k ',eot,'  '
+	db	'.50k ',eot,'  '
+	db	'.62k ',eot,'  '
+	db	'.75k ',eot,'  '
+	db	'.87k ',eot,'  '
+l06f4:
+	db	'   --   ',eot
+l06fd:
+	db	'Squeezed',eot
+l0706:
+	db	'Crunched',eot
+l070f:
+	db	'(--> ',eot
+l0715:
+	db	cr,lf
+	db	'v1.20   SGG   28 Apr 88'
+	db	cr,lf,lf
+	db	'Usage:  LDIR lbrname [afn.typ]'
+	db	cr,lf,lf,eot
+l0753:
+	db	cr,lf
+	db	'   Name           Length     Method   Cre Date   Mod Date       Comments'
+	db	cr,lf
+	db	'============   ============ ========  ====================  ================='
+	db	cr,lf,eot
+l07ef:
+	dw	0
+l07f1:
+	dw	0
+l07f3:
+	dw	0
+l07f5:
+	db	0
+l07f6:
+	db	0,0
+l07f8:
+	db	0
+l07f9:
+	dw	0
+l07fb:
+	dw	0
+l07fd:
+	dw	0
+;;l07ff:
+
+l07ff	equ	07ffh		;  1 Byte
+l0800	equ	0800h		;  2 Bytes
+l0802	equ	0802h		;  2 Bytes
+l0804	equ	0804h		;  1 Byte
+l0805	equ	0805h		;  1 Byte
+l0806	equ	0806h		; 11 Bytes
+
+l0891	equ	0891h		; Down: Stack
+				; Up:   Heap
+
+	end
+

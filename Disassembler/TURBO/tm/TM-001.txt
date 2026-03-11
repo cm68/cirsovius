@@ -1,0 +1,1197 @@
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !! DO NOT CHANGE THE FOLLOWING CODE       !!
+; !! IT WILL BE OVERWRITTEN BY THE COMPILER !!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	jp	IniStart	; Jump to Init
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% ENTER TURBO ON COLD ENTRY %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+IF	@@DU
+TMusr:
+	db	0
+ENDIF	;@@DU
+MainStart:
+IF	@@DU
+	ld	a,_get
+	call	LogUsr		; Get entry user
+	ld	(TMusr),a	; .. save
+ENDIF	;@@DU
+	ld	hl,(BDOS+1)	; Get top
+	ld	bc,-StkSpc
+	add	hl,bc
+	ld	(AvailRAM),hl	; .. set high memory
+	call	TURBOInit	; Init a bit
+	call	ClrScr		; Clear screen
+	call	String		; Ask for error message
+	db	cr,lf,lf,lf,lf
+IF	@@GERMAN
+	db	'Fehlermeldungen laden ',eot
+ELSE
+	db	'Include error messages ',eot
+ENDIF	;@@GERMAN
+	ld	a,.TRUE
+	ld	(MSGFlg),a	; .. set flag
+	call	Ld.MSG		; Load message file
+	call	IniSession	; Init values
+	call	ShowMenue	; Display menue
+;
+; %%%%%%%%%%%%%%%%%%%%%%
+; %% TURBO WARM START %%
+; %%%%%%%%%%%%%%%%%%%%%%
+;
+ReEntMain:
+	ld	sp,(BDOS+1)	; Get stack back
+	ld	hl,ReEntMain	; .. set return
+	push	hl
+	call	CtrlStr
+	db	cr+MSB,lf+MSB,'>'+MSB,eot
+	call	StatChk		; Get selection
+	call	DoUPcase
+	call	NL
+	ld	hl,M.Menue	; Load main environment
+	ld	de,M.Table
+	ld	b,MMClen
+	call	DoCmd		; Find key
+	jr	c,ShowMenue	; .. nope
+	jp	(hl)		; .. go execute
+;
+; Re-enter menue after ESCape acknowledge
+;
+TPmenue:
+IF	@@DU
+	ld	a,(TMusr)	; Get entry user
+	ld	(FCB-1),a	; .. save into FCB
+	call	LogUsr		; .. log it
+ENDIF	;@@DU
+	call	TURBOInit	; Re-Init TURBO
+	ld	hl,(Curr.PC)
+	ld	a,h
+	or	l
+	jr	z,ReEntMain	; .. re-enter
+	jp	GoSearch	; .. search for error
+;
+; SUB MENUE : QUIT SUBMENUE
+;
+S.QUIT:
+	pop	hl		; Clean stack
+;
+; Display main menue
+;
+ShowMenue:
+	call	ClrScr
+	call	CtrlStr
+IF	@@GERMAN
+	db	'L'+MSB,'aufwerk:     ',' '+MSB,eot
+ELSE
+	db	'L'+MSB,'ogged drive:',' '+MSB,eot
+ENDIF	;@@GERMAN
+	call	RetDsk		; Get logged disk
+	add	a,'A'
+	call	ChrPutCon
+	call	CtrlStr
+	db	cr+MSB,lf+MSB
+IF	@@GERMAN
+	db	'N'+MSB,'utzerbereich:',' '+MSB,eot
+ELSE
+	db	'U'+MSB,'ser area:   ',' '+MSB,eot
+ENDIF	;@@GERMAN
+	call	PrUser		; Print user area
+	call	CtrlStr
+	db	cr+MSB,lf+MSB,lf+MSB
+IF	@@GERMAN
+	db	'A'+MSB,'rbeitsdatei:',' '+MSB,eot
+ELSE
+	db	'W'+MSB,'ork file:',' '+MSB,eot
+ENDIF	;@@GERMAN
+	call	PrWFCB		; Print work file
+	call	CtrlStr
+IF	@@GERMAN
+	db	cr+MSB,lf+MSB,'H'+MSB,'auptdatei:  ',' '+MSB,eot
+ELSE
+	db	cr+MSB,lf+MSB,'M'+MSB,'ain file:',' '+MSB,eot
+ENDIF	;@@GERMAN
+	ld	de,MFCB
+	call	PrFCB		; Print main file
+	call	CtrlStr
+	db	cr+MSB,lf+MSB,lf+MSB
+IF	@@GERMAN
+	db	'E'+MSB,'ditieren   '
+	db	'K'+MSB,'ompilieren '
+	db	'S'+MSB,'tart       '
+	db	'R'+MSB,'etten'
+ELSE
+	db	'E'+MSB,'dit     '
+	db	'C'+MSB,'ompile  '
+	db	'R'+MSB,'un   '
+	db	'S'+MSB,'ave'
+ENDIF	;@@GERMAN
+	db	cr,lf
+IF	@@GERMAN
+IF	@@EXEC
+	db	'a','U'+MSB,'sf}hren   '
+ENDIF	;@@EXEC
+	db	'I'+MSB,'nhalt      '
+	db	'O'+MSB,'ptionen  '
+	db	'* ','B'+MSB,'eenden *'
+ELSE
+IF	@@EXEC
+	db	'e','X'+MSB,'ecute  '
+ENDIF	;@@EXEC
+	db	'D'+MSB,'ir      '
+	db	'Q'+MSB,'uit  compiler '
+	db	'O'+MSB,'ptions'
+ENDIF	;@@GERMAN
+	db	cr,lf,lf
+	db	'Text: ',eot
+	ld	de,(TxtBeg)	; Get text limits
+	ld	hl,(TxtEnd)
+	dec	hl
+	call	FreeBytes	; Give free bytes
+	ld	de,(TxtEnd)	; Get gap
+	ld	hl,(TopMem)
+;
+; Print decimal free bytes and hex addresses
+; ENTRY	Reg HL holds  end  address
+;	Reg DE holds start address
+;
+TellFree:
+	call	String
+IF	@@GERMAN
+	db	'Frei: ',eot
+ELSE
+	db	'Free: ',eot
+ENDIF	;@@GERMAN
+;
+; Print decimal free bytes and hex addresses
+; ENTRY	Reg HL holds  end  address
+;	Reg DE holds start address
+;
+FreeBytes:
+	push	hl
+	push	de
+	or	a
+	sbc	hl,de
+	call	PrFixInt	; Print formatted number
+	call	String
+IF	@@GERMAN
+	db	' Bytes (',eot
+ELSE
+	db	' bytes (',eot
+ENDIF	;@@GERMAN
+	pop	hl
+	call	GetHxWrd
+	ld	a,'-'
+	call	ChrPutCon
+	pop	hl
+	call	GetHxWrd
+	ld	a,')'
+	call	ChrPutCon
+	jp	NL
+;
+; MAIN MENUE : MAIN FILE
+;
+M.MAIN:
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Name der Hauptdatei',eot
+ELSE
+	db	'Main file name',eot
+ENDIF	;@@GERMAN
+	call	IniPart		; Init a bit
+	call	StrGet		; Get name
+	ld	a,0
+	ld	(MFCB+1),a	; Set no file
+	ret	z
+	ld	hl,MFCB
+..Copy:
+	push	hl
+	call	SetPAS		; Set .PAS
+	pop	de
+	ld	hl,FCB
+	ld	bc,FCBlen
+	ldir			; Copy file
+	ret
+;
+; MAIN MENUE - WORK FILE
+;
+M.WORK:
+	ld	hl,TellNew
+	ld	(LoadExit+1),hl	; Redirect error
+	call	DoSave		; Save work file
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Name der Arbeitsdatei',eot
+ELSE
+	db	'Work file name',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get name
+	ld	a,0
+	ld	(WFCB+Fdrv),a	; Indicate no file
+	jr	nz,WrkCopy
+	call	IniSession	; Clear a bit
+	jp	ReEntMain	; .. re-enter TURBO
+WrkCopy:
+	ld	hl,WFCB
+	call	..Copy		; Copy file
+	jp	IniLoad		; .. start loading
+;
+; MAIN MENUE - SAVE
+;
+M.SAVE:
+	call	GetFN		; Get file
+	ld	hl,WFCB
+	push	hl
+	ld	de,FCB
+	ld	bc,FCBlen
+	ldir			; Copy file
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Abspeichern ',eot
+ELSE
+	db	'Saving ',eot
+ENDIF	;@@GERMAN
+	ld	de,FCB
+	call	PrFCB		; Print file
+	ld	hl,(TxtEnd)
+	dec	hl
+	ld	(hl),eof	; Close text
+	call	SetBAK		; Set .BAK
+	call	ClrSFCB		; Clear FCB
+	ld	c,.Delete
+	call	.BDOS		; Delete file
+	ld	hl,FCB+Fdrv
+	ld	de,FCB+DIRlen
+	xor	a
+	ld	(ChgFlg),a	; Clear change flag
+	ld	(de),a
+	inc	a
+	ld	(RenFlg),a	; Set rename flag
+	inc	de
+	ld	bc,DIRlen-1
+	ldir			; .. unpack
+	pop	hl
+	ld	de,FCB
+	ld	bc,DIRlen	; .. get new name
+	ldir
+	ld	c,.Rename
+	call	FBDOS		; Rename file
+	ld	hl,(TxtBeg)	; Get start of text
+MainSave:
+	push	hl
+	call	ClrSFCB		; Clear FCB
+	ld	c,.Make
+	call	.BDOS		; Create new file
+	pop	hl
+	inc	a
+	jr	z,DirFull	; .. impossible
+	push	hl
+	ld	de,TmpBuff
+	push	de
+	call	SetDMA		; Set disk buffer
+	pop	de
+	pop	hl
+	ld	b,RecLng
+SavGet:
+	ld	a,(hl)		; Get from buffer
+	inc	hl
+SavPut:
+	ld	(de),a		; .. unpack
+	inc	de
+	djnz	SavChkEOF	; .. till end of buffer
+	ld	b,a
+	push	bc
+	push	hl
+	ld	c,.WrSeq
+	call	FBDOS		; Write record
+	pop	hl
+	pop	bc
+	or	a
+	jr	nz,DskFull	; .. impossible
+	ld	de,TmpBuff	; Load buffer base
+	ld	a,b
+	ld	b,RecLng	; .. and length
+SavChkEOF:
+	cp	eof		; Test end
+	jr	nz,SavGet	; .. nope
+	ld	a,b
+	sub	RecLng		; Check state of buffer
+	ld	a,eof
+	jr	nz,SavPut	; .. still more
+	ld	c,.Close	; Fall in close
+	jp	FBDOS
+;
+; Directory full
+;
+DirFull:
+	call	String		; Tell error
+IF	@@GERMAN
+	db	'  Inhaltsverzeichnis',eot
+ELSE
+	db	'  Directory',eot
+ENDIF	;@@GERMAN
+	jr	Full
+;
+; Disk full
+;
+DskFull:
+	call	String		; Tell error
+IF	@@GERMAN
+	db	'  Laufwerk',eot
+ELSE
+	db	'  Disk',eot
+ENDIF	;@@GERMAN
+Full:
+	call	String
+IF	@@GERMAN
+	db	' voll',eot
+ELSE
+	db	' full',eot
+ENDIF	;@@GERMAN
+	call	ESCape		; Get escape
+	call	ClrSFCB		; Clear FCB
+	ld	c,.Delete
+	call	FBDOS		; Delete file
+	ld	a,(RenFlg)	; Test rename flag
+	or	a
+	ret	z		; .. nope
+	ld	(ChgFlg),a	; Set change flag
+	ld	hl,FCB+Fdrv	; Point to name
+	ld	de,FCB+DIRlen	; .. 2nd part
+	xor	a
+	ld	(RenFlg),a	; Clear rename
+	ld	(de),a
+	inc	de
+	ld	bc,DIRlen-1
+	ldir			; Unpack name
+	call	SetBAK		; Set .BAK
+	ld	c,.Rename
+	call	FBDOS		; Rename file
+	jp	ReEntMain	; .. re-enter
+;
+RenFlg:
+	db	0
+;
+; MAIN MENUE : COMPILE
+;
+M.COMPILE:
+	call	InstallFile	; Get file into memory
+	ld	a,(CmpMode)	; Get mode
+	dec	a		; Test to memory
+	jp	z,COMPmem	; .. yeap, skip file set up
+	dec	a
+	push	af
+	ld	hl,'H'+'N'*256
+	jr	nz,COMP.setExt	; .. aha, chaining
+	ld	hl,'O'+'M'*256
+COMP.setExt:
+	ld	a,'C'
+	ld	(FFCB+_ext),a	; Set extension
+	ld	(FFCB+_ext+1),hl
+	ld	a,_NoLIB
+	ld	(CmpTyp),a	; Set chain
+	ld	hl,(CmpStrt)	; Get compiler start
+	ld	(CodeBeg),hl
+	ld	hl,(AvailRAM)	; .. and top
+	ld	(DataEnd),hl
+	ld	de,FFCB
+	push	de
+	call	ClrFCB		; Prepare file
+	ld	c,.Delete
+	call	.BDOS		; Delete file
+	pop	de
+	ld	c,.Make
+	call	.BDOS		; .. and create new one
+	inc	a
+	jp	z,COMP.Ferr	; .. oops, no directory space
+	pop	af		; Get back .COM or .CHN
+	ld	hl,TPA
+	jr	z,Prep.COM	; .. .COM file
+	ld	hl,(CodeBeg)	; .. get chain base
+Prep.COM:
+	ld	(CodePC),hl	; Set PC
+	ex	de,hl
+RTL.loop:
+	ld	hl,(CodeBeg)	; Get code start
+	scf
+	sbc	hl,de		; Test reached
+	jr	c,COMPbeg	; .. yeap
+	ld	hl,(CodeBeg)
+	ld	(TPA+1),hl
+	push	de
+	call	SetDMA		; Set buffer
+	ld	c,.WrSeq
+	ld	de,FFCB
+	call	.BDOS		; Write to file
+	pop	de
+	ld	hl,StrtPrg	; Set jump to start
+	ld	(TPA+1),hl
+	or	a
+	jp	nz,COMP.Ferr	; .. oops, write error
+	ld	hl,CCPbuf
+	add	hl,de
+	ex	de,hl
+	jr	RTL.loop	; .. write next
+COMPbeg:
+	db	skip
+COMPmem:
+	xor	a
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Kompilieren ',eot
+ELSE
+	db	'Compiling ',eot
+ENDIF	;@@GERMAN
+	ld	de,FFCB
+	or	a
+	jr	z,NoDispCOM	; Skip memory
+	call	String		; Indicate on .COM or .CHN
+	db	' --> ',eot
+	call	PrFCB		; Print .COM file
+NoDispCOM:
+	call	IniPart		; Init a bit
+	call	NL
+	call	COMPILE		; Compile
+	ld	a,(ErrCode)
+	cp	_ABORT		; Test abort error
+	jr	nz,COMP.noBRK	; .. nope
+	call	String
+	db	cr,lf,lf
+IF	@@GERMAN
+	db	'Kompilierung abgebrochen',eot
+ELSE
+	db	'Compilation aborted',eot
+ENDIF	;@@GERMAN
+	jp	ReEntMain	; Re-enter TURBO
+COMP.noBRK:
+	call	String		; Tell a bit
+IF	@@GERMAN
+	db	' Zeilen'
+ELSE
+	db	' lines'
+ENDIF	;@@GERMAN
+	db	cr,lf,lf,eot
+	ld	a,(ErrCode)	; Test error code
+	or	a
+	jp	nz,COMP.err	; .. process it
+	ld	a,(CmpTyp)	; Test search for error
+	cp	_FndErr
+	jr	nz,SkpCOMP.err	; .. nope
+	call	ErrorAt		; Tell error position
+	call	String		; .. not found
+IF	@@GERMAN
+	db	'nicht gefunden'
+ELSE
+	db	'not found'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+	jp	ReEntMain	; Re-enter TURBO
+SkpCOMP.err:
+	or	a		; Test compiling memory
+	jr	z,SkpFree	; .. yeap
+	ld	hl,(CodeBeg)	; Get code start
+	ld	de,StrtPrg	; Get start of application
+	or	a
+	sbc	hl,de
+	add	hl,de
+	call	nz,TellFree	; Tell amount of free bytes
+SkpFree:
+	call	String
+	db	'Code: ',eot
+	ld	de,(CodeBeg)
+	ld	hl,(CodeEnd)
+	push	hl
+	dec	hl
+	call	FreeBytes	; Give free bytes
+	pop	de
+	ld	hl,(DataBeg)
+	push	hl
+	call	TellFree	; Tell free bytes
+	pop	de
+	inc	de
+	ld	hl,(DataEnd)
+	call	String
+	db	'Data: ',eot
+	call	FreeBytes	; Give free bytes
+	ld	a,-1
+	ld	(CompFlg),a	; Set no compile
+	ret
+;
+; Process compiler error
+;
+COMP.err:
+	cp	_DskFull	; Test disk full
+	jp	nc,COMP.Ferr	; .. disk error
+	cp	_FndRTerr	; Test run-time error found
+	jr	nc,RTL.err	; .. yeap
+	ld	b,a		; Save error number
+	call	String
+IF	@@GERMAN
+	db	'Fehler ',eot
+ELSE
+	db	'Error ',eot
+ENDIF	;@@GERMAN
+	ld	h,0
+	ld	l,b
+	push	bc
+	call	PrInt		; Tell error number
+	pop	bc
+	ld	a,(MSGFlg)	; Test TP.MSG
+	or	a
+	jr	z,NoMSG		; .. nope
+	ld	hl,(MSGbase)	; Get TP.MSG address
+MSG.loop:
+	ld	a,(hl)		; Look for EOF
+	cp	eof
+	jr	z,NoMSG		; .. yeap, no message
+	cp	' '		; Test control
+	jr	c,SkpMSGctrl	; .. yeap, skip it
+	sub	'0'		; Build number
+	ld	c,a
+	add	a,a
+	add	a,a
+	add	a,c
+	add	a,a
+	inc	hl
+	add	a,(hl)
+	sub	'0'
+	inc	hl
+	cp	b		; Compare error number
+	jr	z,MyErrNum	; .. found
+SkpMSGctrl:
+	ld	a,(hl)
+	inc	hl		; .. skip to end of line
+	cp	cr
+	jr	nz,SkpMSGctrl
+	ld	a,(hl)
+	cp	lf
+	jr	nz,MSG.loop
+	inc	hl
+	jr	MSG.loop
+MyErrNum:
+	call	String		; Tell we got it
+	db	': ',eot
+PrMS.Loop:
+	ld	a,(hl)
+	cp	cr		; Test end of text
+	jr	z,NoMSG		; .. yeap, that's all
+	cp	' '		; Test control string
+	jr	nc,PrMS.chr	; .. nope, print
+	ld	de,(MSGbase)	; .. get base
+PrMS.next:
+	ld	a,(de)
+	inc	de
+	cp	' '		; Find control
+	jr	nc,PrMS.srcCtrl	; .. nope
+	cp	(hl)		; .. test ours
+	jr	nz,PrMS.srcCtrl	; .. nope
+PrMS.CtrlLoop:
+	ld	a,(de)		; Test end of line
+	cp	cr
+	jr	z,PrMS.skp
+	call	ChrPutCon	; Give substring
+	inc	de
+	jr	PrMS.CtrlLoop
+PrMS.srcCtrl:
+	ld	a,(de)
+	inc	de
+	cp	cr		; Skip end of line
+	jr	nz,PrMS.srcCtrl
+	inc	de
+	jr	PrMS.next	; Try next
+PrMS.chr:
+	call	ChrPutCon	; Print character
+PrMS.skp:
+	inc	hl
+	jr	PrMS.Loop	; .. get more
+;
+; Got position of run-time error
+;
+RTL.err:
+	call	ErrorAt		; Tell error position
+	call	String		; .. found
+IF	@@GERMAN
+	db	'gefunden',eot
+ELSE
+	db	'found',eot
+ENDIF	;@@GERMAN
+NoMSG:
+	xor	a
+	ld	(FilFlg),a	; Clear file flags
+	ld	a,(IncFlg)	; Test INCLUDE file
+	or	a
+	jr	z,NoINC.err	; .. nope
+	ld	a,'.'
+	call	ChrPutCon
+	call	ForceSave	; Force saving
+	ld	de,WFCB		; Get FCB
+	ld	hl,CFCB
+	ld	bc,Fname+Fext+1
+	ldir			; Copy include file
+	call	DoIniLoad	; .. load it
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Fehler in Include Datei',eot
+ELSE
+	db	'Error found in above include file',eot
+ENDIF	;@@GERMAN
+	jr	ErrGetESC
+NoINC.err:
+	call	MFCBhere	; Test main file defined
+	jr	z,ErrGetESC	; .. nope
+	ld	de,WFCB
+	ld	hl,MFCB
+	ld	bc,Fdrv+Fname+Fext
+	ldir			; Save file
+ErrGetESC:
+	call	ESCape		; Get escape
+	ld	hl,(CTxtPtr)	; Fetch current editor address
+	jp	ErrEDIT		; .. fall in edit
+;
+; MAIN MENUE : RUN
+;
+M.RUN:
+	ld	a,(CompFlg)	; Get flag
+	or	a		; .. test active
+	call	z,M.COMPILE	; .. compile before go
+	ld	a,(CmpMode)	; Get mode
+	dec	a
+IF	@@EXEC
+	jr	z,RUN.MEM	; .. to memory
+	dec	a
+	ret	nz		; .. skip chain
+	call	Ld.OVR		; Load OVR file
+	ret	z		; .. not ther
+	call	MFCBhere	; Test main file there
+	ld	hl,WFCB
+	jr	z,RUN.FCB.swap	; .. nope
+	ld	hl,MFCB
+RUN.FCB.swap:
+	ld	de,FFCB
+	ld	bc,1+Fname+Fext
+	ldir			; Unpack FCB
+	ld	a,'C'
+	ld	hl,'O'+'M'*256
+	ld	(FFCB+_ext),a; Set extension
+	ld	(FFCB+_ext+1),hl
+	ld	de,FFCB
+	call	ClrFCB		; Prepare file
+	push	de
+	ld	c,.Open
+	call	.BDOS		; Find file
+	pop	hl
+	inc	a
+	jp	z,OVL.Ret	; .. go to return procedure
+	ld	de,$DMY.ARG
+	jp	PrepOVR		; .. and go
+RUN.MEM:
+ELSE
+	ret	nz
+ENDIF	;@@EXEC
+	call	GetCCP		; Get CCP parameter
+	call	GetCodeBeg	; Init text end, get code start
+	call	String		; Tell running
+	db	cr,lf
+IF	@@GERMAN
+	db	'Start'
+ELSE
+	db	'Running'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+	ld	hl,(CodeBeg)	; Get start of code
+	jp	(hl)		; .. and go
+;
+; MAIN MENUE : EDIT
+;
+M.EDIT:
+	call	GetFN		; Prepare file
+	ld	hl,-1		; Set zero offset
+ErrEDIT:
+	push	hl
+	ld	hl,(XConout+1)
+	ld	(Old.Conout+1),hl
+	ld	hl,New.Conout
+	ld	(XConout+1),hl	; Set new I/O
+	pop	hl
+	jp	EDIT		; .. go edit
+IF	@@EXEC
+;
+; MAIN MENUE : EXECUTE
+;
+M.EXECUTE:
+	call	Ld.OVR		; Load OVR file
+	ret	z		; .. not there
+EXEC.PRG:
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Programm',eot
+ELSE
+	db	'Program',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get name
+	jp	z,OVL.Ret	; Go to return procedure
+	ld	a,'C'
+	ld	hl,'O'+'M'*256
+	call	PrepFile	; Get .COM file
+	jr	z,EXEC.PRG	; .. not there
+	ld	hl,FCB
+PrepOVR:
+	push	de		; Argument pointer
+	push	hl		; FCB
+	ld	a,(LogDisk)
+	push	af		; Logged disk
+	ld	hl,BuildFCB
+	push	hl		; Build FCB
+	ld	hl,AvailMem
+	push	hl		; Number of bytes
+	ld	hl,CurMemPtr
+	push	hl		; Save area start
+	ld	hl,OVL.Ret
+	push	hl		; Return address
+	jp	@OVLADR		; .. go
+ENDIF	;@@EXEC
+;
+; MAIN MENUE : DIR
+;
+M.DIR:
+	call	String
+IF	@@GERMAN
+	db	'Dateimaske',eot
+ELSE
+	db	'Dir mask',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get mask
+	call	BuildFCB	; Set up FCB
+	xor	a
+	ld	(IOResult),a	; Clear I/O
+	ld	hl,FCB+1
+	ld	b,Fname
+	call	SetWild		; Set wild card if empty
+	ld	hl,FCB+_ext
+	ld	b,Fext
+	call	SetWild
+	call	RetDsk		; Get logged disk
+	push	af
+	push	af
+	ld	a,(FCB)
+	or	a
+	jr	z,MDirDefDrv
+	pop	hl
+	dec	a
+	push	af
+	call	LogDsk		; Select disk
+MDirDefDrv:
+	pop	af
+	add	a,'A'
+	ld	(M.DIRdrv),a
+	ld	de,TmpBuff
+	call	SetDMA		; Set buffer
+	ld	de,0		; Clear flag and count
+	ld	c,.SrcFrs
+MDirNext:
+	push	de
+	call	FBDOS		; Search for file
+	pop	de
+	ld	c,a
+	inc	a
+	jr	z,MDirEOF	; .. no more or none
+	ld	a,c
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	ld	c,a
+	ld	b,0
+	ld	hl,TmpBuff+_SYS
+	add	hl,bc
+	bit	_MB,(hl)	; Test SYS bit set
+	jr	nz,MDirSkip	; .. yeap, skip display
+	ld	d,-1		; Set any found flag
+	ld	hl,TmpBuff
+	add	hl,bc		; Point to entry
+	inc	e		; Test 1st file
+	dec	e
+	jr	nz,MDIR.beg	; .. nope
+	ld	a,ScrCol-1	; Get columns
+	ld	e,-1
+MDIR.getCol:
+	inc	e
+	sub	DirLng		; Calculate files per line
+	jr	nc,MDIR.getCol
+	jr	MDIR.go
+MDIR.beg:
+	call	String		; Give delimiter
+	db	': ',eot
+MDIR.go:
+	ld	b,Fname+Fext	; Set length
+MDIR.FCBloop:
+	inc	hl
+	ld	a,(hl)
+	and	NoMSB		; No attribute
+	call	ChrPutCon	; .. print name and extension
+	ld	a,b
+	cp	Fext+1
+	ld	a,' '
+	call	z,ChrPutCon	; .. give delimiter
+	djnz	MDIR.FCBloop
+	dec	e		; Test remainder
+	jr	z,MDIR.NL		; .. none
+	ld	a,' '
+	call	ChrPutCon	; Give separator
+	jr	MDirSkip
+MDIR.NL:
+	call	NL		; .. new line if full
+MDirSkip:
+	ld	c,.SrcNxt
+	jr	MDirNext
+MDirEOF:
+	inc	e
+	dec	e
+	call	nz,NL		; Close line if necessary
+	inc	d		; Test any file found
+	jr	z,MDIR.free
+	call	String		; .. nope, so tell it
+IF	@@GERMAN
+	db	'Keine Datei'
+ELSE
+	db	'No file'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+MDIR.free:
+	call	NL
+	ld	de,TmpBuff
+	call	SetDMA		; Set disk buffer
+	call	RetDsk		; Return logged drive
+	ld	e,a
+	ld	c,.DskFre
+	call	BDOS		; Get free bytes
+	ld	hl,(TmpBuff)	; Get remaining records
+	ld	a,(TmpBuff+2)
+	ld	c,a
+	ld	b,3
+MDIR.div8:
+	srl	c		; Divide by 8 for kBytes
+	rr	h
+	rr	l
+	djnz	MDIR.div8
+	call	String
+IF	@@GERMAN
+	db	'Verbleibender Platz auf '
+ELSE
+	db	'Bytes Remaining On '
+ENDIF	;@@GERMAN
+M.DIRdrv:
+	db	'X: ',eot
+	call	PrInt		; Give number
+	ld	a,'k'
+	call	ChrPutCon
+	pop	af
+	jp	LogDsk		; Select disk
+;
+; MAIN MENUE : LOG DRIVE
+;
+M.LOG:
+	call	String
+IF	@@GERMAN
+	db	'Neues Laufwerk',eot
+ELSE
+	db	'New drive',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get drive
+	ld	a,(de)		; Test empty line
+	cp	eof
+	jr	nz,MLOG.getD
+	ld	a,(DU)		; Get default
+	jr	MLOG.setD
+MLOG.getD:
+	call	DoUPcase
+	sub	'A'		; Test valid range A..P
+	ret	c
+	cp	'P'-'A'+1
+	ret	nc
+MLOG.setD:
+	push	af
+	call	RetDsk		; Return current disk
+	ld	d,a
+	pop	af
+	ld	e,a
+	push	de
+	call	LogDsk		; Select disk
+	pop	de
+	inc	a
+	jr	z,MLOG.oldD	; .. oops, error
+	ld	a,e
+	ld	(DU),a		; Set new on success
+	ret
+MLOG.oldD:
+	ld	a,d
+	jp	LogDsk		; .. reset old
+;
+; MAIN MENUE : LOG USER
+;
+M.USER:
+	call	String
+IF	@@GERMAN
+	db	'Neuer Benutzerbereich',eot
+ELSE
+	db	'New user area',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get drive
+	ld	a,(de)		; Test empty line
+	cp	eof
+	ret	z		; .. yeap
+	ex	de,hl
+	ld	de,0		; Clear number
+GetUs:
+	ld	a,(hl)
+	cp	'0'		; Test count
+	jr	c,USR.NoNum
+	cp	'9'+1
+	jr	nc,USR.noNum
+	inc	hl
+	call	Mult10		; Get times 10
+	sub	'0'
+	add	a,e
+	ld	e,a
+	jr	nc,GetUs
+	ret			; .. invalid
+USR.NoNum:
+	ld	a,e
+	cp	MaxUsr+1	; Test range
+	ret	nc		; .. invalid
+IF	@@DU
+	ld	(TMusr),a	; .. save
+ENDIF	;@@DU
+	jp	LogUsr		; Set user code
+;
+; MAIN MENUE : OPTIONS
+;
+M.Options:
+	ld	hl,M.Options	; Set default return
+	push	hl
+	call	ClrScr
+	ld	a,(CmpMode)	; Get mode
+	call	CompArrow	; Display arrow
+	call	CtrlStr
+IF	@@GERMAN
+	db	'S'+MSB,'peicher '
+ELSE
+	db	'M'+MSB,'emory'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+	call	CompArrow	; .. or this one
+	call	CtrlStr
+IF	@@GERMAN
+	db	'C'+MSB,'om-Datei'
+ELSE
+	db	'C'+MSB,'om-file'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+	call	CompArrow	; .. or this one
+	call	CtrlStr
+IF	@@GERMAN
+	db	'c','H'+MSB,'n-Datei'
+ELSE
+	db	'c','H'+MSB,'n-file'
+ENDIF	;@@GERMAN
+	db	cr,lf,lf,eot
+	ld	a,(CmpMode)	; Get mode
+	cp	_Memory		; .. test memory compilation
+	jr	z,SkpCOMOpt	; .. yeap
+	call	CtrlStr
+IF	@@GERMAN
+	db	'A'+MSB,'nfangsadresse:',' '+MSB,eot
+ELSE
+	db	'S'+MSB,'tart address:',' '+MSB,eot
+ENDIF	;@@GERMAN
+	ld	hl,(CmpStrt)
+	call	GetHxWrd	; Print start of compiling
+	call	CtrlStr
+	db	' (min ',eot
+	ld	hl,StrtPrg	; Get start address
+	call	GetHxWrd
+	call	CtrlStr
+	db	')',cr,lf
+IF	@@GERMAN
+	db	'E'+MSB,'ndadresse:    ',' '+MSB,eot
+ELSE
+	db	'E'+MSB,'nd   address:',' '+MSB,eot
+ENDIF	;@@GERMAN
+	ld	hl,(AvailRAM)
+	call	GetHxWrd	; .. and end
+	call	CtrlStr
+	db	' (max ',eot
+	ld	hl,(BDOS+1)
+	call	GetHxWrd
+	call	CtrlStr
+	db	')',cr,lf,lf,eot
+SkpCOMOpt:
+	ld	a,(CCPflg)
+	call	BuffArrow	; Display arrow
+	call	CtrlStr
+IF	@@GERMAN
+	db	'K'+MSB,'lein'
+ELSE
+	db	'L'+MSB,'imited'
+ENDIF	;@@GERMAN
+	db	cr,lf,eot
+	call	BuffArrow	; Display arrow
+	call	CtrlStr
+IF	@@GERMAN
+	db	'G'+MSB,'ro~'
+ELSE
+	db	'U'+MSB,'nlimited'
+ENDIF	;@@GERMAN
+	db	cr,lf,lf,eot
+	call	CtrlStr
+IF	@@GERMAN
+	db	'F'+MSB,'ehler im Laufzeitsystem finden '
+	db	'* ','B'+MSB,'eenden *'
+	db	cr,lf,lf,'>'+MSB,eot
+ELSE
+	db	'F'+MSB,'ind run-time error  '
+	db	'Q'+MSB,'uit',cr,lf,lf,'>'+MSB,eot
+ENDIF	;@@GERMAN
+	call	StatChk		; Get selection
+	call	DoUPcase
+	call	NL
+	ld	hl,S.Menue	; Load sub-environment
+	ld	de,S.Table
+	ld	b,SMClen
+	call	DoCmd		; Get sub-key
+	ret	c
+	jp	(hl)
+;
+; MAIN MENUE : QUIT
+;
+M.QUIT:
+	call	DoSave		; Save work file
+	call	crtexit		; Fix up screen
+	jp	OS		; .. exit
+;
+; SUB MENUE - COMPILE TO MEMORY
+;
+S.MEM:
+	ld	a,_Memory
+	jr	S.CMPL
+;
+; SUB MENUE - COMPILE TO FILE
+;
+S.COM:
+	ld	a,_File
+	jr	S.CMPL
+;
+; SUB MENUE - COMPILE CHAIN TO FILE
+;
+S.CHN:
+	ld	a,_Chain
+S.CMPL:
+	ld	(CmpMode),a	; Set mode
+	jp	IniPart		; Init a bit
+;
+; SUB MENUE - UNLIMITED CCP BUFFER
+;
+S.UNLIMIT:
+	ld	a,.TRUE
+	ld	(CCPflg),a	; Set mode
+	ret
+;
+; SUB MENUE - LIMITED CCP BUFFER
+;
+S.LIMIT:
+	ld	a,FALSE
+	ld	(CCPflg),a	; Set mode
+	ret
+;
+; SUB MENUE - SET COMPILER START ADDRESS
+;
+S.START:
+	call	String
+IF	@@GERMAN
+	db	'Anfangsadresse',eot
+ELSE
+	db	'Start address',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get address
+	ld	hl,StrtPrg	; Get limit
+	call	nz,.CnvHex
+	ld	(CmpStrt),hl	; .. set it
+	ret
+.CnvHex:
+	push	hl		; Save min. value
+	call	CnvHex		; .. get new one
+	pop	de
+	or	a
+	sbc	hl,de
+	ex	de,hl
+	ret	c
+	add	hl,de		; .. fix for new
+	ret
+;
+; SUB MENUE - SET COMPILER END ADDRESS
+;
+S.END:
+	call	String
+IF	@@GERMAN
+	db	'Endadresse',eot
+ELSE
+	db	'End address',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get address
+	ld	hl,(BDOS+1)
+	ld	bc,-StkSpc
+	add	hl,bc
+	call	nz,..CnvHex
+	ld	(AvailRAM),hl	; .. set it
+	ret
+..CnvHex:
+	push	hl		; Save min. value
+	call	CnvHex		; .. get new one
+	pop	de
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	ex	de,hl
+	ret	nc
+	add	hl,de		; .. fix for old
+	ret
+;
+; SUB MENUE : FIND COMPILER ERROR
+;
+S.FIND:
+	call	String
+IF	@@GERMAN
+	db	'Fehleradresse eingeben',eot
+ELSE
+	db	'Enter PC',eot
+ENDIF	;@@GERMAN
+	call	StrGet		; Get PC
+	ret	z
+	call	CnvHex
+	ld	(Curr.PC),hl
+GoSearch:
+	call	NL
+	call	InstallFile	; Get file into memory
+	ld	hl,0
+	ld	(CodeBeg),hl	; Clear start of code
+	ld	a,_FndErr
+	ld	(CmpTyp),a	; Set type
+	call	String
+	db	cr,lf
+IF	@@GERMAN
+	db	'Suchen',eot
+ELSE
+	db	'Searching',eot
+ENDIF	;@@GERMAN
+	jp	NoDispCOM
+

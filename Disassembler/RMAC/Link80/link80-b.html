@@ -1,0 +1,466 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-b.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>Appendix B</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center>
+<p><br><a NAME="B"></a><b><u><font size=+2>APPENDIX B</font></u></b>
+<p><b>LISTING OF "<a href="diocalls-pli.txt">DIOCALLS</a>"</b>
+<br><b>SHOWING THE BASIC CP/M DIRECT INTERFACE</b></center>
+
+<br>
+<br>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: DIOCALLS
+
+L: List Source Program
+
+%include 'diomod.dcl';
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+
+PL/I-80 V1.0, COMPILATION OF: DIOCALLS
+
+   1 a 0000 diotst:
+   2 a 0006     proc options(main);
+   3 a 0006     /* external CP/M I/O entry points */
+   4 a 0006     /* (note: each source line begins with tab chars) */
+   5+c 0006     dcl
+   6+c 0006         memptr entry         returns (ptr),
+   7+c 0006         memsiz entry         returns (fixed(15)),
+   8+c 0006         memwds entry         returns (fixed(15)),
+   9+c 0006         dfcb0  entry         returns (ptr),
+  10+c 0006         dfcb1  entry         returns (ptr),
+  11+c 0006         dbuff  entry         returns (ptr),
+  12+c 0006         reboot entry,
+  13+c 0006         rdcon  entry         returns (char(1)),
+  14+c 0006         wrcon  entry         (char(1)),
+  15+c 0006         rdrdr  entry         returns (char(1)),
+  16+c 0006         wrpun  entry         (char(1)),
+  17+c 0006         wrlst  entry         (char(1)),
+  18+c 0006         coninp entry         returns (char(1)),
+  19+c 0006         conout entry         (char(1)),
+  20+c 0006         rdstat entry         returns (bit(1)),
+  21+c 0006         getio  entry         returns (bit(8)),
+  22+c 0006         setio  entry         (bit(8)),
+  23+c 0006         wrstr  entry         (ptr),
+  24+c 0006         rdbuf  entry         (ptr),
+  25+c 0006         break  entry         returns (bit(1)),
+  26+c 0006         vers   entry         returns (bit(16)),
+  27+c 0006         reset  entry,
+  28+c 0006         select entry         (fixed(7)),
+  29+c 0006         open   entry   (ptr) returns (fixed(7)),
+  30+c 0006         close  entry   (ptr) returns (fixed(7)),
+  31+c 0006         sear   entry   (ptr) returns (fixed(7)),
+  32+c 0006         searn  entry         returns (fixed(7)),
+  33+c 0006         delete entry   (ptr),
+  34+c 0006         rdseq  entry   (ptr) returns (fixed(7)),
+  35+c 0006         wrseq  entry   (ptr) returns (fixed(7)),
+  36+c 0006         make   entry   (ptr) returns (fixed(7)),
+  37+c 0006         rename entry   (ptr),
+  38+c 0006         logvec entry         returns (bit(16)),
+  39+c 0006         curdsk entry         returns (fixed(7)),
+  40+c 0006         setdma entry         (ptr),
+  41+c 0006         allvec entry         returns (ptr),
+  42+c 0006         wpdisk entry,
+  43+c 0006         rovec  entry         returns (bit(16)),
+  44+c 0006         filatt entry         (ptr),
+  45+c 0006         getdpb entry         returns (ptr),
+  46+c 0006         getusr entry         returns (fixed(7)),
+  47+c 0006         setusr entry   (fixed(7)),
+  48+c 0006         rdran  entry   (ptr) returns (fixed(7)),
+  49+c 0006         wrran  entry   (ptr) returns (fixed(7)),
+  50+c 0006         filsiz entry   (ptr),
+  51+c 0006         setrec entry   (ptr),
+  52+c 0006         resdrv entry         (bit(16)),
+  53+c 0006         wrranz entry   (ptr) returns (fixed(7));
+  54 c 0006     dcl
+  55 c 0006         c char(1),
+  56 c 0006         v char(254) var,
+  57 c 0006         i fixed;
+  58 c 0006
+  59 c 0006
+  60 c 0006     /**********************************
+  61 c 0006     *                                 *
+  62 c 0006     * Fixed Location Tests:           *
+  63 c 0006     *     MEMPTR, MEMSIZ, MEMWDS,     *
+  64 c 0006     *     DFCB0, DFCB1, DBUFF         *
+  65 c 0006     *                                 *
+  66 c 0006     **********************************/
+  67 c 0006     dcl
+  68 c 0006         memptrv ptr,
+  69 c 0006         memsizv fixed,
+  70 c 0006         (dfcb0v, dfcb1v, dbuffv) ptr,
+  71 c 0006         command char(127) var based (dbuffv),
+  72 c 0006         1 fcb0 based(dfcb0v),
+  73 c 0006           2 drive fixed(7),
+  74 c 0006           2 name  char(8),
+  75 c 0006           2 type  char(3),
+  76 c 0006           2 extnt fixed(7),
+  77 c 0006           2 space (19) bit(8),
+  78 c 0006           2 cr    fixed(7),
+  79 c 0006         memory (0:0) based(memptrv) bit(8);
+  80 c 0006     memptrv = memptr();
+  81 c 000C     memsizv = memsiz();
+  82 c 0012     dfcb0v  = dfcb0();
+  83 c 0018     dfcb1v  = dfcb1();
+  84 c 001E     dbuffv  = dbuff();
+  85 c 0024     put edit ('Command Tail: ',command) (a);
+  86 c 004A     put edit ('First Default File:',
+  87 c 008D           fcb0.name,'.',fcb0.type) (skip,4a);
+  88 c 008D     put edit ('dfcb0 ',unspec(dfcb0v),
+  89 c 0137           'dfcb1 ',unspec(dfcb1v),
+  90 c 0137           'dbuff ',unspec(dbuffv),
+  91 c 0137           'memptr',unspec(memptrv),
+  92 c 0137           'memsiz',unspec(memsizv),
+  93 c 0137           'memwds',memwds())
+  94 c 0137          (5(skip,a(7),b4),skip,a(7),f(6));
+  95 c 0137     put skip list('Clearing Memory');
+  96 c 0153         /* sample loop to clear mem */
+  97 c 0153         do i = 0 repeat(i+1) while (i^=memsizv-1);
+  98 c 016A         memory (i) = '00'b4;
+  99 c 017F         end;
+ 100 c 017F
+ 101 c 017F
+ 102 c 017F     /**********************************
+ 103 c 017F     *                                 *
+ 104 c 017F     *        REBOOT Test              *
+ 105 c 017F     *                                 *
+ 106 c 017F     **********************************/
+ 107 c 017F     put skip list ('Reboot? (Y/N)');
+ 108 c 019B     get list (c);
+ 109 c 01B5     if translate(c,'Y','y') = 'Y' then
+ 110 c 01DD         call reboot();
+ 111 c 01E0
+ 112 c 01E0
+ 113 c 01E0     /**********************************
+ 114 c 01E0     *                                 *
+ 115 c 01E0     *       RDCON, WRCON Test         *
+ 116 c 01E0     *                                 *
+ 117 c 01E0     **********************************/
+ 118 c 01E0     put list('Type Input, End with "$" ');
+ 119 c 01F7     v = '^m^j';
+ 120 c 0204         do while (substr(v,length(v)) ^= '$');
+ 121 c 0220         v = v || rdcon();
+ 122 c 022E         end;
+ 123 c 022E     put skip list('You Typed:');
+ 124 c 024A         do i = 1 to length(v);
+ 125 c 0266         call wrcon(substr(v,i,1));
+ 126 c 028E         end;
+ 127 c 028E
+ 128 c 028E
+ 129 c 028E     /**********************************
+ 130 c 028E     *                                 *
+ 131 c 028E     *       RDRDR and WRPUN Test      *
+ 132 c 028E     *                                 *
+ 133 c 028E     **********************************/
+ 134 c 028E     put skip list('Reader to Punch Test?(Y/N)');
+ 135 c 02AA     get list (c);
+ 136 c 02C4     if translate(c,'Y','y') = 'Y' then
+ 137 c 02EC         do;
+ 138 c 02EC         put skip list('Copying RDR to PUN until ctl-z');
+ 139 c 0308         c = ' ';
+ 140 c 0314             do while (c ^= '^z');
+ 141 c 0323             c = rdrdr();
+ 142 c 032E             if c ^= '^z' then
+ 143 c 033D                 call wrpun(c);
+ 144 c 0346             end;
+ 145 c 0346         end;
+ 146 c 0346
+ 147 c 0346
+ 148 c 0346     /**********************************
+ 149 c 0346     *                                 *
+ 150 c 0346     *            WRLST Test           *
+ 151 c 0346     *                                 *
+ 152 c 0346     **********************************/
+ 153 c 0346     put list('List Output Test?(Y/N)');
+ 154 c 035D     get list(c);
+ 155 c 0377     if translate(c,'Y','y') = 'Y' then
+ 156 c 039F         do i = 1 to length(v);
+ 157 c 03BB         call wrlst(substr(v,i,1));
+ 158 c 03E3         end;
+ 159 c 03E3
+ 160 c 03E3
+ 161 c 03E3     /**********************************
+ 162 c 03E3     *                                 *
+ 163 c 03E3     *   Direct I/O, CONOUT, CONINP    *
+ 164 c 03E3     *                                 *
+ 165 c 03E3     **********************************/
+ 166 c 03E3     put list
+ 167 c 03FA         ('Direct I/O, Type Line, End with Line Feed');
+ 168 c 03FA         c = ' ';
+ 169 c 0406             do while (c ^= '^j');
+ 170 c 0415             call conout(c);
+ 171 c 041B             c = coninp();
+ 172 c 0429             end;
+ 173 c 0429
+ 174 c 0429
+ 175 c 0429     /**********************************
+ 176 c 0429     *                                 *
+ 177 c 0429     *  Direct I/O, Console Status     *
+ 178 c 0429     *             RDSTAT              *
+ 179 c 0429     *                                 *
+ 180 c 0429     **********************************/
+ 181 c 0429     put skip list('Status Test, Type Character');
+ 182 c 0445         do while (^rdstat());
+ 183 c 044F         end;
+ 184 c 044F     /* clear the character */
+ 185 c 044F     c = coninp();
+ 186 c 045A
+ 187 c 045A
+ 188 c 045A     /**********************************
+ 189 c 045A     *                                 *
+ 190 c 045A     *       GETIO, SETIO IObyte       *
+ 191 c 045A     *                                 *
+ 192 c 045A     **********************************/
+ 193 c 045A     dcl
+ 194 c 045A         iobyte bit(8);
+ 195 c 045A     iobyte = getio();
+ 196 c 0460     put edit ('IObyte is ',iobyte,
+ 197 c 0493           ', New Value: ') (skip,a,b4,a);
+ 198 c 0493     get edit (iobyte) (b4(2));
+ 199 c 04AF     call setio(iobyte);
+ 200 c 04B5
+ 201 c 04B5
+ 202 c 04B5     /**********************************
+ 203 c 04B5     *                                 *
+ 204 c 04B5     *   Buffered Write,  WRSTR Test   *
+ 205 c 04B5     *                                 *
+ 206 c 04B5     **********************************/
+ 207 c 04B5     put list('Buffered Output Test:');
+ 208 c 04CC     /* "v" was previously filled by RDCON */
+ 209 c 04CC     call wrstr(addr(v));
+ 210 c 04D8
+ 211 c 04D8
+ 212 c 04D8     /**********************************
+ 213 c 04D8     *                                 *
+ 214 c 04D8     *     Buffered Read RDBUF Test    *
+ 215 c 04D8     *                                 *
+ 216 c 04D8     **********************************/
+ 217 c 04D8     dcl
+ 218 c 04D8         1 inbuff static,
+ 219 c 04D8           2 maxsize bit(8) init('80'b4),
+ 220 c 04D8           2 inchars char(127) var;
+ 221 c 04D8     put skip list('Line Input, Type Line, End With Return');
+ 222 c 04F4     put skip;
+ 223 c 0505     call rdbuf(addr(inbuff));
+ 224 c 0511     put skip list('You Typed: ',inchars);
+ 225 c 0536
+ 226 c 0536
+ 227 c 0536     /**********************************
+ 228 c 0536     *                                 *
+ 229 c 0536     *      Console BREAK Test         *
+ 230 c 0536     *                                 *
+ 231 c 0536     **********************************/
+ 232 c 0536     put skip list('Console Break Test, Type Character');
+ 233 c 0552         do while(^break());
+ 234 c 055C         end;
+ 235 c 055C     c = rdcon();
+ 236 c 0567
+ 237 c 0567
+ 238 c 0567     /**********************************
+ 239 c 0567     *                                 *
+ 240 c 0567     *     Version Number VERS Test    *
+ 241 c 0567     *                                 *
+ 242 c 0567     **********************************/
+ 243 c 0567     dcl
+ 244 c 0567         version bit(16);
+ 245 c 0567     version = vers();
+ 246 c 056D     if substr(version,1,8) = '00'b4 then
+ 247 c 0576         put skip list('CP/M'); else
+ 248 c 0595         put skip list('MP/M');
+ 249 c 05B1     put edit(' Version ',substr(version,9,4),
+ 250 c 05F5         '.',substr(version,13,4)) (a,b4,a,b4);
+ 251 c 05F5
+ 252 c 05F5
+ 253 c 05F5     /**********************************
+ 254 c 05F5     *                                 *
+ 255 c 05F5     *     Disk System RESET Test      *
+ 256 c 05F5     *                                 *
+ 257 c 05F5     **********************************/
+ 258 c 05F5     put skip list('Resetting Disk System');
+ 259 c 0611     call reset();
+ 260 c 0614
+ 261 c 0614
+ 262 c 0614     /**********************************
+ 263 c 0614     *                                 *
+ 264 c 0614     *       Disk SELECT Test          *
+ 265 c 0614     *                                 *
+ 266 c 0614     **********************************/
+ 267 c 0614     put skip list('Select Disk # ');
+ 268 c 0630     get list(i);
+ 269 c 0648     call select(i);
+ 270 c 0654
+ 271 c 0654     /**********************************
+ 272 c 0654     *                                 *
+ 273 c 0654     * Note:  The OPEN, CLOSE, SEAR,   *
+ 274 c 0654     *        SEARN, DELETE, RDSEQ,    *
+ 275 c 0654     *        WRSEQ, MAKE, and RENAME  *
+ 276 c 0654     * functions are tested in the     *
+ 277 c 0654     *        DIOCOPY program          *
+ 278 c 0654     *                                 *
+ 279 c 0654     **********************************/
+ 280 c 0654
+ 281 c 0654     /**********************************
+ 282 c 0654     *                                 *
+ 283 c 0654     *         LOGVEC and CURDSK       *
+ 284 c 0654     *                                 *
+ 285 c 0654     **********************************/
+ 286 c 0654     put skip list ('Login Vector',
+ 287 c 0695         logvec(),'Current Disk',
+ 288 c 0695         curdsk());
+ 289 c 0695
+ 290 c 0695     /**********************************
+ 291 c 0695     *                                 *
+ 292 c 0695     * See DIOCOPY for SETDMA Function *
+ 293 c 0695     *                                 *
+ 294 c 0695     **********************************/
+ 295 c 0695
+ 296 c 0695     /**********************************
+ 297 c 0695     *                                 *
+ 298 c 0695     *  Allocate Vector ALLVEC Test    *
+ 299 c 0695     *                                 *
+ 300 c 0695     **********************************/
+ 301 c 0695     dcl
+ 302 c 0695         alloc (0:30) bit(8)
+ 303 c 0695             based (allvec()),
+ 304 c 0695         allvecp ptr;
+ 305 c 0695     allvecp = allvec();
+ 306 c 069B     put edit('Alloc Vector at ',
+ 307 c 0700         unspec(allvecp),':',
+ 308 c 0700         (alloc(i) do i=0 to 30))
+ 309 c 0700         (skip,a,b4,a,254(skip,4(b,x(1))));
+ 310 c 0700
+ 311 c 0700     /**********************************
+ 312 c 0700     *                                 *
+ 313 c 0700     *  Note:  the following functions *
+ 314 c 0700     *  apply to version 2.0 or newer. *
+ 315 c 0700     *                                 *
+ 316 c 0700     **********************************/
+ 317 c 0700
+ 318 c 0700     /**********************************
+ 319 c 0700     *                                 *
+ 320 c 0700     *           WPDISK Test           *
+ 321 c 0700     *                                 *
+ 322 c 0700     **********************************/
+ 323 c 0700     put skip list('Write Protect Disk?(Y/N)');
+ 324 c 071C     get list(c);
+ 325 c 0736     if translate(c,'Y','y') = 'Y' then
+ 326 c 075E         call wpdisk();
+ 327 c 0761
+ 328 c 0761     /**********************************
+ 329 c 0761     *                                 *
+ 330 c 0761     *          ROVEC Test             *
+ 331 c 0761     *                                 *
+ 332 c 0761     **********************************/
+ 333 c 0761     put skip list('Read/Only Vector is',rovec());
+ 334 c 0788
+ 335 c 0788     /**********************************
+ 336 c 0788     *                                 *
+ 337 c 0788     *  Disk Parameter Block Decoding  *
+ 338 c 0788     *          Using GETDPB           *
+ 339 c 0788     *                                 *
+ 340 c 0788     **********************************/
+ 341 c 0788     dcl
+ 342 c 0788         dpbp ptr,
+ 343 c 0788         1 dpb based (dpbp),
+ 344 c 0788           2 spt fixed(15),
+ 345 c 0788           2 bsh fixed(7),
+ 346 c 0788           2 blm bit(8),
+ 347 c 0788           2 exm bit(8),
+ 348 c 0788           2 dsm bit(16),
+ 349 c 0788           2 drm bit(16),
+ 350 c 0788           2 al0 bit(8),
+ 351 c 0788           2 al1 bit(8),
+ 352 c 0788           2 cks bit(16),
+ 353 c 0788           2 off fixed(7);
+ 354 c 0788     dpbp = getdpb();
+ 355 c 078E     put edit('Disk Parameter Block:',
+ 356 c 08C6         'spt',spt,'bsh',bsh,'blm',blm,
+ 357 c 08C6         'exm',exm,'dsm',dsm,'drm',drm,
+ 358 c 08C6         'al0',al0,'al1',al1,'cks',cks,
+ 359 c 08C6         'off',off)
+ 360 c 08C6         (skip,a,2(skip,a(4),f(6)),
+ 361 c 08C6             4(skip,a(4),b4),
+ 362 c 08C6             skip,2(a(4),b,x(1)),
+ 363 c 08C6             skip,a(4),b4,
+ 364 c 08C6             skip,a(4),f(6));
+ 365 c 08C6
+ 366 c 08C6     /**********************************
+ 367 c 08C6     *                                 *
+ 368 c 08C6     *      Test Get/Set user Code     *
+ 369 c 08C6     *          GETUSR, SETUSR         *
+ 370 c 08C6     *                                 *
+ 371 c 08C6     **********************************/
+ 372 c 08C6     put skip list
+ 373 c 08FC         ('User is',getusr(),', New User:');
+ 374 c 08FC     get list(i);
+ 375 c 0914     call setusr(i);
+ 376 c 0920
+ 377 c 0920     /**********************************
+ 378 c 0920     *                                 *
+ 379 c 0920     *         FILSIZ, SETREC,         *
+ 380 c 0920     *     RDRAN, WRRAN, WRRANZ are    *
+ 381 c 0920     *        tested in DIORAND        *
+ 382 c 0920     *                                 *
+ 383 c 0920     **********************************/
+ 384 c 0920
+ 385 c 0920     /**********************************
+ 386 c 0920     *                                 *
+ 387 c 0920     *     Test Drive Reset RESDRV     *
+ 388 c 0920     *      (version 2.2 or newer)     *
+ 389 c 0920     *                                 *
+ 390 c 0920     **********************************/
+ 391 c 0920     dcl
+ 392 c 0920         drvect bit(16);
+ 393 c 0920     put list('Drive Reset Vector:');
+ 394 c 0937     get list(drvect);
+ 395 c 094F     call resdrv(drvect);
+ 396 c 0955
+ 397 c 0955     /**********************************
+ 398 c 0955     *                                 *
+ 399 c 0955     *                                 *
+ 400 c 0955     **********************************/
+ 401 a 0955     end diotst;
+
+CODE SIZE = 0958
+DATA AREA = 04BA
+END  COMPILATION
+
+</pre>
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-c.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-a.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-c.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-a.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-b.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+</html>

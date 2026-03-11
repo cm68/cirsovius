@@ -1,0 +1,2167 @@
+	title	GSX Screen Driver
+	name	('DDSCREEN')
+
+; DASMed version of CP/M PLUS (JOYCE)
+; By W. Cirsovius
+
+; GSX screen driver DDSCREEN.PRL
+
+BIOS	equ	0000h
+BDOS	equ	0005h
+
+CPM3	equ	030h
+
+.Conout	equ	 2
+.vers	equ	12
+.SCB	equ	49
+
+.Get	equ	 0
+.SetW	equ	-2
+_Conout	equ	024h
+
+_ConVec	equ	1000000000000000b
+
+_TEask	equ	00bfh
+_TEres	equ	00c2h
+_CDvers	equ	00e3h
+_SCRrun	equ	00e9h
+
+_USERF	equ	30
+
+COM.RAM	equ	0c000h
+COM.pag	equ	COM.RAM SHR 8
+
+Roller	equ	0b600h		; Roller RAM address
+ChrMatr	equ	0b800h		; Address of character matrix
+
+lf	equ	0ah
+cr	equ	0dh
+esc	equ	1bh
+eot	equ	-1
+
+HiMask	equ	11110000b
+
+_Col	equ	90		; Screen width on default
+_Row	equ	32
+_Offs	equ	32		; Cursor offset for ESC Y
+
+;
+; %%%%%%%%%%%%%%%%%%
+; %% Driver entry %%
+; %%%%%%%%%%%%%%%%%%
+;
+; ENTRY	Reg DE points to GSX parameter block
+;
+	ex	de,hl
+	ld	de,PB
+	ld	bc,PBlen
+	ldir			; Copy parameter block
+	ld	a,3
+	ld	de,0
+	call	stor.CONTRL	; Set result CONTRL(3):=0
+	ld	a,1
+	ld	de,OPC.TAB
+	jr	dds.start	; .. get opcode CONTRL(1)
+;
+; Opcode = 5 : Perform device specific operation
+;
+Escape:
+	ld	de,ESC.TAB
+	jr	Exe.CONTRL.6
+;
+; Opcode = 11 : Output a primitive display element
+;
+Primitive:
+	ld	de,PRM.TAB
+Exe.CONTRL.6:
+	ld	a,6		; .. get ID CONTRL(6)
+dds.start:
+	call	lod.CONTRL	; Get CONTRL()
+	ld	a,h		; Test correct range
+	or	a
+	ret	nz		; .. illegal
+	ld	a,(de)
+	cp	l
+	ret	c		; .. illegal
+	add	hl,hl
+	dec	hl
+	add	hl,de		; Get from table
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	jp	(hl)		; .. execute
+;
+; Main opcode table
+;
+OPC.TAB:
+	db	opc.len		; Max opcode
+;
+	dw	Ini.WS		; Code	 1
+	dw	StopGraph	;	 2
+	dw	Clr.WS		;	 3
+	dw	DispPend	;	 4
+	dw	Escape		;	 5
+	dw	PolyLine	;	 6
+	dw	Marker		;	 7
+	dw	Text		;	 8
+	dw	PolyGon		;	 9
+	dw	CellArr		;	10
+	dw	Primitive	;	11
+	dw	CharHeight	;	12
+	dw	NotImpl		;	13 -
+	dw	SpecColIdx	;	14
+	dw	SetPolyType	;	15
+	dw	NotImpl		;	16 -
+	dw	SetPolyCol	;	17
+	dw	SetPolyMark	;	18
+	dw	NotImpl		;	19 -
+	dw	SetPolyMCol	;	20
+	dw	NotImpl		;	21 -
+	dw	SetColIdx	;	22
+	dw	NotImpl		;	23 -
+	dw	NotImpl		;	24 -
+	dw	SetFillCol	;	25
+	dw	RetCol		;	26
+	dw	NotImpl		;	27 -
+	dw	NotImpl		;	28 -
+	dw	NotImpl		;	29 -
+	dw	NotImpl		;	30 -
+	dw	NotImpl		;	31 -
+	dw	SetWrt		;	32
+	dw	NotImpl		;	33 -
+opc.len	equ	($-OPC.TAB-1) / 2
+;
+; ESCape code table
+;
+ESC.TAB:
+	db	esc.len		; Max code
+;
+	dw	InqCharCell	; Code	 1
+	dw	EntGraph	;	 2
+	dw	ExiGraph	;	 3
+	dw	CursUp		;	 4
+	dw	CursDwn		;	 5
+	dw	CursRgt		;	 6
+	dw	CursLft		;	 7
+	dw	CursHome	;	 8
+	dw	ClrEoS		;	 9
+	dw	ClrEoL		;	10
+	dw	SetCurs		;	11
+	dw	OutTxt		;	12
+	dw	RevOn		;	13
+	dw	RevOff		;	14
+	dw	GetCurs		;	15
+	dw	NotImpl		;	16 -
+	dw	NotImpl		;	17 -
+	dw	PutGraphCurs	;	18
+	dw	RemGraphCurs	;	19
+esc.len	equ	($-ESC.TAB-1) / 2
+;
+; Primitive code table
+;
+PRM.TAB:
+	db	prm.len		; Max code
+;
+	dw	OutBAR		; Code	 1
+	dw	NotImpl		;	 2 -
+	dw	NotImpl		;	 3 -
+	dw	NotImpl		;	 4 -
+	dw	NotImpl		;	 5 -
+prm.len	equ	($-PRM.TAB-1) / 2
+;
+; Print immediate string
+; ENTRY	Call follows string closed by -1
+;
+String:
+	call	SetConVec	; Set console as output vector
+	ex	(sp),hl		; .. get string pointer
+Str.Loop:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; .. test end
+	jp	m,Str.End
+	ld	e,a
+	ld	c,.Conout
+	push	hl
+	call	BDOS		; Print via console
+	pop	hl
+	jr	Str.Loop
+Str.End:
+	ex	(sp),hl		; .. get back old vector
+Set.SCB:
+	ld	(SCB.PB+2),hl	; Save new value
+	ld	b,.SetW
+Do.SCB:
+	ld	hl,SCB.PB+1
+	ld	(hl),b		; .. set code
+	dec	hl
+	ld	(hl),_Conout	; .. set offset
+	ex	de,hl
+	ld	c,.SCB
+	jp	BDOS
+;
+; Set console as output device
+; EXIT	Reg HL holds current vector
+;
+SetConVec:
+	ld	b,.Get
+	call	Do.SCB		; Get current vector
+	push	hl		; .. save
+	ld	hl,_ConVec	; Set new vector
+	call	Set.SCB
+	pop	hl
+	ret
+;
+; Illegal OS or environment found
+;
+IllOS:
+	call	String		; Give message
+	db	cr,lf,'Cannot run in this environment',cr,lf
+	db	eot
+	rst	0		; .. and break
+;
+; Opcode = 1 : Initialize a graphic workstation
+;
+Ini.WS:
+	ld	c,.vers
+	call	BDOS		; Get OS version
+	ld	a,l
+	and	HiMask
+	cp	CPM3		; Check OS ok
+	jr	nz,IllOS
+	call	InstUSERF	; Install user vector
+	jr	nc,IllOS
+	call	USERF		; Get version
+	dw	_CDvers
+	dec	a		; Verify PCW8xxx
+	jr	nz,IllOS
+	call	String
+	db	esc,'f'		; No Cursor
+	db	esc,'E'		; Set cursor 0,0; clear screen
+	db	esc,'H'
+	db	eot
+	call	USERF		; Get current cursor
+	dw	_TEask
+	ld	a,b		; Swap top row
+	ld	b,c		; .. left column
+	ld	c,a
+	ld	l,d		; Unpack bottom row
+	ld	h,e		; .. and column
+	add	hl,bc		; Get combination
+	ex	de,hl		; .. as window size
+	call	SaveWindow	; .. save
+	ld	hl,(Hor_Pix)
+	ld	de,(Left_Pix)
+	or	a
+	sbc	hl,de		; Get difference in pixel
+	ld	($INTOUT),hl
+	ld	hl,(Ver_Pix)
+	ld	de,(Top_Pix)
+	or	a
+	sbc	hl,de		; .. same for vertical
+	ld	($INTOUT+2),hl
+	ld	a,3
+	ld	de,6
+	call	stor.CONTRL	; Set number of vertices
+	ld	a,5
+	ld	de,INT.len
+	call	stor.CONTRL	; Set length of INTOUT
+	ld	de,(INTOUT)
+	ld	hl,$INTOUT
+	ld	bc,INT.len*2
+	ldir			; Copy to INTOUT(1)..INTOUT(45)
+	ld	de,(PTSOUT)
+	ld	hl,$PTSOUT
+	ld	bc,PSO.len*2
+	ldir			; .. and PTSOUT(1)..PTSOUT(12)
+	call	IniData		; Init data
+	call	RevOff		; Set revers video off
+	call	INTIN.2.PL	; .. polyline linetype
+	call	INTIN.4.PM	; .. polyline marker
+	call	SetReplace	; .. write replace
+	jp	RemGC		; Remove graphic cursor
+;
+; INTOUT field as result for caller
+;
+$INTOUT:
+	dw	_Col*8-1	;  (1) Max addressable width
+	dw	_Row*8-1	;  (2) Max addressable height
+	dw	  1		;  (3) No precisely image
+	dw	375		;  (4) Width aspect ratio
+	dw	800		;  (5) Height aspect ratio
+	dw	  1		;  (6) Character heights
+	dw	  5		;  (7) Number of linetypes
+	dw	  1		;  (8) Number of line width
+	dw	  5		;  (9) Number of marker types
+	dw	  1		; (10) Number of marker sizes
+	dw	  1		; (11) Number of fonts
+	dw	  0		; (12) Number of patterns
+	dw	  0		; (13) Number of hatch styles
+	dw	  2		; (14) Number of predefined col
+	dw	  1		; (15) Number of GDPs
+	dw	  1		; (16) BAR GDP
+	dw	 -1		; (17) --
+	dw	 -1		; (18) --
+	dw	 -1		; (19) --
+	dw	 -1		; (20) --
+	dw	 -1		; (21) --
+	dw	 -1		; (22) --
+	dw	 -1		; (23) --
+	dw	 -1		; (24) --
+	dw	 -1		; (25) --
+	dw	  4		; (26) None attribute
+	dw	 -1		; (27) --
+	dw	 -1		; (28) --
+	dw	 -1		; (29) --
+	dw	 -1		; (30) --
+	dw	 -1		; (31) --
+	dw	 -1		; (32) --
+	dw	 -1		; (33) --
+	dw	 -1		; (34) --
+	dw	 -1		; (35) --
+	dw	  0		; (36) No color
+	dw	  0		; (37) No text rotation
+	dw	  0		; (38) No fill area
+	dw	  0		; (39) No read cell
+	dw	  2		; (40) Monochrome
+	dw	  0		; (41) No locator devices
+	dw	  0		; (42) No valuator devices
+	dw	  0		; (43) No choice devices
+	dw	  0		; (44) No string devices
+	dw	  0		; (45) Only output workstation
+INT.len	equ	($-$INTOUT) / 2
+;
+; PTSOUT field as result for caller
+;
+$PTSOUT:
+	dw	  0		;  (1) Always zero
+	dw	  7		;  (2) Min character height
+	dw	  0		;  (3) Always zero
+	dw	  8		;  (4) Max character height
+	dw	  1		;  (5) Min line width
+	dw	  0		;  (6) Always zero
+	dw	  1		;  (7) Max line width
+	dw	  0		;  (8) Always zero
+	dw	  0		;  (9) Always zero
+	dw	  7		; (10) Min marker height
+	dw	  0		; (11) Always zero
+	dw	  7		; (12) Max marker height
+PSO.len	equ	($-$PTSOUT) / 2
+;
+; Opcode = 2 : Stop all graphics output to this workstation
+;
+StopGraph:
+	call	USERF		; .. reset
+	dw	_TEres
+	ret
+;
+; Opcode = 3 : Clear CRT screen
+;
+Clr.WS:
+	xor	a		; Clear pattern
+	ld	hl,(Ver_Pix)	; Get vertical length
+	jp	ClrWindow	; .. go clear
+;
+; Opcode = 4 : Display all pending graphics on workstation
+;
+DispPend:
+	ret			; .. dummy
+;
+; ESCape Code = 1 : Inquire addressable character cells
+;
+InqCharCell:
+	call	Where.X.Y	; Get cursor
+	ld	a,d
+	push	de
+	call	stor.INTOUT.1	; INTOUT(1):=rows
+	pop	de
+	ld	d,0
+	ld	a,2
+	jp	stor.INTOUT	; INTOUT(2):=columns
+;
+; ESCape Code = 2 : Enter graphics mode
+;
+EntGraph:
+	call	String		; Turn off cursor
+	db	esc,'f'
+	db	eot
+	ret
+;
+; ESCape Code = 3 : Exit graphics mode
+;
+ExiGraph:
+	call	String
+	db	esc,'e'		; Turn on cursor
+	db	eot
+	ret
+;
+; ESCape Code = 4 : Cursor up
+;
+CursUp:
+	call	String		; .. up
+	db	esc,'A'
+	db	eot
+	ret
+;
+; ESCape Code = 5 : Cursor down
+;
+CursDwn:
+	call	String		; .. down
+	db	esc,'B'
+	db	eot
+	ret
+;
+; ESCape Code = 6 : Cursor right
+;
+CursRgt:
+	call	String		; .. right
+	db	esc,'C'
+	db	eot
+	ret
+;
+; ESCape Code = 7 : Cursor left
+;
+CursLft:
+	call	String		; .. left
+	db	esc,'D'
+	db	eot
+	ret
+;
+; ESCape Code = 8 : Home cursor
+;
+CursHome:
+	call	String		; .. home
+	db	esc,'H'
+	db	eot
+	ret
+;
+; ESCape Code = 9 : Erase to end of screen
+;
+ClrEoS:
+	call	String		; .. erase
+	db	esc,'J'
+	db	eot
+	ret
+;
+; ESCape Code = 10 : Erase to end of line
+;
+ClrEoL:
+	call	String		; .. erase
+	db	esc,'K'
+	db	eot
+	ret
+;
+; ESCape Code = 11 : Direct cursor address
+;
+SetCurs:
+	call	Where.X.Y	; Get cursor
+	ld	a,1
+	call	lod.INTIN	; Get row from INTIN(1)
+	ld	a,h
+	or	a
+	jr	nz,SC.skp.Y
+	ld	a,d		; Test against max
+	cp	l
+	jr	c,SC.skp.Y
+	ld	d,l		; .. set what we got
+SC.skp.Y:
+	ld	a,2
+	call	lod.INTIN	; Get column from INTIN(2)
+	ld	a,h
+	or	a
+	jr	nz,SC.skp.X
+	ld	a,e
+	cp	l		; Test againts max
+	jr	c,SC.skp.X
+	ld	e,l		; .. set what we got
+SC.skp.X:
+	ld	hl,256*(_Offs-1) + _Offs-1
+	add	hl,de		; Add offset
+	ld	a,h		; .. swap bytes
+	ld	h,l
+	ld	l,a
+	ld	($CURSOR),hl	; .. set into escape sequence
+	call	String		; .. and set it
+	db	esc,'Y'
+$CURSOR:
+	db	0,0
+	db	eot
+	ret
+;
+; ESCape Code = 12 : Output cursor addressable text
+;
+OutTxt:
+	call	SetConVec	; Set console as output
+	push	hl
+	ld	a,4
+	call	lod.CONTRL	; Get CONTRL(4)
+	ld	b,h		; .. as length
+	ld	c,l
+	ld	hl,(INTIN)	; Init array
+OT.loop:
+	ld	e,(hl)		; .. get LO as character
+	inc	hl
+	inc	hl
+	push	hl
+	push	bc
+	ld	c,.Conout	; Print it
+	call	BDOS
+	pop	bc
+	pop	hl
+	dec	bc		; .. count down
+	ld	a,b
+	or	c
+	jr	nz,OT.loop
+	pop	hl
+	jp	Set.SCB		; .. reset vector
+;
+; ESCape Code = 14 : Reverse video off
+;
+RevOff:
+	call	String		; .. off
+	db	esc,'q'
+	db	eot
+	ret
+;
+; ESCape Code = 13 : Reverse video on
+;
+RevOn:
+	call	String		; .. on
+	db	esc,'p'
+	db	eot
+	ret
+;
+; ESCape Code = 15 : Inquire current cursor address
+;
+GetCurs:
+	call	Where.X.Y	; Get cursor
+	ld	d,0
+	ld	e,h
+	ld	a,1
+	push	hl
+	call	stor.INTOUT	; INTOUT(1):=row
+	pop	hl
+	ld	e,l
+	ld	a,2
+	jp	stor.INTOUT	; INTOUT(2):=column
+;
+; Get cursor position
+; EXIT	Reg D holds bottom row
+; 	Reg E holds right column
+;	Reg H holds cursor row
+;	Reg L holds cursor column
+;
+Where.X.Y:
+	call	USERF		; Get cursor
+	dw	_TEask
+	inc	d		; Make 1 relative
+	inc	e
+	inc	h
+	inc	l
+	ret
+;
+; ESCape Code = 19 : Remove last graphic cursor
+;
+RemGraphCurs:
+	ld	hl,(Grph.Y)	; Get row
+	ld	de,(Grph.X)	; .. and column
+	ld	a,h		; Test active
+	or	a
+	ret	m		; .. no
+	call	PosGraphCurs
+RemGC:
+	ld	a,-1		; Reset graphic cursor
+	ld	(Grph.Y+1),a
+	ret
+;
+; ESCape Code = 18 : Place graphic cursor at position
+;
+PutGraphCurs:
+	ld	hl,(PTSIN)
+	call	Get.2Words	; Fetch coordinates
+	ld	(Grph.Y),hl	; .. set Y
+	ld	(Grph.X),de	; .. and X
+PosGraphCurs:
+	push	iy
+	push	ix
+	push	hl
+	push	de
+	ld	a,3
+	call	SetWrMode	; .. set mode
+	ld	a,1
+	call	SetInt1		; .. and intensity pointer
+	pop	de
+	pop	hl
+	push	de
+	pop	ix		; .. get X
+	push	hl
+	pop	iy		; .. and Y
+	ld	bc,-7
+	add	iy,bc		; .. get Y-7
+	push	hl
+	push	de
+	ld	bc,7
+	add	hl,bc		; .. and Y+7
+	call	set.curs	; .. set cursor
+	pop	de
+	pop	hl
+	push	hl
+	pop	iy
+	push	de
+	pop	ix
+	ld	bc,-7
+	add	ix,bc
+	ld	bc,7
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	call	set.curs	; Set cursor
+	pop	ix
+	pop	iy
+	ret
+;
+; Opcode = 15 : Set polyline linetype
+;
+SetPolyType:
+	ld	a,1
+	call	INTIN.1.PL	; Get from INTIN(1)
+	jp	stor.INTOUT.1	; INTOUT(1):=val
+;
+; Set polyline linetype from INTIN(2)
+; EXIT	Accu holds type selected
+;
+INTIN.2.PL:
+	ld	a,2
+INTIN.1.PL:
+	call	lod.INTIN	; Get INTIN()
+	ld	a,h
+	or	a		; Test range
+	ld	b,1
+	jr	nz,PL.def
+	ld	a,l
+	or	a		; .. default 1
+	jr	z,PL.def
+	ld	a,LT
+	cp	l		; Test max
+	jr	c,PL.def
+	ld	b,l		; .. ok, set if valid
+PL.def:
+	ld	a,b
+	push	af
+	dec	a
+	add	a,a		; Get table index
+	add	a,6bh		; Base l046b
+	ld	l,a
+P1::
+	adc	a,04h
+	sub	l
+	ld	h,a
+	ld	a,(hl)		; .. get value
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ld	(SelPL),hl	; Save pattern
+	pop	af
+	ret
+l046b::
+	dw	1111111111111111b
+	dw	1111111000000000b
+	dw	1110000011100000b
+	dw	1111111000111000b
+	dw	1111111111110000b
+LT	equ	($-l046b) / 2
+;
+; Opcode = 9 : Fill a PolyGon
+;
+PolyGon:
+	call	get.vertices	; Get vertices
+	ret	z		; .. only one
+	ld	a,(FillColIdx)	; Get fill color index
+l047c:
+	push	iy
+	push	ix
+	ld	de,-1		; All bits set to 1
+	call	l04a8
+	call	Get.2Words	; Fetch ...
+	call	set.curs	; Set cursor
+	pop	ix
+	pop	iy
+	ret
+;
+; Opcode = 6 : Output a PolyLine to device
+;
+PolyLine:
+	call	get.vertices	; Get vertices
+	ret	z		; .. only one
+	ld	de,(SelPL)	; Get polyline type pattern
+	ld	a,(LineColIdx)	; .. and color index
+	push	iy
+	push	ix
+	call	l04a8
+	pop	ix
+	pop	iy
+	ret
+;
+;
+;
+l04a8:
+	push	hl
+	push	bc
+	push	hl
+	push	de
+	call	SetInt.WrMode	; Set intensity and write mode
+	pop	hl
+	call	sav.patt	; Save pattern
+	pop	hl
+	push	hl
+	call	Get.2Words	; .. fetch
+	push	hl
+	push	de
+	jr	l04c6
+l04bc:
+	push	bc
+	push	hl
+	call	Get.2Words	; .. fetch
+	push	hl
+	push	de
+	call	set.curs	; Set cursor
+l04c6:
+	pop	ix
+	pop	iy
+	pop	hl
+	pop	bc
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l04bc
+	pop	hl
+	ret
+;
+; Load number of vertices
+; EXIT	Reg HL points to input coordinate array
+;	Reg BC holds number
+;	Zero reflects a number of 1
+;
+get.vertices:
+	ld	a,2
+	call	lod.CONTRL	; Get CONTRL(2)
+	ld	b,h		; .. copy
+	ld	c,l
+	ld	hl,(PTSIN)	; Get array address
+	ld	a,c
+	dec	a
+	or	b		; Test CONTRL(2)=1
+	ret
+;
+; Opcode = 18 : Set polymarker type
+;
+SetPolyMark:
+	ld	a,1
+	call	INTIN.1.PM	; Set marker from INTIN(1)
+	jp	stor.INTOUT.1	; INTOUT(1):=val
+;
+; Set polyline marker from INTIN(4)
+;
+INTIN.4.PM:
+	ld	a,4
+INTIN.1.PM:
+	call	lod.INTIN	; Get INTIN()
+	ld	a,h
+	or	a
+	ld	b,3		; Select default
+	jr	nz,PM.def	; Test range
+	ld	a,l
+	or	a
+	jr	z,PM.def
+	ld	a,PM
+	cp	l
+	jr	c,PM.def
+	ld	b,l		; Select if valid
+PM.def:
+	ld	a,b
+	push	af
+	add	a,a
+	add	a,15h-2		; Get index
+	ld	l,a		; Base l0515
+P2::
+	adc	a,05h
+	sub	l
+	ld	h,a
+	ld	a,(hl)		; Fetch value
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ld	(SelPM),hl	; Save pattern
+	pop	af
+	ret
+l0515::
+	db	'.',0
+	db	'+',3
+	db	'*',3
+	db	'o',4
+	db	'x',4
+PM	equ	($-l0515) / 2
+;
+; Opcode =7 : Output Markers to the device
+;
+Marker:
+	ld	a,(MarkColIdx)	; Get color index
+	call	SetInt.WrMode	; Set intensity and write mode
+	ld	a,2
+	call	lod.CONTRL	; Get CONTRL(2)
+	ld	b,h
+	ld	c,l
+	ld	hl,(PTSIN)
+l052f:
+	push	hl
+	push	bc
+	call	l0540
+	pop	bc
+	pop	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l052f
+	ret
+;
+;
+;
+l0540:
+	call	Get.2Words	; .. fetch ..
+	ld	bc,(SelPM)	; Get character
+	ld	a,c
+	cp	'.'		; Test it
+	jp	z,l0730
+	dec	de
+	dec	de
+	dec	de
+	ld	a,l
+	add	a,b
+	ld	l,a
+	jr	nc,l0556
+	inc	h
+l0556:
+	ld	a,(SelPM)	; Get character
+	jp	WrTxtChar	; .. write it
+;
+; Opcode = 8 : Write text at specified position
+;
+Text:
+	push	ix
+	ld	a,(TxtColIdx)	; Get text color index
+	call	SetInt.WrMode	; Set intensity and write mode
+	ld	hl,(PTSIN)
+	call	Get.2Words	; Fetch coordinates
+	ld	bc,6
+	add	hl,bc		; .. fix Y
+	push	hl
+	ld	a,4
+	call	lod.CONTRL	; Get CONTRL(4)
+	ld	b,h		; .. as length
+	ld	c,l
+	ld	ix,(INTIN)
+	pop	hl
+l057b:
+	ld	a,(ix)		; Get character
+	inc	ix
+	inc	ix
+	push	bc
+	push	hl
+	push	de
+	call	WrTxtChar	; Write character
+	pop	hl
+	pop	de
+	ld	bc,8
+	add	hl,bc
+	ex	de,hl
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l057b
+	pop	ix
+	ret
+;
+; Opcode = 12 : Set character height
+;
+CharHeight:
+	ld	a,3
+	ld	de,2
+	call	stor.CONTRL	; CONTRL(3):=2
+	xor	a
+	ld	hl,(PTSOUT)
+	ld	(hl),7
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),7
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),8
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),8
+	inc	hl
+	ld	(hl),a
+	ret
+;
+; Primitive Code = 1 : Output BAR element
+;
+OutBAR:
+	ld	a,(FillColIdx)	; Get fill color index
+l05bb:
+	push	af
+	ld	hl,(PTSIN)
+	push	hl
+	call	Get.2Words	; Get 1st coordinates
+	ld	(l07b8),hl	; .. save Y
+	ld	(l07bc),hl
+	ex	de,hl
+	ld	(l07b6),hl	; .. and X
+	ld	(l07c2),hl
+	pop	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	call	Get.2Words	; Get 2nd coordinates
+	ld	(l07c0),hl
+	ld	(l07c4),hl
+	ex	de,hl
+	ld	(l07be),hl
+	ld	(l07ba),hl
+	ld	hl,l07b6
+	ld	bc,4
+	pop	af
+	jp	l047c
+;
+; Opcode = 10 : Display cell array
+;
+CellArr:
+	ld	a,(LineColIdx)	; Get color index
+	jp	l05bb
+;
+; Initialize data for opening a workstation
+;
+IniData:
+	xor	a
+	ld	hl,perc.0
+	call	SavIntens	; .. set no intensity
+	ld	a,1
+	ld	hl,perc.100
+	call	SavIntens	; .. and full intensity
+	ld	a,3
+	ld	de,LineColIdx	; Init index pointer
+	call	StINTIN.	; Get from INTIN(3)
+	ld	a,5
+	call	StINTIN.	; .. INTIN(5)
+	ld	a,7
+	call	StINTIN.	; .. INTIN(7)
+	ld	a,10		; .. and INTIN(10)
+;
+; Store index from INTIN()
+; ENTRY	Reg DE points to current index
+;	Accu holds index to INTIN
+;
+StINTIN.:
+	call	GetINTIN.	; .. map to 0 or 1
+	ld	(de),a		; .. store
+	inc	de
+	ret
+;
+perc.0:
+	dw	0,0,0
+perc.100:
+	dw	1000,1000,1000
+;
+; Opcode = 14 : Specify colour index value
+;
+SpecColIdx:
+	ld	a,1
+	call	lod.INTIN	; Get INTIN(1)
+	ld	a,h		; Test index
+	or	a
+	ret	nz		; .. > 255
+	ld	a,1		; Verify 0 or 1
+	cp	l
+	ret	c
+	ld	a,l		; .. get index
+	ld	hl,(INTIN)
+	inc	hl		; .. get INTIN(2)
+	inc	hl
+;
+; Save color intensity
+;
+SavIntens:
+	push	af
+	call	ArrIndx		; .. get index
+	push	de
+	ld	bc,2*3
+	ldir			; .. unpack bytes
+	pop	hl
+	call	Color?		; Test zero color
+	ld	b,a		; .. save result
+	pop	af
+	jp	Intens?		; .. save intensity state
+;
+; Return indexed pointer
+; ENTRY	Accu holds index - either 0 or 1
+; EXIT	Reg DE holds pointer
+;
+ArrIndx:
+	add	a,a		; *2
+	ld	e,a
+	add	a,a		; *4
+	add	a,e		; *6
+	add	a,0c6h		; Base l07c6
+	ld	e,a
+P3::
+	adc	a,07h
+	sub	e
+	ld	d,a
+	ret
+;
+; Opcode = 17 : Set polyline color index
+;
+SetPolyCol:
+	ld	hl,LineColIdx	; .. point to index
+	jr	l066d
+;
+; Opcode = 20 : Set polymarker color index
+;
+SetPolyMCol:
+	ld	hl,MarkColIdx	; .. point to index
+	jr	l066d
+;
+; Opcode = 22 : Set color index
+;
+SetColIdx:
+	ld	hl,TxtColIdx	; .. point to index
+	jr	l066d
+;
+; Opcode = 25 : Set fill color index
+;
+SetFillCol:
+	ld	hl,FillColIdx	; .. point to index
+l066d:
+	push	hl
+	call	GetINTIN_1	; Get INTIN(1)
+	pop	hl
+	ld	(hl),a
+	jp	stor.INTOUT.1	; INTOUT(1):=val
+;
+; Return color index equivalent of INTIN(1)
+; EXIT	Accu holds either 0 or 1
+;
+GetINTIN_1:
+	ld	a,1
+;
+; Return color index equivalent
+; ENTRY	Accu holds undex to INTIN()
+; EXIT	Accu holds either 0 or 1
+;
+GetINTIN.:
+	call	lod.INTIN	; Get INTIN()
+	ld	a,h
+	or	a
+	ld	a,1
+	ret	nz		; .. return 1 on overflow
+	cp	l
+	ret	c
+	ld	a,l		; .. else get value
+	ret
+;
+; Opcode = 26 : Return color representation
+;
+RetCol:
+	call	GetINTIN_1	; Get INTIN(1)
+	call	stor.INTOUT.1	; INTOUT(1):=val
+	call	ArrIndx		; .. get index[0,1]
+	ld	hl,(INTIN)	; Get requested index
+	ld	a,(hl)
+	inc	hl		; .. test zero
+	or	(hl)
+	ld	hl,(INTOUT)
+	inc	hl		; .. fix for INTOUT(2)
+	inc	hl
+	ex	de,hl
+	jr	nz,l06a1	; .. any request
+	ld	bc,2*3
+	ldir			; .. copy entire index
+	ret
+l06a1:
+	call	Color?		; Test color
+	ex	de,hl
+	ld	de,0
+	jr	nc,l06ad	; .. nope
+	ld	de,1000		; Set percentage
+l06ad:
+	ld	b,3
+l06af:
+	ld	(hl),e		; Store results
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	djnz	l06af
+	ret
+;
+; Test color definition
+; ENTRY	Reg HL points to three color field
+; EXIT	Carry set if any definition
+;
+Color?:
+	ld	b,2*3
+	xor	a
+l06b9:
+	or	(hl)		; .. test for zero
+	inc	hl
+	djnz	l06b9
+	add	a,-1
+	sbc	a,a
+	ret
+;
+; Set standard write mode replace
+;
+SetReplace:
+	ld	a,1
+	ld	(WrFlag),a	; Set write mode replace
+	ret
+;
+; Opcode =32 : Set writing mode
+;
+SetWrt:
+	ld	a,1
+	call	lod.INTIN	; Get INTIN(1)
+	ld	e,1		; Set default replace
+	ld	a,h		; Check range
+	or	a
+	jr	z,l06d9
+	ld	a,l
+	dec	a
+	cp	4+1
+	jr	c,l06d9
+	ld	e,l		; .. set mode
+l06d9:
+	ld	d,0
+	ld	a,1
+	call	stor.INTOUT	; INTOUT(1):=0
+	ld	a,e
+	ld	(WrFlag),a	; Set mode
+	ret
+;
+; Set intensity pointer and write mode
+;
+SetInt.WrMode:
+	call	SetInt1		; Set intensity pointer
+	ld	a,(WrFlag)	; Get write mode
+	jp	SetWrMode	; .. set write mode
+;
+; Load value from CONTRL()
+; ENTRY	Accu holds index
+; EXIT	Reg HL holds value
+;
+lod.CONTRL:
+	ld	hl,(CONTRL)
+	jr	lod..
+;
+; Load value from INTIN()
+; ENTRY	Accu holds index
+; EXIT	Reg HL holds value
+;
+lod.INTIN:
+	ld	hl,(INTIN)
+lod..:
+	dec	a		; Fix index
+	add	a,a		; .. *2
+	adc	a,l
+	ld	l,a
+	adc	a,h
+	sub	l
+	ld	h,a
+	ld	a,(hl)		; Get value
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ret
+;
+; Store byte into INTOUT(1)
+; ENTRY	Accu holds byte
+;
+stor.INTOUT.1:
+	ld	e,a		; .. expand to 16 bit
+	ld	d,0
+	ld	a,1		; .. set index
+;
+; Store value into INTOUT()
+; ENTRY	Reg DE holds value
+;	Accu holds index
+;
+stor.INTOUT:
+	ld	hl,(INTOUT)	; Get base
+	jr	stor..
+;
+; Store value into CONTRL()
+; ENTRY	Reg DE holds value
+;	Accu holds index
+;
+stor.CONTRL:
+	ld	hl,(CONTRL)	; Get base
+stor..:
+	dec	a		; Fix index
+	add	a,a		; .. *2
+	adc	a,l
+	ld	l,a
+	adc	a,h
+	sub	l
+	ld	h,a
+	ld	(hl),e		; Store value
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Get view point cursor coordinates
+; ENTRY	Reg HL points to right position
+;	Reg DE points to upper position
+; EXIT	Reg HL points to fixed right position
+;	Reg DE points to fixed upper position
+;
+GetRel.XY:
+	ld	b,h		; .. copy right position
+	ld	c,l
+	ld	hl,(Ver_Pix)
+	or	a
+	sbc	hl,bc		; .. get difference
+	ld	bc,(Left_Pix)	; .. then fix next one
+	ex	de,hl
+	add	hl,bc		; .. by adding limit
+	ex	de,hl
+	ret
+;
+; Write character
+; ENTRY	Accu holds character
+;	Regs HL, DE, IX and IY hold position
+;
+WrTxtChar:
+	call	GetRel.XY	; Get relative cursor
+	jp	WrChar		; .. write character
+;
+;
+;
+l0730:
+	call	GetRel.XY	; Get relative cursor
+	jp	l089b
+;
+; Set cursor
+; ENTRY	Reg HL points to right position
+;	Reg IY points to left  position
+;	Reg DE points to upper position
+;	Reg IX points to lower position
+;
+set.curs:
+	call	GetRel.XY	; Get relative
+	push	hl
+	push	iy
+	pop	bc		; .. copy Y
+	ld	hl,(Ver_Pix)
+	or	a
+	sbc	hl,bc
+	push	hl
+	pop	iy
+	pop	hl
+	ld	bc,(Left_Pix)
+	add	ix,bc
+	jp	l09b6
+;
+; Load two consecutive words from memory
+; ENTRY	Reg HL points to address
+; EXIT	Reg DE holds 1st word
+;	Reg HL holds 2nd word
+;
+Get.2Words:	
+	ld	e,(hl)		; Get 1st
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)		; .. and 2nd
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ret
+;
+; Unimplemented codes
+;
+; Opcodes		13,16,19,21,23,24,27,28,29,30,31,33
+; ESCape codes		16,17
+; Primitive codes	2,3,4,5
+;
+NotImpl:
+	ret
+
+	ds	70
+
+PB:
+CONTRL:
+	dw	0
+INTIN:
+	dw	0
+PTSIN:
+	dw	0
+INTOUT:
+	dw	0
+PTSOUT:
+	dw	0
+PBlen	equ	$-PB
+
+SCB.PB:
+	db	0		; Offset
+	db	0		; Function
+	dw	0		; New value
+Grph.X:
+	dw	0		; Graphic cursor column
+Grph.Y:
+	db	0		; Graphic cursor row
+	db	0		; HI is graphic cursor flag
+SelPL:
+	dw	0		; Polyline type pattern
+SelPM:
+	dw	0		; Polyline marker (ASCII+Count)
+l07b6:
+	dw	0
+l07b8:
+	dw	0
+l07ba:
+	dw	0
+l07bc:
+	dw	0
+l07be:
+	dw	0
+l07c0:
+	dw	0
+l07c2:
+	dw	0
+l07c4:
+	dw	0
+l07c6:
+	ds	2*6
+LineColIdx:
+	db	0
+MarkColIdx:
+	db	0
+TxtColIdx:
+	db	0
+FillColIdx:
+	db	0
+WrFlag:
+	db	0
+	ds	25
+;
+; Install user vector
+; EXIT	Carry set indicates OK
+;
+InstUSERF:
+	ld	a,COM.pag-1
+P4::
+	cp	07h		; HIGH InstUSERF	; Check room ;;; 7
+	ret	nc		; .. error
+	ld	hl,(BIOS+1)	; Get BIOS base
+	ld	de,3*(_USERF-1)
+	add	hl,de		; .. point to vector
+	ld	de,USERF
+	ld	bc,3
+	ldir			; .. install it
+	ld	bc,0
+	ld	de,256*(_Col-1) + _Row-1
+	call	SaveWindow	; Save max window size
+	xor	a
+	ld	b,a
+	call	Intens?		; Clear intensity state
+	ld	a,1
+	ld	b,a
+	call	Intens?		; .. set it
+	xor	a
+	call	SetInt2		; .. set intensity pointer
+	ld	a,1
+	call	SetInt1
+	ld	hl,-1
+	call	sav.patt	; Set all bits to 1
+	ld	a,1
+	call	SetWrMode	; Set write mode
+	scf			; Mark ok
+	ret
+;
+; Save window size
+; ENTRY	Reg B holds left column
+;	Reg C holds top row
+;	Reg D holds horizontal width
+;	Reg E holds vertical height
+;
+SaveWindow:	
+	ld	l,b
+	ld	h,d
+	ld	(X_Start),hl	; Save X environment
+	xor	a
+	ld	h,a
+	add	hl,hl		; Get left start * 8
+	add	hl,hl
+	add	hl,hl
+	ld	(Left_Pix),hl
+	ld	l,d
+	ld	h,a
+	inc	hl
+	add	hl,hl		; .. same for horizontal
+	add	hl,hl
+	add	hl,hl
+	dec	hl
+	ld	(Hor_Pix),hl
+	ld	l,c
+	ld	h,a
+	add	hl,hl		; .. and top row
+	add	hl,hl
+	add	hl,hl
+	ld	(Top_Pix),hl
+	ld	l,e
+	ld	h,a
+	inc	hl
+	add	hl,hl		; .. and vertical
+	add	hl,hl
+	add	hl,hl
+	dec	hl
+	ld	(Ver_Pix),hl
+	ret
+;
+; User interface to special BIOS call #30
+;
+USERF:
+	ds	3
+;
+; Set intensity
+; ENTRY	Accu holds flag - either 0 or 1
+;	Reg B holds value
+;
+Intens?:
+	ld	hl,IntensArr	; Get base
+	or	a		; Test flag
+	jr	z,l0862
+	inc	hl		; .. fix address
+l0862:
+	ld	a,b
+	add	a,-1		; Map 0->00H, other ->FFH
+	sbc	a,a
+	ld	(hl),a		; .. save flag
+	ret
+;
+; Set intensity pointer
+; ENTRY	Accu holds flag - either 0 or 1
+;
+SetInt1:
+	ld	hl,IntensArr	; Get base
+	or	a		; Test zero
+	jr	z,l086f
+	inc	hl		; .. fix address
+l086f:
+	ld	(IntensPtr1),hl	; .. save
+	ret
+;
+; Set intensity pointer
+; ENTRY	Accu holds flag - either 0 or 1
+;
+SetInt2:
+	ld	hl,IntensArr	; Get base
+	or	a		; Test zero
+	jr	z,l087a
+	inc	hl		; .. fix address
+l087a:
+	ld	(IntensPtr2),hl	; .. save
+	ret
+;
+; Set mode for writing
+; ENTRY	Accu holds mode
+;
+SetWrMode:
+	ld	hl,Mode.0
+	dec	a		; Test 0
+	jr	z,l0893
+	ld	hl,Mode.1
+	dec	a		; .. 1
+	jr	z,l0893
+	ld	hl,Mode.2
+	dec	a		; .. 2
+	jr	z,l0893
+	ld	hl,Mode.3	; .. >= 3
+l0893:
+	ld	(WrBit+1),hl	; .. save routine
+	ret
+;
+; Save pattern
+; ENTRY	Reg HL holds pattern
+;
+sav.patt:
+	ld	(cur.pat),hl	; .. save
+	ret
+;
+;
+;
+l089b:
+	call	l0a5b
+	ret	nc
+	ld	bc,WrBit	; .. write bit
+	call	USERF
+	dw	_SCRrun
+	ret
+;
+; Rotate current pattern
+; EXIT	Carry reflects the bit stae of MSB
+;
+shf.patt:
+	push	hl
+	ld	hl,(cur.pat)	; Get pattern
+	add	hl,hl		; .. shift
+	jr	nc,l08b0
+	inc	l		; .. remember carry
+l08b0:
+	ld	(cur.pat),hl	; .. save new one
+	pop	hl
+;
+; -->> Write bit entry
+;
+WrBit:
+	jp	Mode.0
+;
+; Write mode 0
+;
+Mode.0:
+	jr	nc,l08dc	; .. skip if carry not set
+l08b9:
+	ld	bc,(IntensPtr1)	; Get pointer to intensity
+l08bd:
+	ld	a,(bc)
+	push	af
+	call	l0912		; Get video address
+	pop	af
+	and	b
+	ld	c,a
+	ld	a,b
+	cpl
+	and	(hl)
+	or	c
+	ld	(hl),a
+	ret
+;
+; Write mode 1
+;
+Mode.1:
+	jr	c,l08b9
+	ret
+;
+; Write mode 2
+;
+Mode.2:
+	ret	nc
+	call	l0912		; Get video address
+	ld	de,(IntensPtr1)	; Get pointer to intensity
+	ld	a,(de)
+	and	b
+	xor	(hl)
+	ld	(hl),a
+	ret
+;
+; Write mode 3
+;
+Mode.3:
+	ret	nc
+l08dc:
+	ld	bc,(IntensPtr2)	; Get intensity pointer
+	jr	l08bd
+;
+;
+;
+l0yyy::
+	call	l0a5b
+	ld	bc,(IntensPtr2)	; Get intesity pointer
+	ld	a,(bc)
+	ret	nc
+	ld	bc,l08f4
+	call	USERF
+	dw	_SCRrun
+	ret
+;
+;
+;
+l08f4:
+	call	l0912		; Get video address
+	ld	a,(hl)
+	ld	e,b
+	ret
+;
+;
+;
+l0xxx::
+	ld	b,a
+	push	bc
+	call	l0a5b
+	pop	bc
+	ld	a,b
+	ret	nc
+	ld	bc,l090b
+	call	USERF
+	dw	_SCRrun
+	ret
+;
+;
+;
+l090b:
+	push	af
+	call	l0912		; Get video address
+	pop	af
+	ld	(hl),a
+	ret
+;
+; Get address of screen line
+;
+l0912:
+	ld	bc,Roller	; Get roller base
+	add	hl,hl		; .. fix a bit
+	add	hl,bc
+	ld	a,(hl)		; Fetch value in roller
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	and	11111000b	; Strip bits
+	add	a,l
+	ld	l,a
+	rl	h
+	ld	c,e
+	ld	a,e
+	and	11111000b
+	ld	e,a
+	add	hl,de
+	ld	a,c
+	and	00000111b	; Mask bits
+	add	a,LOW l0934
+	ld	e,a		; Point into bit table
+P5::
+	adc	a,HIGH l0934
+	sub	e
+	ld	d,a
+	ld	a,(de)		; .. fetch byte
+	ld	b,a
+	ret
+l0934::
+	db	10000000b
+	db	01000000b
+	db	00100000b
+	db	00010000b
+	db	00001000b
+	db	00000100b
+	db	00000010b
+	db	00000001b
+;
+;
+;
+l093c:
+	call	l0940
+	ret	nc
+l0940:
+	push	iy
+	push	ix
+	call	l0950
+	push	hl
+	pop	iy
+	push	de
+	pop	ix
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0950:
+	call	l0a5b
+	ret	c
+l0954:
+	call	l0a8b
+	ret	nc
+	ld	b,h
+	ld	c,l
+	push	de
+	push	ix
+	pop	hl
+	add	hl,de
+	sra	h
+	rr	l
+	push	hl
+	push	iy
+	pop	hl
+	add	hl,bc
+	sra	h
+	rr	l
+	pop	de
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	jr	nz,l097a
+	ex	(sp),hl
+	sbc	hl,de
+	add	hl,de
+	ex	(sp),hl
+	jr	z,l098d
+l097a:
+	push	ix
+	ex	(sp),hl
+	or	a
+	sbc	hl,de
+	pop	hl
+	jr	nz,l0996
+	push	iy
+	ex	de,hl
+	ex	(sp),hl
+	sbc	hl,de
+	pop	hl
+	ex	de,hl
+	jr	nz,l0996
+l098d:
+	pop	bc
+	push	ix
+	pop	de
+	push	iy
+	pop	hl
+	scf
+	ret
+l0996:
+	ex	(sp),ix
+	push	iy
+	push	bc
+	pop	iy
+	push	bc
+	call	l0a8b
+	pop	bc
+	pop	iy
+	ex	(sp),ix
+	jr	c,l09ab
+	pop	bc
+	jr	l0954
+l09ab:
+	push	de
+	pop	ix
+	push	hl
+	pop	iy
+	pop	de
+	ld	h,b
+	ld	l,c
+	jr	l0954
+;
+;
+;
+l09b6:
+	ld	bc,l09bf
+	call	USERF
+	dw	_SCRrun
+	ret
+;
+;
+;
+l09bf:
+	call	l093c
+	ret	nc
+	push	hl
+	push	ix
+	pop	hl
+	or	a
+	sbc	hl,de
+	call	l0b82
+	ld	b,-1
+	jp	p,l09d7
+	ld	b,1
+	call	Neg.HL		; .. negate register
+l09d7:
+	ex	(sp),hl
+	push	iy
+	pop	de
+	or	a
+	sbc	hl,de
+	call	l0b82
+	ld	c,1
+	jp	p,l09eb
+	ld	c,-1
+	call	Neg.HL		; Negate register
+l09eb:
+	pop	de
+	call	l0b78
+	ld	a,0
+	jp	m,l0a02
+	ex	de,hl
+	ld	a,b
+	ld	b,c
+	ld	c,a
+	push	ix
+	push	iy
+	pop	ix
+	pop	iy
+	ld	a,-1
+l0a02:
+	ld	(l0ba8),a
+	push	de
+	add	hl,hl
+	ld	(l0ba4),hl
+	sbc	hl,de
+	push	hl
+	ex	de,hl
+	add	hl,hl
+	call	Neg.HL		; Negate register
+	ld	(l0ba2),hl
+	ld	a,b
+	ld	e,a
+	add	a,a
+	sbc	a,a
+	ld	d,a
+	ld	a,c
+	ld	(l0ba6),a
+	add	a,a
+	sbc	a,a
+	ld	(l0ba7),a
+	pop	hl
+	pop	bc
+	inc	bc
+l0a26:
+	push	bc
+	push	hl
+	push	de
+	push	ix
+	pop	de
+	push	iy
+	pop	hl
+	ld	a,(l0ba8)
+	or	a
+	jr	z,l0a36
+	ex	de,hl
+l0a36:
+	call	shf.patt	; Shift pattern
+	pop	de
+	pop	hl
+	ld	a,h
+	add	a,a
+	jr	c,l0a4d
+	or	l
+	jr	z,l0a4d
+	ld	bc,(l0ba6)
+	add	iy,bc
+	ld	bc,(l0ba2)
+	add	hl,bc
+l0a4d:
+	ld	bc,(l0ba4)
+	add	hl,bc
+	add	ix,de
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l0a26
+	ret
+;
+;
+;
+l0a5b:
+	ld	bc,(Top_Pix)
+	call	l0b7e
+	jp	m,l0a89
+	ld	bc,(Ver_Pix)
+	call	l0b7e
+	jr	z,l0a71
+	jp	p,l0a89
+l0a71:
+	ld	bc,(Left_Pix)
+	call	l0b72
+	jp	m,l0a89
+	ld	bc,(Hor_Pix)
+	call	l0b72
+	jr	z,l0a87
+	jp	p,l0a89
+l0a87:
+	scf
+	ret
+l0a89:
+	or	a
+	ret
+;
+;
+;
+l0a8b:
+	push	ix
+	ex	(sp),hl
+	ld	bc,(Left_Pix)
+	call	l0ab3
+	ld	bc,(Hor_Pix)
+	call	c,l0abd
+	pop	hl
+	ret	nc
+	ex	de,hl
+	push	iy
+	ex	(sp),hl
+	ld	bc,(Top_Pix)
+	call	l0ab3
+	ld	bc,(Ver_Pix)
+	call	c,l0abd
+	pop	hl
+	ex	de,hl
+	ret
+;
+;
+;
+l0ab3:
+	call	l0b7e
+	call	m,l0b72
+	scf
+	ret	p
+	or	a
+	ret
+;
+;
+;
+l0abd:
+	call	l0b7e
+	scf
+	ret	m
+	ret	z
+	call	l0b72
+	scf
+	ret	m
+	ret	z
+	or	a
+	ret
+;
+; Write textual character
+; ENTRY	Accu holds character
+;
+WrChar:
+	ld	bc,l0ad4
+	call	USERF
+	dw	_SCRrun
+	ret
+;
+;
+;
+l0ad4:
+	push	ix
+	push	hl
+	ld	l,a
+	ld	h,0
+	add	hl,hl		; .. *8
+	add	hl,hl
+	add	hl,hl
+	ld	bc,ChrMatr
+	add	hl,bc		; .. point to matrix
+	push	hl
+	pop	ix		; .. copy address
+	pop	hl
+	ld	b,8		; .. set lines
+l0ae7:
+	push	de
+	push	bc
+	ld	c,(ix+0)	; Fetch pixel row
+	inc	ix
+	ld	b,8		; .. set bits
+l0af0:
+	push	bc
+	call	l0a5b		; Validate place
+	pop	bc
+	jr	nc,l0b02
+	ld	a,c
+	add	a,a		; .. get bit
+	push	hl
+	push	de
+	push	bc
+	call	WrBit		; .. write bit
+	pop	bc
+	pop	de
+	pop	hl
+l0b02:
+	sla	c
+	inc	de
+	djnz	l0af0		; .. do one line
+	pop	bc
+	pop	de
+	inc	hl
+	djnz	l0ae7		; .. do character
+	pop	ix
+	ret
+;
+; Clear screen window
+; ENTRY	Accu holds pattern
+;	Reg HL holds vertical count
+;
+ClrWindow:
+	ld	bc,l0b18
+	call	USERF
+	dw	_SCRrun
+	ret
+;
+;
+;
+l0b18:
+	ld	b,a
+	ld	de,(Top_Pix)
+	xor	a
+	sbc	hl,de
+	inc	hl
+	or	h
+	ret	m
+	or	l
+	ret	z
+	ld	h,l
+	push	hl
+	ld	a,b
+	ld	hl,IntensArr	; Get base
+	or	a		; Test mode
+	jr	z,l0b2f		; .. fix address
+	inc	hl
+l0b2f:
+	ld	c,(hl)
+	ld	hl,(Top_Pix)
+	add	hl,hl
+	ld	de,Roller	; Get roller base
+	add	hl,de		; .. add
+	push	hl
+	ld	a,(X_Size)
+	ld	hl,X_Start
+	sub	(hl)
+	inc	a
+	ld	b,a
+	ld	l,(hl)
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	ex	de,hl
+	pop	hl
+	pop	af
+l0b4b:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	and	0f8h
+	add	a,l
+	ld	l,a
+	rl	h
+	add	hl,de
+	ld	de,8
+l0b5d:
+	ld	(hl),c
+	add	hl,de
+	djnz	l0b5d
+	pop	hl
+	inc	hl
+	inc	hl
+	pop	de
+	pop	bc
+	pop	af
+	dec	a
+	jr	nz,l0b4b
+	ret
+;
+; Negate register
+; ENTRY	Reg HL holds  value
+; EXIT	Reg HL holds -value
+;
+Neg.HL:
+	xor	a
+	sub	l		; .. simple subtract
+	ld	l,a
+	sbc	a,h
+	sub	l
+	ld	h,a
+	ret
+;
+; ENTRY	Reg DE holds
+;	Reg BC holds
+;	Accu holds
+; EXIT	
+;
+l0b72:
+	ex	de,hl
+	call	l0b7e
+	ex	de,hl
+	ret
+;
+; ENTRY	Reg HL holds
+;	Reg DE holds
+;	Accu holds
+; EXIT	
+;
+l0b78:
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	l0b82
+;
+; ENTRY	Reg HL holds
+;	Reg BC holds
+;	Accu holds
+; EXIT	
+;
+l0b7e:
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+;
+; ENTRY	Accu holds
+; EXIT	
+;
+l0b82:
+	ret	po
+	jp	m,l0b89
+	or	80h
+	ret
+l0b89:
+	and	7fh
+	ret
+
+	ds	4
+Left_Pix:
+	dw	0		; Left start of screen * 8
+Hor_Pix:
+	dw	0		; Horizontal size * 8  + 7
+Top_Pix:
+	dw	0		; Top row * 8
+Ver_Pix:
+	dw	0		; Vertical size *8  + 7
+X_Start:
+	db	0		; Left start of screen
+X_Size:
+	db	0		; Horizontal size
+cur.pat:
+	dw	0		; Current pattern
+IntensPtr1:
+	dw	0
+IntensPtr2:
+	dw	0
+IntensArr:
+	db	0,0
+l0ba2:
+	dw	0
+l0ba4:
+	dw	0
+l0ba6:
+	db	0
+l0ba7:
+	db	0
+l0ba8:
+	ds	8
+
+	end
+

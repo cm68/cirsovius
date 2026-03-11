@@ -1,0 +1,114 @@
+	title	Patch fuer MAIL232
+	name	('MAILP')
+
+; Patch-Tabellen fuer Baud Raten
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Tel: +49/40/4223247
+
+; Diese Version von MAIL232 beginnt wie folgt:
+
+; 0100h	ld   hl,(0001)  ; Basisadresse des BIOS laden
+; 0103h	ld   de,0057
+; 0106h	add  hl,de      ; Adresse fuer XBIOS berechnen
+; 0107h	ld   (0b4e),hl
+; 010ah	call 0757       ; Oberen Speicher belegen
+
+	.z80
+	aseg
+
+SApara	equ	00bch		; XBIOS Vektor fuer UART Parameter
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; Interne Adressen von MAIL232
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+PATCH	equ	010ah		; Hier aendert der Patch MAIL232
+
+COMOVE	equ	0757h		; Adresse in 010BH
+XBIOS	equ	0b4dh		; XBIOS-Zugriff
+
+TXBAUD	equ	0e3ch		; Wert fuer Sende-Baud-Rate
+RCBAUD	equ	0e3dh		; Wert fuer Empfangs-Baud-Rate
+
+TX$BAUD	equ	0bc2h		; ASCII-Wert fuer Sende-Baud-Rate
+RC$BAUD	equ	0bd7h		; ASCII-Wert fuer Empfangs-Baud-Rate
+
+$BAUD	equ	0de2h		; ASCII Baud-Tabelle
+;
+; Schritt 1 : Vektor auf Adresse hinter MAIL232 setzen
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; SID aufrufen und und Wert fuer MAILP auf Hex-Wert von NEXT setzen
+;
+MAILP	equ	1100h
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+	org	PATCH
+
+	call	MAILP		; Aufruf zum Setzen der Baud-Rate
+
+; -----------------------------------------------
+
+	org	MAILP
+
+MAILP:
+	call	SetTables
+;
+; Die folgende Adresse ist aus der Speicheradresse 010BH in MAIL232
+;
+	jp	COMOVE
+;
+; Die eigentliche Arbeit
+; ++++++++++++++++++++++
+;	
+SetTables:
+;
+; Schritt 2 : Baud-Rate lesen und in die Tabellen eintragen
+;
+; Schritt 2.1 : Baud-Rate lesen und in die binaeren Tabellen eintragen
+;
+	call	XBIOS		; UART Baud-Rate lesen
+	dw	SApara
+;
+; ACHTUNG:	Der Bereich von XBIOS   geht von 1 bis 15,
+;		Der Bereich von MAIL232 geht von 0 bis 14 !
+;
+	dec	c		; Werte korrigieren
+	ld	a,c
+	ld	(TXBAUD),a	; Eintragen
+;
+	dec	b
+	ld	a,b
+	ld	(RCBAUD),a
+	push	bc
+;
+; Schritt 2.2 : Baud-Rate lesen und in die ASCII-Tabellen eintragen
+;
+	ld	de,RC$BAUD	; Empfangs-Baud-Rate eintragen
+	call	ASCII.Baud
+
+	pop	bc
+	ld	a,c
+	ld	de,TX$BAUD	; Sende-Baud-Rate eintragen
+;
+; ASCII-Wert aus Tabelle mit Wert in Accu eintragen
+;
+ASCII.Baud:
+	ld	hl,$BAUD
+	add	a,a		; *4
+	add	a,a
+	add	a,l		; Adresse berechnen
+	ld	l,a
+	jr	nc,no.CY
+	inc	h
+no.CY:
+	ld	bc,4
+	ldir			; Zeichen umkopieren
+	ret
+
+	end
+

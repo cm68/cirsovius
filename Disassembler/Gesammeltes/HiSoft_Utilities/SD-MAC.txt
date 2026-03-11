@@ -1,0 +1,562 @@
+	title	Small Directory Tool
+	name	('SD')
+
+; DASMed version of HISOFT's small utility SD.COM
+; By W.Cirsovius
+
+; SD.COM is a utility to display a detailed directory listing
+; and the disc free space.
+
+; Call it:
+;		SD <afn>
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+l005c	equ	005ch
+l0080	equ	0080h
+
+.conout	equ	 2
+.string	equ	 9
+.vers	equ	12
+.logdsk	equ	14
+.srcfrs	equ	17
+.srcnxt	equ	18
+.curdsk	equ	25
+.getalv	equ	27
+.getdpd	equ	31
+.getspc	equ	46
+
+CPMv	equ	030h
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+_RC	equ	15
+_DIR	equ	16
+
+MAXREC	equ	128
+
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+l0000	equ	00h
+l0010	equ	10h
+
+	ld	sp,(TPATOP)	; Fetch stack from top of memory
+	ld	de,l03f3
+	call	l0187		; Give header
+	ld	c,.curdsk
+	call	BDOS		; Get current disk
+	ld	(l045c),a	; Save it
+	ld	hl,l0080	; Point to command line
+	ld	a,(hl)		; Get length
+	and	a		; Test any input
+	jr	nz,l0124	; Yeap
+	ld	hl,l041f	; Point to wildcard
+	ld	de,l005c
+	ld	bc,.drv+.nam+.ext
+	ldir			; Enable it
+l0124:
+	xor	a
+	ld	(l0455),a
+	ld	(l045f),a	; Clear current file count
+	ld	de,l005c
+	push	de
+	pop	ix		; Copy FCB
+	ld	a,(ix+.drv)	; Get name character
+	cp	' '		; Test defined
+	jr	nz,l0143	; Yeap
+	push	de
+	inc	de
+	ld	hl,l041f+.drv
+	ld	bc,.nam+.ext
+	ldir			; Set wildcard name
+	pop	de
+l0143:
+	ld	a,(de)
+	or	a
+	jr	nz,l014b
+	ld	a,(l045c)	; Get current disk
+	inc	a
+l014b:
+	dec	a
+	ld	(l045d),a	; Save disk
+	ld	e,a
+	ld	c,.logdsk
+	call	BDOS		; Log disk
+	ld	c,.getdpd
+	call	BDOS		; Get address of disk parameter
+	ld	(l0456),hl	; Save it
+	inc	hl		; Advance to extend mask EXM
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get mask
+	ld	(l0458),a	; Save it
+	ld	de,l005c
+	ld	(ix+_EX),'?'	; Enable all extents
+	ld	c,.srcfrs
+	call	BDOS		; Search for first file
+	inc	a		; Test any file to display
+	jr	nz,l018c	; Yeap
+l0174:
+	ld	de,l0441
+	call	l0187		; Tell disk free space
+	call	l031b		; Calculate disk free space
+	ld	a,(l045c)	; Get current disk
+	ld	e,a
+	ld	c,.logdsk
+	call	BDOS		; Reset to entry disk
+	rst	0		; Exit
+;
+; Put string ^DE to console
+;
+l0187:
+	ld	c,.string
+	jp	BDOS		; Print
+;
+; SD cont'd
+;
+l018c:
+	dec	a		; Fix directory code
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,a		; *16
+	add	a,a		; *32
+	ld	e,a
+	ld	d,0
+	ld	hl,l0080
+	add	hl,de		; Position in record
+	ld	a,(l045f)	; Get current file count
+	push	af
+	push	hl
+	ld	hl,l0465	; Init directory buffer
+	or	a		; Test first file
+	jr	z,l01ab		; Yeap
+	ld	b,a
+	ld	de,_DIR
+l01a8:
+	add	hl,de		; Position to current entry
+	djnz	l01a8
+l01ab:
+	pop	de		; Get back source
+	ld	bc,_DIR
+	ex	de,hl
+	ldir			; Unpack filename
+	pop	af		; Get back file count
+	inc	a
+	ld	(l045f),a	; Update it
+	ld	c,.srcnxt
+	call	BDOS		; Find next file
+	inc	a		; Test more
+	jr	nz,l018c	; Yeap
+	call	l0265
+	ld	a,(l045f)	; Get current file count
+	ld	b,a
+	ld	ix,l0465	; Init directory buffer
+l01ca:
+	push	bc
+	bit	7,(ix+0)
+	call	z,l01dc
+	ld	de,l0010
+	add	ix,de
+	pop	bc
+	djnz	l01ca
+	jr	l0174
+l01dc:
+	call	l0241		; Print name of file
+	ld	de,l042e
+	bit	7,(ix+10)
+	jr	z,l01eb
+	ld	de,l042b
+l01eb:
+	call	l0187
+	ld	de,l0434
+	bit	7,(ix+9)
+	jr	z,l01fa
+	ld	de,l0431
+l01fa:
+	call	l0187
+	ld	l,(ix+15)
+	ld	h,(ix+14)
+	ld	a,l
+	or	h
+	jr	z,l021a
+	ld	a,l
+	and	7
+	jr	nz,l020d
+	dec	hl
+l020d:
+	srl	h
+	rr	l
+	srl	h
+	rr	l
+	srl	h
+	rr	l
+	inc	hl
+l021a:
+	ld	c,l
+	ld	a,h
+	call	l03a2
+	ld	de,l0437
+	call	l0187
+	ld	c,(ix+15)
+	ld	a,(ix+14)
+	call	l03a2
+	ld	de,l041a
+	ld	a,(l0455)
+	xor	1
+	ld	(l0455),a
+	jr	z,l023e
+	ld	de,l041d
+l023e:
+	jp	l0187
+;
+; Print name of file ^IX
+;
+l0241:
+	push	ix
+	pop	hl		; Copy filename
+	ld	b,.nam+.ext	; Init count
+	inc	hl
+l0247:
+	push	hl
+	push	bc
+	ld	a,.ext
+	cp	b		; Test extension position
+	jr	nz,l0257	; Nope
+	push	hl
+	ld	e,'.'
+	ld	c,.conout
+	call	BDOS		; Indicate it
+	pop	hl
+l0257:
+	ld	e,(hl)		; Get character
+	res	7,e		; Strip off attribute
+	ld	c,.conout
+	call	BDOS		; Print it
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l0247
+	ret
+;
+;
+;
+l0265::
+	ld	ix,l0465	; Init directory buffer
+	ld	a,(l045f)	; Get current file count
+	ld	b,a
+l026d:
+	push	bc
+	ld	a,(l0458)	; Get extend mask EXM
+	cp	(ix+_EX)	; Compare
+	jr	c,l029b		; Skip
+	ld	a,(ix+_RC)
+	cp	MAXREC		; Test value
+	jr	nz,l029b	; Skip
+l027d:
+	call	l02cc
+	jr	z,l029b
+	set	7,(iy+0)
+	ld	l,(iy+15)
+	ld	h,(iy+14)
+	ld	e,(ix+15)
+	ld	d,(ix+14)
+	add	hl,de
+	ld	(ix+15),l
+	ld	(ix+14),h
+	jr	l027d
+l029b:
+	ld	a,(l0458)	; Get extend mask EXM
+	or	a
+	call	nz,l02ab
+	ld	de,l0010
+	add	ix,de
+	pop	bc
+	djnz	l026d
+	ret
+;
+;
+;
+l02ab:
+	inc	a
+	ld	e,a
+	ld	c,(ix+12)
+	xor	a
+	ld	d,a
+	call	l03dd
+	ld	a,l
+	or	a
+	ret	z
+	ld	b,l
+	ld	l,(ix+15)
+	ld	h,(ix+14)
+	ld	de,l0080
+l02c2:
+	add	hl,de
+	djnz	l02c2
+	ld	(ix+15),l
+	ld	(ix+14),h
+	ret
+;
+;
+;
+l02cc:
+	ld	iy,l0465	; Init directory buffer
+	push	bc
+	ld	a,(l045f)	; Get current file count
+	ld	b,a
+l02d5:
+	push	ix
+	push	iy
+	pop	hl
+	pop	de
+	and	a
+	sbc	hl,de
+	jr	z,l02e9
+	bit	7,(iy+0)
+	call	z,l0308		; Compare filenames
+	jr	z,l02f3		; Match
+l02e9:
+	ld	de,l0010
+	add	iy,de
+	djnz	l02d5
+	xor	a
+	pop	bc
+	ret
+l02f3:
+	ld	a,(l0458)	; Get extend mask EXM
+	or	a
+	jr	z,l0304
+	push	ix
+	push	iy
+	pop	ix
+	call	l02ab
+	pop	ix
+l0304:
+	or	1
+	pop	bc
+	ret
+;
+; Compare filenames ^DE:^HL - Z set says match
+;
+l0308:
+	push	ix
+	push	iy
+	pop	de
+	pop	hl
+	push	bc
+	ld	b,.nam+.ext	; Set length
+l0311:
+	inc	hl
+	inc	de
+	ld	a,(de)		; Get character
+	cp	(hl)		; Compare
+	jr	nz,l0319	; No match
+	djnz	l0311
+l0319:
+	pop	bc
+	ret
+;
+; Calculate disk free space
+;
+l031b:
+	ld	c,.vers
+	call	BDOS		; Get CP/M version
+	cp	CPMv		; Test CP/M PLUS
+	jr	nc,l0374	; Yeap
+;
+; Calculate free space running CP/M 1.x or CP/M 2.x
+;
+	ld	ix,(l0456)	; Get address of disk parameter
+	ld	l,(ix+5)	; Get number of blocks (-1) DSM
+	ld	h,(ix+6)
+	ld	(l0459),hl
+	ld	a,(ix+2)	; Get block shift factor BSH
+	sub	2
+	ld	b,a
+	xor	a
+	scf
+l0339:
+	rla
+	djnz	l0339
+	ld	(l045b),a
+	ld	c,.getalv
+	call	BDOS		; Get allocation vector into HL
+	ld	bc,(l0459)
+	inc	bc
+	ld	de,l0000
+l034c:
+	ld	a,8
+l034e:
+	ld	(l045e),a
+	rl	(hl)
+	jr	c,l0356
+	inc	de
+l0356:
+	dec	bc
+	ld	a,c
+	or	b
+	jr	z,l0364
+	ld	a,(l045e)
+	dec	a
+	jr	nz,l034e
+	inc	hl
+	jr	l034c
+l0364:
+	ld	l,e
+	ld	h,d
+	ld	a,(l045b)
+	ld	b,a
+	dec	b
+	jr	z,l0370
+l036d:
+	add	hl,de
+	djnz	l036d
+l0370:
+	ld	a,h
+	ld	c,l
+	jr	l0397
+;
+; Calculate free space running CP/M 3.x or later
+;
+l0374:
+	ld	a,(l045d)	; Get disk
+	ld	c,.getspc
+	ld	e,a
+	call	BDOS		; Get free space on disk
+	ld	b,3
+	ld	ix,l0080
+l0383:
+	srl	(ix+2)
+	rr	(ix+1)
+	rr	(ix+0)
+	djnz	l0383
+	ld	a,(ix+1)
+	ld	c,(ix+0)
+l0397:
+	call	l03a2
+	ld	a,'K'
+l039c:
+	ld	e,a
+	ld	c,.conout
+	jp	BDOS		; Put to console
+l03a2:
+	ld	hl,l0464
+	ld	e,5
+l03a7:
+	push	de
+	push	hl
+	ld	de,10
+	call	l03dd
+	ld	d,l
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	pop	de
+	dec	e
+	jr	nz,l03a7
+	ld	b,5
+	res	0,c
+l03bb:
+	ld	a,b
+	cp	1
+	jr	nz,l03c2
+	set	0,c
+l03c2:
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	nz,l03cf
+	bit	0,c
+	jr	nz,l03cf
+	ld	a,' '
+	jr	l03d3
+l03cf:
+	set	0,c
+	add	a,'0'
+l03d3:
+	push	hl
+	push	bc
+	call	l039c
+	pop	bc
+	pop	hl
+	djnz	l03bb
+	ret
+l03dd:
+	ld	hl,l0000
+	ld	b,10h
+l03e2:
+	rl	c
+	rla
+	adc	hl,hl
+	sbc	hl,de
+	jr	nc,l03ec
+	add	hl,de
+l03ec:
+	ccf
+	djnz	l03e2
+	rl	c
+	rla
+	ret
+;
+l03f3:
+	db	'SD V1.0 by Adam Denning (C) HiSoft 1986'
+l041a:
+	db	cr,lf,eot
+l041d:
+	db	tab,eot
+l041f:
+	db	0,'???????????'
+l042b:
+	db	' S',eot
+l042e:
+	db	'  ',eot
+l0431:
+	db	'R ',eot
+l0434:
+	db	'  ',eot
+l0437:
+	db	'K  Recs: ',eot
+l0441:
+	db	cr,lf,'Disc free space: ',eot
+l0455:
+	db	'f'
+l0456:
+	db	'un'		; Address of disk parameter
+l0458:
+	db	'c'		; Extend mask EXM
+l0459:
+	db	'ti'
+l045b:
+	db	'o'
+l045c:
+	db	'n'		; Current disk
+l045d:
+	db	0f3h		; Work disk
+l045e:
+	db	' '
+l045f:
+	db	'i'		; Current file count
+	db	0eeh,' so'
+l0464:
+	db	'u'
+;
+; Directory buffer starts here
+;
+l0465:
+	db	'rc',0e5h,' an',0e4h,' Man',0f8h
+	db	' ',8dh,0ah,'librar',0f9h,' '
+	db	'form'
+
+	end
+

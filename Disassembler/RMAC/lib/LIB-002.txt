@@ -1,0 +1,1836 @@
+;
+; Set special link item
+; ENTRY	Accu holds control field
+;
+SetSpcL:
+	ld	(LnkItem),a
+	cp	.InvItm		; Check invalid item
+	jp	z,SpcL.Inv
+	cp	.EndFil		; Test end of file
+	jr	z,SpcL.skpAF
+	cp	.COMsiz
+	call	nc,RdAFIELD	; Read AField
+SpcL.skpAF:
+	ld	a,.MinOff
+	ld	hl,LnkItem
+	cp	(hl)		; Test reading BFIELD
+	call	nc,RdBFIELD	; .. do it
+	ld	a,(LnkItem)
+	cp	.EndMod		; Test end module
+	jr	nz,SpcL.skpMod
+	bit	@tmp,(ix+2)	; Test temporary file
+	jr	z,SpcL.Rd2
+SpcL.Rd1:
+	ld	a,($$$Bit)	; Test count
+	cp	.bits
+	jr	z,SpcL.skpMod
+	ld	b,1
+	call	RdBit?		; Read bit forcing boundary
+	jr	SpcL.Rd1
+SpcL.Rd2:
+	ld	a,(RELbit)	; Test count
+	cp	.bits
+	jr	z,SpcL.skpMod
+	ld	b,1
+	call	RdBit?		; Read bit forcing boundary
+	jr	SpcL.Rd2
+SpcL.skpMod:
+	ld	a,(LnkItem)
+	cp	.ModNam		; Test module name
+	jr	nz,SpcL.skpNam
+	ld	hl,BFIELD-1
+	ld	c,(hl)
+	ld	de,NamBuf-1
+	inc	c
+	call	Move		; .. unpack name and length
+SpcL.skpNam:
+	bit	@dis,(ix+1)	; Test dump allowed
+	ret	nz
+	bit	@dmp,(ix)	; Test [D]
+	jr	z,SpcL.noDmp
+	call	crlf
+	set	@lin,(ix+2)
+	ld	hl,(LnkItem)
+	ld	h,0
+	ld	bc,ItmTab
+	add	hl,hl
+	add	hl,bc
+	ld	e,(hl)		; Get mode string
+	inc	hl
+	ld	d,(hl)
+	call	string		; .. tell item
+	ld	a,.MinOff
+	ld	hl,LnkItem
+	cp	(hl)		; Test name field
+	call	nc,PrBF		; .. print
+	ld	a,(LnkItem)
+	cp	.EndFil
+	jr	z,SpcL.noAF
+	cp	.COMsiz		; .. test address field
+	call	nc,prAF		; Print address
+SpcL.noAF:
+	ld	a,(LnkItem)
+	cp	.LocCnt		; Test location counter
+	jr	nz,SpcL.noLoc
+	ld	a,(AF.mode)
+	ld	(AF.idx),a
+	call	GetLocCtr	; Point to address requested
+	ld	de,(AFIELD)
+	ld	(hl),d		; .. store location counter
+	dec	hl
+	ld	(hl),e
+SpcL.noLoc:
+	ld	a,(LnkItem)
+	cp	.EndMod		; Test end module
+	jr	nz,SpcL.noDmp
+	ld	hl,0
+	ld	(LocTab),hl	; Clear addresses
+	ld	(LocTab+2),hl
+	ld	(LocTab+4),hl
+	ld	(LocTab+6),hl
+	ld	hl,AF.idx
+	ld	(hl),.PrgRel	; Set default mode
+	call	crlf
+SpcL.noDmp:
+	bit	@pub,(ix)	; Test [P]
+	call	nz,pub.ENT.EXT	; Process it
+	bit	@ref,(ix+2)	; Test [R]
+	call	nz,ref.ENT.EXT	; Process it
+	bit	@pub,(ix)
+	jr	nz,SpcL.do..
+	bit	@mod,(ix)	; Test [P] or [M]
+	jr	z,SpcL.noMod
+SpcL.do..:
+	ld	a,(LnkItem)
+	cp	.ModNam		; Test module name
+	jr	nz,SpcL.noMod
+	call	crlf
+	call	PrBF		; .. print if so
+	ld	hl,(ModCnt)
+	inc	hl		; Bump count
+	ld	(ModCnt),hl
+SpcL.noMod:
+	bit	@rel,(ix)	; Test writing .REL file
+	jr	z,SpcL.noWrt
+	ld	a,(LnkItem)
+	cp	.EndFil		; Test end of file
+	jr	nc,SpcL.EOF
+	ld	b,3
+	ld	c,4
+	call	WrBit?		; Write special link item
+	ld	hl,(LnkItem)
+	ld	c,l
+	ld	b,4
+	call	WrBit?		; Write value of link item
+	ld	a,(LnkItem)
+	cp	.COMsiz		; Test writing address field
+	call	nc,WrAF		; .. write it
+	ld	a,.MinOff
+	ld	hl,LnkItem
+	cp	(hl)		; Test writing name field
+	call	nc,WrBF		; .. write it
+SpcL.EOF:
+	ld	a,(LnkItem)
+	cp	.EndMod		; Test end of module
+	jr	nz,SpcL.noWrt
+SpcL.EmpBit:
+	ld	a,(WBitCnt)	; Check bit boundary
+	cp	-.bits
+	jr	z,SpcL.noWrt
+	ld	b,1
+	ld	c,0
+	call	WrBit?		; .. fill zero bits
+	jr	SpcL.EmpBit
+SpcL.noWrt:
+	bit	@idx,(ix)	; Test [I]
+	jr	z,SpcL.noIDX
+	ld	a,(LnkItem)
+	cp	.Entry		; Test ENTRY
+	call	z,WrtIDXsym	; .. write header if so
+	ret
+SpcL.noIDX:
+	bit	@unk,(ix)	; Test [U]
+	ret	z
+	ld	a,(LnkItem)
+	cp	.Entry		; Test ENTRY
+	jr	nz,SpcL.UX
+	ld	d,.dob
+	ld	e,.pos
+	ld	c,e
+	jr	SpcL.U.do
+SpcL.UX:
+	cp	.Extrn		; Test EXTERNAL
+	ret	nz
+	ld	d,.inc
+	ld	e,0
+	ld	c,.exm
+SpcL.U.do:
+	push	bc
+	push	de
+	ld	hl,BFIELD-1
+	call	heap.find	; Test symbol here
+	pop	de
+	pop	bc
+	jr	c,SpcL.U.??	; .. it's known
+	ld	hl,BFIELD-1
+	ld	de,0		; Clear entry
+	call	heap.save	; Save name
+	call	Check.MEM	; Test enough memory
+	ret
+SpcL.U.??:
+	ld	a,.pos
+	call	Marked??	; Test ENTRY
+	ld	a,d
+	jr	c,SpcL.U.yes
+	ld	a,e
+SpcL.U.yes:
+	call	SetMark		; Set marker
+	ret
+SpcL.Inv:
+	ld	de,$LNK.Inv
+	jp	Mstr.ERR	; Give message and abort
+;
+; Check ENTRY or EXTRN on [P] and [E] option
+;
+pub.ENT.EXT:
+	ld	a,(LnkItem)
+	ld	de,$entry
+	cp	.Entry		; Test ENTRY
+	jr	z,SpcL.XE	; .. print if so
+	bit	@exm,(ix)	; Test [E]
+	ret	z
+	cp	.Extrn		; Test EXTERNAL
+	ret	nz
+	ld	de,$extrn
+SpcL.XE:
+	call	writeln		; Give string
+	call	PrBF		; Print
+	ret
+;
+; Check ENTRY or EXTRN on [R]
+;
+ref.ENT.EXT:
+	ld	a,(LnkItem)
+	ld	de,$r.entry
+	cp	.Entry		; Test ENTRY
+	jr	z,ref.XE	; .. print if so
+	cp	.Extrn		; Test EXTERNAL
+	ret	nz
+	ld	de,$r.extrn
+ref.XE:
+	push	de		; Save string
+	ld	hl,RefName-1
+	ld	de,BFIELD-1
+	call	Comp..		; Test label
+	pop	de
+	ret	nc		; .. not the same
+	push	de
+	ld	de,$in.mod
+	call	writeln
+	ld	hl,NamBuf-1
+	ld	de,PrR..	; Print module
+	call	ExecPr
+	ld	de,$fnd
+	call	string
+	ld	hl,RefName-1
+	ld	de,PrBF		; Print symbol
+	call	ExecPr
+	ld	de,$state
+	call	string
+	pop	de
+	call	string		; Give state
+	ret
+ExecPr:
+	push	hl		; Save buffer
+	ld	bc,ExecRet
+	push	bc
+	push	de
+	ret			; .. start
+ExecRet:
+	pop	hl		; Get back pointer
+	ld	a,.modlen
+	sub	(hl)		; Get difference
+	ret	z		; .. none
+	ld	b,a
+ExecBlnK:
+	call	Blank		; .. give blanks
+	djnz	ExecBlnk
+	ret
+;
+; Read one item from stream
+; EXIT	Accu holds type read
+;	00-0F Special link item
+;	10-12 Address mode (Offset 0F)
+;	13    Constant byte
+;
+RdItem:
+	ld	b,1
+	call	RdBit?		; Read bit
+	or	a		; Test control
+	jr	nz,RdItm.ctr
+	call	SetConst
+	ld	a,.Const	; Set constant
+	ret
+RdItm.ctr:
+	ld	b,2
+	call	RdBit?		; Read next two bits
+	ld	(ItmMod),a
+	or	a		; Test special link
+	jr	z,RdItm.SpcL
+	ld	a,(ItmMod)
+	call	SetAdr		; Set address
+	ld	a,(ItmMod)
+	add	a,.AdrMod
+	ret
+RdItm.SpcL:
+	ld	b,4
+	call	RdBit?		; Get special link
+	ld	(ItmMod),a
+	call	SetSpcL		; Set item
+	ld	a,(ItmMod)
+	ret
+;
+; Check valid ASCII character in name field
+; ENTRY	Accu holds character
+;
+ChkASCII:
+	ld	de,$INV.ASCII
+	cp	' '
+	jp	c,Mstr.ERR	; Test range
+	cp	'~'+1
+	ret	c
+	jp	Mstr.ERR
+;
+; Bump current buffer pointer
+; EXIT	Accu holds character
+;
+bump.ptr:
+	ld	hl,(strptr)
+	inc	hl		; .. bump
+	ld	(strptr),hl
+	ld	a,(hl)		; .. get character
+	ret
+;
+; Test delimiter
+; ENTRY	Reg BC points to list of delimiters closed by -1
+; EXIT	Carry reset if delimiter
+;	Carry  set  if no delimiter
+;
+no.delim:
+	ld	hl,(strptr)	; Get character pointer
+	dec	bc
+n.d.loop:
+	inc	bc
+	ld	a,(bc)		; Test end
+	cp	-1
+	scf
+	ret	z
+	cp	(hl)		; Compare
+	jr	nz,n.d.loop
+	ret			; .. set flag if delimiter
+;
+; Check module parsing on < selection
+;
+ModParse:
+	call	bump.ptr	; Bump pointer
+	cp	'>'		; Test end of selection
+	jr	z,MP.SetEnd
+	cp	','		; .. or module separator
+	jr	z,MP.SetEnd
+	ld	hl,FCB
+	ld	(FCBptr),hl
+	ld	de,strptr
+	call	parse.it	; Parse module name
+	ld	(strptr),hl
+	ret
+MP.SetEnd:
+	set	@Esel,(ix+1)	; Set flag
+	ret
+;
+; Get name of module
+;
+get.module:
+	res	@to,(ix+1)	; Reset flag
+	ld	b,0		; .. and count
+	ld	de,ModName
+g.m.loop:
+	push	bc
+	call	bump.ptr	; Bump pointer
+	ld	bc,mod.delim
+	call	no.delim
+	pop	bc
+	ld	a,(hl)		; Test delimiter
+	jr	nc,g.m.delim	; .. yes
+	call	UPPER		; Unpack name
+	ld	(de),a
+	inc	de
+	inc	b		; Bump
+	ld	a,b
+	cp	.modlen+1	; Test overflow
+	jr	c,g.m.loop
+	jp	Syntax.Err
+g.m.delim:
+	cp	'-'		; Test range
+	jr	nz,g.m.no.to
+	set	@to,(ix+1)
+	jr	g.m.no.cls
+g.m.no.to:
+	cp	')'		; Test closure
+	jr	nz,g.m.no.cls
+	set	@Eexm,(ix+1)	; Set flag
+g.m.no.cls:
+	ld	a,b		; Set length
+	ld	(ModName-1),a
+	or	a
+	ret
+;
+; Found ( in command line
+;
+ext.mod:
+	bit	@exm,(ix+1)	; Test flag already set
+	jp	nz,Syntax.Err
+	set	@exm,(ix+1)	; Set flag
+	ld	(ext.ptr),hl	; Save pointer
+ext..loop:
+	ld	a,(hl)
+	cp	')'		; Test end
+	ret	z		; .. that's it
+	call	get.module	; Get module
+	jr	nz,ext..full	; Test name
+	set	@att,(ix+1)	; Set attached
+	jr	ext..empt
+ext..full:
+	ld	hl,ModName-1
+	call	heap.find	; Find symbol
+	ld	hl,ModName-1
+	ld	de,0
+	ld	c,0
+	call	nc,heap.save	; Save name if unknown
+ext..empt:
+	bit	@to,(ix+1)	; Test -
+	jr	z,ext..no.to
+	call	get.module	; Get module
+	call	z,Set.M.End	; Set end if empty
+ext..no.to:
+	ld	bc,ext.delim
+	call	no.delim	; Test legal delimiter
+	jr	nc,ext..loop	; .. ok
+	jp	Syntax.Err
+;
+; Found < in command line
+;
+sel.mod:
+	set	@sel,(ix+1)	; Set flag
+sel..loop:
+	ld	a,(hl)
+	cp	'>'		; Test end of selection
+	ret	z
+	inc	hl
+	ld	(sel.ptr),hl	; Save current pointer
+	res	@Esel,(ix+1)	; Clear flag
+	call	get.module	; Get a module
+	jp	z,Syntax.Err	; .. should be at least one
+	ld	hl,(strptr)
+	ld	a,(hl)
+	cp	'='		; Test assignment
+	jr	nz,sel..noAss
+	inc	hl
+	ld	(sel.ptr),hl	; Fix pointer
+	call	ModParse	; Parse module
+	bit	@Esel,(ix+1)	; Test flag
+	jr	z,sel..noAss
+	ld	hl,0
+	ld	(sel.ptr),hl	; Clear pointer if end
+sel..noAss:
+	ld	hl,ModName-1
+	call	heap.find	; Test file here
+	jr	nc,sel..canSav	; Not found
+	ld	iy,(CurTop)
+	ld	hl,(sel.ptr)	; .. change pointer in list
+	ld	(iy+.SymOff),l
+	ld	(iy+.SymOff+1),h
+	bit	@sel,(iy)	; Fix flag
+	jr	sel..done
+sel..canSav:
+	ld	hl,ModName-1
+	ld	de,(sel.ptr)
+	ld	c,.Sel
+	call	heap.save	; Save name
+sel..done:
+	ld	bc,sel.delim
+	call	no.delim	; Test legal delimiter
+	jr	nc,sel..loop
+	jp	Syntax.Err
+;
+; Found [ in command line
+;
+lib.opt.set:
+	ld	a,c
+	or	(ix)		; Insert bit
+	ld	(ix),a
+lib.opt:
+	call	bump.ptr	; Bump pointer
+	cp	']'		; Test end of options
+	ret	z
+	call	UPPER
+	cp	'D'		; Test D.ump
+	ld	c,.dmp
+	jr	z,lib.opt.set
+	cp	'I'		; Test I.ndexed
+	ld	c,.idx
+	jr	z,lib.opt.set
+	cp	'M'		; Test M.odules
+	ld	c,.mod
+	jr	z,lib.opt.set
+	cp	'P'		; Test P.rint
+	ld	c,.pub
+	jr	z,lib.opt.set
+	cp	'E'		; Test E.xternals
+	ld	c,.pub+.exm
+	jr	z,lib.opt.set
+	cp	'U'		; Test U.nsolved
+	ld	c,.unk
+	jr	z,lib.opt.set
+	cp	'R'		; Test R.eference
+	jr	z,lib.ref.set
+	cp	'N'		; Test N.o_page
+	jp	nz,Syntax.Err
+	ld	a,TRUE
+	ld	(PageMode),a	; Set page mode
+	jr	lib.opt
+lib.ref.set:
+	call	bump.ptr
+	cp	'='		; Verify =
+	jp	nz,Syntax.Err
+	call	bump.ptr
+	cp	'('		; .. and (
+	jp	nz,Syntax.Err
+	ld	b,0		; Clear count
+	ld	de,RefName	; Set buffer
+g.r.loop:
+	call	bump.ptr	; Bump pointer
+	cp	')'
+	jr	z,g.r.exit	; Test end
+	call	UPPER		; Unpack name
+	ld	(de),a
+	inc	de
+	inc	b		; Bump
+	ld	a,b
+	cp	.modlen+1	; Test overflow
+	jr	c,g.r.loop
+	jp	Syntax.Err
+g.r.exit:
+	ld	a,b
+	or	a		; Check no empty
+	jp	z,Syntax.Err
+	ld	(RefName-1),a	; .. set length
+	set	@ref,(ix+2)	; Set reference
+	jr	lib.opt
+;
+; Decode command line
+; ENTRY	Accu holds decode mode, TRUE allows assignment (=)
+;
+decode:
+	ld	(decode.F),a	; Save decode flag
+	res	@sel,(ix+1)	; Reset flags
+	res	@exm,(ix+1)
+	ld	hl,(TopPtr)
+	ld	(decode.ptr),hl	; Set top pointer
+	call	bump.ptr
+	ld	hl,PARS.FCB
+	ld	(FCBptr),hl	; Set FCB
+	ld	de,strptr
+	call	parse.it	; .. go parse
+	ld	(strptr),hl	; Save pointer
+	ld	a,h
+	or	l		; Test end
+	jr	nz,DC.more
+	ld	hl,$NULL
+	ld	(strptr),hl	; .. set pointer if so
+DC.more:
+	ld	bc,..delim
+	call	no.delim	; Test delimiter
+	ld	a,(hl)
+	jr	nc,DC.delim	; .. yes
+	cp	'('		; Test selection of module(s)
+	jr	nz,DC.noExt
+	call	ext.mod		; .. get module
+	jr	DC.cont
+DC.noExt:
+	cp	'<'		; Test replacement/delete
+	jr	nz,DC.noSel
+	call	sel.mod		; .. select module
+	jr	DC.cont
+DC.noSel:
+	cp	'['		; Test option
+	jp	nz,Syntax.Err
+	call	lib.opt		; .. get option
+DC.cont:
+	call	bump.ptr
+	jr	DC.more		; .. get more
+DC.delim:
+	or	a
+	jr	nz,DC.noEnd
+	set	@end,(ix)	; Set end
+	ret
+DC.noEnd:
+	cp	'='		; Test assignment
+	ret	nz
+	ld	a,(decode.F)	; .. legitimate it
+	rra	
+	ret	c
+	jp	Syntax.Err
+;
+; Scan the input line the first time
+;
+scanner:
+	res	@end,(ix)	; Reset end
+	ld	a,TRUE
+sc..loop:
+	call	decode		; .. allow assignment
+	bit	@end,(ix)	; Test end
+	ret	nz
+	ld	a,FALSE		; .. decode without assignment
+	jr	sc..loop	; .. loop if not
+;
+; Convert character to UPPER case if no control
+; ENTRY	Accu holds character
+; EXIT	Accu holds character returned
+;
+UPPER:
+	cp	' '		; Test control
+	jr	nc,no.UPP.Ctl
+	ld	a,cr		; Return CR if control
+	ret
+no.UPP.Ctl:
+	cp	'a'		; Test a .. z
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	UPPmask		; Convert to A .. Z
+	ret
+;
+; Get disk and user from string
+; ENTRY	Reg DE points to parameter block
+;
+GetDU:
+	push	ix
+	push	de
+	push	de		; .. copy PB
+	pop	ix
+	ld	l,(ix+2)	; Get address of FCB
+	ld	h,(ix+3)
+	ld	(DU.FCB),hl
+	ld	l,(ix+0)	; Get address of string
+	ld	h,(ix+1)
+	call	FetchDU		; .. get drive and user
+	ld	(DU),bc		; .. save drive and user
+	ld	(ix+0),l	; Set address of string
+	ld	(ix+1),h
+	pop	de
+	pop	ix
+	ret
+;
+; Set disk and user into FCB
+;
+SetDU:
+	push	hl
+	ld	hl,(DU.FCB)	; Get FCB
+	ld	bc,(DU)
+	inc	b
+	ld	(hl),b		; Set disk
+	dec	hl
+	ld	(hl),c		; .. and user
+	pop	hl
+	ret
+;
+; Get disk and user from string
+; ENTRY	Reg HL points to string
+; EXIT	Reg B  holds drive
+;	Reg C  holds user
+;	Carry set on error
+;
+FetchDU:
+	dec	hl
+FDU.blnk:
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Skip leading blanks
+	jr	z,FDU.blnk
+	push	hl
+	ld	b,4		; Set length of max DU:
+TestDU:
+	call	IsDelimiter	; Find delimiter
+	jr	z,ItIsDU	; .. yeap
+	inc	hl
+	djnz	TestDU		; Test more
+DefDU:
+	pop	hl
+	call	UsrGet		; Get user
+..D:
+	ld	a,(LogDsk)	; .. and drive
+	ld	b,a
+	or	a
+	ret
+ItIsDU:
+	cp	':'		; Verify expected one
+	jr	nz,DefDU	; .. nope
+	ld	e,0		; .. set no drive and user
+	ld	c,0		; .. clear user
+	pop	hl		; Get back pointer
+UsrLoop:
+	call	IsDelimiter	; Test delimiter
+	inc	hl
+	jr	z,DUend		; .. yeap
+	sub	'0'		; Strip off ASCII offset
+	jr	c,ParseErr	; .. invalid range
+	cp	9+1		; Test possible drive
+	jr	nc,IsDrv?	; .. maybe
+	ld	d,a
+	ld	a,c
+	add	a,a		; .. old *10
+	add	a,a
+	add	a,c
+	add	a,a
+	add	a,d		; .. add new
+	ld	c,a
+	cp	_MaxUsr+1	; Test range
+	jr	nc,ParseErr	; .. error
+	set	1,e		; Set user
+	bit	2,e		; Verify no previous user
+	jr	z,UsrLoop
+	jr	ParseErr	; .. should *NOT* be
+IsDrv?:
+	bit	1,e		; Test user
+	jr	z,NoUsr
+	set	2,e		; .. set it
+NoUsr:
+	sub	'A'-'0'		; Test range of drive
+	jr	c,ParseErr	; .. error
+	cp	'P'-'A'+1
+	jr	nc,ParseErr
+	bit	0,e		; Verify default drive
+	jr	nz,ParseErr	; .. should be
+	ld	b,a		; .. set drive
+	set	0,e
+	jr	UsrLoop		; Try user
+ParseErr:
+	scf			; Set error
+	ret
+DUend:
+	bit	0,e		; Test drive
+	call	z,..D		; .. get current
+	bit	1,e		; Test user
+	ld	a,c	
+	call	z,UsrGet	; .. get if not
+	ld	c,a
+	or	a
+	ret
+UsrGet:
+	ld	a,(LogUsr)	; Get user
+	ld	c,a
+	ret
+;
+; Test character a delimiter
+; ENTRY	Reg HL points to string
+; EXIT	Zero flag set if delimiter
+;	Accu holds character in UPPER case
+;
+IsDelimiter:
+	ld	a,(hl)
+	push	hl
+	push	bc
+	ld	hl,DelimTab	; Get table
+	ld	bc,dellen
+	cpir			; .. compare
+	pop	bc
+	pop	hl
+	ret
+;
+; Delimiter table
+;
+DelimTab:
+	db	cr,tab,null,' .,:;[]=<>|'
+dellen	equ	$-DelimTab
+;
+; Init FCB from string
+; ENTRY	Reg DE points to string address followed by FCB address
+; EXIT	Reg HL holds code :	0 if end of string
+;				Current address if more
+;
+parse.it:
+	call	GetDU		; Get optional disk and user
+	jp	c,Syntax.Err	; .. should be ok
+	call	parse		; Parse module name
+	inc	hl
+	ld	a,h
+	or	l		; Test ok
+	jp	z,Syntax.Err	; .. should be
+	dec	hl
+	call	SetDU		; .. set disk and user
+	ret
+;
+; Init FCB from string
+; ENTRY	Reg DE points to string adress followed by FCB address
+; EXIT	Reg HL holds code :	0 if end of string
+;				Current address if more
+;				-1 on error
+;
+; NOTE	Preprocessing of (, ) and -. These characters are NO
+;	delimiters for BDOS function 152
+;
+parse:
+	push	ix
+	push	de
+	pop	ix
+	ld	l,(ix+0)	; Get string
+	ld	h,(ix+1)
+parse??:
+	ld	b,0
+	ld	c,b
+	ld	a,(hl)		; Test end
+	cp	b
+	jr	z,do.parse
+	ld	b,')'
+	ld	c,'['
+	cp	b		; Test special delimiter
+	jr	z,do.parse
+	ld	b,'('
+	cp	b
+	jr	z,do.parse
+	ld	b,'-'
+	cp	b
+	jr	z,do.parse
+	inc	hl
+	jr	parse??
+do.parse:
+	push	hl
+	push	bc
+	ld	(hl),c		; Set end or delimiter
+	ld	c,.parse
+	call	BDOS		; .. run
+	pop	bc
+	pop	de
+	ld	a,b
+	ld	(de),a		; Reset character
+	pop	ix
+	ret
+;
+; Read byte from stream
+; EXIT	Accu holds byte value
+;
+RdVAL8:
+	ld	b,8		; Set length
+;
+; Read bit stream
+; ENTRY	Reg B holds bit count
+; EXIT	Accu holds bit value
+;
+RdBit?:
+	ld	c,0		; Clear bit value
+	bit	@tmp,(ix+2)	; Test temporary file
+	jr	nz,Rd.$$$	; .. read from temporary file
+Rd?.loop:
+	ld	hl,RELbit
+	inc	(hl)		; Bump count
+	ld	a,(hl)
+	dec	a		; Test byte boundary
+	jr	z,Rd?.Bound
+	cp	.bits		; Test byte done
+	jr	c,Rd?.Old
+	ld	(hl),1
+	ld	hl,(RELptr)
+	inc	hl		; Bump pointer
+	ld	(RELptr),hl
+	ld	de,(RELmax)	; Test buffer scanned
+	sbc	hl,de
+	jr	c,Rd?.Bound
+	ld	hl,0
+	ld	(RELptr),hl
+	push	bc
+	call	RdStream	; Read new from file
+	pop	bc
+Rd?.Bound:
+	ld	de,(RELptr)
+	ld	hl,RdBuf
+	add	hl,de		; Point to buffer
+	ld	a,(hl)
+	ld	(RELbits),a	; Get bits
+Rd?.Old:
+	ld	hl,RELbits
+	rlc	(hl)		; Get MSB
+	rl	c		; .. into MSB
+	bit	@1st,(ix+1)	; Test flag
+	call	nz,CompStream	; Set new values
+	djnz	Rd?.loop
+	ld	a,c		; .. get result
+	ret
+Rd.$$$:
+	ld	hl,$$$Bit	; Bump count
+	inc	(hl)
+	ld	a,(hl)
+	cp	.bits+1		; Test max
+	jr	c,Rd?..Old
+	ld	(hl),1		; Init bit count
+	ld	hl,($$$Ptr)
+	inc	hl
+	ld	($$$Ptr),hl
+	ld	de,($$$Max)	; Test buffer scanned
+	sbc	hl,de
+	jr	c,Rd?..Bound
+	ld	hl,0
+	ld	($$$Ptr),hl
+	push	bc
+	call	RdStream.	; Read new from file
+	pop	bc
+Rd?..Bound:
+	ld	de,($$$Ptr)
+	ld	hl,$$$Buf
+	add	hl,de		; Set buffer
+	ld	a,(hl)
+	ld	($$$Bits),a	; Set new byte
+Rd?..Old:
+	ld	hl,$$$Bits
+	rlc	(hl)		; Get MSB
+	rl	c		; .. into MSB
+	djnz	Rd.$$$
+	ld	a,c
+	ret
+;
+; Test end item found
+; EXIT	Carry set if found
+;
+END.itm:
+	ld	de,NamBuf-1
+	ld	hl,$END
+	jr	Comp..		; Test end item
+;
+; Test module found
+; EXIT	Carry set if found
+;
+MOD.fnd:
+	ld	hl,NamBuf-1
+	ld	de,ModName-1
+Comp..:
+	ld	b,(hl)		; Get length
+	inc	b		; .. fix
+;
+; Compare two strings
+; ENTRY	Reg B  holds length of strings
+;	Reg DE points to 1st string
+;	Reg HL points to 2nd string
+; EXIT	Carry set if same strings
+;
+Compare:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	scf
+	ccf
+	ret	nz		; .. not equal
+	inc	de
+	inc	hl
+	djnz	Compare
+	scf			; .. equal
+	ret
+;
+; Print file name
+; ENTRY	Reg HL holds FCB
+;
+PrFN:
+	ld	b,FCBlen	; Set count
+PF.loop:
+	inc	hl		; Bump
+	ld	a,(hl)
+	cp	' '		; Test blank
+	call	nz,conout	; .. print if not
+	ld	a,b
+	cp	ext.len+1	; Test dot
+	ld	a,'.'
+	call	z,conout
+	djnz	PF.loop
+	ret
+;
+; Print error and halt
+; ENTRY	Reg HL holds FCB
+;	Reg DE points to string
+;
+StrErr:
+	push	hl		; Save FCB
+	call	string		; Give message
+	pop	hl
+	call	PrFN		; Print file name
+	jp	OS		; .. fall in halt
+;
+; Read disk buffer from file
+; ENTRY	Reg DE holds FCB
+;	Reg HL holds count
+;	Reg BC holds buffer
+; EXIT	Reg HL holds number of sectors read
+;
+RdDsk:
+	ld	a,.RD		; Set read
+	jr	DiskIO		; .. do it
+;
+; Write disk buffer to file
+; ENTRY	Reg DE holds FCB
+;	Reg HL holds count
+;	Reg BC holds buffer
+; EXIT	Reg HL holds number of sectors written
+;
+WrDsk:
+	ld	a,.WR		; Set write
+;
+; Execute disk I/O
+; ENTRY	Reg DE holds FCB
+;	Reg HL holds count
+;	Reg BC holds buffer
+;	Accu   holds mode 00-Read, 01-Write
+; EXIT	Reg HL holds number of sectors attached
+;
+DiskIO:
+	ld	(IO.mod),a	; Save mode
+	ld	(IO.FCB),de	; .. and FCB
+	ld	(IO.Buf),bc	; .. and buffer
+	call	DivRec
+	ld	(IO.len),de	; .. and count (as records)
+	ld	hl,0
+	ld	(RdRes),hl	; Clear result
+IO.loop:
+	ld	hl,(IO.len)
+	ld	a,h
+	or	a		; Test > Max
+	jr	nz,gt.MAX
+	ld	a,l		; Test done
+	or	a
+	jr	z,IO.ex
+	cp	RecMax+1	; Test max record length
+	jr	nc,gt.MAX
+	ld	e,l		; Get new
+	ld	d,h
+	ld	l,h		; .. clear
+	jr	do.rec
+gt.MAX:
+	ld	de,RecMax
+	sbc	hl,de		; Fix remainder
+do.rec:
+	ld	(IO.len),hl
+	ld	(IO.rec),de
+	call	mulsec		; Set sector
+	ld	de,(IO.Buf)	; Get buffer
+	call	setdma		; .. set it
+	ld	de,(IO.FCB)
+	ld	a,(IO.mod)	; Test read
+	cp	.RD
+	jr	nz,IO.WR
+	call	rdseq		; Read record
+	or	a		; Test success
+	jr	z,IO.OK
+	ld	a,h		; Test any read
+	or	a
+	jr	z,rd.Err
+	ld	hl,(RdRes)	; Test any read
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; .. set new
+	ld	(RdRes),hl
+	jr	IO.ex
+rd.Err:
+	ld	de,$RD.ERR	; .. error
+	jp	str.ERR
+IO.WR:
+	call	wrseq		; Read record
+	or	a		; Test success
+	jr	z,IO.OK
+	ld	de,$WR.ERR
+	jp	str.ERR		; .. error
+IO.OK:
+	ld	de,(IO.rec)	; Get records
+	ld	hl,(RdRes)
+	add	hl,de		; Bump records
+	ld	(RdRes),hl
+	ex	de,hl
+	call	MulRec		; Get count
+	ld	de,(IO.Buf)
+	add	hl,de		; Bump buffer
+	ld	(IO.Buf),hl
+	jr	IO.loop
+IO.ex:
+	ld	de,defDMA
+	call	setdma		; Reset to standard buffer
+	ld	e,1
+	call	mulsec		; Reset count
+	ld	hl,(RdRes)	; Get back records
+	ret
+;
+; Rewrite file
+; ENTRY	Reg DE holds FCB
+;
+rewrite:
+	push	de		; Save FCB
+	call	delete		; Delete file
+	pop	de
+	ld	hl,FCBlen+1
+	add	hl,de		; Init FCB position
+	ld	b,FCBmax-FCBlen
+rew.loop:
+	ld	(hl),0		; Clear FCB part
+	inc	hl
+	djnz	rew.loop
+	call	create		; Create file
+	cp	OSErr		; Check error
+	ret	nz
+	ld	de,$DIR.FULL
+	jp	str.ERR		; Error
+;
+; Open file
+; ENTRY	Reg DE holds FCB
+;
+.FOpen:
+	inc	de
+	ld	a,(de)
+	cp	' '		; Test file name
+	jp	z,Syntax.Err
+	dec	de
+FOpen:
+	push	de
+	call	Reset		; Open file
+	pop	hl
+	ret	nz		; .. test ok
+	ld	de,$NO.FILE
+	jp	StrErr		; Error
+;
+; Close file
+; ENTRY	Reg DE holds FCB
+;
+FClose:
+	call	close		; Close file
+	cp	OSErr		; .. test OK
+	ret	nz
+	ld	de,$CLOS.ERR
+	jp	str.ERR		; Error
+;
+; Close line on console
+;
+crlf:
+	call	.crlf		; Close line, check break
+	ld	a,(PageMode)
+	or	a		; Test page mode
+	ret	nz		; .. built in
+	exx
+	ld	hl,Page
+	inc	(hl)		; Bump page
+	ld	a,(PageLen)
+	cp	(hl)
+	exx
+	ret	nz		; .. not top
+	exx
+	ld	(hl),0		; Clear count
+	exx
+	push	de
+	ld	de,$more
+	call	string		; Wait for more
+Wt.Key:
+	call	combrk
+	jr	nc,Wt.Key
+	cp	CtrlC		; May be abort
+	jr	z,.break
+	cp	cr
+	jr	nz,Wt.Key
+	or	a
+.break:
+	push	af
+	ld	de,$no.more
+	call	string
+	pop	af
+	pop	de
+	ret	nz		; .. ok on CR
+	jr	break		; .. else break
+;
+; Check character available, get it if so
+; EXIT	Carry set if character here
+;	Accu holds character
+;
+combrk:
+	call	constat		; Test key
+	rra
+	ret	nc
+	call	conin		; .. get it
+	scf
+	ret
+;
+; Close line on console, test user abort
+;
+.crlf:
+	ld	a,cr
+	call	conout		; Give CR
+	ld	a,lf		; .. and LF
+	call	conout
+;
+; Test user abort
+;
+Tst.Abort:
+	call	combrk		; Test key
+	ret	nc		; .. no
+	cp	CtrlC		; Test Ctrl_C
+	ret	nz
+break:
+	ld	de,$ctrlC
+	call	string		; Tell abort
+Wt.YN:
+	call	conin		; Get input
+	call	UPPER
+	cp	'Y'		; Test valid response
+	jr	z,..Abort
+	cp	'N'
+	jr	nz,Wt.YN
+..Abort:
+	push	af
+	ld	de,$Cl.CtrlC
+	call	string		; Clear line
+	pop	af
+	cp	'N'
+	ret	z		; .. ignore if NO
+	ld	de,$ABORT	; .. exit
+	jp	str.ERR
+;
+; %%%%%%%%%%%%%%%%%%%%
+; %% BDOS FUNCTIONS %%
+; %%%%%%%%%%%%%%%%%%%%
+;
+; Print character
+; ENTRY	Accu holds character
+;
+conout:
+	push	bc
+	push	de
+	push	hl
+	ld	e,a		; Get character into E
+	ld	c,.conout
+	call	BDOS		; .. print
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Give new line and print string
+; ENTRY	Reg DE points to string
+;
+writeln:
+	push	de		; Save entry
+	call	crlf		; .. new line
+	pop	de		; Get string
+;
+; Print string
+; ENTRY	Reg DE points to string
+;
+string:
+	ld	c,.string
+	call	BDOS		; .. print
+	ret
+;
+; Get state of console
+; EXIT	Accu reflects state (FF == character here)
+;
+constat:
+	ld	e,..dirst	; Set status
+	jr	dircon		; .. do it
+;
+; Get character
+; EXIT	Accu holds character
+;
+conin:
+	ld	e,..dirin	; Set input
+dircon:
+	ld	c,.dircon
+	call	BDOS		; .. get
+	ret
+;
+; Get current disk
+; EXIT	Accu holds disk
+;
+GetDsk:
+	ld	c,.getdsk
+	call	BDOS		; Get disk
+	ret
+;
+; Get current user
+; EXIT	Accu holds user
+;
+GetUsr:
+	ld	a,_get		; .. fall in get
+;
+; Set current user
+; ENTRY	Accu holds user
+;
+SelUsr:
+	ld	e,a
+	ld	a,(LogUsr)
+	cp	e		; Test user already logged
+	ret	z		; .. yeap
+	ld	a,e
+	ld	(LogUsr),a	; .. set new one
+	ld	c,.usrcod
+	call	BDOS		; Set user
+	ret
+;
+; Set disk sector count
+; ENTRY	Reg E holds new count (1..128)
+;
+mulsec:
+	ld	c,.mulsec
+	call	BDOS		; Set count
+	ret
+;
+; Set disk buffer
+; ENTRY	Reg DE points to buffer
+;
+setdma:
+	ld	c,.setdma
+	call	BDOS		; Set buffer
+	ret
+;
+; Delete file
+; ENTRY	Reg DE points to FCB
+;
+delete:
+	ld	c,.delete
+	call	DU.BDOS		; Delete
+	ret
+;
+; Reset file
+; ENTRY	Reg DE points to FCB
+; EXIT	Zero flag set on error
+;
+Reset:
+	ld	hl,.EX
+	add	hl,de
+	ld	(hl),0		; Clear extent
+	ld	hl,.CR
+	add	hl,de
+	ld	(hl),0		; And current record
+;
+; Open file
+; ENTRY	Reg DE points to FCB
+; EXIT	Zero flag set on error
+;
+open:
+	ld	c,.open
+	call	DU.BDOS		; Open
+	cp	OSerr		; .. fix for error
+	ret
+;
+; Read sequential record
+; ENTRY	Reg DE points to FCB
+;
+rdseq:
+	ld	c,.rdseq
+	call	DU.BDOS		; Read it
+	ret
+;
+; Write sequential record
+; ENTRY	Reg DE points to FCB
+;
+wrseq:
+	ld	c,.wrseq
+	call	DU.BDOS		; Write it
+	ret
+;
+; Create file
+; ENTRY	Reg DE points to FCB
+;
+create:
+	ld	c,.make
+	call	DU.BDOS		; Create it
+	ret
+;
+; Close file
+; ENTRY	Reg DE points to FCB
+;
+close:
+	push	de
+	ld	de,defDMA
+	call	setdma		; Set default disk buffer
+	pop	de		; Get FCB into DE
+	ld	c,.close
+	call	DU.BDOS		; Close it
+	ret
+;
+; Rename file
+; ENTRY	Reg DE points to FCB
+;
+rename:	
+	ld	c,.rename
+	call	DU.BDOS		; Rename it
+	ret
+;
+; Get system info from SCB
+; ENTRY	Accu holds offset in SCB
+; EXIT	Accu holds byte from SCB
+;	Reg HL holds word from SCB
+;
+SysInfo:
+	ld	de,SCB
+	ld	(de),a		; Set offset
+	ld	c,.SCB
+	call	BDOS		; .. get it
+	ret
+SCB:
+	db	0,0
+;
+; Execute special BDOS call
+; ENTRY	Reg DE points to FCB preceded by user area
+;
+DU.BDOS:
+	push	bc
+	push	de
+	dec	de
+	ld	a,(de)
+	call	SelUsr		; Select user
+	pop	de
+	pop	bc
+	call	BDOS		; .. do the call
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%%
+; %% SYS-LIB FUNCTIONS %%
+; %%%%%%%%%%%%%%%%%%%%%%%
+;
+; Divide by record length
+; ENTRY	Reg HL holds value
+; EXIT	Reg DE divided by 128
+;	Accu holds modulo 128
+;
+; Formula: HL DIV 128 = (HL MUL 2) DIV 256
+;
+DivRec:
+	ld	a,l
+	push	af
+	xor	a
+	add	hl,hl		; Multiply by 2
+	adc	a,0		; .. remember carry
+	ld	e,h		; Divide by 256
+	ld	d,a
+	pop	af
+	and	RecLng-1	; .. mask
+	ret
+;
+; Multiply by record length
+; ENTRY	Reg HL holds value
+; EXIT	Reg HL multiplied by 128
+;
+; Formula: HL MUL 128 = (HL MUL 256) DIV 2
+;
+MulRec:
+	ld	a,h		; Get HI
+	ld	h,l		; Get LO into HI (= MUL 256)
+	ld	l,0		; Clear LO
+	srl	a		; Divide by 2
+	rr	h
+	rr	l
+	ret
+
+; *********
+; DATA AREA
+; *********
+
+	ds	2*38
+stack:
+
+;
+; Internal flags -- three bytes
+;
+;    7      6      5      4   |  3      2      1      0
+; +------+------+------+------+------+------+------+------+
+; | END  | [U]  | [E]  | [D]  | [I]  | [M]  |  [P] | REL  | +0
+; +------+------+------+------+------+------+------+------+
+; |  <   |  >   |  (   |  )   |  -   | Att. | 1st  | Dis. | +1
+; +------+------+------+------+------+------+------+------+
+; |  NL  | GEN  | [R]  |      | IDX  |      |      | $$$  | +2
+; +------+------+------+------+------+------+------+------+
+;
+; Symbol control field:
+;
+; +------+------+------+------+------+------+------+------+
+; |  <   | ENTR | EXT  | Inc  | Doub | <--  Length   -->  |
+; +------+------+------+------+------+------+------+------+
+;
+stat.flag:
+	db	0,0,0
+$REL:
+	db	'REL'
+$IRL:
+	db	'IRL'
+$FATAL:
+	db	'Fatal Error',eot
+$END:
+	db	1,'l'
+$extrn:
+	db	'-   ',eot
+$entry:
+	db	'+ ',eot
+$NULL:
+	db	null
+mod.delim:
+	db	',=',0,'>)-',-1
+ext.delim:
+	db	',)',-1
+sel.delim:
+	db	',>',-1
+..delim:
+	db	',=',0,-1
+..EX:
+	db	0
+..CR:
+	db	0
+TopPtr:
+	dw	0
+decode.ptr:
+	dw	0
+heap.root:
+	dw	-1		; Start with highest address
+;
+	db	0
+SCR.FCB:
+	ds	FCBlen+1
+;
+	db	0
+PARS.FCB:
+	ds	FCBspc
+;
+	db	0
+$$$.FCB:
+	ds	FCBspc
+;
+	db	0
+REL.FCB:
+	db	0,'REL     $$$'
+r.f.	equ	$-REL.FCB
+	ds	FCBspc-r.f.
+;
+	db	0
+IRL.FCB:
+	db	0,'IRL     $$$'
+i.f.	equ	$-IRL.FCB
+	ds	FCBspc-i.f.
+RELmax:
+	dw	WrLen
+$$$Max:
+	dw	RdLen
+IDXtop:
+	dw	0		; Calculated top
+IDXlen:
+	dw	0
+WBitVal:			; \
+	db	0		; |
+WBitCnt:			; |
+	db	-.bits		; /
+IDXpos:
+	dw	0
+WrMax:
+	dw	WrLen
+WrBfp:
+	dw	0
+BitPos:
+	dw	0
+Bit.Cnt:
+	dw	0
+strptr:
+	dw	0,0
+FCBptr	equ	strptr+2
+CurTop:
+	dw	0
+ext.ptr:
+	dw	0
+EXT.R.offs:
+	db	0
+REC.R.offs:
+	db	0
+BYT.R.OFFS:
+	db	0
+EXT.W.offs:
+	db	0
+REC.W.offs:
+	db	0
+BYT.W.offs:
+	db	0
+ext.num:
+	db	0
+rec.num:
+	dw	0
+				; \
+	db	0		; |
+NamBuf:				; |
+	ds	.modlen+1	; /
+				; \
+	db	0		; |
+ModName:			; |
+	ds	.modlen+1	; /
+				; \
+	db	0		; |
+RefName:			; |
+	ds	.modlen+1	; /
+$in.mod:
+	db	'In MODULE : ',eot
+$fnd:
+	db	', found ',eot
+$state:
+	db	', state ',eot
+$r.entry:
+	db	'ENTRY',eot
+$r.extrn:
+	db	'EXTRN',eot
+$IDX.ERR:
+	db	'Index Error',eot
+$NO.MODULE:
+	db	'No Module: ',eot
+$SYNTAX.ERR:
+	db	'Syntax Error : ',eot
+$OVFL:
+	db	'Memory Overflow',eot
+avl.str:
+	dw	0
+avl.len:
+	db	0
+heap.str:			; \
+	dw	0		; |
+heap.len:			; |
+	db	0		; |
+heap.ptr:			; |
+	dw	0		; /
+CR.recs:
+	dw	0
+ItmSav:
+	db	0
+PBblk:
+	ds	4
+Mod..Cnt:
+	db	0
+SavePtr:
+	dw	0
+LocTab:
+	ds	8		; Location counters
+AF.idx:
+	db	.PrgRel
+Addr.mod:
+	db	'APDC'
+AF.mode:
+	db	0
+AFIELD:
+	dw	0
+				; \
+	db	0		; |
+BFIELD:				; |
+	ds	7		; /
+StrmPtr:
+	dw	0
+$LNK.0:
+	db	'Entry symbol ',eot
+$LNK.1:
+	db	'Select common block ',eot
+$LNK.2:
+	db	'Program name ',eot
+$LNK.3:
+	db	'Request ',eot
+$LNK.4:
+	db	eot
+$LNK.5:
+	db	'Define COMMON size ',eot
+$LNK.6:
+	db	'Chain external ',eot
+$LNK.7:
+	db	'Define entry point ',eot
+$LNK.8:
+	db	'External - offset ',eot
+$LNK.9:
+	db	'External + offset ',eot
+$LNK.A:
+	db	'Define data size ',eot
+$LNK.B:
+	db	'Set program counter ',eot
+$LNK.C:
+	db	'Chain address ',eot
+$LNK.D:
+	db	'Define program size ',eot
+$LNK.E:
+	db	'End program ',eot
+$LNK.F:
+	db	'End file',eot
+ItmTab:
+	dw	$LNK.0
+	dw	$LNK.1
+	dw	$LNK.2
+	dw	$LNK.3
+	dw	$LNK.4
+	dw	$LNK.5
+	dw	$LNK.6
+	dw	$LNK.7
+	dw	$LNK.8
+	dw	$LNK.9
+	dw	$LNK.A
+	dw	$LNK.B
+	dw	$LNK.C
+	dw	$LNK.D
+	dw	$LNK.E
+	dw	$LNK.F
+$LNK.Inv:
+	db	cr,lf
+	db	'Incompatible special link item found',eot
+$INV.ASCII:
+	db	cr,lf
+	db	'Found invalid character in name field',eot
+$IN.MODULE:
+	db	cr,lf,'Error in module ',eot
+VAL8:
+	db	0
+SavAdrMod:
+	db	0
+VAL16:
+	dw	0
+LnkItem:
+	db	0
+ItmMod:
+	db	0
+sel.ptr:
+	dw	0
+decode.F:
+	db	0
+RELbits:			; \
+	db	0		; |
+RELbit:				; |
+	db	0		; /
+RELptr:
+	dw	0
+$$$Bits:			; \
+	db	0		; |
+$$$Bit:				; |
+	db	0		; /
+$$$Ptr:
+	dw	0
+$ctrlC:
+	db	'Found Ctrl-C - Abort [Y/N] ',eot
+$Cl.CtrlC:
+	db	cr,'                           ',cr,eot
+$ABORT:
+	db	cr,lf,'.. Aborted',cr,lf,eot
+$RD.ERR:
+	db	'Disk Read Error',eot
+$WR.ERR:
+	db	'Disk Write Error',eot
+$CLOS.ERR:
+	db	'Cannot Close',eot
+$DIR.FULL:
+	db	'Directory Full',eot
+$NO.FILE:
+	db	'No File: ',eot
+$INC:
+	db	' I   .. ',eot
+$MUL:
+	db	' M   .. ',eot
+$UND:
+	db	' U   .. ',eot
+$M.I:
+	db	' M+I .. ',eot
+$more:
+	db	'Press RETURN to Continue',eot
+$no.more:
+	db	cr,'                        ',cr,eot
+$MFND:
+	db	'Modules found : ',eot
+PageMode:
+	ds	1
+PageLen:
+	ds	1
+Page:
+	db	0
+ModCnt:
+	dw	0
+LogDsk:
+	ds	1
+LogUsr:
+	ds	1
+DU:
+	ds	2
+DU.FCB:
+	ds	2
+
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!!!! Dynamic allocation !!!!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+MEM.top:
+RdRes:
+help:
+
+IO.Buf	equ	RdRes+2
+IO.len	equ	IO.Buf+2
+IO.FCB	equ	IO.len+2
+IO.mod	equ	IO.FCB+2
+IO.rec	equ	IO.mod+1
+
+copydma	equ	IO.rec+2
+
+$$$Buf	equ	copydma+CCPlen
+RdBuf	equ	$$$Buf+RdLen
+WrBuf	equ	RdBuf+WrLen
+IdxBuf	equ	WrBuf+WrLen
+
+TOP	equ	IdxBuf
+
+; ***** HELP *****
+
+	ld	de,$help
+	call	string		; Give small help
+	jp	OS		; .. and stop
+$help:
+	db	'The CP/M+ Librarian Utility',cr,lf,lf
+	db	'  LIB filespec{[I|M|P|E|U|R=(name)|D|N]}='
+	db	'{filespec{modifier}{,filespec{modifier} .. }}'
+	db	cr,lf,lf
+	db	'"filespec" may be preceded by optional disk '
+	db	'and/or user in either way',cr,lf,lf
+	db	'I  The INDEX option creates an indexed '
+	db	'library file of type .IRL. LINK-80',cr,lf
+	db	'   searches faster on indexed libraries than'
+	db	' on non-indexed libraries.',cr,lf,lf
+	db	'M  The MODULE option displays module names.'
+	db	cr,lf,lf
+	db	'P  The PUBLICS option displays module names'
+	db	' and the public variables for',cr,lf
+	db	'   the new library file.',cr,lf,lf
+	db	'E  The EXTERNAL option displays module names'
+	db	', the public variables and ',cr,lf
+	db	'   external references for '
+	db	'the new library file.',cr,lf,lf
+	db	'U  The UNKNOWN option displays unsolved names'
+	db	' and checks valid library structure.',cr,lf,lf
+	db	'R  The REFERENCE option searches for labels'
+	db	' and reports modules referenced to.'
+	db	cr,lf,lf
+	db	'D  The DUMP option displays the contents of '
+	db	'object modules in ASCII form.',cr,lf,lf
+	db	'N  The NOPAGE option does not stop '
+	db	'screen on full page.',cr,lf,lf
+	db	'DELETE              REPLACE          '
+	db	'             SELECT',cr,lf
+	db	'<module=>    <module=filename.REL>     '
+	db	'(modFIRST-modLAST,mod1,mod2,...,modN)',cr,lf
+	db	'          If module name and filename',cr,lf
+	db	'          are the same this shorthand',cr,lf
+	db	'          can be used:     <filename>'
+	db	cr,eot
+;
+; Verify correct CP/M version
+;
+version:
+	ld	c,.vers
+	call	BDOS		; Get version
+	cp	OSver
+	ret	nc
+	ld	de,$illver
+	call	string		; Tell error
+	jp	OS
+$illver:
+	db	'LIB requires CP/M 3.x',eot
+
+	end	LIB
+

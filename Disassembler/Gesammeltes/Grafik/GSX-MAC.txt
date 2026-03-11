@@ -1,0 +1,599 @@
+	title	GSX System File
+	name	('GSX')
+
+; DASMed version of original CP/M PLUS file GSX.SYS
+
+; This module implements the GDOS kernel.
+; Immediately following this kernel the device dependent GIOS
+; code will be loaded.
+; This GDOS kernel as well as the GIOS implementation are both
+; .PRL files and will be loaded when the application program
+; is executed. NOTE that the application program must be
+; prepared by GENGRAF.COM which installs a simple loader to
+; the application
+
+; The GDOS will be called by
+
+;	LD	C,115		; The GDOS function
+;	LD	DE,PB		; A 5 word array
+;	CALL	0005H		; Thru standard BDOS
+
+OS	equ	0000h
+
+RecLng	equ	128
+
+_FN	equ	  8
+_Fext	equ	  3
+_ext	equ	  9
+_cr	equ	 32
+
+.Conout	equ	  2
+.String	equ	  9
+.Open	equ	 15
+.Close	equ	 16
+.RdSeq	equ	 20
+.SetDMA	equ	 26
+.GDOS	equ	115		; Activating GSX.SYS
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+MaxDev	equ	  5
+TabLen	equ	 11
+FLen	equ	 75
+
+; Structure of header - (initialized by GENGRAF.COM loader)
+;
+; 0..2	Jump to start
+; 3..5	Jump to BDOS		<<-- From Loader
+;  6,7	Current device		<<-- From Loader
+; 8..62	Device table		<<-- From Loader
+; 63,64	End of table
+;  65	Start of header message	<<-- Printed by loader
+;
+	jp	GDOS		; Jump over head
+BDOS:
+	jp	$-$		; << Jump to BDOS
+CurDev:
+	dw	-1		; << Current device
+DevTable:
+;
+; Structure of each element:
+;
+; Byte	0	Device ID	\
+; Byte	1	Zero		/ Interpreted as 16 bit word
+; Byte	2	Drive
+; Bytes 3..10	File name
+;
+	ds	MaxDev*TabLen	; << Device table
+	dw	-1
+;
+; Message accessed and printed by GENGRAF.COM loader
+;
+; Here used as data area -->> 300 Bytes
+;
+Prefix	equ	FLen*4		; Pairs of two bytes
+
+$HEAD:
+$PTSIN:
+
+$DMA	equ	$PTSIN
+
+	db	'Building GSX ...',cr,lf,eot
+;
+	db	'--------------------------------'
+	db	cr,lf
+	db	'GSX-80 1.1  01 Oct 83    Serial No 5000-1232-654321'
+	db	cr,lf
+	db	'Copyright (C) 1983                                 '
+	db	cr,lf
+	db	'Digital Research,'
+	db	' Inc.          All Rights '
+	db	'Reserved'
+	db	cr,lf
+$FCB:
+	db	'---------------------------------------------------'
+	db	cr,lf,eot
+$RecPtr:
+
+HeadLen	equ	$-$HEAD
+	ds	Prefix-HeadLen
+;
+; %%%%%%%%%%%%%%%%%%%%%%
+; %% Entry of GSX.SYS %%
+; %%%%%%%%%%%%%%%%%%%%%%
+;
+GDOS:
+	ld	a,c
+	cp	.GDOS		; Check to be active
+	jp	nz,BDOS
+	ld	hl,CONTRL
+	ld	c,PBlen
+	call	Move		; Save parameter block
+	ld	hl,(CONTRL)	; Get CONTRL(1)
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	dec	hl
+	ld	a,h
+	or	l		; Test opcode=1
+	jp	z,Open.WS
+	call	Prep.WS		; Prepare station
+	call	GIOS		; Call device function
+GDOS..result:
+	jp	GDOS.result
+;
+; Opcode = 1 : Initialize a graphic workstation
+;
+Open.WS:
+	ld	hl,(INTIN)	; Get INTIN(1)
+	ld	e,(hl)		; .. it's the device ID
+	inc	hl
+	ld	d,(hl)
+	ld	hl,(CurDev)
+	call	sub.hl.de	; Test currently loaded
+	jp	z,DevLoaded	; .. yes, skip loading .PRL
+	ld	hl,DevTable	; Init pointer
+SrcDev:
+	push	hl
+	ld	a,(hl)		; Get ID
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	and	h
+	inc	a		; Test end (-1)
+	pop	bc
+	jp	z,DevLoaded	; .. skip loading
+	push	bc
+	call	sub.hl.de	; Test device found
+	pop	hl
+	jp	z,DevFound
+	ld	bc,TabLen
+	add	hl,bc		; .. bump to next
+	jp	SrcDev
+DevFound:
+	inc	hl		; .. fix for file name
+	inc	hl
+	ex	de,hl
+	ld	(CurDev),hl	; Save current device
+	ld	hl,$FCB
+	ld	c,_FN+1
+	call	Move		; Copy file name
+	call	LoadPRL		; Load .PRL file
+DevLoaded:
+	call	GIOS		; Call device function
+	ld	hl,(INTOUT)	; Fetch INTOUT(1)
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	hl
+	ld	(WIDTH),hl	; .. save
+	pop	hl
+	inc	hl
+	ld	a,(hl)		; Fetch INTOUT(2)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	hl
+	ld	(HEIGHT),hl	; .. save
+	jp	GDOS..result	; Get result
+;
+; Prepare GDOS call depending on CONTRL(2)
+;
+Prep.WS:
+	ld	hl,(CONTRL)	; Get CONTRL(2)
+	inc	hl
+	inc	hl
+	ld	e,(hl)		; .. fetch it
+	inc	hl
+	ld	d,(hl)
+	ld	a,e		; Test zero
+	or	d
+	ret	z
+	ld	hl,-FLen
+	add	hl,de		; Check range
+	jp	nc,Prep.WS.noDef
+	ld	e,FLen		; .. set default if overflow
+Prep.WS.noDef:
+	ld	hl,(PTSIN)	; Get array field
+	push	hl		; .. save
+	ld	hl,$PTSIN
+	ld	(PTSIN),hl	; .. swap it
+	push	hl
+	pop	bc		; Get scratch
+	pop	hl		; .. and array field
+Prep.WS.move:
+	push	de		; Save count
+	ex	de,hl
+	ld	hl,(WIDTH)
+	call	NDC.to.Device	; Convert NDC to device
+	ex	de,hl
+	ld	hl,(HEIGHT)
+	call	NDC.to.Device	; .. height,too
+	pop	de		; Get back count
+	dec	e
+	jp	nz,Prep.WS.move	; .. loop
+	ret
+;
+; Expand NDC format to device code
+; ENTRY	Reg HL holds max device coordinate
+;	Reg DE points to original field to be converted
+;	(Where NDC coordinate comes from)
+;	Reg BC points to scratch  field to be converted
+;	(Where device coordinate goes to)
+; EXIT	Reg DE points to original field incremented by 2
+; 	Reg BC points to scratch  field incremented by 2
+;
+NDC.to.Device:
+	ex	de,hl
+	ld	a,(hl)		; Get NDC value
+	inc	hl
+	push	hl
+	ld	h,(hl)
+	push	bc
+	ld	l,a
+	ld	c,15		; Set bit count
+	push	de
+	ex	de,hl
+	ld	hl,0		; Clear result
+N.t.D.loop:
+	ld	a,d		; Shift NCD
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	jp	nc,N.t.D.noCY	; .. test bit
+	ld	a,c
+	pop	bc
+	push	bc
+	add	hl,bc		; Add max value
+	ld	c,a
+N.t.D.noCY:
+	ld	a,h		; Shift result
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	dec	c
+	jp	nz,N.t.D.loop	; .. test done
+	pop	bc
+	pop	bc		; Get back field
+	ld	a,l
+	ld	(bc),a		; .. save result
+	inc	bc
+	ld	a,h
+	ld	(bc),a
+	inc	bc		; Fix pointer
+	pop	hl
+	inc	hl
+	ret
+;
+; Perform resulting operation after GIOS call
+;
+GDOS.result:
+	ld	hl,(CONTRL)	; Get CONTRL(1)
+	ld	de,2*2
+	add	hl,de		; .. point to CONTRL(3)
+	ld	c,(hl)		; .. get count
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(PTSOUT)	; Point to PTSOUT(1)
+Res.Move:
+	ld	a,c
+	or	b
+	ret	z		; Test done
+	push	bc
+	ex	de,hl
+	ld	hl,(WIDTH)
+	call	Device.to.NDC	; Convert to NCD
+	ex	de,hl
+	ld	hl,(HEIGHT)
+	call	Device.to.NDC	; .. height, too
+	pop	bc
+	dec	bc
+	jp	Res.Move
+;
+; Normalize resulting coordinates to NDC format
+; ENTRY	Reg HL holds max device coordinate
+;	Reg DE points to field to be converted
+;	(Where device coordinate goes to)
+; EXIT	Reg DE points to field incremented by 2
+;
+Device.to.NDC:
+	ld	b,h		; Copy coordinate
+	ld	c,l
+	ex	de,hl
+	ld	e,(hl)		; Fetch device format
+	push	hl
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,16		; Set bit count
+	ld	de,0		; .. clear result
+D.t.N.loop:
+	push	af
+	ex	de,hl
+	add	hl,hl		; .. result * 2
+	ex	de,hl
+	add	hl,hl		; .. format * 2
+	ld	a,l
+	sub	c		; Subtract current
+	ld	l,a
+	ld	a,h
+	sbc	a,b
+	ld	h,a
+	jp	nc,D.t.N.Gt0	; .. test >0
+	add	hl,bc		; .. make >0
+	dec	de		; .. fix result
+D.t.N.Gt0:
+	inc	de
+	pop	af
+	dec	a		; Test done
+	jp	nz,D.t.N.loop
+	and	a
+	ld	a,d
+	rra			; Shift result right
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	jp	nc,D.t.N.noCY	; .. test bit
+	inc	de		; .. fix result
+D.t.N.noCY:
+	pop	hl
+	ld	(hl),e		; Save NCD value
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ret
+;
+; Move bytes
+; ENTRY	Reg DE points to source
+;	Reg HL points to destination
+;	Reg C  holds length
+;
+Move:
+	ld	a,(de)		; Get
+	ld	(hl),a		; Put
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,Move		; .. till end
+	ret
+;
+; HL:=HL-DE
+; Zero flag set if regs are equal
+;
+sub.hl.de:
+	ld	a,l
+	sub	e		; Subtract
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ld	h,a
+	or	l		; .. fix zero
+	ret
+;
+; User parameter block saved here
+;
+PB:
+CONTRL:
+	dw	0
+INTIN:
+	dw	0
+PTSIN:
+	dw	0
+INTOUT:
+	dw	0
+PTSOUT:
+	dw	0
+PBlen	equ	$-PB
+
+WIDTH:
+	dw	0		; INTOUT(1) --> Raster width
+HEIGHT:
+	dw	0		; INTOUT(2) --> Raster height
+;
+; Load .PRL file
+;
+LoadPRL:
+	call	Reset		; Prepare device file
+	call	RdRecord	; Read 1st record
+	ld	hl,(BDOS+1)
+	ld	de,GIOS.page
+	call	sub.hl.de	; Get base base
+	ex	de,hl
+	ld	hl,($DMA+1)	; Fetch length of file
+	push	hl
+	ld	a,e
+	sub	l		; .. test room
+	ld	a,d
+	sbc	a,h
+	jp	nc,Load.go
+	ld	de,$TOO.BIG
+	jp	FCB.ERR		; .. no, error
+Load.go:
+	call	RdRecord	; Skip 2nd record
+	pop	bc		; .. get length
+	push	bc
+	ld	hl,GIOS.page	; Set load page
+	push	hl
+Load.loop:
+	call	RdByte		; Get byte from file
+	ld	(hl),a		; .. store
+	inc	hl
+	dec	bc
+	ld	a,c
+	or	b
+	jp	nz,Load.loop
+	pop	hl		; Get back load destination
+	ld	b,h
+	dec	b		; .. fix for relocating
+	pop	de		; .. get length
+Load.byte:
+	ld	c,8		; Init bits
+	call	RdByte		; .. get relocation control
+Load.bit:
+	rlca			; Test bit of control
+	push	af
+	jp	nc,Load.NoRel
+	ld	a,b
+	add	a,(hl)		; .. relocate byte
+	ld	(hl),a
+Load.NoRel:
+	inc	hl
+	dec	de
+	ld	a,d		; Test done
+	or	e
+	jp	z,Load.rdy
+	pop	af
+	dec	c		; Test all bits thru
+	jp	nz,Load.bit
+	jp	Load.byte	; .. next control byte
+Load.rdy:
+	pop	af		; Clean stack
+	jp	Close		; .. close file
+;
+; Read byte from device file
+; EXIT	Accu holds byte
+;
+RdByte:
+	push	hl
+	push	de
+	ld	hl,($RecPtr)	; Get current pointer
+	inc	l		; .. test buffer read
+	jp	p,RB.buff
+	push	bc
+	call	RdRecord
+	pop	bc
+	ld	hl,0
+RB.buff:
+	ld	($RecPtr),hl	; Set pointer
+	ld	de,$DMA
+	add	hl,de
+	ld	a,(hl)		; Get byte
+	pop	de
+	pop	hl
+	ret
+;
+; Prepare device file
+;
+Reset:
+	ld	de,$PRL
+	ld	hl,$FCB+_ext
+	ld	c,PRLlen
+	call	Move		; Get extension .PRL
+	ld	hl,RecLng
+	ld	($RecPtr),hl	; Init record pointer
+	ld	de,$FCB
+	ld	c,.Open		; Open file
+	call	BDOS
+	ld	hl,$FCB+_cr
+	ld	(hl),0		; Clear current record
+IOResult:
+	or	a
+	ret	p		; Test success
+	ld	de,$NOT.FOUND
+	jp	FCB.ERR
+;
+; Close device file
+;
+Close:
+	ld	de,$FCB
+	ld	c,.Close
+	call	BDOS		; Close file
+	jp	IOResult	; .. watch result
+;
+; Print character on console
+; ENTRY	Reg E holds character
+;
+Conout:
+	push	hl
+	ld	c,.Conout
+	call	BDOS		; .. print
+	pop	hl
+	ret
+;
+; Print string of fixed length
+; ENTRY	Reg HL points to string
+;	Accu holds length+1
+;
+FixString:
+	dec	a
+	ret	z		; Test end
+	ld	e,(hl)		; .. get character
+	inc	hl
+	push	af
+	call	Conout		; .. print
+	pop	af
+	jp	FixString
+;
+; Read record from device file
+;
+RdRecord:
+	ld	de,$DMA
+	ld	c,.SetDMA
+	call	BDOS		; Set disk buffer
+	ld	de,$FCB
+	ld	c,.RdSeq
+	call	BDOS		; Read record
+	or	a		; Test success
+	ret	z
+	ld	de,$ILL.EOF
+;
+; Print error after FCB action
+; ENTRY	Reg DE points to error message
+;
+FCB.ERR:
+	push	de
+	ld	hl,$FCB		; Init FCB
+	ld	a,(hl)		; Get drive
+	or	a		; .. test current
+	jp	z,F.E.NoDrv
+	add	a,'A'-1
+	ld	e,a
+	call	Conout		; .. print ASCII
+	ld	e,':'
+	call	Conout		; .. and delimiter
+F.E.NoDrv:
+	inc	hl
+	ld	a,_FN+1
+	call	FixString	; Print name
+	ld	e,'.'
+	call	Conout
+	ld	a,_Fext+1
+	call	FixString	; .. and extension
+	pop	de
+	ld	c,.String
+	call	BDOS		; Print it
+	jp	OS		; .. break program
+;
+$TOO.BIG:
+	db	' too big to load',eot
+$ILL.EOF:
+	db	':  unexpected EOF',eot
+$NOT.FOUND:
+	db	' not found',eot
+$PRL:
+	db	'PRL',0,0,0
+PRLlen	equ	$-$PRL
+	ds	5		; Filler for page boundary
+;
+; Entry to driver
+;
+GIOS:
+	ld	de,CONTRL	; Enter with PB in reg DE
+GIOS.page::
+;
+; ++++++++++++++++++++++++++++++++++++++++
+; ++ DRIVER MUST START AT PAGE BOUNDARY ++
+; ++++++++++++++++++++++++++++++++++++++++
+
+	end
+

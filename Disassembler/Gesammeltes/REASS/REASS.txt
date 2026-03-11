@@ -1,0 +1,57 @@
+AdW der DDR
+
+Institut fuer Informatik                  Berlin, den 3.12.85
+   und Rechentechnik                      RN/SE/IMPL-AB/005
+Abt. Systementwicklung
+
+
+
+Anwenderbeschreibung REASS (Rueckuebersetzer)
+=============================================
+
+Bearbeiter: W. Dames
+
+Das Programm REASS dient zur Rueckuebersetzung von Hauptspeicherbereichen oder von Files in das Befehlsformat.
+Im Gegensatz zu einfachen Rueckuebersetzern werden durch REASS Befehls- und Datenmarken generiert und das erzeugte Ergebnis (auf Bildschirm/Drucker und/oder als File) ist erneut durch den Assembler verarbeitbar.
+Hat man alle Adresskonstanten gefunden, so ist das Ergebnis sogar auf andere Adressen verschiebbar.
+Die Rueckuebersetzung erfolgt in 2 Paessen.
+Im ersten Pass werden ausgehend von den vorgegebenen Eintrittspunkten die Befehle interpretiert, bis sich ein unbedingter Sprung (RET, JMP), ein verbotener Befehl oder ein mit einer Datenmarke (CALL mit anschliessenden Parametern statt Befehlen!) ergibt.
+Dabei werden auf Grund der Operandenadressen Daten- und Befehlsadressen gefunden und in der Markentabelle gemerkt.
+Stellen Befehlsadressen neue Eintrittspunkte dar, so werden sie genauso wie urspruenglich vorgegebene ausgewertet.
+Dies setzt sich fort bis keine neuen Befehlsstellen mehr gefunden werden.
+
+Im sich daran anschliessenden zweiten Pass werden dann die Befehle entsprechend ihrer Mnemonik mit Marken rueckuebersetzt, die Daten als DB-Konstanten (wenn moeglich als Zeichen) und alle sonstigen Programmstellen als DB-Konstanten mit sogenannten X-Marken (Befehlsmarken beginnen mit I, Datenmarken mit D, es folgen jeweils 4 Hexadezimalziffern entsprechend der Adresse).
+Bei der im 2. Pass erfolgenden Bildschirmausgabe kann man ein Stoppen bei X- und/oder D-Marken fordern, da diese Eintrittspunkte darstellen koennen.
+Wird eine solche Marke veraendert, so erfolgt eine sofortige Neuuebersetzung und eine Listing-Fortsetzung auf dem Bildschirm ab dieser Stelle.
+Nach dem 2. Pass ist die Eingabe weiterer Marken moeglich (Befehlsmarken haben Prioritaet gegenueber Datenmarken) oder auch das Streichen von Marken.
+Durch einen mehrmaligen Lauf findet man dann bald alle Befehls- und Datenstellen des Programms.
+Fuer die Weiterarbeit kann sowohl der rueckuebersetzte Quelltext als auch die Liste der Eintrittspunkte als File gerettet werden.
+Reicht dabei der Platz auf der Ausgabediskette nicht, so wird durch REASS ein Wechsel der Diskette unterstuetzt.
+Als Assemblerformat erzeugt REASS auf Grund einer frueheren Version das im Betriebssystem SIOS uebliche Format.
+Das Z80-Format fuer M80 (bzw. ASM) erhaelt man durch das Programm ASSFORM, das auch die Zusammenfassung von DB-Zeilen gestattet (s.u.).
+Die Benutzerfuehrung erfolgt fuer REASS im Dialog, daher wird im folgenden Beispiel nur der Aufruf erlaeutert:
+
+Beispiel:
+--------
+
+REASS SUBMIT.COM		Quellfile kann auch im
+				Dialog angegeben werden
+....				REASS-Operatoreingaben
+				bis ^C
+ASSFORM SUBMIT.MAC=SUBMIT.REA/M/D62
+				SUBMIT.REA sei das erzeugte
+				Ergebnis der Rueckueber-
+				setzung. /M bedeutet Ueber-
+				fuehrung in MAC-Format,
+                                /Dxx bedeutet Zusammenfassen
+				von DB-Zeilen bis Spalte xx
+				erreicht.
+M80 ,=SUBMIT			Testuebersetzung
+				Befehlsmarken mitten im
+				Befehl oder Datenmarken
+				an gleicher Stelle wie
+				Befehlsmarken werden von
+				REASS bewusst nicht erzeugt
+				und erzeugen damit Fehler
+				in der M80-Uebersetzung.
+

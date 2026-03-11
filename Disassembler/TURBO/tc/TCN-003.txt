@@ -1,0 +1,1565 @@
+;
+;
+;
+l573d:
+	dec	hl
+	ld	b,(hl)
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	de
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	de
+	dec	hl
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	de
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	de
+	inc	b
+	dec	b
+	jp	z,l57d6
+	call	MustLeftParen	; Verify (
+l575e:
+	push	bc
+	ld	b,(hl)
+	dec	hl
+	ld	a,(hl)
+	dec	hl
+	ld	(l7b57),a
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	ld	c,b
+l576b:
+	bit	7,(hl)
+	dec	hl
+	jr	z,l576b
+	djnz	l576b
+	ld	b,c
+	push	hl
+	ex	de,hl
+	call	Get$TYPE	; Get name
+l5778:
+	push	bc
+	ld	a,(l7b57)
+	or	a
+	jr	nz,l57a9
+	ld	a,(Type)
+	cp	_Set
+	jr	c,l57a1
+	call	.Expression	; Get expression
+	call	l5864
+	ld	a,(Type)
+	cp	_Ptr
+	jr	z,l57bd
+	cp	_Real
+	jr	c,l57c0
+	jr	nz,l57bd
+	call	StImm
+	db	@L20
+$I20:
+	PUSH	BC
+	PUSH	DE
+@L20	equ	$-$I20
+	jr	l57bd
+l57a1:
+	call	SavEnv1		; Save environment
+	call	l6749
+	jr	l57af
+l57a9:
+	call	SavEnv1		; Save environment
+	call	l677f
+l57af:
+	call	CpyEnv2		; Copy into 2nd environment
+	ld	a,(l7b69)
+	cp	0
+	call	nz,l58c5
+	call	RestEnv1	; Get back environment
+l57bd:
+	call	StPUSH		; Set PUSH HL
+l57c0:
+	pop	bc
+	dec	b
+	jr	z,l57c9
+	call	MustComma	; Verify ,
+	jr	l5778
+l57c9:
+	pop	hl
+	pop	bc
+	dec	b
+	jr	z,l57d3
+	call	MustComma	; Verify ,
+	jr	l575e
+l57d3:
+	call	MustRightParen	; Verify )
+l57d6:
+	pop	de
+	pop	hl
+	ld	a,d
+	or	e
+	jr	z,l57e3
+	call	StLD.HL		; Set LD HL,val16
+	ex	de,hl
+	call	StLD.DE		; Set LD DE,val16
+l57e3:
+	pop	de
+	pop	hl
+	ld	a,.CALL		; CALL addr
+	jp	StCode
+;
+;
+;
+ll57ea::
+	ld	a,(Type)
+	cp	0
+	jr	z,l57f9
+	cp	_RecF
+	jr	c,l57fd
+	cp	_String
+	jr	nc,l57fd
+l57f9:
+	call	ERROR		; Invalid assignment
+	db	_InvAss
+l57fd:
+	ld	a,(AdrMode)	; Get address mode
+	bit	1,a
+	jr	nz,l5812
+	bit	0,a
+	jr	z,l580a
+	ld	a,-1
+l580a:
+	ld	hl,(VarAdr)
+	ld	(TypVal),hl	; Set value
+	jr	l581a
+l5812:
+	call	l678b
+	call	StPUSH		; Set PUSH HL
+	ld	a,1
+l581a:
+	ld	(l7b57),a
+	ret
+;
+; Variable found for assignement
+;
+l57ea:
+	call	ll57ea		; Get destination
+	call	MustAss		; Verify :=
+	ld	a,(Type)	; Get type
+	cp	_Set		; .. test it
+	jp	nc,l593a
+	call	SavEnv1		; Save environment
+	call	l6749
+	call	RestEnv2	; Get back into 2nd environment
+	call	l58c5
+	ld	a,(l7b64)
+	dec	a
+	jr	z,l5852
+	inc	a
+	jr	z,l5845
+	call	StImm
+	db	@L21
+$I21:
+	dw	.LD@DE		; LD DE,(addr)
+@L21	equ	$-$I21
+	jr	l584a
+l5845:
+	call	StImm
+	db	@L22
+$I22:
+	db	.LD.DE		; LD DE,val16
+@L22	equ	$-$I22
+l584a:
+	ld	hl,(l7b65)
+	call	StWrd
+	jr	l5857
+l5852:
+	call	StImm
+	db	@L23
+$I23:
+	POP	DE
+@L23	equ	$-$I23
+l5857:
+	ld	hl,(l7b6f)
+	call	StLD.BC		; Set LD BC,val16
+	call	StImm
+	db	@L24
+$I24:
+	LDIR
+@L24	equ	$-$I24
+	ret
+;
+;
+;
+l5864:
+	ld	a,(Type)	; Get type
+	cp	_Real		; Test real
+	jr	nz,l5877	; .. nope
+	ld	a,b
+	cp	_Integ		; Test source integer
+	jr	nz,l589d	; .. nope
+	ld	b,_Real		; Force real
+	ld	hl,IntFlt	; .. convert
+	jr	l589a
+l5877:
+	cp	_String		; Test string
+	jr	nz,l588c
+	ld	a,b
+	cp	_Char		; Test source character
+	jr	nz,l589d	; .. nope
+	ld	b,_String	; Force string
+	call	StImm		; Get one character
+	db	@L25
+$I25:
+	LD	H,L
+	LD	L,1
+	PUSH	HL
+@L25	equ	$-$I25
+	jr	l589d
+l588c:
+	cp	_Char		; Test character
+	jr	nz,l589d	; .. nope
+	ld	a,b
+	cp	_String		; Test from string
+	jr	nz,l589d	; .. nope
+	ld	b,_Char		; Force character
+	ld	hl,AssChr	; .. set call
+l589a:
+	call	StCALL@
+l589d:
+	ld	a,(Type)	; Test same types
+	cp	b
+	jr	nz,l58c1	; .. should be so
+	cp	_Set		; Test set
+	jr	nz,l58b1	; .. nope
+	ld	a,c		; Test value
+	or	a
+	ret	z		; .. nope
+	ld	hl,(Low.Rng)	; Get pointer
+	cp	(hl)		; .. compare
+	ret	z		; .. same
+	jr	l58c1		; .. should be
+l58b1:
+	cp	_Ptr		; Test pointer
+	ret	nz		; .. nope
+	ld	hl,(l7b8b)	; Get pointer
+	ld	a,h		; Test NIL
+	or	l
+	ret	z		; .. yeap
+	ld	de,(Low.Rng)	; Get pointer
+	sbc	hl,de		; .. test same
+	ret	z		; .. should be
+l58c1:
+	call	ERROR		; Invalid types
+	db	_InvType
+;
+;
+;
+l58c5:
+	ld	a,(Type)	; Get type
+	cp	0		; Test valid
+	jr	z,l58c1		;;l591b .. nope
+	ld	c,10111111b
+	cp	_Integ		; Test range
+	jr	nc,l5906
+	ld	c,10000011b
+	cp	_String
+	jr	nz,l58e3
+	ld	a,(LocOpt)	; Get option
+	bit	.Vopt,a		; Test strong var check
+	jr	nz,l5906	; .. yeap
+	ld	c,10000000b
+	jr	l5906
+l58e3:
+	cp	_TxtF		; Test range
+	jr	nc,l5906
+	ld	c,10110011b
+	cp	_Set
+	jr	nc,l5906
+	ld	c,11000011b
+	cp	_Record
+	jr	nc,l5906
+	ld	hl,(High.Rng)	; Get pointer
+	ld	a,h		; Test zero
+	or	l
+	ld	c,10111111b
+	jr	nz,l5906
+	ld	hl,(LastAdr)	; Get last address
+	ld	a,(hl)		; .. fetch code ????
+	cp	10
+	jr	nz,l58c1	;;l591b
+	ld	c,10110011b
+l5906:
+	ld	hl,Type		; Set type
+	ld	de,l7b69	; .. comparision
+	ld	b,8		; .. length
+l590e:
+	rl	c		; Get bit
+	jr	nc,l5916	; Skip comparision
+	ld	a,(de)		; Compare
+	cp	(hl)
+	jr	nz,l58c1	;;l591b	.. should be equal
+l5916:
+	inc	hl
+	inc	de
+	djnz	l590e
+	ret
+;;l591b:
+;;	call	ERROR		; Invalid types
+;;	db	_InvType
+;
+;
+;
+l591f:
+	ld	de,-4
+	add	hl,de
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	de
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ld	(TypVal),de	; Set value
+	pop	hl
+	call	Get$TYPE	; Get name
+	xor	a
+	ld	(l7b57),a
+	call	MustAss		; Verify :=
+;
+; Get and build right side of assignment
+;
+l593a::
+	call	.Expression	; Get expression
+	call	l5864
+	jp	l661b
+;
+; ASSIGN(filvar,string)
+;
+.ASSIGN:
+	call	GetFilVar	; Get file variable
+	ld	hl,AssUntype
+	cp	_TxtF
+;;	jr	nz,l5955
+	jr	nz,ll5955
+	ld	hl,AssTxt
+
+ll5955:
+
+	call	l5955
+	jr	ll5abe
+l5955:
+	push	hl
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	StrExpr		; Get string
+	pop	hl
+l5960:
+	call	MustRightParen	; Verify )
+	jp	StCALL@
+;
+; RENAME(filvar,string)
+;
+..RENAME:
+	call	GetFilVar	; Get file variable
+	ld	hl,rename
+	call	l5955
+	jr	ll5abe
+;
+; ERASE(filvar)
+;
+.ERASE:
+	call	GetFilVar	; Get file variable
+	ld	hl,erase
+	jr	l5960
+;
+; CHAIN(filvar)
+;
+.CHAIN:
+	ld	hl,chain
+	jr	l5981
+;
+; EXECUTE(filvar)
+;
+.EXECUTE:
+	ld	hl,execute
+l5981:
+	push	hl
+	call	GetFilVar	; Get file variable
+l5985:
+	pop	hl
+l5986:
+	call	l5960
+ll5abe:
+	jp	l5abe
+;
+; SEEK(filvar,n)
+;
+.SEEK:
+	call	GetFilVar	; Get file variable
+	cp	_TxtF
+	call	ErrZ		; Text file not allowed
+	db	_NoTxtErr
+	ld	hl,seekrec
+	cp	_RecF		; Test record file
+	jr	z,l599f
+	ld	hl,seek
+l599f:
+	push	hl
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer expression
+	jr	l5985
+;
+; FLUSH(filvar)
+;
+.FLUSH:
+	call	GetFilVar	; Get file variable
+	cp	_RecF
+	call	ErrNZ		; File type not allowed
+	db	_NoTxtUnt
+	ld	hl,flush
+	jr	l5986
+;
+; RESET(filvar)
+;
+.RESET:
+	ld	hl,ResTab
+	jr	l59c1
+;
+; REWRITE(filvar)
+;
+.REWRITE:
+	ld	hl,RewrTab
+l59c1:
+	push	hl
+	call	GetFilVar	; Get file variable
+	ld	a,(Type)
+	cp	_RecF
+	jr	nz,l59d8
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$ENV		; Get name
+	ld	hl,(l7b6f)
+	call	StLD.DE		; Set LD DE,val16
+l59d8:
+	pop	hl
+	jr	l59e1
+;
+; CLOSE(filvar)
+;
+..CLOSE:
+	call	GetFilVar	; Get file variable
+	ld	hl,ClsTab
+l59e1:
+	call	MustRightParen	; Verify )
+	call	DoFileRel	; Put for file type
+	jr	ll5abe
+;
+; Install file related operation
+; ENTRY	Reg HL points to table
+;
+DoFileRel:
+	ld	a,(Type)	; Get type
+	sub	_RecF		; .. strip off offset
+	add	a,a
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Get hook into table
+	ld	e,(hl)		; .. load routine
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	StCALL@		; .. install it
+;
+; Reset table
+;
+ResTab:
+	dw	resetrecord,resettext,resetuntyp
+;
+; Rewrite table
+;
+RewrTab:
+	dw	RWrRecord,RWrText,RWrUntype
+;
+; Close table
+;
+ClsTab:
+	dw	closerecord,closetext,closeuntyp
+;
+; EXIST(filvar)
+;
+.EXIST:
+	call	GetFilVar	; Get file variable
+	call	MustRightParen	; Verify )
+	ld	hl,Exist
+	call	StCALL@		; Set CALL EXIST
+	jp	l64d2
+;
+; APPEND(filvar)
+;
+.APPEND:
+	call	GetFilVar	; Get file variable
+	call	MustRightParen	; Verify )
+	ld	a,(Type)	; Get type
+	cp	_TxtF		; Must be text
+	call	ErrNZ
+	db	_TextFilExp
+	ld	hl,Append
+	call	StCALL@		; Set CALL APPEND
+	jp	l5abe
+;
+; FINDFIRST(mask)
+;
+.FINDFIRST:
+	call	MustLeftParen	; Verify (
+	call	StrExpr		; Get string mask
+	ld	hl,FndFrs
+	call	l5c81		; Get ) and set function
+	jp	l647e		; .. return type
+;
+; FINDNEXT
+;
+.FINDNEXT:
+	ld	hl,FndNxt
+	jp	ll647e		; Set function and return type
+;
+; Get file variable
+;
+GetFilVar:
+	call	MustLeftParen	; Verify (
+.GetFilVar:
+	call	FilVar
+	ret	z
+	call	ERROR		; File variable expected
+	db	_FilVarExp
+;
+; Get type of file
+; EXIT	Accu holds type
+;	Zero set if file type
+;	Carry set if ...
+;
+FilVar:
+	call	l67b2
+	scf
+	ret	nz
+	ld	a,(Type)
+	cp	_RecF		; Test file
+	jr	c,l5a2f		; .. nope
+	cp	_UntF+1
+	jr	nc,l5a2f	; .. also none
+	call	l678b
+	xor	a
+	ld	a,(Type)
+	ret
+l5a2f:
+	xor	a
+	dec	a
+	ret
+;
+; READLN(filvar,var)
+;
+.READLN:
+	db	.LD.A
+;
+; READ(filvar,var)
+;
+.READ:
+	xor	a
+	ld	(NL.mode),a	; Set new line mode
+	call	IsLeftParen	; Test (
+	jr	z,l5a41		; .. yeap
+	call	l5aca
+	jr	l5ab4
+l5a41:
+	call	FilVar		; Get file variable
+	jr	c,l5a63
+	jr	nz,l5a5b	; .. none
+	cp	_RecF
+	jp	z,l5bd8
+	cp	_TxtF
+	call	ErrNZ		; Untyped file not allowed
+	db	_NoUntErr
+	ld	hl,setreadtext
+	call	StCALL@
+	jr	l5aac
+l5a5b:
+	call	l678b
+	call	l5aca
+	jr	l5a69
+l5a63:
+	call	l5aca
+l5a66:
+	call	l677f
+l5a69:
+	ld	a,(Type)
+	cp	_String
+	jr	c,l5a78
+	cp	_Bool
+	jr	z,l5a78
+	cp	13
+	jr	c,l5a7c
+l5a78:
+	call	ERROR		; I/O not allowed
+	db	_IOinvalid
+l5a7c:
+	cp	_String
+	jr	nz,l5a8f
+
+	call	LD.B.LEN	; .. set length
+
+;;	ld	a,(TypLen)	; Get length
+;;	dec	a		; .. fix
+;;	ld	h,a
+;;	ld	l,.LD.B
+;;	call	StWrd		; Put to table
+
+	ld	hl,RdString
+	jr	l5aa9
+l5a8f:
+	ld	hl,RdReal
+	cp	_Real
+	jr	z,l5aa9
+	ld	hl,RdChar
+	cp	_Char
+	jr	z,l5aa9
+	ld	hl,RdInt
+	ld	a,(TypLen)	; Get length of type
+	dec	a
+	jr	nz,l5aa9	; .. integer
+	ld	hl,RdByte	; .. set byte
+l5aa9:
+	call	StCALL@		; Set CALL read_any
+l5aac:
+	call	IsComma		; Test ,
+	jr	z,l5a66		; .. yeap
+	call	MustRightParen	; Verify )
+l5ab4:
+	ld	hl,endread
+l5ab7:
+	ld	a,(NL.mode)	; Test READLN
+	or	a
+	call	nz,StCALL@	; .. yeap, set call
+l5abe:
+	ld	a,(LocOpt)
+	bit	.Iopt,a		; Test I/O check
+	ret	z		; .. nope
+	ld	hl,ioerrchk
+	jp	StCALL@		; .. insert check of I/O
+;
+;
+;
+l5aca:
+	ld	hl,Input
+	ld	a,(LocOpt)
+	bit	.Bopt,a		; Test I/O mode
+	jr	z,l5ae4		; .. passive, set terminal
+	ld	hl,read		; .. else set console
+	ld	a,(NL.mode)	; Test READNL
+	or	a
+	jr	z,l5ae4		; .. nope
+	ld	hl,readln
+	xor	a
+	ld	(NL.mode),a	; Clear NL
+l5ae4:
+	jp	StCALL@		; .. set I/O
+;
+; WRITELN(filvar,var)
+;
+.WRITELN:
+	db	.LD.A		; ld a,.xor
+;
+; WRITE(filvar,var)
+;
+.WRITE:
+	xor	a
+	ld	(NL.mode),a	; Set mode
+	call	IsLeftParen	; Test (
+	jr	z,l5afa		; .. yeap
+	ld	hl,Input	; Set terminal
+	call	StCALL@
+	jp	l5bd2
+l5afa:
+	call	FilVar		; Get file variable
+	jr	c,l5b20
+	jr	nz,l5b15	; .. none
+	cp	_RecF
+	jp	z,l5bdd
+	cp	_TxtF
+	call	ErrNZ		; Untyped file not allowed
+	db	_NoUntErr
+	ld	hl,SWrTxt
+	call	StCALL@
+	jp	l5bc9
+l5b15:
+	call	l620f
+	ld	hl,Input
+	call	StCALL@
+	jr	l5b4f
+l5b20:
+	ld	hl,Input
+	call	StCALL@
+l5b26:
+	call	GetLabType	; Get type of label
+	jr	nz,l5b4c
+	ld	a,b		; .. got constant
+	cp	_String		; Test string
+	jr	nz,l5b47
+	LdSRC	a
+	cp	','
+	jr	z,l5b3b
+	cp	')'
+	jr	nz,l5b47
+l5b3b:
+	ld	hl,WrImStr
+	call	StCALL@		; Set CALL write_string
+	call	StLen		; Save string
+	jp	l5bc9
+l5b47:
+	call	l6201
+	jr	l5b4f
+l5b4c:
+	call	Expression	; Get expression
+l5b4f:
+	ld	a,b
+	cp	_String
+	jr	c,l5b58
+	cp	13
+	jr	c,l5b5c
+l5b58:
+	call	ERROR		; I/O not allowed
+	db	_IOinvalid
+l5b5c:
+	cp	_Char
+	jr	nz,l5b6a
+	call	IsColon		; Test :
+	jr	nz,l5ba6	; .. nope
+	call	l5edd
+	jr	l5b72
+l5b6a:
+	call	ExprPush	; Push regs
+	call	IsColon		; Test :
+	jr	nz,l5b8b	; .. nope
+l5b72:
+	push	bc
+	call	IntExpr		; Get integer expressin
+	pop	bc
+	ld	a,b
+	cp	_Real
+	jr	nz,l5ba6
+	call	IsColon		; Test :
+	jr	nz,l5b9d	; .. nope
+	push	bc
+	call	StPUSH		; Set PUSH HL
+	call	IntExpr		; Get integer expression
+	pop	bc
+	jr	l5ba6
+l5b8b:
+	ld	hl,0
+	ld	a,b
+	cp	9
+	jr	nz,l5b95
+	ld	l,18
+l5b95:
+	call	StLD.HL		; Set LD HL,0/18
+	ld	a,b
+	cp	_Real
+	jr	nz,l5ba6
+l5b9d:
+	call	StPUSH		; Set PUSH HL
+	ld	hl,-1
+	call	StLD.HL		; Set LD,-1
+l5ba6:
+	ld	a,b
+	ld	hl,WrString
+	cp	_String		; Test string
+	jr	z,l5bc6
+	ld	hl,WrReal
+	cp	_Real		; .. real
+	jr	z,l5bc6
+	ld	hl,WrInt
+	cp	_Integ		; .. integer
+	jr	z,l5bc6
+	ld	hl,WrBool
+	cp	_Bool		; .. boolean
+	jr	z,l5bc6
+	ld	hl,WrChar	; Set character
+l5bc6:
+	call	StCALL@		; Set CALL write_routine
+l5bc9:
+	call	IsComma		; Test ,
+	jp	z,l5b26		; .. yeap
+	call	MustRightParen	; Verify )
+l5bd2:
+	ld	hl,writelntext
+	jp	l5ab7
+l5bd8:
+	ld	hl,RdRecord
+	jr	l5be0
+l5bdd:
+	ld	hl,writerecord
+l5be0:
+	ld	(l7ba7),hl
+	ld	a,(NL.mode)	; Test WRITELN
+	or	a
+	call	ErrNZ		; Textfile expected
+	db	_TextFilExp
+	ld	hl,SWrRec
+	call	StCALL@
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$ENV		; Get name
+l5bf7:
+	call	IsComma		; Test ,
+	jr	nz,l5c10	; .. nope
+	call	SavEnv2		; Save environment
+	call	l677f
+	call	RestEnv2	; Get back environment
+	call	l58c5
+	ld	hl,(l7ba7)
+	call	StCALL@
+	jr	l5bf7
+l5c10:
+	call	MustRightParen	; Verify )
+	jp	l5abe
+;
+; BLOCKREAD(filvar,var,recs{,result})
+;
+.BLOCKREAD:
+	ld	hl,BlkRdR
+	ld	de,BlkRd
+	jr	l5c24
+;
+; BLOCKWRITE(filvar,var,recs{,result})
+;
+.BLOCKWRITE:
+	ld	hl,BlkWrR
+	ld	de,BlkWr
+l5c24:
+	push	hl
+	push	de
+	call	GetFilVar	; Get file variable
+	cp	_UntF
+	call	ErrNZ		; Untyped file expected
+	db	_UntypeExp
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	l677f
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer expression
+	call	IsComma		; Test ,
+	pop	de
+	pop	hl
+	jr	z,l5c4b		; .. yeap
+	push	de
+	jr	l5c63
+l5c4b:
+	push	hl
+	call	StPUSH		; Set PUSH HL
+	call	l677f
+	ld	a,(Type)
+	cp	_Integ
+	jr	nz,l5c5f
+	ld	a,(TypLen)	; Get length
+	dec	a		; .. verify integer
+	jr	nz,l5c63
+l5c5f:
+	call	ERROR		; Integer variable expected
+	db	_IntVexp
+l5c63:
+	jp	l5985
+;
+; DELETE(string,pos,num)
+;
+..DELETE:
+	call	MustLeftParen	; Verify (
+	call	l5cad
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer pos
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer num
+	ld	hl,delete
+l5c81:
+	call	MustRightParen	; Verify )
+	jp	StCALL@
+;
+; INSERT(object,target,pos)
+;
+.INSERT:
+	call	MustLeftParen	; Verify (
+	call	StrExpr		; Get object
+	call	MustComma	; Verify ,
+	call	l5cad
+	call	StPUSH		; Set PUSH HL
+	ld	a,(TypLen)	; Get length
+	dec	a		; .. fix
+
+	push	af
+
+;;	ld	h,a
+;;	ld	l,.LD.B
+;;	push	hl
+
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer pos
+
+;;	pop	hl
+
+	pop	af
+	call	LD.B.		; Set length
+
+	call	StWrd		; .. put length to table
+	ld	hl,insert
+	jr	l5c81
+;
+;
+;
+l5cad:
+	call	l677f
+	ld	a,(Type)
+	cp	_String
+	ret	z
+	call	ERROR		; String variable expected
+	db	_StrVexp
+;
+; STR(val,string)
+;
+.STR:
+	call	MustLeftParen	; Verify (
+	call	NumExpr		; Get val
+	call	ExprPush	; Push regs
+	call	IsColon		; Test :
+	jr	nz,l5ce4	; .. nope
+	push	bc
+	call	IntExpr		; Get integer expression
+	call	StPUSH		; Set PUSH HL
+	pop	bc
+	ld	a,b
+	cp	_Integ
+	jr	z,l5d02
+	call	IsColon		; Test :
+	jr	nz,l5cf9	; .. nope
+	push	bc
+	call	IntExpr		; Get integer expression
+	call	StPUSH		; Set PUSH HL
+	pop	bc
+	jr	l5d02
+l5ce4:
+	ld	hl,0
+	ld	a,b
+	cp	_Integ
+	jr	z,l5cee
+	ld	l,18
+l5cee:
+	call	StLD.HL		; Set LD HL,0/18
+	call	StPUSH		; Set PUSH HL
+	ld	a,b
+	cp	_Integ
+	jr	z,l5d02
+l5cf9:
+	ld	hl,-1
+	call	StLD.HL		; Set LD HL,-1
+	call	StPUSH		; Set PUSH HL
+l5d02:
+	call	MustComma	; Verify ,
+	push	bc
+	call	l5cad
+
+	call	LD.B.LEN	; .. set length
+
+;;	ld	a,(TypLen)	; Get length
+;;	dec	a		; .. fix
+;;	ld	h,a
+;;	ld	l,.LD.B
+;;	call	StWrd		; Put to table
+
+	pop	bc
+	ld	hl,strinteger
+	ld	a,b
+	cp	_Integ
+	jr	z,ll5c81
+	ld	hl,strreal
+ll5c81:
+	jp	l5c81
+;
+; VAL(string,var,code)
+;
+.VAL:
+	call	MustLeftParen	; Verify (
+	call	StrExpr		; Get string
+	call	MustComma	; Verify ,
+	call	l677f
+	ld	a,(Type)
+	cp	_Real
+	jr	z,l5d45
+	cp	_Integ
+	jr	nz,l5d41
+	ld	a,(TypLen)	; Get length
+	dec	a
+	ld	a,_Integ
+	jr	nz,l5d45
+l5d41:
+	call	ERROR		; Integer or real var expected
+	db	_IntRealVexp
+l5d45:
+	push	af
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	l677f
+	ld	a,(Type)
+l5d52:
+	cp	_Integ
+	jr	nz,l5d5c
+	ld	a,(TypLen)	; Get length
+	dec	a
+	jr	nz,l5d60
+l5d5c:
+	call	ERROR		; Integer variable expected
+	db	_IntVexp
+l5d60:
+	pop	af
+	ld	hl,valinteger
+	cp	_Integ
+	jr	z,ll5c81
+	ld	hl,valreal
+	jr	ll5c81
+;
+; GOTOXY(x,y)
+;
+.GOTOXY:
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer x
+	ld	hl,gotoxy
+l5d76:
+	push	hl
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer y
+	pop	hl
+	jr	l5db1
+;
+; RANDOMIZE
+;
+.RANDOMIZE:
+	ld	hl,RndMize
+	jp	StCALL@
+;
+; DELAY(time)
+;
+.DELAY:
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer time
+	ld	hl,delay
+	jr	l5db1
+;
+; GETMEM(pvar,i)
+;
+.GETMEM:
+	call	l5de3
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer i
+	jr	l5dae
+;
+; NEW(pvar)
+;
+.NEW:
+	call	l5de3
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$ENV		; Get name
+	ld	hl,(l7b6f)
+	call	StLD.HL		; Set LD HL,val16
+l5dae:
+	ld	hl,new
+l5db1:
+	jp	l5960
+;
+; FREEMEM(pvar,i)
+;
+.FREEMEM:
+	call	l5de3
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer i
+	jr	l5dce
+;
+; DISPOSE(pvar)
+;
+.DISPOSE:
+	call	l5de3
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$ENV		; Get name
+	ld	hl,(l7b6f)
+	call	StLD.HL		; Set LD HL,val16
+l5dce:
+	ld	hl,dispose
+	jp	l5960
+;
+; MARK(pvar)
+;
+.MARK:
+	ld	hl,mark
+	jr	l5ddc
+;
+; RELEASE(pvar)
+;
+.RELEASE:
+	ld	hl,release
+l5ddc:
+	push	hl
+	call	l5de9
+	pop	hl
+	jr	l5db1
+l5de3:
+	call	l5de9
+	jp	StPUSH		; Set PUSH HL
+l5de9:
+	call	MustLeftParen	; Verify (
+	call	l677f
+	ld	a,(Type)
+	cp	_Ptr
+	ret	z
+	call	ERROR		; Pointer variable expected
+	db	_PtrVexp
+;
+; OVRDRIVE(drv)
+;
+.OVRDRIVE:
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer drv
+	ld	hl,ovrdrive
+	jp	l5960
+;
+; MOVE(var1,var2,num)
+;
+.MOVE:
+	call	MustLeftParen	; Verify (
+	call	l677f
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	l677f
+	ld	hl,move
+	jp	l5d76
+;
+; FILLCHAR(var,num,val)
+;
+.FILLCHAR:
+	call	MustLeftParen	; Verify (
+	call	l677f
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer num
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	ActParam	; Get simple val
+	ld	hl,fillchar
+	jp	l5db1
+;
+; CRTINIT
+;
+.CRTINIT:
+	ld	hl,crtinit
+	jr	l5e45
+;
+; CRTEXIT
+;
+.CRTEXIT:
+	ld	hl,crtexit
+	jr	l5e45
+;
+; CLRSCR
+;
+.CLRSCR:
+	ld	hl,clrscr
+l5e45:
+	jp	StCALL@
+;
+; CLREOL
+;
+.CLREOL:
+	ld	hl,clreol
+	jr	l5e45
+;
+; NORMVIDEO
+; HIGHVIDEO
+;
+.NORMVIDEO:
+	ld	hl,normvideo
+	jr	l5e45
+;
+; LOWVIDEO
+;
+.LOWVIDEO:
+	ld	hl,lowvideo
+	jr	l5e45
+;
+; INSLINE
+;
+.INSLINE:
+	ld	hl,insline
+	jr	l5e45
+;
+; DELLINE
+;
+.DELLINE:
+	ld	hl,delline
+	jr	l5e45
+;
+; EXIT
+;
+.EXIT:
+	ld	de,0
+	jp	l5639
+;
+; HALT
+;
+.HALT:
+	ld	hl,halt
+	jp	StJP@		; Store JP HALT
+;
+; Procedure:
+; PORT(port)
+;
+.PORT:
+	call	l5e8e
+	call	StImm
+	db	@L26
+$I26:
+	POP	BC
+	OUT	(C),L
+@L26	equ	$-$I26
+	ret
+;
+; STACKPTR
+;
+.STACKPTR:
+	call	MustAss		; Verify :=
+	call	IntExpr		; Get integer
+	call	StImm
+	db	@L27
+$I27:
+	LD	SP,HL
+@L27	equ	$-$I27
+	ret
+;
+; Get expression saving current environment
+;
+.Expression:
+	call	SavEnv1		; Save environment
+	call	Expression	; Get expression
+	call	RestEnv1	; Get back environment
+	ret
+;
+;
+;
+l5e8e:
+	call	@IntExpr	; Get [] or ()
+	call	MustAss		; Verify :=
+	call	StPUSH		; Set PUSH HL
+;
+; Process integer expression
+;
+IntExpr:
+	call	Expression	; Get expression
+	ld	a,b
+	cp	_Integ
+	ret	z
+	call	ERROR		; Integer expression expected
+	db	_IntExprExp
+;
+; Process number expression
+;
+NumExpr:
+	call	Expression
+	ld	a,b
+	cp	_Integ
+	ret	z
+	cp	_Real
+	ret	z
+	call	ERROR		; Integer or real expr expected
+	db	_IntRealExprExp
+;
+; Process boolean expression
+;
+BoolExpr:
+	call	Expression
+	ld	a,b
+	cp	_Bool
+	ret	z
+	call	ERROR		; Boolean expression expected
+	db	_BoolExprExp
+;
+; Process actual parameter
+;
+ActParam:
+	call	Expression
+.ActParam:
+	ld	a,b
+	cp	_Integ
+	ret	nc
+	cp	_String
+	call	ErrNZ
+	db	_SimpExpr	; Simple expression expected
+	ld	b,_Char
+	ld	hl,AssChr
+	jp	StCALL@
+;
+; Process string expression
+;
+StrExpr:
+	call	Expression
+	ld	a,b
+	cp	_String
+	ret	z
+	cp	_Char
+	call	ErrNZ
+	db	_StrExprExp		; String expression expected
+l5edd:
+	ld	b,_String
+	call	StImm
+	db	@L28
+$I28:
+	LD	H,L
+	LD	L,1
+	PUSH	HL
+@L28	equ	$-$I28
+	ret
+;
+; Expression handler
+;
+Expression:
+	call	SimpExpr	; Get simple expression
+..Expression:
+	push	bc
+	call	FndTabStr	; Find operator
+	db	_Byte
+	dw	$OPERS
+	pop	bc
+	ret	nz		; .. nope
+	ld	a,(hl)
+	inc	a
+	jr	z,l5f34
+	dec	a
+	push	af
+	push	bc
+	call	ExprPush	; Push regs
+	ld	hl,(l7b8b)
+	push	hl
+	call	SimpExpr	; Get simple expression
+	pop	hl
+	ld	(l7b8d),hl
+	pop	de
+	call	ExprConv	; Convert expression
+	pop	af
+	ld	e,a
+	ld	d,0
+	ld	hl,l5f68
+	add	hl,de
+	ld	a,b
+	cp	_Set
+	jr	z,l5f28
+	inc	hl
+	inc	hl
+	cp	_Real
+	jr	z,l5f28
+	inc	hl
+	inc	hl
+	cp	_String
+	jr	z,l5f28
+	inc	hl
+	inc	hl
+l5f28:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,d
+	or	e
+	call	ErrZ		; Invalid operand type
+	db	_IllOpers
+	ex	de,hl
+	jr	l5f62
+l5f34:
+	ld	a,b
+	cp	_Integ
+	jr	nc,l5f47
+	cp	_String
+	call	ErrNZ		; Invalid operand type
+	db	_IllOpers
+	ld	hl,AssChr
+	call	StCALL@
+	ld	b,_Char
+l5f47:
+	push	bc
+	call	StPUSH		; Set PUSH HL
+	call	SimpExpr	; Get simple expression
+	pop	de
+	ld	a,b
+	cp	_Set
+	call	ErrNZ		; Invalid operand type
+	db	_IllOpers
+	ld	a,c
+	or	a
+	jr	z,l5f5f
+	cp	d
+	call	ErrNZ		; Invalid type
+	db	_InvType
+l5f5f:
+	ld	hl,SetIN
+l5f62:
+	call	StCALL@
+	ld	b,_Bool
+	ret
+;
+; Operator table
+;
+l5f68:
+;
+;	=
+;
+	dw	set.EQ		; SET
+	dw	eqreal		; REAL
+	dw	eqstring	; STRING
+	dw	eqinteger	; INTEGER
+;
+;	<>
+;
+	dw	set.NEQ
+	dw	nereal
+	dw	nestring
+	dw	neinteger
+;
+;	>=
+;
+	dw	SetSb1
+	dw	gtereal
+	dw	gtestring
+	dw	gteinteger
+;
+;	<=
+;
+	dw	SetSb2
+	dw	ltereal
+	dw	ltestring
+	dw	lteinteger
+;
+;	>
+;
+	dw	0
+	dw	gtreal
+	dw	gtstring
+	dw	gtinteger
+;
+;	<
+;
+	dw	0
+	dw	ltreal
+	dw	ltstring
+	dw	ltinteger
+;
+; Set code LD B,len
+;
+LD.B.LEN:
+	ld	a,(TypLen)	; Get length
+	dec	a		; .. fix
+;
+; Set code LD B,len
+; ENTRY	Accu holds length
+;
+LD.B.:
+	ld	h,a
+	ld	l,.LD.B
+	call	StWrd		; Store code
+	ret
+	.comment		|
+;
+FS.stat:
+	ds	1
+FS.ptr:
+	ds	2
+FS.RRN:
+	ds	3
+FS.top:
+	ds	2
+;
+; Save current state of source pointer or file
+;
+ptell::
+	ld	a,(IncFlg)	; Get include file state
+	ld	(FS.stat),a	; .. save
+	push	ix		; Get line pointer
+	pop	hl
+;;	ld	hl,(SrcPtr)	; Get text pointer
+	or	a		; Test include file
+	jr	z,PT.sav	; .. nope
+	ld	de,CFCB		; Get source file
+	ld	c,.SetRRN
+	call	.BDOS		; Get random record
+	push	ix
+	ld	ix,CFCB+_rrn	; Point to result
+	ld	a,(Inc.read)	; Get records read
+	ld	b,a
+	ld	a,(ix+0)
+	sub	b		; Calculate record position
+	ld	l,a
+	ld	a,(ix+1)
+	sbc	a,0
+	ld	h,a
+	ld	a,(ix+2)
+	sbc	a,0
+	jr	nc,PT.RRN	; .. in range
+	xor	a		; .. set very first record
+	ld	l,a
+	ld	h,a
+PT.RRN:
+	ld	(FS.RRN),hl	; Save record
+	ld	(FS.RRN+2),a
+	ld	hl,(INC$Top)	; Get .INC top
+	ld	(FS.top),hl	; .. save
+	ld	hl,(INC.ptr)	; .. current pointer
+	pop	ix
+PT.sav:
+	ld	(FS.ptr),hl	; .. save pointer
+	ret
+;
+; Restore state of source pointer or file
+;
+pseek::
+	ld	hl,(FS.ptr)	; Get back text pointer
+	ld	a,(FS.stat)	; .. include file state
+	ld	(IncFlg),a	; .. save
+	or	a		; Test from file
+	jr	nz,PS.INC	; .. yeap
+;;	ld	(SrcPtr),hl	; Restore text pointer
+	push	hl
+	pop	ix
+	ret
+PS.INC:
+	ld	(INC.ptr),hl	; .. restore current pointer
+	ld	hl,(FS.top)	; .. .INC top
+	ld	(INC$Top),hl
+	ld	hl,(FS.RRN)	; Get record
+	ld	(CFCB+_rrn),hl	; .. restore
+	ld	a,(FS.RRN+2)
+	ld	(CFCB+_rrn+2),a
+	ld	de,(Inc.DMA)
+	ld	c,.SetDMA
+	call	.BDOS		; Set buffer
+	ld	de,CFCB
+	ld	c,.RdRnd
+	call	.BDOS		; Position buffer
+	call	Rd.Inc		; Read buffer
+	ret
+				|
+

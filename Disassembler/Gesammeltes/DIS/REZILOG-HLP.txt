@@ -1,0 +1,149 @@
+
+REZILOG		<Vers 0.7>
+
+Alle Werteingaben koennen durch ".SYMBOL" ersetzt werden, wenn dieses
+	Symbol in der Tabelle vorhanden ist.
+
+Aufruf:	REZILOG NAME / OPTION1 OPTION2
+			NAME = Name des Programms und der Arbeitsdateien
+			OPTIONx Kommando Uxxxx oder
+					 Oxxxx
+;	Kommentareingabe
+	;ADR,Kommentar	:Kommentareingabe
+	;ADR		:Kommentarausgabe
+	;		:Ausgabe der ganzen Kommentardatei
+	;ADR,		:Kommentar loeschen
+			Kommentare erscheinen vor der Programmzeile
+			"\" neue Zeile in K.
+			"_" (Underline) K. erscheint hinter der Zeile
+	Achtung : Durch Eingabe von "Uaddr" muss der Kommentardatei
+			vorher Speicherbereich zugeordnet werden !
+
+
+~
+Control
+	C		Dump Controlltabelle
+	Cssss		Dump ab Adresse ssss ( hex )
+	Caaaa,x		Definition von Controll- Eintraegen
+			B = Byte ( ASCII falls darstellbar )
+			W = Wort
+			I = Instruction / Befehl
+			K = Kill / loeschen
+			E = Endemarke
+			S = DEFS  Vorsicht, ist bis zum naechsten
+			  C-Eintrag wirksam , kein Absuchen der Symboltabelle
+			< H = Hex ( ohne ASCII-Umwandlung ) in Vorbereitung >
+
+	jeder C - Eintrag erzeugt eine neue Zeile
+
+~
+Dump	
+	D		Speicher Dump ( 1 Block )
+	Daaaa		Speicher Dump ( 1 Block ) ab aaaa
+	Daaaa,eeee	Dump von aaaa bis eeee
+	D,eeee		Weitermachen bis eeee
+	D=xx		Einstellen der Blockgroesse auf xx (HEX)
+			Standard ist 080H
+
+	Achtung, alle Adressangaben beziehen sich auf den OFFSET.
+	Die wirklich angezeigte Adresse ist OFFSET+ANGEZEIGTE ADRESSE.
+	Wenn die wahren A. interessieren ist der OFFSET auf "0" zu setzen
+	( Eingabe: O0<CR> )
+	Vor dem naechsten List Kommando muss der alte OFFSET wieder
+	eingestellt werden, sonst stimmen die CONTROL und SYMBOL Zuordnungen
+	nicht mehr.
+~
+Enter	Symbol
+	Ennnn,.SYMBOL	Ein Symbol darf aus folgenden Zeichen bestehen:
+			A-Z, 0-9, +, - ,und muss mit A-Z beginnen.
+			Symbole die +/- enthalten werden nur als Operanden
+			dargestellt.
+	Die Symboltabelle ist alphabetisch sortiert. Unterschiedliche
+	Symboleintraege mit gleichen Adresswerten sind moeglich.
+
+Kill	loeschen eines Symbols aus der Tabelle
+	K.SYMBOL
+
+=	Aendern eines Symbolnamens
+	=.ALT.NEU
+
+Find	Suche nach Adresse oder Wert. Abbruch durch <CR>.
+	Fxxxx,ssss	Suche Adresse xxxx, start bei ssss
+	Fxxxx		Suche Adresse xxxx
+
+~
+List	Programm
+	L		List eine Bildschirmseite
+	Lssss,eeee	List von ssss bis eeee
+	L,eeee		List bis eeee
+	Lssss		List eine Seite ab ssss
+	L=xx		Einstellen der Seitenlaenge ( Wert in Hex )
+
+	Ein Eintrag Ceeee,E stoppt den List-Befehl
+
+A	wie List jedoch wird automatisch nach (ASCII) Text gesuch, und
+	entsprechende Control Eintraege erzeugt.
+	8 darstellbare ASCII Zeichen werden als Text erkannt.
+
+Build	wie List jedoch mit automatischer Symbol - Generierung
+
+Prolog	Bei Ausgabe auf Disk vor List aufrufen
+	Erzeugt ORG und EQU Anweisungen
+
+~
+Offset	Einstellen des OFFSETs ( das Programm liegt nicht auf seiner
+			wahren Adresse
+	O		Ausgabe des momentanen Offset - Wertes
+	Onnnn		Setze Offset auf nnnn
+
+	O ist als Option beim Aufruf erlaubt.
+
+Prolog	Ezeugen von ORG und EQU Anweisungen
+
+	Pssss,eeee	Erzeugt ORG ssss
+			Alle Symbole ausserhalb von ssss-eeee
+			werden als EQU xxxxH definiert
+
+Quiet	(still) Q ist als Vorspann vor Kommandos erlaubt und unterdrueckt
+			die Bildschirm- Ausgabe.
+	Qkkkk		Stumme Ausfuehrung des Kommandos kkkk
+			z.B bei Build und Save
+
+~
+Read	Rname.com	lesen eines COM - Files
+	Rname.ctl	laden der CTL - Tabelle
+	Rname.sym	laden der SYMBOL - Tabelle
+	Rname.doc	laden der Kommentar - Datei
+			vorher mit 'U' Speicherplatz zuweisen
+
+Save	Sname.z80	schreiben eines 'SOURCE FILES'
+	     .asm	vorher 'Paaaa,eeee' ausfuehren
+			mit 'L' schreiben und 'Z' abschliessen
+	Sname.ctl	retten der CTL - Tabelle
+	Sname.sym	retten der SYMbol - Tabelle
+	Sname.doc	retten der Kommentardatei
+
+	S*		retten aller Dateien ( ausser .Z80/.ASM )
+	S**		retten aller Dateien und .Z80 eroeffnen
+	ACHTUNG: dies geht nur, wenn beim Aufruff automatisch
+			gelesen wurde ( siehe Aufruf )
+
+
+~
+User	Unnnn		Bereich ab nnnn fuer Kommentardatei reservieren
+
+X	X		Symbol - und Control - Tabellen loeschen
+
+Z	Close / Abschliessen einer .ASM/.Z80 Datei
+	----------------------------------------------------
+Vorsicht ! Bei Build ( A & ; ) koennen Tabellenueberlaeufe auftreten.
+	Wenn die Symboltabelle sich dem Programmbereich naehert,
+	alle Dateien auf die Diskette retten (evtl. neue Disk) und
+	mit groesserem OFFSET neu laden. Wenn die Kommentardatei 
+	ins CP/M waechst, sofort die naechste Kneipe aufsuchen.
+
+?	Speicherbelegung (Statistik) zum Erkennen von drohenden
+	Ueberlaufen. ( Auto-Rangecheck in Vorbereitung )
+	----------------------------------------------------
+
+

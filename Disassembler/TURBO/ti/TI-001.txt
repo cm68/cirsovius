@@ -1,0 +1,595 @@
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !! DO NOT CHANGE THE FOLLOWING CODE  !!
+; !! OTHERWISE COMPILER MAY BE REFUSED !!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	dseg
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %% ENTER TURBO ON COLD ENTRY %%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+IniStart:
+	sub	a		; Check the right CPU
+	ld	de,$Ill.CPU
+	jp	pe,Exit
+	ld	c,.Version
+	call	BDOS		; Get OS version
+	cp	CPM.OS		; .. verify correct one
+	ld	de,$Ill.OS
+	jp	c,Exit		; .. error
+	ld	c,.RetDsk
+	call	BDOS		; Get logged disk
+	inc	a
+	ld	(LogDisk),a
+	ld	a,(CallDsk)
+	ld	(TPA.Dsk),a	; Set caller disk
+IF	@@KEY
+	ld	hl,(OS+1)	; Get OS base
+	ld	de,..userf	; .. get offset
+	add	hl,de
+	ld	(XBIOS+1),hl	; Set special vector
+	call	XBIOS		; Get version
+	dw	CD_VERS
+	ld	de,$Ill.PCW
+	cp	_PCW		; MUST be PCW
+	jp	nz,Exit
+	ld	a,b
+	cp	BIOS_Maj	; Verify known versions
+	jp	nz,Exit
+	ld	a,c
+	ld	hl,KM.XLTa
+	cp	BIOS_Min.a
+	jr	z,GotOS
+	ld	hl,KM.XLTb
+	cp	BIOS_Min.b
+	jr	z,GotOS
+	ld	hl,KM.XLTc
+	cp	BIOS_Min.c
+	jp	nz,Exit
+GotOS:
+	ld	(KM.XLT),hl	; Set up translation vector
+ENDIF	;@@KEY
+	ld	hl,CCPbuf	; Test installer requested
+	ld	a,(hl)
+	or	a
+	jp	z,MainStart	; .. nope
+	ld	b,a
+WtBlank:
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	jr	nz,TstInst
+	djnz	WtBlank
+	jp	MainStart
+TstInst:
+	cp	'I'
+	jp	nz,MainStart
+	dec	b
+	jp	nz,MainStart
+;
+; //////////////////////////////////////////
+; /// The installer part of the Compiler ///
+; //////////////////////////////////////////
+;
+	ld	de,$Rules
+	call	String		; Tell what we are able to do
+	ld	a,(CallDsk)
+	ld	de,IFCB
+	ld	(de),a		; Set callers disk
+	ld	c,.Open
+	call	BDOS		; Open file
+	inc	a
+	ld	de,$FATAL
+	jp	z,Exit
+	ld	de,IDMA
+	ld	c,.setDMA
+	call	BDOS		; Set disk buffer
+	ld	de,IFCB
+	ld	c,.RdRnd
+	call	BDOS		; Read record
+	ld	de,$InvTP
+	ld	a,(IDMA)
+	cp	.JP		; Verify header ok
+	jp	nz,Exit
+	ld	hl,(IDMA+1)
+	ld	bc,StrtPrg
+	or	a
+	sbc	hl,bc
+	jp	nz,Exit
+	ld	a,(IDMA+3)	; Fetch length
+	ld	hl,IDMA+4	; Get init sequence
+	ld	de,$CRTINIT
+	call	TellCtrl	; Tell control
+	ld	a,(IDMA+3)	; Fetch length
+	ld	c,a
+	ld	b,0
+	ld	hl,IDMA+4	; Get de-init sequence
+	add	hl,bc
+	push	hl
+	add	hl,bc		; .. point over it
+	pop	de
+	push	hl
+	ex	de,hl
+	ld	de,$CRTEXIT
+	call	TellCtrl	; Tell de-init
+	pop	hl
+	ld	de,$COL
+	call	TellDec		; Tell columns
+	inc	hl
+	ld	de,$ROW
+	call	TellDec
+	ld	a,(ChgFlg)
+	or	a		; Test change
+	call	nz,WrtBack	; .. yeap
+	jp	MainStart
+;
+Exit:
+	call	String		; Give error message
+	jp	OS		; .. and leave
+;
+; Print message on console
+; ENTRY	Reg DE points to message
+;
+String:
+	push	bc
+	push	hl
+	ld	c,.String
+	call	BDOS		; .. tell it
+	pop	hl
+	pop	bc
+	ret
+;
+; Print hex byte
+; ENTRY	Accu holds byte
+;
+HexByte:
+	push	af
+	rra			; Get HI
+	rra
+	rra
+	rra
+	call	HexNib
+	pop	af		; .. then LO
+HexNib:
+	and	LoMask
+	add	a,40h		; Convert to hex
+	daa
+	adc	a,90h
+	daa
+;
+; Print character on console
+; ENTRY	Accu holds character
+;
+Conout:
+	push	bc
+	push	de
+	push	hl
+	ld	e,a
+	ld	c,.Conout
+	call	BDOS		; .. print
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Print decimal byte
+; ENTRY	Accu holds byte
+;
+DecByte:
+	ld	b,a
+	ld	c,100
+	call	PrDig		; Get hundreds
+	ld	c,10
+	call	PrDig		; .. and tens
+	ld	a,'0'
+	add	a,b		; Get units
+	call	Conout		; .. print
+	ret
+;
+; Print digit
+; ENTRY	Reg B holds byte
+;	Reg C holds limit
+; EXIT	Reg B holds result
+;
+PrDig:
+	ld	a,b
+	cp	c		; Test range
+	ret	c		; .. nope
+	ld	e,-1
+..dig:
+	inc	e
+	sub	c		; .. fix byte
+	jr	nc,..dig
+	add	a,c
+	ld	b,a
+	ld	a,'0'
+	add	a,e
+	call	Conout		; .. print
+	ret
+;
+; Give escape sequence control
+; ENTRY	Reg DE holds string
+;	Reg HL points to control
+;	Accu holds max length
+;
+TellCtrl:
+	push	af
+	push	hl
+	call	String		; .. print string
+	ld	b,(hl)		; Get length
+	inc	b
+	dec	b		; Test any
+	jr	z,NoCtrl
+	call	DumpCtrl	; .. dump it
+	call	ASCIICtrl	; .. as ASCII, too
+ExitCtrl:
+	call	NL		; .. close line
+	pop	hl
+	pop	af
+	call	SetCtrl
+	ret
+NoCtrl:
+	ld	de,$NONE	; Tell none
+	call	String
+	jr	ExitCtrl
+;
+; Dump control
+; ENTRY	Reg HL points to definition
+;	Reg B  holds length of definition
+;
+DumpCtrl:
+	push	hl
+	push	bc
+.DumpCtrl:
+	inc	hl
+	ld	a,(hl)
+	call	HexByte		; .. print byte
+	dec	b
+	ld	a,','
+	call	nz,Conout	; .. give delimiter
+	inc	b
+	djnz	.DumpCtrl
+	pop	bc
+	pop	hl
+	ret
+;
+; Dump control as ASCII
+; ENTRY	Reg HL points to definition
+;	Reg B  holds length of definition
+;
+ASCIICtrl:
+	ld	a,'('
+	call	Conout		; Give delimiter
+ASCII..:
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; .. test range
+	jr	nc,..Ctr
+	ld	a,'^'
+	call	Conout		; Indicate control
+	ld	a,(hl)
+	add	a,'@'
+..Ctr:
+	call	Conout
+	djnz	ASCII..
+	ld	a,')'
+	call	Conout		; .. close it
+	ret
+;
+; Set control
+; ENTRY	Reg HL points to control sequence
+;	Accu holds max length of control
+;
+SetCtrl:
+	ld	c,a		; .. save length
+	ld	de,$Ctrl
+	call	String		; Tell request
+ReCtrl:
+	ld	de,$Colon
+	call	String
+	call	GetLine		; Get input
+	ret	z		; .. none
+	push	hl		; Copy entry
+	pop	ix
+	ld	(ix),0		; Clear length
+	ld	a,(de)		; Test clear
+	cp	'-'
+	jr	z,SetChg	; .. yeap
+	push	bc
+	push	hl
+NxtCtrl:
+	call	GetByte		; Load byte
+	jr	c,CtrlErr
+	inc	hl
+	ld	(hl),a		; Save byte
+	inc	(ix)		; .. bump
+	inc	b
+	dec	b		; Test end
+	jr	z,CtrlEnd
+	dec	c		; .. count down
+	jr	nz,NxtCtrl
+CtrlErr:
+	ld	de,$CtrlErr
+	call	String		; Tell parameter erroe
+	pop	hl
+	pop	bc
+	jr	ReCtrl
+CtrlEnd:
+	pop	af		; .. clean stack
+	pop	af
+SetChg:
+	ld	a,TRUE
+	ld	(ChgFlg),a	; Set flag
+	ret
+;
+; Get byte from line stream
+; ENTRY	Reg DE points to stream
+;	Reg B  holds length of line
+; EXIT	Carry set on error
+;	Accu holds byte
+;
+GetByte:
+	ld	a,(de)		; Get character
+	cp	'^'		; Test control prefix
+	jr	nz,NotAsCtrl
+	dec	b
+	scf
+	ret	z		; .. should not be the end
+	inc	de
+	ld	a,(de)
+	sub	'@'		; .. make control
+NotAsCtrl:
+	inc	de
+	dec	b
+	or	a
+	ret
+;
+; Give decimal length
+; ENTRY	Reg DE holds string
+;	Reg HL points to number
+;
+TellDec:
+	push	hl
+	call	String		; Give message
+	ld	a,(hl)
+	call	DecByte		; .. print number
+	call	NL
+	pop	hl
+	call	SetDec		; Set new value
+	ret
+;
+; Give new decimal value
+; ENTRY	Reg HL points to location
+;
+SetDec:
+	ld	de,$Dec
+	call	String		; Tell request
+ReDec:
+	ld	de,$Colon
+	call	String
+	call	GetLine		; Get line input
+	ret	z		; .. none
+	push	hl
+	ld	hl,0		; Clear number
+..Dec:
+	ld	a,(de)
+	sub	'0'
+	jr	c,DecErr	; Test range
+	cp	9+1
+	jr	nc,DecErr
+	push	bc
+	ld	c,l
+	ld	b,h
+	add	hl,hl		; * 2
+	add	hl,hl		; * 4
+	add	hl,bc		; * 5
+	add	hl,hl		; *10
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; .. insert digit
+	pop	bc
+	inc	h
+	dec	h
+	jr	nz,DecErr	; Verify byte
+	inc	de
+	djnz	..Dec
+	ld	a,l
+	pop	hl
+	ld	(hl),a		; Set new value
+	ld	a,TRUE
+	ld	(ChgFlg),a	; Indicate change
+	ret
+DecErr:
+	ld	de,$ParErr
+	call	String		; Tell parameter erroe
+	pop	hl
+	jr	ReDec
+;
+; Get line input
+; EXIT	Zero flag set if empty line
+;	Reg DE points to input
+;	Reg B  holds length of input
+;
+GetLine:
+	push	hl
+	push	bc
+	ld	de,$Line
+	ld	c,.GetLin
+	call	BDOS		; .. get line
+	call	NL
+	pop	bc
+	ld	hl,$Line+1
+	ld	b,(hl)
+	inc	hl
+	ex	de,hl
+	pop	hl
+	inc	b
+	dec	b		; Fix result
+	ret
+;
+; Close console line
+;
+NL:
+	ld	de,$CRLF
+	call	String		; .. close line
+	ret
+;
+; Write back 1st record of file
+;
+WrtBack:
+	ld	hl,IDMA
+	ld	de,TPA
+	ld	bc,RecLng
+	ldir			; .. set new in memory
+	ld	de,IFCB
+	ld	c,.WrRnd
+	call	BDOS		; Write record
+	ld	de,IFCB
+	ld	c,.Close
+	call	BDOS		; Close file
+	ret
+;
+$Ill.CPU:
+IF	@@GERMAN
+	db	'Programm ben|tigt Z80 CPU',eotx
+ELSE
+	db	'Requires Z80 CPU',eotx
+ENDIF	;@@GERMAN
+$Ill.OS:
+IF	@@GERMAN
+	db	'Programm ben|tigt CP/M 3.x',eotx
+ELSE
+	db	'Requires CP/M 3.x',eotx
+ENDIF	;@@GERMAN
+IF	@@KEY
+$Ill.PCW:
+IF	@@GERMAN
+	db	'Programm ben|tigt den PCW8xxx mit'
+ELSE
+	db	'Requires PCW8xxx with'
+ENDIF	;@@GERMAN
+	db	' BIOS '
+	_BIOS$_
+	db	eotx
+ENDIF	;@@KEY
+$Rules:
+IF	@@GERMAN
+	db	'Der Installationsteil kann '
+	db	'folgende Werte {ndern:',cr,lf,lf
+	db	tab,'- Bildschirm Initialisierung'
+	db	tab,'(CrtInit)',cr,lf
+	db	tab,'- Bildschirm R}cksetzung'
+	db	tab,'(CrtExit)',cr,lf
+	db	tab,'- Bildschirmbreite',cr,lf
+	db	tab,'- Bildschirmh|he'
+ELSE
+	db	'Installer can change the following items:'
+	db	cr,lf,lf
+	db	tab,'- Crt init sequence',tab,'(CrtInit)'
+	db	cr,lf
+	db	tab,'- Crt de-init sequence',tab,'(CrtExit)'
+	db	cr,lf
+	db	tab,'- Screen width',cr,lf
+	db	tab,'- Screen height'
+ENDIF	;@@GERMAN
+$CRLF:
+	db	cr,lf,lf,eotx
+$FATAL:
+IF	@@GERMAN
+	db	'FEHLER - Datei '
+	_PRGNAME
+	db	'.COM nicht zu finden',eotx
+ELSE
+	db	'FATAL - Missing '
+	_PRGNAME
+	db	'.COM',eotx
+ENDIF	;@@GERMAN
+$InvTP:
+IF	@@GERMAN
+	db	'Falsche '
+	_PRGNAME
+	db	'.COM Version',eotx
+ELSE
+	db	'Invalid version of '
+	_PRGNAME
+	db	'.COM',eotx
+ENDIF	;@@GERMAN
+$CRTEXIT:
+IF	@@GERMAN
+	db	'Aktuelle CRTEXIT Sequenz : ',eotx
+ELSE
+	db	'  Current CRTEXIT setting : ',eotx
+ENDIF	;@@GERMAN
+$CRTINIT:
+IF	@@GERMAN
+	db	'Aktuelle CRTINIT Sequenz : ',eotx
+ELSE
+	db	'  Current CRTINIT setting : ',eotx
+ENDIF	;@@GERMAN
+$COL:
+IF	@@GERMAN
+	db	' Aktuelle Anzahl Spalten : ',eotx
+ELSE
+	db	'Current number of columns : ',eotx
+ENDIF	;@@GERMAN
+$ROW:
+IF	@@GERMAN
+	db	'  Aktuelle Anzahl Zeilen : ',eotx
+ELSE
+	db	'   Current number of rows : ',eotx
+ENDIF	;@@GERMAN
+$NONE:
+IF	@@GERMAN
+	db	'Nicht gesetzt',eotx
+ELSE
+	db	'Not defined',eotx
+ENDIF	;@@GERMAN
+$Dec:
+IF	@@GERMAN
+	db	'Neuer Wert',eotx
+ELSE
+	db	'New value',eotx
+ENDIF	;@@GERMAN
+$ParErr:
+IF	@@GERMAN
+	db	'Falscher Zahlenwert',eotx
+ELSE
+	db	'Invalid number',eotx
+ENDIF	;@@GERMAN
+$CtrlErr:
+IF	@@GERMAN
+	db	'Falsche Kontrollfolge',eotx
+ELSE
+	db	'Invalid control',eotx
+ENDIF	;@@GERMAN
+$Ctrl:
+IF	@@GERMAN
+	db	'Neue Kontrollsequenz',eotx
+ELSE
+	db	'New sequence',eotx
+ENDIF	;@@GERMAN
+$Colon:
+	db	' : ',eotx
+;
+$Line:
+	db	64,0
+	ds	64
+;
+ChgFlg:
+	db	FALSE
+IFCB:
+	db	0
+.IFCB:
+	_PRGNAME
+IF.L	equ	$-.IFCB
+	rept	Fname-IF.L
+	db	' '
+	endm
+	db	'COM',0,0,0,0
+	ds	16
+	db	0,0,0,0
+IDMA:
+	ds	RecLng
+

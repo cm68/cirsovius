@@ -1,0 +1,1135 @@
+;
+; Compare two strings
+; ENTRY	1st stack 1st pushed, 2nd stack 2nd pushed
+; EXIT	Carry flag set if 1st<2nd
+;	Zero  flag set if 1st=2nd
+;
+CmpString:
+	ld	hl,2*2		; Note 2nd level call
+	ld	d,h
+	add	hl,sp		; Point to 2nd string
+	ld	e,(hl)		; Get length
+	ld	c,e
+	inc	hl
+	push	hl
+	add	hl,de		; Point to 1st string
+	ld	e,(hl)		; Get length
+	ld	b,e
+	inc	hl
+	push	hl
+	add	hl,de		; Set return stack
+	push	hl
+	pop	iy		; .. into IY
+	pop	de		; Get 1st
+	pop	hl		; .. and 2nd
+CSt.loop:
+	xor	a		; Try zero length
+	cp	b
+	jr	z,CSt.fixCY
+	cp	c		; .. on both
+	jr	nz,CSt.char
+	ld	a,b
+CSt.fixCY:
+	cp	c
+CSt.nomatch:
+	pop	hl		; Get back callers
+	pop	de
+	ld	sp,iy		; .. new stack
+	push	de		; Set 2nd level caller
+	jp	(hl)		; .. bye
+CSt.char:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,CSt.nomatch
+	inc	hl
+	inc	de
+	dec	b
+	dec	c
+	jr	CSt.loop	; Try end
+;
+; Check value in limits 1..255
+; ENTRY	Reg HL holds value
+; EXIT	Accu holds byte
+;
+VALcheck:
+	ld	a,h		; Test HI=0
+	or	a
+	jr	nz,val..err.0	; .. error
+	ld	a,l		; Test LO<>0
+	or	a
+	ret	nz		; .. ok
+val..err.0:
+	ld	a,_StrIdx	; Set error
+	jp	SetRT.Err	; .. abort
+;
+; Function ADD:real
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold sum
+;
+ADDreal:
+	call	ADD.Real	; Add
+Real.OVFL:
+	ret	nc		; Check result
+	ld	a,_FLPovfl	; Set error
+	jp	SetRTerror	; .. and abort
+;
+; Function SUBTRACT:real
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold difference
+;
+SUBreal:
+	call	SUB.Real	; Subtract
+	jr	Real.OVFL	; .. check result
+;
+; Function SQR(real):real
+; ENTRY	Regs (HL,DE,BC) hold number
+; EXIT	Regs (HL,DE,BC) hold square
+;
+SQR:
+	call	Real.Copy	; Copy number, then multiply
+;
+; Function MULTIPLY:real
+; ENTRY	Regs (HL,DE,BC)  hold multiplicand
+; 	Regs (HL,DE,BC)' hold multiplier
+; EXIT	Regs (HL,DE,BC)  hold product
+;
+MULTreal:
+	call	MULT.Real	; Multiply
+	jr	Real.OVFL	; .. check result
+;
+; Function DIVIDE:real
+; ENTRY	Regs (HL,DE,BC)  hold 1st dividend
+; 	Regs (HL,DE,BC)' hold 2nd divisor
+; EXIT	Regs (HL,DE,BC)  hold quotient
+;
+DIVreal:
+	exx			; Get divisor
+	ld	a,l		; .. test zero
+	or	a
+	exx
+NullDivide:
+	ld	a,_DivZero
+	jp	z,SetRTerror	; .. error if zero divisor
+	call	DIV.Real	; Divide
+	jr	Real.OVFL	; .. check result
+;
+; Add reals
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold sum
+;	Carry set on overflow
+;
+ADD.Real:
+	exx
+	bit	sgn.bit,b	; Test sign of 2nd
+	exx
+	jp	nz,Go..SUB	; .. subtract
+Go..ADD:
+	exx
+	ld	a,l		; Test 2nd zero
+	or	a
+	exx
+	ret	z		; .. ok result is 1st
+	exx
+	push	bc		; Save 1st number
+	push	de
+	push	hl
+	exx
+	ld	a,l
+	or	a		; Test 1st zero
+	jr	nz,AddR.noz	; .. no
+	exx
+	res	sgn.bit,b	; Clear sign
+	jr	Real.Pop	; .. get 2nd as result
+AddR.noz:
+	push	bc
+	set	sgn.bit,b	; Force bit set
+	xor	a
+	ex	af,af'
+	exx
+	set	sgn.bit,b
+	ld	a,l
+	exx
+	sub	l		; Test same exponents
+	jr	z,AddR.do	; .. ok
+	jr	nc,AddR.norm
+	neg
+	ex	af,af'
+	dec	a
+	ex	af,af'
+	exx
+AddR.norm:
+	call	Shf.Mant.R	; Shift mantissa right
+	inc	l		; .. bump exponent
+	dec	a
+	jr	nz,AddR.norm
+	ex	af,af'
+	jr	z,AddR.do
+	exx
+AddR.do:
+	pop	af		; Get back mantissa MSB
+	and	sign.bit	; Test sign
+	jr	nz,AddR.LT0	; .. < 0
+	call	ADD.Mant	; Add mantissas
+	jr	nc,AddR.ccy	; .. test bit out
+	call	Rot.Mant.R	; Shift mantissa
+	or	a
+	inc	l		; .. fix exponent
+	jr	nz,AddR.ccy	; Test underflow
+	scf
+	jr	Real.Pop
+AddR.LT0:
+	call	Cmp.Mant	; .. compare mantissas
+	ccf
+	push	af
+	jr	z,AddR.zero	; Test same
+	jr	c,AddR.LT	; .. or less
+	exx
+AddR.LT:
+	call	SUB.Mant	; Subtract
+AddR.normal:
+	bit	sgn.bit,b	; Test normalized
+	jr	nz,AddR.normOK	; .. that's all
+	call	Shf.Mant.L	; Shift
+	dec	l
+	jr	nz,AddR.normal	; .. test underflow
+AddR.zero:
+	call	ZeroFLP		; Zero result
+AddR.normOK:
+	pop	af		; Get back resulting sign
+AddR.ccy:
+	jr	c,AddR.min	; Test sign
+	res	sgn.bit,b	; .. reset if >0
+AddR.min:
+	or	a
+Real.Pop:
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	ret
+;
+; Subtract reals
+; ENTRY	Regs (HL,DE,BC)  hold 1st number
+; 	Regs (HL,DE,BC)' hold 2nd number
+; EXIT	Regs (HL,DE,BC)  hold difference
+;	Carry set on overflow
+;
+SUB.Real:
+	exx
+	bit	sgn.bit,b	; Test sign of 2nd
+	exx
+	jp	nz,Go..ADD	; .. go add if <0
+Go..SUB:
+	call	Cnv.Neg		; .. negate
+	call	Go..ADD		; .. and add
+	ret	c
+;
+; Negate real
+; ENTRY	Regs HL,DE,BC hold real number
+; EXIT	Sign changed if real > 0
+;
+Cnv.Neg:
+	inc	l		; Test exponent 0
+	dec	l
+	ret	z		; .. exit if so
+	ld	a,b
+	xor	sign.bit	; Change sign bit
+	ld	b,a
+	ret
+;
+; Multiply reals
+; ENTRY	Regs (HL,DE,BC)  hold multiplicand
+; 	Regs (HL,DE,BC)' hold multiplier
+; EXIT	Regs (HL,DE,BC)  hold product
+;	Carry set on overflow
+;
+MULT.Real:
+	exx
+	ld	a,l
+	or	a		; Test zero multiplier
+	exx
+	jp	z,ZeroFLP	; .. return zero if so
+	ld	a,l
+	or	a
+	ret	z		; .. return if multiplicand 0
+	exx
+	add	a,l		; Add exponents
+	exx
+	call	Fix.Exp		; Fix exponent
+	push	bc		; Save number
+	push	de
+	push	hl
+	add	ix,sp
+	call	ZeroFLP		; Clear result
+	exx
+	ld	l,mant.len	; Set mantissa count
+	exx
+MulR.loop:
+	ld	a,bit.len	; Set bit count
+	inc	ix
+	ld	l,(ix)
+MulR.i.loop:
+	ex	af,af'
+	rr	l		; Shift bit
+	call	c,ADD.Mant	; .. add mantissas if bit out
+	call	Rot.Mant.R	; Rotate mantissa
+	ex	af,af'
+	dec	a		; Bump loop down
+	jr	nz,MulR.i.loop
+	exx
+	dec	l		; .. test all shifted
+	exx
+	jr	nz,MulR.loop
+	ld	l,(ix-mant.len)	; Get byte back
+	bit	sgn.bit,b	; Test bit
+	jr	nz,MulR.clean
+	ex	af,af'
+	call	Rot.Mant.L	; Get bit
+	inc	l
+	dec	l
+	jr	z,MulR.clean
+	dec	l
+MulR.clean:
+	pop	af		; Clean stack
+	pop	af
+	pop	af
+MulR..OKret:
+	or	a
+MulR.COMret:
+	ex	af,af'
+	pop	af
+	exx
+	pop	bc
+	pop	hl
+	exx
+	pop	ix
+	res	sgn.bit,b	; Reset HI bit
+	or	b
+	ld	b,a		; Insert sign
+	inc	l
+	dec	l
+	call	z,ZeroFLP	; .. test underflow
+	ex	af,af'
+	ret
+;
+; Divide reals
+; ENTRY	Regs (HL,DE,BC)  hold 1st dividend
+; 	Regs (HL,DE,BC)' hold 2nd divisor
+; EXIT	Regs (HL,DE,BC)  hold quotient
+;	Carry set on overflow
+;
+DIV.Real:
+	ld	a,l
+	or	a		; Test zero divisor
+	ret	z
+	exx
+	sub	l		; Get resulting exponent
+	exx
+	ccf
+	call	Fix.Exp		; .. fix it
+	push	hl
+	push	hl
+	push	hl
+	add	ix,sp
+	exx
+	ld	l,mant.len	; Get complete count
+	exx
+	ld	a,bit.len	; Set bit count
+DivR.loop:
+	ex	af,af'
+	call	Cmp.Mant	; Compare mantissas
+	call	nc,SUB.Mant	; .. add
+DivR.madd:
+	ccf
+	rl	l
+	ex	af,af'
+	dec	a
+	jr	nz,DivR.i.loop	; .. test ready
+	ld	(ix+mant.len),l	; Set result
+	dec	ix
+	exx
+	dec	l
+	exx
+	jr	z,DivR.rdy?	; Test total end
+	ld	a,bit.len	; Reset bit count
+DivR.i.loop:
+	call	Shf.Mant.L	; Shift
+	jr	nc,DivR.loop
+	ex	af,af'
+	call	SUB.Mant	; Subtract if bit out
+	or	a
+	jr	DivR.madd
+DivR.rdy?:
+	call	Shf.Mant.L	; Shift mantissa
+	jr	c,DivR.done	; Test bit
+	call	Cmp.Mant	; .. compare
+	ccf
+DivR.done:
+	pop	hl
+	pop	de
+	pop	bc
+	bit	sgn.bit,b	; Test bit
+	jr	nz,DivR.neg
+	call	Rot.Mant.L	; Shift in
+	jr	MulR..OKret
+DivR.neg:
+	inc	l
+	jr	nz,MulR..OKret	; Test ok
+	scf
+	jr	MulR.COMret
+;
+; Fix exponent
+; ENTRY	Accu and Carry reflect state of addition or
+;	subtraction of exponents
+;
+Fix.Exp:
+	jr	c,FE.2.8x	; Test bit out
+	add	a,exp.offset	; Add offset
+	jr	c,FE.doit	; .. test bit
+	jr	FE.rdy??
+FE.2.8x:
+	add	a,exp.offset
+	jr	c,FE.rdy??	; .. test bit
+FE.doit:
+	ld	l,a		; Set new exponent
+	ex	(sp),ix		; .. get caller
+	exx
+	push	hl
+	push	bc
+	ld	a,b		; Get MSB
+	set	sgn.bit,b	; Set bit
+	exx
+	xor	b
+	and	sign.bit	; Get result
+	push	af
+	set	sgn.bit,b	; On 2nd, too
+	push	ix		; Bring back caller
+	ld	ix,0		; .. return IX=0
+	ret
+FE.rdy??:
+	pop	hl
+	ret	c		; Test bit out
+;
+; Clear real number
+; EXIT	Regs (HL,DE,BC)  hold zero
+;
+ZeroFLP:
+	xor	a
+	ld	l,a		; Clear 'em all
+	ld	b,a
+	ld	c,a
+	ld	d,a
+	ld	e,a
+	ld	h,a
+	ret
+;
+; Shift right mantissa
+;
+Shf.Mant.R:
+	or	a		; Clear carry
+;
+; Rotate right mantissa
+;
+Rot.Mant.R:
+	rr	b		; Shift 5 bytes right
+	rr	c
+	rr	d
+	rr	e
+	rr	h
+	ret
+;
+; Shift left mantissa
+;
+Shf.Mant.L:
+	or	a		; Clear carry
+;
+; Rotate left mantissa
+;
+Rot.Mant.L:
+	rl	h		; Shift 5 bytes left
+	rl	e
+	rl	d
+	rl	c
+	rl	b
+	ret
+;
+; Add mantissas
+;
+ADD.Mant:
+	ld	a,h		; Get 1st
+	exx			; ..  2nd
+	add	a,h		; Add
+	exx
+	ld	h,a		; .. into 1st
+	ld	a,e
+	exx
+	adc	a,e
+	exx
+	ld	e,a
+	ld	a,d
+	exx
+	adc	a,d
+	exx
+	ld	d,a
+	ld	a,c
+	exx
+	adc	a,c
+	exx
+	ld	c,a
+	ld	a,b
+	exx
+	adc	a,b
+	exx
+	ld	b,a
+	ret
+;
+; Subtract mantissas
+;
+SUB.Mant:
+	ld	a,h		; Get 1st
+	exx			; ..  2nd
+	sub	h		; Subtract
+	exx
+	ld	h,a		; .. into 1st
+	ld	a,e
+	exx
+	sbc	a,e
+	exx
+	ld	e,a
+	ld	a,d
+	exx
+	sbc	a,d
+	exx
+	ld	d,a
+	ld	a,c
+	exx
+	sbc	a,c
+	exx
+	ld	c,a
+	ld	a,b
+	exx
+	sbc	a,b
+	exx
+	ld	b,a
+	ret
+;
+; Compare mantissas
+; EXIT	Flags set as normal comparision
+;
+Cmp.Mant:
+	ld	a,b		; Get 1st
+	exx			; ..  2nd
+	cp	b		; Compare
+	exx
+	ret	nz		; Exit if .NE. zero
+	ld	a,c
+	exx
+	cp	c
+	exx
+	ret	nz
+	ld	a,d
+	exx
+	cp	d
+	exx
+	ret	nz
+	ld	a,e
+	exx
+	cp	e
+	exx
+	ret	nz
+	ld	a,h
+	exx
+	cp	h
+	exx
+	ret
+;
+; Compare two reals
+; ENTRY	1st real in register set
+;	2nd real in alternative set
+; EXIT	Carry flag set if 1st<2nd
+;	Zero  flag set if 1st=2nd
+;
+CmpReal:
+	exx
+	ld	a,b		; Get sign
+	exx
+	xor	b		; Test same sign
+	jp	p,CR.ssg
+	ld	a,b		; Get first
+	rla			; .. get sign
+	ret
+CR.ssg:
+	bit	sgn.bit,b
+	jr	z,CR.sex	; Test 1st > 0
+	call	CR.sex	; .. compare
+	ret	z
+	ccf
+	ret
+CR.sex:
+	ld	a,l		; Get exponent
+	exx
+	cp	l		; .. compare
+	exx
+	ret	nz		; .. not the same
+	or	a
+	ret	z		; Test zero
+	jp	Cmp.Mant	; Go compare mantissas
+;
+; Function INT(real):real
+;
+Int:
+	ld	a,l
+	sub	Exp.One		; Test > 1
+	jp	c,ZeroFLP	; .. no, return zero
+	inc	a		; Fix count
+	cp	mant.bits	; Test fraction
+	ret	nc		; .. no, that's it
+	exx
+	push	bc		; Save 2nd
+	push	de
+	push	hl
+	ex	af,af'
+	call	ZeroFLP		; Init result
+	ex	af,af'
+INTshf.r:
+	scf
+	call	Rot.Mant.R	; Shift mantissa
+	dec	a
+	jr	nz,INTshf.r
+	exx
+	ld	a,h		; Mask result
+	exx
+	and	h
+	exx
+	ld	h,a
+	ld	a,e
+	exx
+	and	e
+	exx
+	ld	e,a
+	ld	a,d
+	exx
+	and	d
+	exx
+	ld	d,a
+	ld	a,c
+	exx
+	and	c
+	exx
+	ld	c,a
+	ld	a,b
+	exx
+	and	b
+	exx
+	ld	b,a
+..Real.Pop:
+	jp	Real.Pop
+;
+; Function FRAC(real):real
+;
+Frac:
+	exx
+	push	bc
+	push	de
+	push	hl
+	exx
+	call	Real.Copy	; Copy number
+	exx
+	call	Int		; Get integer
+	exx
+	call	SUB.Real	; Subtract from number
+	jr	..Real.Pop
+;
+; Function SQRT(real):real
+;
+SQRT:
+	ld	a,l		; Test zero operand
+	or	a
+	ret	z
+	bit	sgn.bit,b	; Test negative operand
+	ld	a,_NegSqrt
+	jp	nz,SetRTerror	; .. error
+	call	Real.Copy	; Copy number
+	ld	a,l
+	add	a,exp.offset	; Fix resulting exponent
+	sra	a
+	add	a,exp.offset
+	ld	l,a
+	sub	sqr.exp		; Fix exponent
+	push	af
+	exx
+SQRT.loop:
+	push	bc
+	push	de
+	push	hl
+	call	DIV.Real	; Divide
+	call	ADD.Real	; .. add
+	dec	l		; exponent-1
+	push	bc
+	push	de
+	push	hl
+	call	SUB.Real	; Subtract
+	ld	a,l
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	ex	(sp),hl
+	cp	h		; Test ready
+	ex	(sp),hl
+	jr	nc,SQRT.loop	; .. loop
+	pop	af
+	exx
+	ret
+;
+; Function COS(real):real
+;
+COS:
+	exx
+	call	PI		; Load 180 degrees
+	dec	l		; .. make 90 degrees
+	call	SUB.Real	; .. subtract
+;
+; Function SIN(real):real
+;
+SIN:
+	exx
+	call	PI		; Load 180 degrees
+	inc	l		; .. make 360 degrees
+	exx
+	ld	a,l
+	cp	sin.min		; Test underflow
+	ret	c
+	push	bc
+	res	sgn.bit,b
+	call	CmpReal		; Compare against period
+	pop	bc
+	jr	c,SIN.LT.360
+	call	DIV.Real	; Get within period
+	call	Frac
+	call	MULT.Real
+SIN.LT.360:
+	bit	sgn.bit,b	; Test sign
+	call	nz,ADD.Real	; .. add
+	exx
+	dec	l		; Make 180 degrees
+	exx
+	call	CmpReal		; Test within 180 degrees
+	push	af
+	call	nc,SUB.Real	; Subtract
+	exx
+	dec	l		; Make 90 degrees
+	exx
+	call	CmpReal		; Test within 90 degrees
+	jr	c,SIN.GT.90
+	exx
+	inc	l		; Make 180 degrees
+	call	SUB.Real	; .. subtract
+SIN.GT.90:
+	ld	a,l
+	cp	sin.min		; Test underflow
+	jr	c,SIN.exit
+	exx
+	ld	bc,02aaah	; Set 1/3
+	ld	de,0aaaah
+	ld	hl,0aa7fh
+	call	MULT.Real	; Divide by 3
+	push	ix
+	ld	ix,SIN.COS.tab-Real.Len
+	ld	a,Trg.Len
+	call	TAYLOR		; Do the TAYLOR loop
+	pop	ix
+	call	Real.Copy	; Copy
+	call	MULT.Real	; And multiply
+	call	MULT.Real
+	push	bc
+	push	de
+	push	hl
+	exx
+	call	Real.Copy
+	dec	l		; Divide by 4
+	dec	l
+	exx
+	dec	l		; .. by 2
+	call	ADD.Real	; .. add
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	call	SUB.Real	; Subtract
+	inc	l		; Multiply by 4
+	inc	l
+SIN.exit:
+	pop	af
+	inc	l		; Test zero
+	dec	l
+	ret	z
+	ret	c		; Check sign
+	ld	a,b
+	xor	sign.bit	; .. toggle it
+	ld	b,a
+	ret
+;
+; Taylor series for SINE and COSINE
+;
+SIN.COS.tab:
+	db	067h,0aah,03fh,02bh,032h,0d7h	; -1/11!
+	db	06eh,0b6h,02ah,01dh,0efh,038h	;  1/9!
+	db	074h,00dh,0d0h,000h,00dh,0d0h	; -1/7!
+	db	07ah,088h,088h,088h,088h,008h	;  1/5!
+	db	07eh,0abh,0aah,0aah,0aah,0aah	; -1/3!
+Trg.Len	equ	($-SIN.COS.tab)/Real.Len
+;
+; Function LN(real):real
+;
+LN:
+	inc	l
+	dec	l		; Check zero
+	ld	a,_LNerr
+	jp	z,SetRTerror	; .. error
+	bit	sgn.bit,b
+	jp	nz,SetRTerror	; .. same for negative
+	exx
+	call	SQRT.2		; Load constant
+	exx
+	ld	a,l
+	ld	l,Exp.One
+	sub	l		; Fix exponent
+	push	af
+	call	DIV.Real	; .. divide
+	exx
+	call	ONE		; Load constant
+	exx
+	call	SUB.Real	; Subtract
+	push	bc
+	push	de
+	push	hl
+	exx
+	inc	l		; Double
+	call	ADD.Real	; .. add
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	call	DIV.Real	; Divide
+	push	ix
+	ld	ix,LN.tab-Real.Len
+	ld	a,LN.len
+	call	TAYLOR		; Do the loop
+	pop	ix
+	inc	l		; Times 2
+	exx
+	call	LN.2		; Get constant
+	dec	l
+	exx
+	call	ADD.Real	; Add
+	pop	af
+	push	bc
+	push	de
+	push	hl
+	ld	l,a
+	ld	h,0
+	jr	nc,LN.Fix
+	dec	h		; Set -1
+LN.Fix:
+	call	IntFlt		; Convert to real
+	exx
+	inc	l		; .. times 2
+	call	MULT.Real	; Multiply
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	call	ADD.Real	; Add
+	ld	a,l
+	cp	ln.min		; Test underflow
+	jp	c,ZeroFLP	; .. set zero if so
+	ret
+;
+; Taylor series for Natural Logarithm
+;
+LN.tab:
+	db	07dh,08ah,09dh,0d8h,089h,01dh	; 1/13
+	db	07dh,0e9h,0a2h,08bh,02eh,03ah	; 1/11
+	db	07dh,08eh,0e3h,038h,08eh,063h	; 1/9
+	db	07eh,049h,092h,024h,049h,012h	; 1/7
+	db	07eh,0cdh,0cch,0cch,0cch,04ch	; 1/5
+	db	07fh,0abh,0aah,0aah,0aah,02ah	; 1/3
+LN.len	equ	($-LN.tab)/Real.Len
+;
+; Function EXP(real):real
+;
+EXP:
+	exx
+	call	LN.2		; Set constant
+	exx
+	or	a
+	bit	sgn.bit,b	; Save sign
+	push	af
+	res	sgn.bit,b	; .. clear it
+	call	DIV.Real	; Divide
+	ld	a,l
+	cp	exp.max		; Test overflow
+	jr	nc,EXP..ovfl
+	push	bc
+	push	de
+	push	hl
+	inc	l		; Times 2
+	call	Round		; Get integer
+	push	hl
+	srl	h		; Divide by two
+	rr	l
+	ld	a,l
+	pop	hl
+	push	af
+	call	IntFlt		; Get back real
+	inc	l		; Check zero
+	dec	l
+	jr	z,EXP..zero
+	dec	l		; Fix exponent if not
+EXP..zero:
+	exx
+	pop	af
+	pop	hl
+	pop	de
+	pop	bc
+	push	af
+	call	SUB.Real	; Subtract
+	push	ix
+	ld	ix,EXP.tab-Real.Len
+	ld	a,EXP.Len
+	call	TAYLOR.		; Do the loop
+	pop	ix
+	pop	af		; Test result bit
+	jr	nc,EXP..chk
+	push	af
+	exx
+	call	SQRT.2		; Get constnt
+	exx
+	call	MULT.Real	; Divide
+	pop	af
+EXP..chk:
+	add	a,l		; Get new exponent
+	ld	l,a
+	jr	c,EXP..ovfl	; .. overflow
+	pop	af
+	ret	z		; Test sign
+	exx
+	call	ONE		; Get 1/result
+	jp	DIV.Real
+EXP..ovfl:
+	pop	hl		; .. clean stack
+	ld	a,_FLPovfl
+	jp	SetRTerror	; Set error
+;
+; Taylor series for natural EXPonetiation
+;
+EXP.tab:
+	db	06dh,02eh,01dh,011h,060h,031h	; 1.3215 E-6
+	db	070h,046h,02ch,0feh,0e5h,07fh	; 1.5252 E-5
+	db	074h,036h,07ch,089h,084h,021h	; 1.5403 E-4
+	db	077h,053h,03ch,0ffh,0c3h,02eh	; 1.3333 E-3
+	db	07ah,0d2h,07dh,05bh,095h,01dh	; 9.6181 E-3
+	db	07ch,025h,0b8h,046h,058h,063h	; 5.5504 E-2
+	db	07eh,016h,0fch,0efh,0fdh,075h	; 2.4022 E-1
+	db	080h,0d2h,0f7h,017h,072h,031h	; 6.9314 E-1
+EXP.Len	equ	($-EXP.tab)/Real.Len
+;
+; Function ARCTAN(real):real
+;
+ARCTAN:
+	ld	a,l
+	or	a
+	ret	z		; Test zero
+	push	ix
+	exx
+	call	ONE		; Get constant
+	exx
+	xor	a
+	bit	sgn.bit,b	; Test sign
+	jr	z,ARCTAN.pos
+	inc	a
+	res	sgn.bit,b	; .. make absolute
+ARCTAN.pos:
+	push	af		; Save sign
+	call	CmpReal		; Compare against 1
+	jr	c,ARCTAN.LT.1
+	exx
+	call	DIV.Real	; Get 1/operand
+	pop	af
+	set	sgn.bit,a	; Indicate revers
+	push	af
+ARCTAN.LT.1:
+	exx
+	ld	bc,006cfh	; Load 0.13165
+	ld	de,0e98eh
+	ld	hl,04a7eh
+	exx
+	call	CmpReal		; Compare
+	jr	nc,ARCTAN.GT.min
+	call	??.tab.TAYLOR	; Build series
+	jr	ARCTAN.rdy?	; Fall in end
+ARCTAN.GT.min:
+	ld	ix,ARC..tab-3*Real.Len
+	ld	a,2		; Set loop
+ARCTAN.r.loop:
+	ex	af,af'
+	exx
+	ld	de,3*Real.Len
+	add	ix,de
+	call	Load.R.Tab	; Get value from table
+	exx
+	call	CmpReal		; Compare against result
+	jr	c,ARCTAN.r.exit
+	ex	af,af'
+	dec	a		; .. go thru the loop
+	jr	nz,ARCTAN.r.loop
+	exx
+	ld	de,2*Real.Len	; Fix table
+	add	ix,de
+	exx
+ARCTAN.r.exit:
+	exx
+	call	Load.R.Tab..	; Get next
+	set	sgn.bit,b	; .. make negative
+	call	ADD.Real	; .. add
+	push	bc
+	push	de
+	push	hl
+	call	Load.R.Tab	; Get value back
+	call	MULT.Real	; .. multiply
+	exx
+	call	ONE
+	call	ADD.Real	; Add to 1.0
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	call	DIV.Real	; Divide
+	push	ix
+	call	??.tab.TAYLOR	; .. do the series
+	pop	ix
+	exx
+	call	Load.R.Tab..	; Get next
+	call	ADD.Real	; .. add
+ARCTAN.rdy?:
+	pop	af
+	rla			; Get sign bit
+	jr	nc,ARCTAN.ret.pos
+	push	af
+	exx
+	call	PI		; Get PI
+	dec	l		; .. (PI/2)
+	call	SUB.Real	; .. subtract
+	pop	af
+ARCTAN.ret.pos:
+	pop	ix
+	bit	1,a		; Test operand sign
+	ret	z
+	set	sgn.bit,b	; Set negative
+	ret
+;
+; 2nd Taylor series for ARCTangent
+;
+ARC..tab:
+	db	07fh,0e7h,0cfh,0cch,013h,054h	;  4.1421 E-1
+	db	07fh,0f6h,0f4h,0a2h,030h,009h	;  2.6794 E-1
+	db	07fh,06ah,0c1h,091h,00ah,006h	;  2.6179 E-1
+	db	080h,0b5h,09eh,08ah,06fh,044h	;  7.6732 E-1
+	db	080h,082h,02ch,03ah,0cdh,013h	;  5.7735 E-1
+	db	080h,06ah,0c1h,091h,00ah,006h	;  5.2359 E-1
+	db	081h,000h,000h,000h,000h,000h	;  1.0000
+	db	080h,021h,0a2h,0dah,00fh,049h	;  7.8539 E-1
+;
+; Taylor series for ARCTangent
+;
+ARC.tab:
+	db	07dh,0e8h,0a2h,08bh,02eh,0bah	; -1/11
+	db	07dh,08eh,0e3h,038h,08eh,063h	;  1/9
+	db	07eh,049h,092h,024h,049h,092h	; -1/7
+	db	07eh,0cdh,0cch,0cch,0cch,04ch	;  1/5
+	db	07fh,0abh,0aah,0aah,0aah,0aah	; -1/3
+AT.Len	equ($-ARC.tab)/Real.Len
+;
+; Perform TAYLOR series
+; Calculate SERIES(x^2)*x
+;
+??.tab.TAYLOR:
+	ld	ix,ARC.tab-Real.Len
+	ld	a,AT.Len	; Load 2nd table
+TAYLOR:
+	push	bc
+	push	de
+	push	hl
+	push	af
+	call	Real.Copy	; Copy value
+	call	MULT.Real	; .. ^2
+	pop	af
+	call	TAYLOR.		; .. do sub-job
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	jp	MULT.Real	; Multiply last times
+;
+; The TAYLOR series loop
+; ENTRY	Reg IX points to table
+;	Accu holds loop count
+; Calculate : 1-(1/3!)x+..+/-..-(1/11!)x^8
+;
+TAYLOR.:
+	push	af
+	exx
+	call	Load.R.Tab..	; Load from table
+	jr	TAYLOR.go	; Skip addition this time
+TAYLOR.loop:
+	push	af
+	exx
+	push	bc
+	push	de
+	push	hl
+	call	Load.R.Tab..	; Get next value
+	call	ADD.Real	; .. add it
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+TAYLOR.go:
+	call	MULT.Real	; Multiply to value
+	pop	af
+	dec	a
+	jr	nz,TAYLOR.loop	; Test ready
+	exx
+	call	ONE		; Load 1.0
+	jp	ADD.Real	; .. add series
+;
+; Load next real from table
+; ENTRY	Reg IX points to table
+; EXIT	Regs (HL,DE,BC) hold real
+;
+Load.R.Tab..:
+	ld	de,Real.Len
+	add	ix,de		; Point to nex
+;
+; Load real from table
+; ENTRY	Reg IX points to table
+; EXIT	Regs (HL,DE,BC) hold real
+;
+Load.R.Tab:
+	ld	l,(ix+0)	; Get exponent
+	ld	h,(ix+1)	; Mantissa LSB
+	ld	e,(ix+2)
+	ld	d,(ix+3)
+	ld	c,(ix+4)
+	ld	b,(ix+5)	; Mantissa MSB
+	ret
+

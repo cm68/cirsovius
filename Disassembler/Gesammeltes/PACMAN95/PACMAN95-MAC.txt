@@ -1,0 +1,7056 @@
+	title	PACMAN
+	name	('PACMAN')
+
+; DASMed version of PACMAN95.COM found in MANYGAME.ZIP
+; By W. Cirsovius
+
+; (http://www.retroarchive.org/cpm/games/games.htm)
+
+; The following parts are modified against the original version:
+; (1) Video sequences modified for running on the PCW machine
+; (2) Cursor selection, all console input are converted to UPPER case
+; (3) Remove CCP parsing, no parameter passing used
+;     Remove file related code - used only due to C-Programm set up
+; (4) Remove needless code
+; (5) Optimize code, take Z80 relative jump if possible
+
+;;**
+
+	.z80
+	aseg
+	org	0100h
+
+; Changed the following video controls for the PCW:
+;
+; ORIGINAL	PCW		Meaning
+; esc,'.0'	esc,'q'		Turn normal video off
+; esc,'.1'	esc,'p'		Turn normal video on
+; esc,';'	esc,'H',esc,'E'	Clear screen
+; esc,'=',..,..	esc,'Y',..,..	Position cursor
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+
+.conin	equ	 1
+.consta	equ	11
+
+DEL	equ	7fh
+;
+; Cursor movement
+;
+_left	equ	'S'
+_right	equ	'D'
+_up	equ	'E'
+_down	equ	'X'
+_down2	equ	'x'
+_halt	equ	' '
+_quit	equ	'Q'
+_normal	equ	'1'
+_blink	equ	'2'
+_intell	equ	'3'
+_blinkl	equ	'4'
+;
+; Game characters
+;
+_player	equ	'@'
+_monst	equ	'M'
+_gold	equ	'+'
+_magic	equ	'&'		;;'%'
+_treasu	equ	'$'
+;
+; Build address in dynamic data area
+;
+dynadr	macro	offs
+	ld	hl,(l0115)
+IFNB	<offs>
+	ld	de,offs
+ENDIF
+	add	hl,de
+	endm
+;
+; Allocate stack space in front of a subroutine
+;
+alloc	macro	count
+	push	bc
+	ld	hl,-count
+	add	hl,sp
+	ld	sp,hl
+	ld	b,h
+	ld	c,l
+	endm
+;
+; Deallocate stack and exit
+;
+dealloc	macro	count
+	ex	de,hl
+	ld	hl,count
+	add	hl,sp
+	ld	sp,hl
+	ex	de,hl
+	pop	bc
+	ret
+	endm
+;
+; Load HL thru ^HL
+;
+ldhlhl	macro
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	endm
+;
+; Initialize a loop
+;
+forini	macro	offs
+IFNB	<offs>
+	ld	hl,offs
+	add	hl,bc
+ELSE
+	ld	h,b
+	ld	l,c
+ENDIF
+	xor	a
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	endm
+;
+; Run thru a loop
+;
+forloop	macro	offs,endval,addr
+IFNB	<offs>
+	ld	hl,offs
+	add	hl,bc
+ELSE
+	ld	h,b
+	ld	l,c
+ENDIF
+	ldhlhl
+	ld	de,-endval
+	add	hl,de
+	ld	a,h
+	rla
+	jp	nc,addr
+	endm
+;
+; Store constant word
+;
+st16	macro	val
+IFNB	<val>
+	ld	(hl),LOW val
+	inc	hl
+	ld	(hl),HIGH val
+ELSE
+	xor	a
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+ENDIF
+	endm
+;
+; BIOS functions
+;
+CST	equ	2		; Console state
+CIN	equ	3		; Console input
+COT	equ	4		; Console output
+
+null	equ	00h
+bell	equ	07h
+lf	equ	0ah
+cr	equ	0dh
+esc	equ	1bh
+eot	equ	'$'
+
+MAINDYN	equ	18
+
+l5337	equ	5337h		; Obscure top adderss (*** UNUSED ***)
+
+l0054	equ	0054h		; Line  1
+l007c	equ	007ch		; Line  2
+l00a4	equ	00a4h		; Line  3
+l00cc	equ	00cch		; Line  4
+l00f4	equ	00f4h		; Line  5
+l011c	equ	011ch		; Line  6
+l0144	equ	0144h		; Line  7
+l016c	equ	016ch		; Line  8
+l0194	equ	0194h		; Line  9
+l01bc	equ	01bch		; Line 10
+l01e4	equ	01e4h		; Line 11
+l020c	equ	020ch		; Line 12
+l0234	equ	0234h		; Line 13
+l025c	equ	025ch		; Line 14
+l0284	equ	0284h		; Line 15
+l02ac	equ	02ach		; Line 16
+l02d4	equ	02d4h		; Line 17
+l02fc	equ	02fch		; Line 18
+l0324	equ	0324h		; Line 19
+l034c	equ	034ch		; Line 20
+l0374	equ	0374h		; Line 21
+l039c	equ	039ch		; Line 22
+l03c4	equ	03c4h		; Line 23
+l03ec	equ	03ech		; Line 24
+l0414	equ	0414h		; Line 25
+l043c	equ	043ch		; Line 26
+l0464	equ	0464h		; Line 27
+l048c	equ	048ch		; Line 28
+l04b4	equ	04b4h		; Line 29
+l04dc	equ	04dch		; Line 30
+l0504	equ	0504h		; Line 31
+l052c	equ	052ch		; Line 32
+l0554	equ	0554h		; Line 33
+l057c	equ	057ch		; Line 34
+l05a4	equ	05a4h		; Line 35
+l05cc	equ	05cch		; Line 36
+l05f4	equ	05f4h		; Line 37
+l061c	equ	061ch		; Line 38
+l0644	equ	0644h		; Line 39
+l066c	equ	066ch		; Line 40
+l0694	equ	0694h		; Line 41
+l06bc	equ	06bch		; Line 42
+l06e4	equ	06e4h		; Line 43
+l070c	equ	070ch		; Line 44
+l0734	equ	0734h		; Line 45
+l075c	equ	075ch		; Line 46
+l0784	equ	0784h		; Line 47
+l07ac	equ	07ach		; Line 48
+l07d4	equ	07d4h		; Line 49
+l07fc	equ	07fch		; Line 50
+
+l0824	equ	0824h		; Line  1
+l084c	equ	084ch		; Line  2
+l0874	equ	0874h		; Line  3
+l089c	equ	089ch		; Line  4
+l08c4	equ	08c4h		; Line  5
+l08ec	equ	08ech		; Line  6
+l0914	equ	0914h		; Line  7
+l093c	equ	093ch		; Line  8
+l0964	equ	0964h		; Line  9
+l098c	equ	098ch		; Line 10
+l09b4	equ	09b4h		; Line 11
+l09dc	equ	09dch		; Line 12
+l0a04	equ	0a04h		; Line 13
+l0a2c	equ	0a2ch		; Line 14
+l0a54	equ	0a54h		; Line 15
+l0a7c	equ	0a7ch		; Line 16
+l0aa4	equ	0aa4h		; Line 17
+l0acc	equ	0acch		; Line 18
+l0af4	equ	0af4h		; Line 19
+
+l0b6f	equ	0b6fh
+l0b73	equ	0b73h
+l09a0	equ	09a0h
+l0b6d	equ	0b6dh
+l0b71	equ	0b71h		; Score
+
+l03e8	equ	03e8h
+
+l2710	equ	2710h
+
+l0b1c	equ	0b1ch
+
+l0000	equ	00h
+l0001	equ	01h
+l0002	equ	02h
+l0003	equ	03h
+l0004	equ	04h
+l0005	equ	05h
+l0006	equ	06h
+l0007	equ	07h
+l0008	equ	08h
+l0009	equ	09h
+l000a	equ	0ah
+l000c	equ	0ch
+l000d	equ	0dh
+l000e	equ	0eh
+l0010	equ	10h
+l0012	equ	12h
+l0014	equ	14h
+l0015	equ	15h
+l0016	equ	16h
+l0017	equ	17h
+l0018	equ	18h
+l001a	equ	1ah
+l001c	equ	1ch
+l001e	equ	1eh
+l0020	equ	20h
+l0022	equ	22h
+l0024	equ	24h
+l0028	equ	28h
+l002a	equ	2ah
+l002c	equ	2ch
+l002d	equ	2dh
+l0030	equ	30h
+l0032	equ	32h
+l0034	equ	34h
+l0037	equ	37h
+l0038	equ	38h
+l0039	equ	39h
+l003a	equ	3ah
+l003c	equ	3ch
+l003e	equ	3eh
+l0040	equ	40h
+l0042	equ	42h
+l0044	equ	44h
+l0046	equ	46h
+l0048	equ	48h
+l004a	equ	4ah
+l004c	equ	4ch
+l004e	equ	4eh
+l0052	equ	52h
+l0053	equ	53h
+l0061	equ	61h
+l0064	equ	64h
+l007a	equ	7ah
+l007f	equ	7fh
+l0080	equ	80h
+l0087	equ	87h
+l008b	equ	8bh
+l008d	equ	8dh
+l008f	equ	8fh
+l0090	equ	90h
+l0091	equ	91h
+l0092	equ	92h
+l0094	equ	94h
+l0096	equ	96h
+l0098	equ	98h
+l009c	equ	9ch
+l009e	equ	9eh
+
+lbdbd	equ	0bdbdh		; Start of random number
+l59dc	equ	59dch		; Dtto.
+
+lffd3	equ	0ffd3h
+lffd8	equ	0ffd8h
+lffda	equ	0ffdah
+lffdd	equ	0ffddh
+lfffc	equ	0fffch
+lffff	equ	0ffffh
+
+	ld	sp,(TPATOP)	; Get top of memory for stack
+	call	l034b		; Clear pending console key
+	call	l079e		; Play the game
+	jp	OS		; Exit program
+;
+l0115:
+	dw	l47ba		; Start of dynamic data
+;
+; Position in base memory
+;
+l0190:
+	pop	hl
+	ld	e,(hl)		; Get index
+	inc	hl
+	push	hl
+	ex	de,hl
+	ld	h,0		; Expand it
+	add	hl,bc		; Build pointer
+	ldhlhl			; Fetch value
+	ret
+;
+; Return FALSE if C
+;
+l01af:
+	ld	hl,FALSE	; Init FALSE
+	ret	c
+	inc	hl		; Fix for TRUE
+	ret
+;
+; HL:DE
+;
+l01e5:
+	ld	a,l
+	cp	e
+	ret	nz
+	ld	a,h
+	cp	d
+	ret
+;
+; HL:DE
+;
+l01eb:
+	ex	de,hl
+;
+; DE:HL
+;
+l01ec:
+	ld	a,d
+	cp	h
+	ret	nz
+	ld	a,e
+	cp	l
+	ret
+;
+; HL:DE
+;
+l01f3:
+	ld	a,h
+	cp	d
+	ret	nz
+	ld	a,l
+	cp	e
+	ret
+;
+; Signed HL:DE
+;
+l01f9:
+	ex	de,hl
+;
+; Signed DE:HL
+;
+l01fa:
+	ld	a,h
+	xor	d
+	jp	p,l01ec		; DE:HL
+	ld	a,d
+	or	a
+	ret	p
+	scf
+	ret
+;
+; Signed DE:HL
+;
+l0204:
+	ex	de,hl
+;
+; Signed HL:DE
+;
+l0205:
+	ld	a,h
+	xor	d
+	jp	p,l01f3		; HL:DE
+	ld	a,h
+	or	a
+	ret	p
+	scf
+	ret
+;
+;
+;
+l020f:
+	ld	a,d
+	push	af
+	call	l025a
+	ex	de,hl
+	call	l025a
+	ex	de,hl
+	call	l0229
+	pop	af
+	or	a
+	ret	p
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ret
+;
+;
+;
+l0229:
+	ld	a,h
+	or	l
+	ret	z
+	push	de
+	push	hl
+	call	l0289
+	pop	de
+	call	l026b		; HL:=HL*DE
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	pop	de
+	add	hl,de
+	ret
+;
+; Multiply
+;
+l023f:
+	xor	a
+	ld	(l0571),a
+	call	l025a
+	ex	de,hl
+	call	l025a
+	call	l026b		; HL:=HL*DE
+l024d:
+	ld	a,(l0571)
+	rra
+	ret	nc
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ret
+;
+;
+;
+l025a:
+	ld	a,h
+	or	a
+	ret	p
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ld	a,(l0571)
+	inc	a
+	ld	(l0571),a
+	ret
+;
+; HL:=HL*DE
+;
+l026b:
+	push	bc
+	call	l0271		; HL:=HL*DE
+	pop	bc
+	ret
+;
+; HL:=HL*DE
+;
+l0271:
+	ld	b,h
+	ld	c,l
+	ld	hl,0
+l0276:
+	ld	a,b
+	or	c
+	ret	z
+	ld	a,b
+	rra
+	ld	b,a
+	ld	a,c
+	rra
+	ld	c,a
+	jp	nc,l0283
+	add	hl,de
+l0283:
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jp	l0276
+;
+;
+;
+l0289:
+	ld	a,h
+	or	l
+	ret	z
+	push	bc
+	call	l0294
+	ld	h,b
+	ld	l,c
+	pop	bc
+	ret
+;
+;
+;
+l0294:
+	ld	b,1
+l0296:
+	ld	a,h
+	or	a
+	jp	m,l02a0
+	add	hl,hl
+	inc	b
+	jp	l0296
+l02a0:
+	ex	de,hl
+	ld	a,b
+	ld	bc,l0000
+	push	af
+l02a6:
+	call	l02dd		; HL:DE
+	jp	c,l02b7
+	inc	bc
+	push	de
+	ld	a,d
+	cpl
+	ld	d,a
+	ld	a,e
+	cpl
+	ld	e,a
+	inc	de
+	add	hl,de
+	pop	de
+l02b7:
+	xor	a
+	ld	a,d
+	rra
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	pop	af
+	dec	a
+	ret	z
+	push	af
+	ld	a,c
+	rla
+	ld	c,a
+	ld	a,b
+	rla
+	ld	b,a
+	jp	l02a6
+;
+;
+;
+l02cb:
+	xor	a
+	ld	(l0571),a
+	call	l025a
+	ex	de,hl
+	call	l025a
+	ex	de,hl
+	call	l0289
+	jp	l024d
+;
+; HL:DE
+;
+l02dd:
+	ld	a,h
+	cp	d
+	ret	c
+	ret	nz
+	ld	a,l
+	cp	e
+	ret
+;
+; HL:=-HL
+;
+l02fa:
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ret
+;
+; Get top parameter
+;
+l030a:
+	ld	hl,l0004
+	add	hl,sp
+	ldhlhl
+	ret
+
+;
+; Unpack seven parameters
+;
+l0337:
+	ld	de,l059f
+	ld	hl,l0004
+	add	hl,sp
+	push	bc
+	ld	b,2*7
+l0341:
+	ld	a,(hl)
+	ld	(de),a
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,l0341
+	pop	bc
+	ret
+;
+; Clear pending console key
+;
+l034b:
+	ld	c,.consta
+	call	BDOS		; Get state of console
+	or	a		; Test key pressed
+	ld	c,.conin
+	call	nz,BDOS		; Read key if any here
+	ret
+;
+l0571:
+	ds	1
+l0597:
+	dw	l59dc		; Random number
+	dw	0
+l059f:
+	ds	2*7
+;
+; ======================= THE GAME =======================
+;
+l079e:
+	jp	l07c5		; Play the game
+l07a1:
+	jp	l1f5a		; Init board layout
+l07a4:
+	jp	l2fbe		; Clear screen
+l07a7:
+	jp	l2fdd		; Print text on cursor position
+l07aa:
+	jp	l3da2
+l07ad:
+	jp	l3014		; Position cursor and put character on console
+l07b0:
+	jp	l14af
+l07b3:
+	jp	l0dc6
+l07b6:
+	jp	l15db
+l07b9:
+	jp	l304a
+l07bc:
+	jp	l30c0
+l07bf:
+	jp	l46d2		; Delay and check keyboard pressed
+l07c2:
+	jp	l31f3		; Give final statistic and exit
+;
+; Play the game
+;
+l07c5:
+	alloc	MAINDYN
+	call	l07a1		; Init board layout
+	ld	hl,l0002
+	add	hl,bc
+	st16	3
+l07d9:
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jp	nz,l0cec	; End of game
+l07ea:
+	call	l07a4		; Clear screen
+	ld	hl,l0d1c
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0000
+	push	hl
+	call	l07a7		; Print SCORE on cursor position
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0d24
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0015
+	push	hl
+	call	l07a7		; Print gold left on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0042
+	ldhlhl
+	push	hl
+	ld	hl,l0d31
+	push	hl
+	ld	hl,l0008
+	add	hl,bc
+	push	hl
+	call	l07aa
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0008
+	add	hl,bc
+	push	hl
+	ld	hl,l0039
+	push	hl
+	ld	hl,l0015
+	push	hl
+	call	l07a7		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0040
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	nz,l0862
+	ld	hl,l0d35
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0003
+	push	hl
+	call	l07a7		; Print COUNTDOWN on cursor position
+	pop	de
+	pop	de
+	pop	de
+l0862:
+	dynadr	l0038
+	st16	_player
+	dynadr	l003c
+	st16
+	dynadr	l003e
+	ldhlhl
+	push	hl
+	ld	hl,l0d41
+	push	hl
+	dynadr	l0b1c
+	push	hl
+	call	l07aa
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0b1c
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0016
+	push	hl
+	call	l07a7		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	forini
+l08b3:
+	forloop	,l0017,l08f6
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0000
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	call	l07a7		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l08b3
+l08f6:
+	dynadr	l0046
+	st16	12h
+	dynadr	l0048
+	st16	11h
+	dynadr	l004a
+	st16
+	dynadr	l004c
+	st16
+	dynadr	l004e
+	st16
+	dynadr	l0038
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	push	hl
+	call	l07ad		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	st16
+l0969:
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	pop	de
+	call	l01fa		; Signed DE:HL
+	jr	nc,l09a7
+	ld	hl,l0040
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l0003
+	call	l023f		; Multiply
+	push	hl
+	ld	hl,l0017
+	push	hl
+	call	l07ad		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l0969
+l09a7:
+	dynadr	l0008
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	forini	l0004
+l09be:
+	forloop	l0004,l0004,l0a7e
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ld	de,l0010
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	st16	0ah
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0006
+	add	hl,de
+	st16
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	st16
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	st16
+	ld	hl,_monst
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	push	hl
+	call	l07ad		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0006
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	hl,l000c
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l09be
+l0a7e:
+	dynadr	l003a
+	st16
+l0a89:
+	dynadr	l003a
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ld	hl,l000a
+	call	l020f
+	ld	a,h
+	or	l
+	call	z,l07b0
+	call	l07b3
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jp	z,l0cb2
+	forini	l0004
+l0ac5:
+	forloop	l0004,l0002,l0af1
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l07b6
+	pop	de
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l0ac5
+l0af1:
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jp	z,l0cb2
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0006
+	add	hl,de
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	nz,l0b35
+	call	l07b3
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jp	z,l0cb2
+l0b35:
+	ld	hl,l0004
+	add	hl,bc
+	st16	2
+l0b3e:
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,lfffc
+	add	hl,de
+	bit	7,h
+	jr	z,l0b6a
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l07b6
+	pop	de
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l0b3e
+l0b6a:
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jp	z,l0cb2
+	dynadr	l0040
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	nz,l0c84
+	dynadr	l0044
+	ldhlhl
+	ld	de,-l000a
+	add	hl,de
+	ld	a,h
+	or	l
+	ld	hl,l0007
+	jr	z,l0bac
+	ld	hl,l0020
+l0bac:
+	push	hl
+	dynadr	l0044
+	ldhlhl
+	push	hl
+	ld	hl,l0d4d
+	push	hl
+	dynadr	l0b1c
+	push	hl
+	call	l07aa
+	pop	de
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0b1c
+	push	hl
+	ld	hl,l003c
+	push	hl
+	ld	hl,l0003
+	push	hl
+	call	l07a7		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0044
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,lffff
+	add	hl,de
+	bit	7,h
+	jp	z,l0c84
+	ld	hl,l0d53
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0003
+	push	hl
+	call	l07a7		; Print blanks on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0040
+	st16
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0006
+	add	hl,de
+	st16
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	st16
+	forini	l0004
+l0c44:
+	forloop	l0004,l0004,l0c84
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,l000c
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0008
+	pop	de
+	add	hl,de
+	ld	de,l0008
+	add	hl,de
+	st16	1
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l0c44
+l0c84:
+	call	l07b9
+	dynadr	l0042
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jr	z,l0ca1
+	call	l07bc
+	jp	l07ea
+l0ca1:
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jp	nz,l0a89
+l0cb2:
+	ld	hl,l0d6f
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0005
+	push	hl
+	call	l07a7		; Print YOU ARE BEING EATEN on cursor position
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0d83
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0006
+	push	hl
+	call	l07a7		; Print THIS TAKES ABOUT 2 SECONDS on cursor position
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0014
+	push	hl
+	call	l07bf		; Delay and check keyboard pressed
+	pop	de
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l07d9
+l0cec:
+	ld	hl,l0d9e
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0008
+	push	hl
+	call	l07a7		; Print THE MONSTERS ALWAYS TRIUMPH on cursor position
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0dba
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0009
+	push	hl
+	call	l07a7		; Print IN THE END! on cursor position
+	pop	de
+	pop	de
+	pop	de
+	call	l07c2		; Give final statistic and exit
+	dealloc	MAINDYN
+;
+l0d1c:
+	db	'SCORE: ',null
+l0d24:
+	db	'gold left = ',null
+l0d31:
+	db	'%6d',null
+l0d35:
+	db	'COUNTDOWN: ',null
+l0d41:
+	db	'delay = %6d',null
+l0d4d:
+	db	'%2d%c',null
+l0d53:
+	db	'                    ',bell,'  ',bell,'  ',bell,null
+l0d6f:
+	db	'YOU ARE BEING EATEN',null
+l0d83:
+	db	'THIS TAKES ABOUT 2 SECONDS',null
+l0d9e:
+	db	'THE MONSTERS ALWAYS TRIUMPH',null
+l0dba:
+	db	'IN THE END!',null
+;
+;
+;
+l0dc6:
+	jp	l0dd5
+l0dc9:
+	jp	l343f		; Process keyboard input
+l0dcc:
+	jp	l3014		; Position cursor and put character on console
+l0dcf:
+	jp	l2fdd		; Print text on cursor position
+l0dd2:
+	jp	l35fb
+;
+;
+;
+l0dd5:
+	alloc	l000c
+	dynadr	l003e
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0008
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l0df0:
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jr	nz,l0e0f
+	ld	hl,l0008
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l0df0
+l0e0f:
+	ld	hl,l0000
+	push	hl
+	call	l0dc9		; Process keyboard input
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	(hl),' '
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	ldhlhl
+;;**
+	ld	de,l125b
+	push	de		; Set return address
+	inc	h
+	dec	h		; Verify byte
+	ret	nz
+;
+	dec	l		; Test 1
+	jr	z,l0eb2
+	dec	l		; Test 2
+	jp	z,l1042
+	dec	l		; Test 3
+	jp	z,l114d
+	dec	l		; Test 4
+	jp	z,l0f7a
+	ret
+;
+; Selection 1 : move up
+;
+l0eb2::
+	dynadr	l0038
+	st16	'^'		; Indicate direction
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+;;**				VERGLEICH!!!
+	ld	a,'.'
+	cp	e
+	jp	nz,l0ef7
+	ld	a,0
+	cp	d
+	jp	z,l0f2a
+l0ef7:
+	ld	a,' '
+	cp	e
+	jp	nz,l0f03
+	ld	a,0
+	cp	d
+	jp	z,l0f2a
+l0f03:
+	ld	a,'*'
+	cp	e
+	jp	nz,l0f0f
+	ld	a,0
+	cp	d
+	jp	z,l0f2a
+l0f0f:
+	ld	a,_magic
+	cp	e
+	jp	nz,l0f1b
+	ld	a,0
+	cp	d
+	jp	z,l0f2a
+l0f1b:
+	ld	a,_treasu
+	cp	e
+	jp	nz,l0f27
+	ld	a,0
+	cp	d
+	jp	z,l0f2a
+l0f27:
+	jp	l0f61
+;
+; Found valid board marker
+;
+l0f2a:
+	ld	hl,l0020
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	push	hl
+	ldhlhl
+	dec	hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l0f77
+l0f61:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16
+	jp	l0f77
+l0f77:
+	ret
+;
+; Selection 4 : move down
+;
+l0f7a:
+	dynadr	l0038
+	st16	'v'
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+;;**				VERGLEICH!!!
+	ld	a,'.'
+	cp	e
+	jp	nz,l0fbf
+	ld	a,0
+	cp	d
+	jp	z,l0ff2
+l0fbf:
+	ld	a,' '
+	cp	e
+	jp	nz,l0fcb
+	ld	a,0
+	cp	d
+	jp	z,l0ff2
+l0fcb:
+	ld	a,'*'
+	cp	e
+	jp	nz,l0fd7
+	ld	a,0
+	cp	d
+	jp	z,l0ff2
+l0fd7:
+	ld	a,_magic
+	cp	e
+	jp	nz,l0fe3
+	ld	a,0
+	cp	d
+	jp	z,l0ff2
+l0fe3:
+	ld	a,_treasu
+	cp	e
+	jp	nz,l0fef
+	ld	a,0
+	cp	d
+	jp	z,l0ff2
+l0fef:
+	jp	l1029
+l0ff2:
+	ld	hl,l0020
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	push	hl
+	ldhlhl
+	inc	hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l103f
+l1029:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16
+	jp	l103f
+l103f:
+	ret
+;
+; Selection 2 : move left
+;
+l1042:
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	a,h
+	or	l
+	jp	nz,l1085
+	ld	hl,l0020
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	st16	'&'
+	ld	h,b
+	ld	l,c
+	st16	' '
+	ret
+l1085:
+	dynadr	l0038
+	st16	'<'
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	pop	de
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+;;**				VERGLEICH!!!
+	ld	a,'.'
+	cp	e
+	jp	nz,l10cb
+	ld	a,0
+	cp	d
+	jp	z,l10fe
+l10cb:
+	ld	a,' '
+	cp	e
+	jp	nz,l10d7
+	ld	a,0
+	cp	d
+	jp	z,l10fe
+l10d7:
+	ld	a,'*'
+	cp	e
+	jp	nz,l10e3
+	ld	a,0
+	cp	d
+	jp	z,l10fe
+l10e3:
+	ld	a,_magic
+	cp	e
+	jp	nz,l10ef
+	ld	a,0
+	cp	d
+	jp	z,l10fe
+l10ef:
+	ld	a,_treasu
+	cp	e
+	jp	nz,l10fb
+	ld	a,0
+	cp	d
+	jp	z,l10fe
+l10fb:
+	jp	l1134
+l10fe:
+	ld	hl,l0020
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	push	hl
+	ldhlhl
+	dec	hl
+	dec	hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l114a
+l1134:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16
+	jp	l114a
+l114a:
+	ret
+;
+; Selection 3 : move right
+;
+l114d:
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,lffda
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	nz,l1193
+	ld	hl,l0020
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	st16
+	ld	h,b
+	ld	l,c
+	st16	' '
+	ret
+l1193:
+	dynadr	l0038
+	st16	'>'
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	pop	de
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+;;**				VERGLEICH!!!
+	ld	a,'.'
+	cp	e
+	jp	nz,l11d9
+	ld	a,0
+	cp	d
+	jp	z,l120c
+l11d9:
+	ld	a,' '
+	cp	e
+	jp	nz,l11e5
+	ld	a,0
+	cp	d
+	jp	z,l120c
+l11e5:
+	ld	a,'*'
+	cp	e
+	jp	nz,l11f1
+	ld	a,0
+	cp	d
+	jp	z,l120c
+l11f1:
+	ld	a,_magic
+	cp	e
+	jp	nz,l11fd
+	ld	a,0
+	cp	d
+	jp	z,l120c
+l11fd:
+	ld	a,_treasu
+	cp	e
+	jp	nz,l1209
+	ld	a,0
+	cp	d
+	jp	z,l120c
+l1209:
+	jp	l1242
+l120c:
+	ld	hl,l0020
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	push	hl
+	ldhlhl
+	inc	hl
+	inc	hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l1258
+l1242:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16
+	jp	l1258
+l1258:
+	ret
+;
+;;**
+;
+l125b:
+	ld	h,b
+	ld	l,c
+	ldhlhl
+;;**				VERGLEICH!!! OHNE BLANK!!!
+	ld	a,'*'
+	cp	l
+	jp	nz,l126d
+	ld	a,0
+	cp	h
+	jp	z,l1294
+l126d:
+	ld	a,'.'
+	cp	l
+	jp	nz,l1279
+	ld	a,0
+	cp	h
+	jp	z,l1294
+l1279:
+	ld	a,_treasu
+	cp	l
+	jp	nz,l1285
+	ld	a,0
+	cp	h
+	jp	z,l12b3
+l1285:
+	ld	a,_magic
+	cp	l
+	jp	nz,l1291
+	ld	a,0
+	cp	h
+	jp	z,l12cb
+l1291:
+	jp	l139d
+l1294:
+	dynadr	l0b71
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dynadr	l0042
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l139d
+l12b3:
+	dynadr	l0b71
+	push	hl
+	ldhlhl
+	ld	de,l0014
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l139d
+l12cb:
+	ld	hl,l14a3
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0003
+	push	hl
+	call	l0dcf		; Print COUNTDOWN on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0040
+	st16	1
+	dynadr	l0044
+	st16	19h
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0006
+	add	hl,de
+	st16	1
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	st16	1
+	dynadr	l0008
+	ex	de,hl
+	ld	hl,l000a
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	forini	l0002
+l1334:
+	forloop	l0002,l0004,l139d
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	nz,l137b
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	de,l0006
+	add	hl,de
+	st16
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	st16
+l137b:
+	ld	hl,l000a
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	hl,l000c
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l1334
+l139d:
+	dynadr	l0008
+	ex	de,hl
+	ld	hl,l000a
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	forini	l0002
+l13b4:
+	forloop	l0002,l0004,l1455
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jr	nz,l142b
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jr	nz,l142b
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l0dd2
+	pop	de
+	push	hl
+	dynadr	l003c
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jr	l1436
+l142b:
+	dynadr	l003c
+	st16
+l1436:
+	ld	hl,l000a
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	hl,l000c
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l13b4
+l1455:
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jr	z,l149a
+	dynadr	l0038
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	push	hl
+	call	l0dcc		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+l149a:
+	dealloc	l000c
+;
+l14a3:
+	db	'COUNTDOWN: ',null
+;
+;
+;
+l14af:
+	jp	l14b8
+l14b2:
+	jp	l3014		; Position cursor and put character on console
+l14b5:
+	jp	l378d		; Get random number
+;
+;;**
+;
+l15b5:
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	hl,l000c
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jr	l14e9
+l14b8:
+	alloc	l0004
+	dynadr	l0040
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	z,l15d2
+	dynadr	l0008
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	forini	l0002
+l14e9:
+	forloop	l0002,l0004,l15d2
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	ldhlhl
+	ld	a,h
+	or	l
+	jr	nz,l15b5
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	dynadr
+	st16	1
+	ld	hl,l0020
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ldhlhl
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	push	hl
+	call	l14b2		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	inc	hl
+	inc	hl
+	st16	7
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	st16	12h
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l0006
+	add	hl,de
+	st16
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	st16	1
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	st16	1
+	ld	hl,_monst
+	push	hl
+	ld	hl,l0012
+	push	hl
+	ld	hl,l0007
+	push	hl
+	call	l14b2		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	push	hl
+	ld	hl,l0002
+	push	hl
+	call	l14b5		; Get random number
+	pop	de
+	inc	hl
+	inc	hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l15d2:
+	dealloc	l0004
+;
+;
+;
+l15db:
+	jp	l15ea
+l15de:
+	jp	l3014		; Position cursor and put character on console
+l15e1:
+	jp	l19d8
+l15e4:
+	jp	l35fb
+l15e7:
+	jp	l37c3		; Print text at fix position
+;
+;
+;
+l15ea:
+	alloc	l000c
+	ld	hl,l0010
+	add	hl,bc
+	ldhlhl
+	ld	de,l000c
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0008
+	pop	de
+	add	hl,de
+	ex	de,hl
+	ld	hl,l0008
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	nz,l19c1
+	dynadr	l0b6d
+	ldhlhl
+	ld	de,l0002
+	ex	de,hl
+	call	l020f
+	ex	de,hl
+	ld	hl,l000a
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	z,l16af
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	a,h
+	or	l
+	jr	nz,l16ee
+	dynadr	l003a
+	ldhlhl
+	dec	hl
+	push	hl
+	ld	hl,l0010
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	dynadr
+	ldhlhl
+	pop	de
+	call	l020f
+	ld	a,h
+	or	l
+	jr	nz,l16ee
+l16af:
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	l,(hl)
+	ld	h,0
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l15de		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+l16ee:
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l15e1
+	pop	de
+	pop	de
+	pop	de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	ldhlhl
+;;**
+	ld	a,1
+	cp	l		; Test 1
+	jp	nz,l173d
+	ld	a,0
+	cp	h
+	jp	z,l1764
+l173d:
+	ld	a,4
+	cp	l		; Test 4
+	jp	nz,l1749
+	ld	a,0
+	cp	h
+	jp	z,l1786
+l1749:
+	ld	a,2
+	cp	l		; Test 2
+	jp	nz,l1755
+	ld	a,0
+	cp	h
+	jp	z,l17a8
+l1755:
+	ld	a,3
+	cp	l		; Test 3
+	jp	nz,l1761
+	ld	a,0
+	cp	h
+	jp	z,l17e1
+l1761:
+	jp	l1819
+;
+; Selected 1
+;
+l1764:
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	ex	de,hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l1819
+;
+; Selected 4
+;
+l1786:
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	ex	de,hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l1819
+;
+; Selected 2
+;
+l17a8:
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jr	z,l1819
+	ld	h,b
+	ld	l,c
+	st16	'&'
+	jr	l1819
+;
+; Selected 3
+;
+l17e1:
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,lffda
+	add	hl,de
+	bit	7,h
+	jp	nz,l1819
+	ld	h,b
+	ld	l,c
+	st16
+;
+;;**
+;
+l1819:
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l03ec		; Line 24 [l2b86]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	a,(hl)
+;;**				VERGLEICH!!!
+	cp	'.'
+	jp	z,l1858
+	cp	' '
+	jp	z,l1858
+	cp	_magic
+	jp	z,l1858
+	cp	_treasu
+	jp	z,l1858
+	cp	'*'
+	jp	z,l1858
+	jp	l19b6		; Bad direction
+l1858:
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jp	nz,l18db
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jr	nz,l18db
+	ld	hl,l0010
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l15e4
+	pop	de
+	push	hl
+	dynadr	l003c
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l18db:
+	ld	hl,l0010
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	dynadr
+	push	hl
+	dynadr	l0b71
+	ldhlhl
+	ld	de,l0064
+	ex	de,hl
+	call	l0289
+	inc	hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	z,l1955
+	dynadr	l003c
+	ldhlhl
+	inc	hl
+	ld	a,h
+	or	l
+	jr	z,l1955
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	a,h
+	or	l
+	jp	nz,l19c1
+	dynadr	l003a
+	ldhlhl
+	push	hl
+	ld	hl,l0010
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	dynadr
+	ldhlhl
+	pop	de
+	call	l020f
+	ld	a,h
+	or	l
+	jr	nz,l19c1
+l1955:
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	nz,l1988
+	ld	hl,_monst
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l15de		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	jr	l19c1
+l1988:
+	dynadr	l003c
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jr	z,l19c1
+	ld	hl,l0053
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l15de		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	jr	l19c1
+l19b6:
+	ld	hl,l19ca
+	push	hl
+	call	l15e7		; Print text at fix position
+	pop	de
+l19c1:
+	dealloc	l000c
+;
+l19ca:
+	db	'bad direction',null
+;
+;
+;
+l19d8:
+	jp	l19de
+l19db:
+	jp	l378d		; Get random number
+;
+;
+;
+l19de:
+	alloc	l0024
+	ld	h,b
+	ld	l,c
+	st16
+	ld	hl,l002c
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l03ec		; Line 24 [l2b86]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l002a
+	add	hl,bc
+	ldhlhl
+	pop	de
+	add	hl,de
+	ex	de,hl
+	ld	hl,l0022
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0028
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0020
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	ld	a,d
+	or	e
+	jp	z,l1a80
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd8
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,lffdd
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1a80
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd3
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1a80
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	1
+l1a80:
+	ld	hl,l0020
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	z,l1ad6
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,lffdd
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1ad6
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd3
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1ad6
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	4
+l1ad6:
+	ld	hl,l0020
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	z,l1b2c
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	ld	l,(hl)
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,lffdd
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1b2c
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd3
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1b2c
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	2
+l1b2c:
+	ld	hl,l0020
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	z,l1b81
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ld	l,(hl)
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	d,0
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,lffdd
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1b81
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd3
+	add	hl,de
+	ld	a,h
+	or	l
+	jp	z,l1b81
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	3
+l1b81:
+	dynadr	l0b6d
+	ldhlhl
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	z,l1ba8
+	dynadr	l0b6d
+	ldhlhl
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	nz,l1f38
+l1ba8:
+	ld	hl,l03e8
+	push	hl
+	call	l19db		; Get random number
+	pop	de
+	push	hl
+	dynadr	l0b71
+	ldhlhl
+	pop	de
+	call	l01ec		; DE:HL
+	jp	nc,l1f38
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	nz,l1d0f
+	ld	hl,l0020
+	add	hl,bc
+	ldhlhl
+	ld	a,1
+	cp	l		; Test 1
+	jp	nz,l1bf0
+	ld	a,0
+	cp	h
+	jp	z,l1c17
+l1bf0:
+	ld	a,4
+	cp	l		; Test 4
+	jp	nz,l1bfc
+	ld	a,0
+	cp	h
+	jp	z,l1c57
+l1bfc:
+	ld	a,3
+	cp	l		; Test 3
+	jp	nz,l1c08
+	ld	a,0
+	cp	h
+	jp	z,l1c97
+l1c08:
+	ld	a,2
+	cp	l		; Test 2
+	jp	nz,l1c14
+	ld	a,0
+	cp	h
+	jp	z,l1cd3
+l1c14:
+	jp	l1d0f
+;
+; Select 1
+;
+l1c17:
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	add	hl,de
+	ld	l,(hl)
+	ld	a,l
+	cp	'#'
+	jp	z,l1c54
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	add	hl,de
+	ld	l,(hl)
+	ld	a,l
+	cp	'-'
+	jp	z,l1c54
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	4
+l1c54:
+	jp	l1d0f
+;
+; Select 4
+;
+l1c57:
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd8
+	add	hl,de
+	ld	l,(hl)
+	ld	a,l
+	cp	'#'
+	jp	z,l1c94
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	ld	de,lffd8
+	add	hl,de
+	ld	l,(hl)
+	ld	a,l
+	cp	'-'
+	jp	z,l1c94
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	1
+l1c94:
+	jp	l1d0f
+;
+; Select 3
+;
+l1c97:
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	ld	l,(hl)
+	ld	a,l
+	cp	'#'
+	jp	z,l1cd0
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	dec	hl
+	dec	hl
+	ld	l,(hl)
+	ld	a,l
+	cp	'-'
+	jp	z,l1cd0
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	2
+l1cd0:
+	jp	l1d0f
+;
+; Select 2
+;
+l1cd3:
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ld	l,(hl)
+	ld	a,l
+	cp	'#'
+	jp	z,l1d0c
+	ld	hl,l0022
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ld	l,(hl)
+	ld	a,l
+	cp	'-'
+	jp	z,l1d0c
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	st16	3
+l1d0c:
+	jp	l1d0f
+;
+;
+;
+l1d0f:
+	ld	hl,l002a
+	add	hl,bc
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	ldhlhl
+	pop	de
+	call	l02fa		; HL:=-HL
+	add	hl,de
+	ex	de,hl
+	ld	hl,l001c
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l002c
+	add	hl,bc
+	ldhlhl
+	push	hl
+	dynadr	l0052
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	pop	de
+	call	l02fa		; HL:=-HL
+	add	hl,de
+	ex	de,hl
+	ld	hl,l001e
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l001c
+	add	hl,bc
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jp	nz,l1d78
+	ld	hl,l0018
+	add	hl,bc
+	st16	2
+	jp	l1d99
+l1d78:
+	ld	hl,l001c
+	add	hl,bc
+	ldhlhl
+	bit	7,h
+	jp	z,l1d91
+	ld	hl,l0018
+	add	hl,bc
+	st16	3
+	jp	l1d99
+l1d91:
+	ld	hl,l0018
+	add	hl,bc
+	st16
+l1d99:
+	ld	hl,l001e
+	add	hl,bc
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jp	nz,l1db6
+	ld	hl,l0016
+	add	hl,bc
+	st16	1
+	jp	l1dd7
+l1db6:
+	ld	hl,l001e
+	add	hl,bc
+	ldhlhl
+	bit	7,h
+	jp	z,l1dcf
+	ld	hl,l0016
+	add	hl,bc
+	st16	4
+	jp	l1dd7
+l1dcf:
+	ld	hl,l0016
+	add	hl,bc
+	st16
+l1dd7:
+	ld	hl,l001a
+	add	hl,bc
+	st16
+	ld	hl,l0002
+	add	hl,bc
+	st16
+l1de7:
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	pop	de
+	call	l01fa		; Signed DE:HL
+	jp	nc,l1f0c
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	ldhlhl
+	ld	a,h
+	or	l
+	jp	nz,l1e8b
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	push	hl
+	ld	hl,l0016
+	add	hl,bc
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jp	z,l1e5b
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	push	hl
+	ld	hl,l0018
+	add	hl,bc
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jp	nz,l1e88
+l1e5b:
+	ld	hl,l001a
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l000e
+	add	hl,bc
+	add	hl,de
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l1e88:
+	jp	l1efe
+l1e8b:
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	push	hl
+	ld	hl,l0016
+	add	hl,bc
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jp	z,l1efe
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	push	hl
+	ld	hl,l0018
+	add	hl,bc
+	ldhlhl
+	pop	de
+	call	l01e5		; HL:DE
+	jp	z,l1efe
+	ld	hl,l001a
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l000e
+	add	hl,bc
+	add	hl,de
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l1efe:
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l1de7
+l1f0c:
+	ld	hl,l001a
+	add	hl,bc
+	ldhlhl
+	ld	de,lffff
+	add	hl,de
+	bit	7,h
+	jp	nz,l1f38
+	ld	hl,l001a
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l19db		; Get random number
+	pop	de
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l000e
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+	jp	l1f51
+l1f38:
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	call	l19db		; Get random number
+	pop	de
+	add	hl,hl
+	ex	de,hl
+	ld	hl,l0006
+	add	hl,bc
+	add	hl,de
+	ldhlhl
+l1f51:
+	dealloc	l0024
+;
+; Init board layout
+;
+l1f5a:
+	jp	l1f75		; Init board layout
+l1f5d:
+	jp	l437b		; Set console control bits
+l1f60:
+	jp	l37ea		; Init cursor sequence
+l1f63:
+	jp	l3dc1
+l1f66:
+	jp	l4702		; Init random value
+l1f69:
+	jp	l3808		; Give instructions
+l1f6c:
+	jp	l343f		; Process keyboard input
+l1f6f:
+	jp	l2fbe		; Clear screen
+l1f72:
+	jp	l3e09
+;
+; Init board layout
+;
+; Init lines
+;
+stline	macro	num
+	ld	hl,l27ee+l0028*(num-1)
+	push	hl
+	dynadr	l0054+l0028*(num-1)
+	push	hl
+	call	l1f63		; Line num
+	pop	de
+	pop	de
+	endm
+
+l1f75:
+	alloc	l0002
+	ld	h,b
+	ld	l,c
+	st16
+	ld	hl,l0000
+	push	hl
+	call	l1f5d		; Reset all console control bits
+	pop	de
+	call	l1f60		; Init cursor sequence
+	dynadr	l0038
+	st16	_player
+	dynadr	l0046
+	ex	de,hl
+	push	de
+	dynadr	l0052
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+;
+; Set up lines
+;
+	stline	 1
+	stline	 2
+	stline	 3
+	stline	 4
+	stline	 5
+	stline	 6
+	stline	 7
+	stline	 8
+	stline	 9
+	stline	10
+	stline	11
+	stline	12
+	stline	13
+	stline	14
+	stline	15
+	stline	16
+	stline	17
+	stline	18
+	stline	19
+	stline	20
+	stline	21
+	stline	22
+	stline	23
+	stline	24
+	stline	25
+	stline	26
+	stline	27
+	stline	28
+	stline	29
+	stline	30
+	stline	31
+	stline	32
+	stline	33
+	stline	34
+	stline	35
+	stline	36
+	stline	37
+	stline	38
+	stline	39
+	stline	40
+	stline	41
+	stline	42
+	stline	43
+	stline	44
+	stline	45
+	stline	46
+	stline	47
+	stline	48
+	stline	49
+	stline	50
+	ld	hl,l2306
+	jp	l232e
+l2306:
+	db	'# . ### . # . ########### . # . ### . #',null
+l232e:
+	push	hl
+	dynadr	l0824
+	push	hl
+	call	l1f63		; Line 1
+	pop	de
+	pop	de
+	ld	hl,l2342
+	jp	l236a
+l2342:
+	db	'# . . . . # . . . ### . . . # . . . . #',null
+l236a:
+	push	hl
+	dynadr	l084c
+	push	hl
+	call	l1f63		; Line 2
+	pop	de
+	pop	de
+	ld	hl,l237e
+	jp	l23a6
+l237e:
+	db	'####### . ##### . ### . ##### . #######',null
+l23a6:
+	push	hl
+	dynadr	l0874
+	push	hl
+	call	l1f63		; Line 3
+	pop	de
+	pop	de
+	ld	hl,l23ba
+	jp	l23e2
+l23ba:
+	db	'      # . # . . . . . . . . # . #      ',null
+l23e2:
+	push	hl
+	dynadr	l089c
+	push	hl
+	call	l1f63		; Line 4
+	pop	de
+	pop	de
+	ld	hl,l23f6
+	jp	l241e
+l23f6:
+	db	'      # . # . ### - - ### . # . #      ',null
+l241e:
+	push	hl
+	dynadr	l08c4
+	push	hl
+	call	l1f63		; Line 5
+	pop	de
+	pop	de
+	ld	hl,l2432
+	jp	l245a
+l2432:
+	db	'####### . # . #         # . # . #######',null
+l245a:
+	push	hl
+	dynadr	l08ec
+	push	hl
+	call	l1f63		; Line 6
+	pop	de
+	pop	de
+	ld	hl,l246e
+	jp	l2496
+l246e:
+	db	'        . . . #         # . . .        ',null
+l2496:
+	push	hl
+	dynadr	l0914
+	push	hl
+	call	l1f63		; Line 7
+	pop	de
+	pop	de
+	ld	hl,l24aa
+	jp	l24d2
+l24aa:
+	db	'####### . # . #         # . # . #######',null
+l24d2:
+	push	hl
+	dynadr	l093c
+	push	hl
+	call	l1f63		; Line 8
+	pop	de
+	pop	de
+	ld	hl,l24e6
+	jp	l250e
+l24e6:
+	db	'      # . # . ########### . # . #      ',null
+l250e:
+	push	hl
+	dynadr	l0964
+	push	hl
+	call	l1f63		; Line 9
+	pop	de
+	pop	de
+	ld	hl,l2522
+	jp	l254a
+l2522:
+	db	'      # . # . . . . . . . . # . #      ',null
+l254a:
+	push	hl
+	dynadr	l098c
+	push	hl
+	call	l1f63		; Line 10
+	pop	de
+	pop	de
+	ld	hl,l255e
+	jp	l2586
+l255e:
+	db	'####### . # . ########### . # . #######',null
+l2586:
+	push	hl
+	dynadr	l09b4
+	push	hl
+	call	l1f63		; Line 11
+	pop	de
+	pop	de
+	ld	hl,l259a
+	jp	l25c2
+l259a:
+	db	'# . . . . . . . . ### . . . . . . . . #',null
+l25c2:
+	push	hl
+	dynadr	l09dc
+	push	hl
+	call	l1f63		; Line 12
+	pop	de
+	pop	de
+	ld	hl,l25d6
+	jp	l25fe
+l25d6:
+	db	'# ',_magic,' ### . ##### . ### . ##### . ### ',_magic,' #',null
+l25fe:
+	push	hl
+	dynadr	l0a04
+	push	hl
+	call	l1f63		; Line 13
+	pop	de
+	pop	de
+	ld	hl,l2612
+	jp	l263a
+l2612:
+	db	'# . . # . . . . . . . . . . . . # . . #',null
+l263a:
+	push	hl
+	dynadr	l0a2c
+	push	hl
+	call	l1f63		; Line 14
+	pop	de
+	pop	de
+	ld	hl,l264e
+	jp	l2676
+l264e:
+	db	'### . # . # . ########### . # . # . ###',null
+l2676:
+	push	hl
+	dynadr	l0a54
+	push	hl
+	call	l1f63		; Line 15
+	pop	de
+	pop	de
+	ld	hl,l268a
+	jp	l26b2
+l268a:
+	db	'# . . . . # . . . ### . . . # . . . . #',null
+l26b2:
+	push	hl
+	dynadr	l0a7c
+	push	hl
+	call	l1f63		; Line 16
+	pop	de
+	pop	de
+	ld	hl,l26c6
+	jp	l26ee
+l26c6:
+	db	'# . ########### . ### . ########### . #',null
+l26ee:
+	push	hl
+	dynadr	l0aa4
+	push	hl
+	call	l1f63		; Line 17
+	pop	de
+	pop	de
+	ld	hl,l2702
+	jp	l272a
+l2702:
+	db	'# . . . . . . . . . . . . . . . . . . #',null
+l272a:
+	push	hl
+	dynadr	l0acc
+	push	hl
+	call	l1f63		; Line 18
+	pop	de
+	pop	de
+	ld	hl,l273e
+	jp	l2766
+l273e:
+	db	'#######################################',null
+l2766:
+	push	hl
+	dynadr	l0af4
+	push	hl
+	call	l1f63		; Line 19
+	pop	de
+	pop	de
+;
+	dynadr	l0b6f
+	st16
+	ld	hl,0
+	push	hl
+	call	l1f66		; Init random value
+	pop	de
+	dynadr	l003e
+	st16	2000
+	dynadr	l0b6d
+	st16
+	call	l1f69		; Give instructions
+l27a1:
+	dynadr	l0b6d
+	ldhlhl
+	ld	a,h
+	or	l
+	jp	nz,l27bc
+	ld	hl,l0001
+	push	hl
+	call	l1f6c
+	pop	de
+	jp	l27a1
+l27bc::
+	dynadr	l0042
+	st16	185
+	dynadr	l0b71
+	st16
+	call	l1f6f		; Clear screen
+	ld	hl,l27dc
+	jp	l27e0
+l27dc:
+	db	esc,'p',null
+l27e0:
+	push	hl
+	call	l1f72		; Turn on video attribute
+	pop	de
+	dealloc	l0002
+;
+; 50 lines
+;
+l27ee:
+	db	'#######################################',null
+l2816:
+	db	'# . . . * . . . . ### . . . . * . . . #',null
+l283e:
+	db	'# ',_magic,' ### . ##### . ### . ##### . ### ',_magic,' #',null
+l2866:
+	db	'# * . . * . * . * . . * . * . * . . * #',null
+l288e:
+	db	'# . ### . # . ########### . # . ### . #',null
+l28b6:
+	db	'# . . . * # . . . ### . . . # * . . . #',null
+l28de:
+	db	'####### . ##### . ### . ##### . #######',null
+l2906:
+	db	'      # . # . . * . . * . . # . #      ',null
+l292e:
+	db	'      # . # . ### - - ### . # . #      ',null
+l2956:
+	db	'####### . # . #         # . # . #######',null
+l297e:
+	db	'        * . * #         # * . *        ',null
+l29a6:
+	db	'####### . # . #         # . # . #######',null
+l29ce:
+	db	'      # . # . ########### . # . #      ',null
+l29f6:
+	db	'      # . # * . . . . . . * # . #      ',null
+l2a1e:
+	db	'####### . # . ########### . # . #######',null
+l2a46:
+	db	'# . . . * . * . . ### . . * . * . . . #',null
+l2a6e:
+	db	'# ',_magic,' ### . ##### . ### . ##### . ### ',_magic,' #',null
+l2a96:
+	db	'# . . # * . * . * . . * . * . * # . . #',null
+l2abe:
+	db	'### . # . # . ########### . # . # . ###',null
+l2ae6:
+	db	'# . * . . # . . . ### . . . # . . * . #',null
+l2b0e:
+	db	'# . ########### . ### . ########### . #',null
+l2b36:
+	db	'# . . . . . . . * . . * . . . . . . . #',null
+l2b5e:
+	db	'#######################################',null
+l2b86:
+	db	'#######################################',null
+l2bae:
+	db	'# . . . * . . . . ### . . . . * . . . #',null
+l2bd6:
+	db	'# ',_magic,' ### . ##### . ### . ##### . ### ',_magic,' #',null
+l2bfe:
+	db	'# * . . * . * . * . . * . * . * . . * #',null
+l2c26:
+	db	'# . ### . # . ########### . # . ### . #',null
+l2c4e:
+	db	'# . . . * # . . . ### . . . # * . . . #',null
+l2c76:
+	db	'####### . ##### . ### . ##### . #######',null
+l2c9e:
+	db	'      # . # . . * . . * . . # . #      ',null
+l2cc6:
+	db	'      # . # . ### - - ### . # . #      ',null
+l2cee:
+	db	'####### . # . #         # . # . #######',null
+l2d16:
+	db	'        * . * #         # * . *        ',null
+l2d3e:
+	db	'####### . # . #         # . # . #######',null
+l2d66:
+	db	'      # . # . ########### . # . #      ',null
+l2d8e:
+	db	'      # . # * . . . . . . * # . #      ',null
+l2db6:
+	db	'####### . # . ########### . # . #######',null
+l2dde:
+	db	'# . . . * . * . . ### . . * . * . . . #',null
+l2e06:
+	db	'# ',_magic,' ### . ##### . ### . ##### . ### ',_magic,' #',null
+l2e2e:
+	db	'# . . # * . * . * . . * . * . * # . . #',null
+l2e56:
+	db	'### . # . # . ########### . # . # . ###',null
+l2e7e:
+	db	'# . * . . # . . . ### . . . # . . * . #',null
+l2ea6:
+	db	'# . ########### . ### . ########### . #',null
+l2ece:
+	db	'# . . . . . . . * . . * . . . . . . . #',null
+l2ef6:
+	db	'#######################################',null
+l2f1e:
+	db	'#######################################',null
+l2f46:
+	db	'# . . . . . . . . ### . . . . . . . . #',null
+l2f6e:
+	db	'# ',_magic,' ### . ##### . ### . ##### . ### ',_magic,' #',null
+l2f96:
+	db	'# . . . . . . . . . . . . . . . . . . #',null
+;
+l2fbe:
+	jp	l2fc7		; Clear screen
+l2fc1:
+	jp	l3e09
+l2fc4:
+	jp	l3ceb
+;
+; Clear screen
+;
+l2fc7:
+	push	bc
+	ld	hl,l2fda
+	push	hl
+	call	l2fc1
+	pop	de
+	ld	hl,l0004
+	push	hl
+	call	l2fc4
+	pop	de
+	pop	bc
+	ret
+;
+l2fda:
+	db	esc,'H',esc,'E',null
+;
+; Print text on cursor position
+;
+l2fdd:
+	jp	l2fe6		; Print text on cursor position
+l2fe0:
+	jp	l3d2a		; Position cursor
+l2fe3:
+	jp	l3e09
+;
+; Print text on cursor position
+;
+l2fe6:
+	alloc	0
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l2fe0		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l0008
+	add	hl,bc
+	ld	a,(hl)		; Get string pointer
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	push	hl
+	call	l2fe3		; Print string
+	pop	de
+	pop	bc
+	ret
+;
+; Position cursor and put character on console
+;
+l3014:
+	jp	l301d		; Position cursor and put character on console
+l3017:
+	jp	l3d2a		; Position cursor
+l301a:
+	jp	l439f		; Put character to console
+;
+; Position cursor and put character on console
+;
+l301d:
+	alloc	0
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l3017		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l0008
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	push	hl
+	call	l301a		; Put character to console
+	pop	de
+	pop	bc
+	ret
+;
+;
+;
+l304a:
+	jp	l3053
+l304d:
+	jp	l3da2
+l3050:
+	jp	l2fdd		; Print text on cursor position
+;
+;
+;
+l3053:
+	alloc	l000a
+	dynadr	l0b71
+	ldhlhl
+	push	hl
+	ld	hl,l30b8
+	push	hl
+	ld	h,b
+	ld	l,c
+	push	hl
+	call	l304d
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	push	hl
+	ld	hl,l0034
+	push	hl
+	ld	hl,l0000
+	push	hl
+	call	l3050		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0042
+	ldhlhl
+	push	hl
+	ld	hl,l30bc
+	push	hl
+	ld	h,b
+	ld	l,c
+	push	hl
+	call	l304d
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	push	hl
+	ld	hl,l0039
+	push	hl
+	ld	hl,l0015
+	push	hl
+	call	l3050		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dealloc	l000a
+;
+l30b8:
+	db	'%6d',null
+l30bc:
+	db	'%6d',null
+;
+;
+;
+l30c0:
+	alloc	l0005
+	forini	l0002
+l30d0:
+	forloop	l0002,l0017,l31b5
+	forini
+l30e7:
+	forloop	,l0028,l31a7
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0054
+	pop	de
+	add	hl,de
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	l,(hl)
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	(hl),e
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l03ec		; Line 24 [l2b86]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	pop	de
+	add	hl,de
+	push	hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	ld	a,e
+	cp	'*'
+	jp	nz,l319b
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,l0028
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0784		; Line 47 [l2f1e]
+	pop	de
+	add	hl,de
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	pop	de
+	add	hl,de
+	ld	(hl),'.'
+l319b:
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l30e7
+l31a7:
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l30d0
+l31b5:
+	dynadr	l0042
+	st16	185
+	dynadr	l003e
+	push	hl
+	ldhlhl
+	push	hl
+	dynadr	l003e
+	ldhlhl
+	ld	de,l000a
+	ex	de,hl
+	call	l02cb
+	pop	de
+	call	l02fa		; HL:=-HL
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	dealloc	l0005
+;
+; Give final statistic and exit
+;
+l31f3:
+	jp	l3208		; Give final statistic and exit
+l31f6:
+	jp	l46d2		; Delay and check keyboard pressed
+l31f9:
+	jp	l343f		; Process keyboard input
+l31fc:
+	jp	l2fbe		; Clear screen
+l31ff:
+	jp	l3d2a		; Position cursor
+l3202:
+	jp	l3e3b		; Print zero closed format string
+l3205:
+	jp	l3d72		; Close program
+;
+; Give final statistic and exit
+;
+l3208:
+	alloc	l0004
+	ld	hl,l0032
+	push	hl
+	call	l31f6		; Delay and check keyboard pressed
+	pop	de
+	ld	hl,l0000
+	push	hl
+	call	l31f9
+	pop	de
+	call	l31fc		; Clear screen
+	dynadr	l0b6d
+	ldhlhl
+	ld	a,h
+	or	l
+	jp	z,l3342
+	ld	hl,l0002
+	add	hl,bc
+	st16	7
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l334e
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l336c
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l338a
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l33a8
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	dynadr	l0b6d
+	ldhlhl
+	push	hl
+	ld	hl,l33c6
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l33e6
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	dynadr	l0b71
+	ldhlhl
+	push	hl
+	ld	hl,l3404
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+	pop	de
+	ld	hl,l0014
+	push	hl
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	push	hl
+	call	l31ff		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l3421
+	push	hl
+	call	l3202		; Print zero closed format string
+	pop	de
+l3342:
+	call	l3205		; Close program
+	dealloc	l0004
+;
+;
+;
+l334e:
+	db	' ___________________________ ',null
+l336c:
+	db	'|                           |',null
+l338a:
+	db	'| G A M E   O V E R         |',null
+l33a8:
+	db	'|                           |',null
+l33c6:
+	db	'| Game type: %1d              |',null
+l33e6:
+	db	'|                           |',null
+l3404:
+	db	'| Your score: %-5u         |',null
+l3421:
+	db	'|___________________________|',null
+;
+l343f:
+	jp	l344b		; Process keyboard input
+l3442:
+	jp	l43c1		; Return pending console state
+l3445:
+	jp	l43d4		; Return pending character read previously
+l3448:
+	jp	l31f3		; Give final statistic and exit
+;
+;
+;
+l344b:
+	alloc	l0004
+	call	l3442		; Return pending console state
+	ld	a,h
+	or	l		; Test pending character available
+	jp	nz,l345e	; Yeap
+	jp	l35f2
+l345e:
+	call	l3445		; Return pending character read previously
+	ex	de,hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0002
+	add	hl,bc
+	ldhlhl
+	ld	de,l007f
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+;
+	ld	a,_left
+	cp	l		; Test valid selections
+	jp	nz,l3486
+	ld	a,0
+	cp	h
+	jp	z,l3531
+l3486:
+	ld	a,_right
+	cp	l
+	jp	nz,l3492
+	ld	a,0
+	cp	h
+	jp	z,l3548
+l3492:
+	ld	a,_up
+	cp	l
+	jp	nz,l349e
+	ld	a,0
+	cp	h
+	jp	z,l355f
+l349e:
+l34aa:
+	ld	a,_down
+	cp	l
+	jp	nz,l34b6
+	ld	a,0
+	cp	h
+	jp	z,l3576
+l34b6:
+l34c2:
+	ld	a,_halt
+	cp	l
+	jp	nz,l34ce
+	ld	a,0
+	cp	h
+	jp	z,l358d
+l34ce:
+	ld	a,'\'-'@'
+	cp	l
+	jp	nz,l34da
+	ld	a,0
+	cp	h
+	jp	z,l35a3
+l34da:
+	ld	a,DEL
+	cp	l
+	jp	nz,l34e6
+	ld	a,0
+	cp	h
+	jp	z,l35a3
+l34e6:
+	ld	a,_quit
+	cp	l
+	jp	nz,l34f2
+	ld	a,0
+	cp	h
+	jp	z,l35a3
+l34f2:
+	ld	a,'S'-'@'
+	cp	l
+	jp	nz,l34fe
+	ld	a,0
+	cp	h
+	jp	z,l35a9
+l34fe:
+	ld	a,_normal
+	cp	l
+	jp	nz,l350a
+	ld	a,0
+	cp	h
+	jp	z,l35b3
+l350a:
+	ld	a,_blink
+	cp	l
+	jp	nz,l3516
+	ld	a,0
+	cp	h
+	jp	z,l35c2
+l3516:
+	ld	a,_intell
+	cp	l
+	jp	nz,l3522
+	ld	a,0
+	cp	h
+	jp	z,l35d1
+l3522:
+	ld	a,_blinkl
+	cp	l
+	jp	nz,l352e
+	ld	a,0
+	cp	h
+	jp	z,l35e0
+l352e:
+	jp	l35ef
+;
+; Input 'S' : move left
+;
+l3531:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16	2
+	jp	l35f2
+;
+; Input 'D' : move right
+;
+l3548:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16	3
+	jp	l35f2
+;
+; Input 'E' : move up
+;
+l355f:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16	1
+	jp	l35f2
+;
+; Input 'X' : move down
+;
+l3576:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16	4
+	jp	l35f2
+;
+; Input ' ' : halt
+;
+l358d:
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	st16
+	jp	l35f2
+;
+; Input '^\', DEL, 'Q' : quit
+;
+l35a3:
+	call	l3448		; Give final statistic and exit
+	jp	l35f2
+;
+; Input '^S' : ???
+;
+l35a9:
+	ld	h,b
+	ld	l,c
+	st16	1
+	jp	l345e
+;
+; Input '1' : normal game
+;
+l35b3:
+	dynadr	l0b6d
+	st16	1
+	jp	l35f2
+;
+; Input '2' : blinking monsters
+;
+l35c2:
+	dynadr	l0b6d
+	st16	2
+	jp	l35f2
+;
+; Input '3' : intelligent monsters
+;
+l35d1:
+	dynadr	l0b6d
+	st16	3
+	jp	l35f2
+;
+; Input '4' : blinking intelligent monsters
+;
+l35e0:
+	dynadr	l0b6d
+	st16	4
+	jp	l35f2
+l35ef:
+	jp	l345e
+l35f2:
+	dealloc	l0004
+;
+l35fb:
+	jp	l3607
+l35fe:
+	jp	l3014		; Position cursor and put character on console
+l3601:
+	jp	l2fdd		; Print text on cursor position
+l3604:
+	jp	l3da2
+;
+;
+;
+l3607:
+	alloc	l0002
+	ld	hl,l0007
+	push	hl
+	ld	hl,l0000
+	push	hl
+	ld	hl,l0000
+	push	hl
+	call	l35fe		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0052
+	ldhlhl
+	ld	de,l0008
+	add	hl,de
+	ldhlhl
+	dec	hl
+	ld	a,h
+	or	l
+	jp	nz,l3768
+	dynadr	l0b6f
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	dec	de
+	dec	de
+	dec	de
+	ld	a,d
+	or	e
+	jp	nz,l3693
+	dynadr	l09a0
+	ld	a,(hl)
+	cp	'.'
+	jp	nz,l366d
+	dynadr	l0042
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+l366d:
+	dynadr	l09a0
+	ld	(hl),'$'
+	ld	hl,l0024
+	push	hl
+	ld	hl,l0014
+	push	hl
+	ld	hl,l000d
+	push	hl
+	call	l35fe		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0b6f
+	st16
+l3693:
+	ld	hl,l3777
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0005
+	push	hl
+	call	l3601		; Print MONSTERS KILLED on cursor position
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0b6f
+	ldhlhl
+	push	hl
+	ld	hl,l3789
+	push	hl
+	dynadr	l0b1c
+	push	hl
+	call	l3604
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0b1c
+	push	hl
+	ld	hl,l003e
+	push	hl
+	ld	hl,l0005
+	push	hl
+	call	l3601		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l000c
+	call	l026b		; HL:=HL*DE
+	push	hl
+	dynadr	l0008
+	pop	de
+	add	hl,de
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	inc	hl
+	inc	hl
+	st16	0ah
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	add	hl,hl
+	ld	de,l0010
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	st16
+	ld	hl,_monst
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	ldhlhl
+	push	hl
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	inc	hl
+	inc	hl
+	ldhlhl
+	push	hl
+	call	l35fe		; Position cursor and put character on console
+	pop	de
+	pop	de
+	pop	de
+	dynadr	l0b71
+	push	hl
+	ldhlhl
+	ld	de,l000a
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0001
+	jp	l376e
+l3768:
+	ld	hl,lffff
+l376e:
+	dealloc	l0002
+;
+l3777:
+	db	'MONSTERS KILLED: ',null
+l3789:
+	db	'%1d',null
+;
+; Random calculation routines
+;
+l378d:
+	jp	l3793		; Get random number
+l3790:
+	jp	l476b		; Calculate random number
+;
+; Get random number
+;
+; Return 0..max-1
+;
+l3793:
+	alloc	l0002
+	call	l3790		; Calculate random number
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	pop	de
+	call	l0229
+	dealloc	l0002
+;
+; Print text at fix position
+;
+l37c3:
+	jp	l37c9		; Print text at fix position
+l37c6:
+	jp	l2fdd		; Print text on cursor position
+;
+; Print text at fix position
+;
+l37c9:
+	alloc	0
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l002d
+	push	hl
+	ld	hl,l0017
+	push	hl
+	call	l37c6		; Print text on cursor position
+	pop	de
+	pop	de
+	pop	de
+	pop	bc
+	ret
+;
+; Init cursor sequence
+;
+l37ea::
+	push	bc
+	dynadr	l0b73
+	ld	(hl),esc
+	dynadr	l0b73+1
+	ld	(hl),'Y'
+	dynadr	l0b73+4
+	ld	(hl),null
+	pop	bc
+	ret
+;
+l3808:
+	jp	l3814		; Give instructions
+l380b:
+	jp	l2fbe		; Clear screen
+l380e:
+	jp	l3d2a		; Position cursor
+l3811:
+	jp	l3e3b		; Print zero closed format string
+;
+; Give instructions
+;
+l3814:
+	push	bc
+	call	l380b		; Clear screen
+	ld	hl,l0000
+	push	hl
+	ld	hl,l0000
+	push	hl
+	call	l380e		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l38c4
+	push	hl
+	call	l3811		; Start telling help text
+	pop	de
+	ld	hl,l3902
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l394c
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3996
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l39e2
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l0003
+	push	hl
+	ld	hl,l3a2f
+	push	hl
+	call	l3811
+	pop	de
+	pop	de
+	ld	hl,l3a7b
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3ac7
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3b0f
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3b51
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3b78
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3ba0
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3bc5
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3bec
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3c0f
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3c32
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3c58
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3c84
+	push	hl
+	call	l3811
+	pop	de
+	ld	hl,l3cb3
+	push	hl
+	call	l3811
+	pop	de
+	pop	bc
+	ret
+;
+l38c4:
+	db	'Attention: you are in a dungeon, being chased by monsters!'
+	db	cr,lf,lf,null
+l3902:
+	db	'There are gold coins scattered uniformly in the dungeon, marked by "',_gold,'".'
+	db	cr,lf,null
+l394c:
+	db	'One magic potion is available at each spot marked "',_magic,'". Each potion will'
+	db	cr,lf,null
+l3996:
+	db	'enable you to kill monsters by touch for a limited duration. It will also'
+	db	cr,lf,null
+l39e2:
+	db	'scare them away. When you kill a monster it is regenerated, but this takes'
+	db	cr,lf,null
+l3a2f:
+	db	'time. You can also regenerate yourself %d times. Killing all the monsters'
+	db	cr,lf,null
+l3a7b:
+	db	'results in further treasure appearing magically somewhere in the dungeon,'
+	db	cr,lf,null
+l3ac7:
+	db	'marked by "',_treasu,'". There is a magic tunnel connecting the center left and'
+	db	cr,lf,null
+l3b0f:
+	db	'center right parts of the dungeon. The monsters know about it!'
+	db	cr,lf,lf,null
+l3b51:
+	db	'        Type:   ',_left,'       to move left'
+	db	cr,lf,null
+l3b78:
+	db	'                ',_right,'       to move right'
+	db	cr,lf,null
+l3ba0:
+	db	'                ',_up,'       to move up'
+	db	cr,lf,null
+l3bc5:
+	db	'                ',_down,'       to move down'
+	db	cr,lf,null
+l3bec:
+	db	'                <space> to halt '
+	db	cr,lf,null
+l3c0f:
+	db	'                ',_quit,'       to quit'
+	db	cr,lf,lf,null
+l3c32:
+	db	'        Type:   ',_normal,'       normal game'
+	db	cr,lf,null
+l3c58:
+	db	'                ',_blink,'       blinking monsters'
+	db	cr,lf,null
+l3c84:
+	db	'                ',_intell,'       intelligent monsters'
+	db	cr,lf,null
+l3cb3:
+	db	'                ',_blinkl,'       blinking intelligent monsters'
+	db	cr,lf,null
+;
+;
+;
+l3ceb:
+	alloc	l0002
+	ld	h,b
+	ld	l,c
+	st16
+l3cf9:
+	ld	h,b
+	ld	l,c
+	ldhlhl
+	push	hl
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0014
+	call	l023f		; Multiply
+	pop	de
+	call	l01fa		; Signed DE:HL
+	jp	nc,l3d21
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l3cf9
+l3d21:
+	dealloc	l0002
+;
+l3d2a:
+	jp	l3d30		; Position cursor
+l3d2d:
+	jp	l3e09
+;
+; Position cursor
+;
+l3d30:
+	alloc	0
+	ld	hl,l0004
+	add	hl,bc
+	ld	a,(hl)		; Get coordinate
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ld	de,l0020
+	add	hl,de		; Add offset
+	push	hl
+	dynadr	l0b73+2
+	pop	de
+	ld	(hl),e		; Save coordinate
+	ld	hl,l0006
+	add	hl,bc
+	ldhlhl
+	ld	de,l0020
+	add	hl,de
+	push	hl
+	dynadr	l0b73+3
+	pop	de
+	ld	(hl),e
+	dynadr	l0b73
+	push	hl
+	call	l3d2d		; Position cursor
+	pop	de
+	pop	bc
+	ret
+;
+l3d72:
+	jp	l3d7e		; Close program
+l3d75:
+	jp	l3d2a		; Position cursor
+l3d78:
+	jp	l3e09
+l3d7b:
+	jp	OS		; Close program
+;
+; Close program
+;
+l3d7e:
+	push	bc
+	ld	hl,l0000
+	push	hl
+	ld	hl,l0017
+	push	hl
+	call	l3d75		; Position cursor
+	pop	de
+	pop	de
+	ld	hl,l3d9e
+	push	hl
+	call	l3d78		; Turn off video attribute
+	pop	de
+	ld	hl,l0000
+	push	hl
+	call	l3d7b		; Close program
+	pop	de
+	pop	bc
+	ret
+;
+l3d9e:
+	db	esc,'q',null
+;
+l3da2:
+	jp	l3da8
+l3da5:
+	jp	l3e69		; Format string
+;
+;
+;
+l3da8:
+	alloc	0
+	ld	hl,l0006
+	add	hl,bc
+	push	hl
+	call	l0190
+	db	4
+	push	hl
+	call	l3da5		; Format string
+	pop	de
+	pop	de
+	pop	bc
+	ret
+;
+; Move zero closed string
+;
+l3dc1:
+	alloc	l0002
+	call	l0190		; Get pointer to destination
+	db	6
+	ex	de,hl
+	ld	h,b		; Get base address
+	ld	l,c
+	ld	(hl),e		; Store destination
+	inc	hl
+	ld	(hl),d
+l3dd3:
+	ld	hl,l0006
+	add	hl,bc		; Point to destination
+	ld	e,(hl)		; Get it
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Update it
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	ld	hl,l0008
+	add	hl,bc		; Point to source
+	ld	e,(hl)		; Get it
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Update it
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)		; Get character from source
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		; Store character into destination
+	ld	a,e
+	or	a		; Test end of string
+	jp	z,l3df9		; Yeap
+	jp	l3dd3
+l3df9:
+	call	l0190		; Get back pointer
+	db	0
+	dealloc	l0002
+;
+; Print zero closed string
+;
+l3e09:
+	jp	l3e0f		; Print zero closed string
+l3e0c:
+	jp	l439f		; Put character to console
+;
+; Print zero closed string
+;
+l3e0f:
+	alloc	0
+l3e17:
+	call	l0190
+	db	4
+	ld	l,(hl)		; Get character
+	ld	a,l
+	or	a		; Test zero
+	jp	z,l3e39		; Yeap, end
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)		; Get pointer
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)		; Get character
+	ld	h,0
+	push	hl
+	call	l3e0c		; Put character to console
+	pop	de
+	jp	l3e17
+l3e39:
+	pop	bc
+	ret
+;
+; Print zero closed format string
+;
+l3e3b:
+	jp	l3e44		; Print zero closed format string
+l3e3e:
+	jp	l3e69		; Format string
+l3e41:
+	jp	l3e09		; Print string
+;
+; Print zero closed format string
+;
+l3e44:
+	alloc	l0087
+	ld	hl,l008b
+	add	hl,bc
+	push	hl
+	ld	h,b
+	ld	l,c
+	push	hl
+	call	l3e3e		; Format string
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	push	hl
+	call	l3e41		; Print string
+	pop	de
+	dealloc	l0087
+;
+; Format string
+;
+l3e69:
+	jp	l3e78		; Format string
+l3e6c:
+	jp	l41d8		; Convert to ASCII
+l3e6f:
+	jp	l4282		; Test character digit 0..9
+l3e72:
+	jp	l42b1		; Convert ASCII decimal number to hex
+l3e75:
+	jp	l4314		; Convert character to upper case
+;
+; Format string
+;
+l3e78:
+	alloc	l0098
+	ld	hl,l009e
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	dec	de
+	ex	de,hl
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0004
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	call	l0190
+	db	158
+	ex	de,hl
+	ld	hl,l0096
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+;
+; Format loop
+;
+l3ea7:
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Update pointer
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)		; Get chacter
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e		; Store character
+	ld	a,e
+	or	a		; Test end of line
+	jp	z,l41c9		; Yeap
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)
+	ld	a,l
+	cp	'%'		; Test format prefix
+	jp	nz,l41b3	; Nope
+	ld	hl,l0006
+	add	hl,bc
+	ex	de,hl
+	ld	hl,l008d
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0094
+	add	hl,bc
+	st16	6		; Init precision
+	ld	hl,l0091
+	add	hl,bc
+	ld	e,0
+	ld	(hl),e		; Set no left-pads with zeroes
+	ld	hl,l008f
+	add	hl,bc
+	ld	(hl),e		; Set no precision
+	ld	hl,l0090
+	add	hl,bc
+	ld	(hl),e		; Set no left-justify
+	call	l0190
+	db	4
+	ld	l,(hl)		; Get next character
+	ld	a,l
+	cp	'-'		; Test left-justify
+	jp	nz,l3f08	; Nope
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Skip character
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l0090
+	add	hl,bc
+	inc	(hl)		; Set left-justify
+l3f08:
+	call	l0190
+	db	4
+	ld	l,(hl)
+	ld	a,l
+	cp	'0'		; Test left-pads with zeroes
+	jp	nz,l3f18	; Nope
+	ld	hl,l0091
+	add	hl,bc
+	inc	(hl)		; Set left-pads with zeroes
+l3f18:
+	call	l0190
+	db	4
+	ld	l,(hl)
+	ld	h,0
+	push	hl
+	call	l3e6f		; Test character digit 0..9
+	pop	de
+	ld	a,l
+	or	a
+	jp	z,l3f35		; Not a digit
+	ld	hl,l0004
+	add	hl,bc
+	push	hl
+	call	l3e72		; Convert ASCII decimal number to hex
+	pop	de
+	jp	l3f38
+l3f35:
+	ld	hl,0		; Load default width
+l3f38:
+	ex	de,hl
+	ld	hl,l0092
+	add	hl,bc
+	ld	(hl),e		; Store selected width
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)		; Get pointer
+	inc	hl
+	ld	d,(hl)
+	inc	de		; Update pointer
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)		; Get character
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e		; Save it
+	ld	a,e
+	cp	'.'		; Test precision
+	jp	nz,l3f80
+	ld	hl,l0004
+	add	hl,bc
+	push	hl
+	call	l3e72		; Convert ASCII decimal number to hex
+	pop	de
+	ex	de,hl
+	ld	hl,l0094
+	add	hl,bc
+	ld	(hl),e		; Store precision
+	inc	hl
+	ld	(hl),d
+	ld	hl,l008f
+	add	hl,bc
+	inc	(hl)		; Set precision
+	ld	hl,l0004
+	add	hl,bc
+	ld	e,(hl)		; Get pointer
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)		; Get character
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e		; Store current character
+l3f80:
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)		; Get character
+	ld	h,0
+	push	hl
+	call	l3e75		; Convert to upper case
+	pop	de
+	ld	a,l
+	cp	'D'		; Test signed integer
+	jp	z,l3fac
+	cp	'U'		; Test unsigned integer
+	jp	z,l3fe8
+	cp	'X'		; Test hex integer
+	jp	z,l3ff1
+	cp	'O'		; Test octal integer
+	jp	z,l3ffa
+	cp	'C'		; Test character
+	jp	z,l4040
+	cp	'S'		; Test string
+	jp	z,l4071
+	jp	l419d
+;
+; PACMAN uses %6d, %2d, %1d, %d
+;
+l3fac:
+	call	l0190
+	db	150
+	ldhlhl			; Get value
+	ld	a,h
+	or	a		; Test GT 0
+	jp	p,l3fe8		; Yeap
+	ld	hl,l008d
+	add	hl,bc
+	ld	e,(hl)		; Get resulting string pointer
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	(hl),'-'	; Set sign
+	call	l0190
+	db	150
+	push	hl
+	call	l0190
+	db	150
+	ldhlhl
+	call	l02fa		; HL:=-HL
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0092
+	add	hl,bc
+	ld	e,(hl)		; Get selected width
+	inc	hl
+	ld	d,(hl)
+	dec	de		; Fix it
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+;
+; PACMAN uses %-5u
+;
+l3fe8:
+	ld	hl,l0001
+	add	hl,bc
+	ld	(hl),10		; Set number base
+	jp	l4000
+;
+; PACMAN uses %x NEVER
+;
+l3ff1:
+	ld	hl,l0001
+	add	hl,bc
+	ld	(hl),16		; Set number base
+	jp	l4000
+;
+; PACMAN uses %o NEVER
+;
+l3ffa:
+	ld	hl,l0001
+	add	hl,bc
+	ld	(hl),8		; Set number base
+l4000:
+	ld	hl,l0092
+	add	hl,bc
+	push	hl
+	ldhlhl
+	push	hl
+	ld	hl,l0001
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	push	hl
+	ld	hl,l0096
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	dec	de
+	ex	de,hl
+	ldhlhl
+	push	hl
+	ld	hl,l008d
+	add	hl,bc
+	push	hl
+	call	l3e6c		; Convert to ASCII
+	pop	de
+	pop	de
+	pop	de
+	pop	de
+	xor	a
+	ld	h,a
+	call	l02fa		; HL:=-HL
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l40e9
+;
+; PACMAN uses %c
+;
+l4040:
+	ld	hl,l008d
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	ld	hl,l0096
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	dec	de
+	ex	de,hl
+	ldhlhl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		; Store character
+	ld	hl,l0092
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l40e9
+;
+; PACMAN uses %s NEVER
+;
+l4071:
+	ld	hl,l008f
+	add	hl,bc
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test precision set
+	jp	nz,l4084	; Yeap
+	ld	hl,l0094
+	add	hl,bc
+	st16	200		; Set default
+l4084:
+	ld	hl,l0096
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	dec	de
+	ex	de,hl
+	ldhlhl
+	ex	de,hl
+	ld	hl,l0002
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l409f:
+	call	l0190
+	db	2
+	ld	l,(hl)
+	ld	a,l
+	or	a
+	jp	z,l40e9
+	call	l0190
+	db	148
+	ld	a,h
+	or	l
+	jp	z,l40e9
+	ld	hl,l008d
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	ld	hl,l0002
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	ld	hl,l0094
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,l0092
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l409f
+l40e9:
+	call	l0190
+	db	141
+	ld	(hl),0
+	ld	hl,l0006
+	add	hl,bc
+	ex	de,hl
+	ld	hl,l008d
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0090
+	add	hl,bc
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test left-justify
+	jp	nz,l4140	; Yeap
+l4105:
+	ld	hl,l0092
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	inc	de
+	ld	hl,l0000
+	call	l0205		; Signed HL:DE (Test GT 0)
+	jp	nc,l4140
+	ld	hl,l009c
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	ld	hl,l0091
+	add	hl,bc
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test  left-pads with zeroes
+	jp	z,l4137		; Nope, blank it
+	ld	hl,'0'
+	jp	l413a
+l4137:
+	ld	hl,' '
+l413a:
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	jp	l4105
+l4140:
+	call	l0190
+	db	156
+	push	hl
+	ld	hl,l008d
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	ld	a,e
+	or	a
+	jp	z,l4169
+	ld	hl,l009c
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	jp	l4140
+l4169:
+	ld	hl,l0090
+	add	hl,bc
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test left-justify
+	jp	z,l419a		; Nope
+l4173:
+	ld	hl,l0092
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	inc	de
+	ld	hl,l0000
+	call	l0205		; Signed HL:DE (Test GT 0)
+	jp	nc,l419a
+	ld	hl,l009c
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	(hl),' '
+	jp	l4173
+l419a:
+	jp	l41b0
+l419d:
+	ld	hl,l009c
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		; Unpack character
+l41b0:
+	jp	l41c6
+l41b3:
+	ld	hl,l009c
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+l41c6:
+	jp	l3ea7
+l41c9:
+	call	l0190
+	db	156
+	ld	(hl),null
+	dealloc	l0098
+;
+; Convert to ASCII
+;
+l41d8:
+	jp	l41de		; Convert to ASCII
+l41db:
+	jp	l41d8
+;
+; Convert to ASCII
+;
+l41de:
+	alloc	l0001
+	call	l0190
+	db	7
+	push	hl
+	call	l0190
+	db	9
+	pop	de
+	call	l01ec		; DE:HL
+	jp	nc,l422e
+	call	l0190
+	db	5
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	push	de
+	call	l0190
+	db	7
+	ld	de,9+1
+	call	l01eb		; HL:DE
+	jp	nc,l421b	; Got hex
+	call	l0190
+	db	7
+	ld	de,'0'
+	add	hl,de		; Make ASCII
+	jp	l4223
+l421b:
+	call	l0190
+	db	7
+	ld	de,'A'-10
+	add	hl,de		; Make ASCII
+l4223:
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+	ld	hl,l0001
+	ld	h,0
+	jp	l4279
+l422e:
+	call	l0190
+	db	9
+	push	hl
+	call	l0190
+	db	7
+	push	hl
+	call	l0190
+	db	9
+	pop	de
+	call	l0289
+	push	hl
+	call	l0190
+	db	5
+	push	hl
+	call	l41db
+	pop	de
+	pop	de
+	pop	de
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	call	l0190
+	db	9
+	push	hl
+	call	l0190
+	db	7
+	push	hl
+	call	l0190
+	db	9
+	pop	de
+	call	l0229
+	push	hl
+	call	l0190
+	db	5
+	push	hl
+	call	l41db
+	pop	de
+	pop	de
+	pop	de
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)
+	ld	h,0
+	inc	hl
+	ld	h,0
+l4279:
+	dealloc	l0001
+;
+; Test character digit 0..9 - FALSE if not
+;
+l4282:
+	alloc	l0000
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	ld	de,'0'
+	call	l01f9		; Signed HL:DE (Test LT 0)
+	call	l01af		; Return FALSE if C
+	jp	c,l42ad
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	ld	de,'9'
+	call	l0204		; Signed DE:HL (Test GT 9)
+	call	l01af		; Return FALSE if C
+l42ad:
+	pop	bc
+	ret
+;
+;
+;
+l42b1:
+	jp	l42b7		; Convert ASCII decimal number to hex
+l42b4:
+	jp	l4282		; Test character digit 0..9
+;
+; Convert ASCII decimal number to hex
+;
+l42b7:
+	alloc	l0002
+	ld	h,b
+	ld	l,c
+	st16			; Init result
+l42c5:
+	call	l0190
+	db	6
+	ldhlhl
+	ld	l,(hl)
+	ld	h,0
+	push	hl
+	call	l42b4		; Test character digit 0..9 - FALSE if not
+	pop	de
+	ld	a,l
+	or	a
+	jp	z,l4304
+	call	l0190
+	db	0
+	ld	de,10
+	call	l023f		; Multiply*10
+	push	hl
+	call	l0190
+	db	6
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	de
+	ex	de,hl
+	ld	l,(hl)
+	pop	de
+	xor	a
+	ld	h,a
+	add	hl,de
+	ld	de,-'0'
+	add	hl,de
+	ex	de,hl
+	ld	h,b
+	ld	l,c
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l42c5
+l4304:
+	call	l0190
+	db	0
+	dealloc	l0002
+;
+; Convert character to upper case
+;
+l4314:
+	jp	l431a		; Convert to upper case
+l4317:
+	jp	l434c		; Test lower case character - FALSE if not
+;
+; Convert character to upper case
+;
+l431a:
+	alloc	l0000
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	push	hl
+	call	l4317		; Test lower case character - FALSE if not
+	pop	de
+	ld	a,h
+	or	l
+	jp	z,l4341		; Nope
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	ld	de,'A'-'a'
+	add	hl,de		; Convert to upper case
+	jp	l4346
+l4341:
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+l4346:
+	ld	h,0
+	pop	bc
+	ret
+;
+; Test lower case character - FALSE if not
+;
+l434c:
+	alloc	l0000
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	ld	de,'a'
+	call	l01f9		; Signed HL:DE (Test LT a)
+	call	l01af		; Return FALSE if C
+	jp	c,l4377		; Skip if LT a
+	ld	hl,l0004
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	ld	de,'z'
+	call	l0204		; Signed DE:HL (Test GT z)
+	call	l01af		; Return FALSE if C
+l4377:
+	pop	bc
+	ret
+;
+; Set console control bits
+;
+l437b:
+	jp	l4381
+l437e:
+	jp	l43e7
+;
+; Set console control bits
+;
+l4381:
+	alloc	l0000
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0004
+	push	hl
+	call	l437e
+	pop	de
+	pop	de
+	pop	bc
+	ret
+;
+; Put character to console
+;
+l439f:
+	jp	l43a5		; Put character to console
+l43a2:
+	jp	l43e7
+;
+; Put character to console
+;
+l43a5:
+	alloc	l0000
+	ld	hl,l0004
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0001
+	push	hl
+	call	l43a2
+	pop	de
+	pop	de
+	pop	bc
+	ret
+;
+; Return pending console state
+;
+l43c1:
+	jp	l43c7
+l43c4:
+	jp	l43e7
+;
+; Return pending console state
+;
+l43c7:
+	push	bc
+	ld	hl,l0003
+	push	hl
+	call	l43c4
+	pop	de
+	pop	bc
+	ret
+;
+; Return pending character read previously
+;
+l43d4:
+	jp	l43da
+l43d7:
+	jp	l43e7
+;
+; Return pending character read previously
+;
+l43da:
+	push	bc
+	ld	hl,l0002
+	push	hl
+	call	l43d7
+	pop	de
+	pop	bc
+	ret
+;
+; Character output routine
+;
+l43e7:
+	jp	l43f3		; Character output routine
+l43ea:
+	jp	l4796		; Execute BIOS call
+l43ed:
+	jp	OS		; Close program
+l43f0:
+	jp	l439f		; Put character to console
+;
+; Process console I/O depending on parameter passed,
+; always check and read pending character before checking parameter:
+;
+; 1 : Process XON/XOFF before putting character to console
+; 2 : Return pending character read previously
+; 3 : Return pending state
+; 4 : Set control bits
+; Else no action
+;
+; Control bits are initialized to:
+;
+; 00011111	Definition:
+; --------	---------------------------
+; 00000001	Echo pendig character read
+; 00000010	Test pendig character abort and exit program if so
+; 00000100	Handle XON/XOFF (Set flag ^l46c9 to 0 or 1)
+; 00001000	Strip off MSB from pendig character read
+; 00010000	Give CR after LF detected
+;
+l43f3::
+	alloc	l0004
+	ld	hl,l46c8	; Initially this is the message 'Nonsense!'
+	ex	de,hl
+	ld	hl,l0001
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	l,(hl)
+	ld	a,l
+	cp	'N'		; Test still 'Nonsense!'
+	jp	nz,l4455	; Nope, not first call
+;
+; On first call change message Nonsense! as follows:
+;
+; Address:	l46c8 l46c9 l46ca l46cb l46cc l46cd l46ce l46cf l46d0 l46d1
+; Relative:	  0     1     2     3     4     5     6     7     8      9
+; Old:		  N     o     n     s     e     n     s     e     !     00
+;		  4e    6f    6e    73    65    6e    73    65    21    00
+; New:		  00    00    00    73    1f    03    73    65    21    00
+;
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	push	hl
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	push	hl
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ld	e,0
+	ld	(hl),e		; ^l46ca
+	pop	hl
+	ld	(hl),e		; ^l46c9
+	pop	hl
+	ld	(hl),e		; ^l46c8
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	ld	(hl),00011111b	; ^l46cc (1F)
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0005
+	add	hl,de
+	ld	(hl),'C'-'@'	; ^l46cd
+;
+; Real start of routine
+;
+l4455::
+	ld	hl,NULL
+	push	hl
+	ld	hl,CST
+	push	hl
+	call	l43ea		; Get keyboard state thru BIOS
+	pop	de
+	pop	de
+	ld	a,h
+	or	l		; Test key pressed
+	jp	z,l4574		; Nope
+	ld	hl,NULL
+	push	hl
+	ld	hl,CIN
+	push	hl
+	call	l43ea		; Get character thru BIOS
+	pop	de
+	pop	de
+	push	hl
+	call	l3e75		; Convert to upper case
+	pop	de
+	ld	e,l
+	ld	h,b
+	ld	l,c
+	ld	(hl),e		; Save character
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	ld	l,(hl)		; Get byte ^l46cc
+	ex	de,hl
+	ld	hl,l0003
+	add	hl,bc
+	ld	(hl),e		; Store it
+	ld	d,0
+	ld	hl,00001000b	; Test bit set l0008
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	a,h
+	or	l
+	jp	z,l44ad		; Nope
+	ld	h,b
+	ld	l,c
+	push	hl
+	ld	l,(hl)		; Get back character
+	ld	h,0
+	ld	de,01111111b
+	ld	a,h
+	and	d		; Strip off hi bit
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ex	de,hl
+	pop	hl
+	ld	(hl),e
+l44ad:
+	ld	hl,l0003
+	add	hl,bc
+	ld	l,(hl)		; Get back byte from original ^l46cc
+	ld	h,0
+	ld	de,00000010b	; Test bit set l0002
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	a,h
+	or	l
+	jp	z,l44df		; Nope
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)		; Get character
+	push	hl
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0005
+	add	hl,de
+	ld	l,(hl)		; Get ^l46cd
+	pop	de
+	ld	a,l
+	cp	e		; Test abort
+	jp	nz,l44df
+	call	l43ed		; Yeap, exit
+	jp	l4522
+l44df:
+	ld	hl,l0003
+	add	hl,bc
+	ld	l,(hl)		; Get back byte from original ^l46cc
+	ld	h,0
+	ld	de,00000100b	; Test bit set l0004
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	a,h
+	or	l
+	jp	z,l4522		; Nope
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)
+	ld	a,l
+	cp	'S'-'@'		; Test XOFF
+	jp	nz,l450b
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl		; Point to ^l46c9
+	ld	(hl),1		; Indicate XOFF
+	jp	l4574
+l450b:
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)
+	ld	a,l
+	cp	'Q'-'@'		; Test XON
+	jp	nz,l4522
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl		; Point to ^l46c9
+	ld	(hl),0		; Indicate no XOFF
+	jp	l4574
+l4522:
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl		; Point to ^l46ca
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test state
+	jp	nz,l4574	; Already set
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ld	(hl),1		; Set it
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	inc	hl		; Point to ^l46cb
+	push	hl
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)		; Get character
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		; Store it
+	ld	hl,l0003
+	add	hl,bc
+	ld	l,(hl)		; Get back byte from original ^l46cc
+	ld	h,0
+	ld	de,00000001b	; Test bit set l0001
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	a,h
+	or	l
+	jp	z,l4574		; Nope
+	ld	h,b
+	ld	l,c
+	ld	l,(hl)		; Get character
+	ld	h,0
+	push	hl
+	ld	hl,COT
+	push	hl
+	call	l43ea		; Put character thru BIOS
+	pop	de
+	pop	de
+;
+; Test parameter
+;
+l4574:
+	ld	hl,l0008
+	add	hl,bc
+	ldhlhl			; Get parameter
+	ld	a,0
+	cp	l
+	jp	nz,l4588
+	ld	a,0
+	cp	h		; Should be byte
+	jp	z,l45bb
+l4588:
+	ld	a,1
+	cp	l		; Test one
+	jp	nz,l4594
+	ld	a,0
+	cp	h
+	jp	z,l45be
+l4594:
+	ld	a,2
+	cp	l		; Test two
+	jp	nz,l45a0
+	ld	a,0
+	cp	h
+	jp	z,l4626
+l45a0:
+	ld	a,3
+	cp	l		; Test three
+	jp	nz,l45ac
+	ld	a,0
+	cp	h
+	jp	z,l4656
+l45ac:
+	ld	a,4
+	cp	l		; Test four
+	jp	nz,l45b8
+	ld	a,0
+	cp	h
+	jp	z,l4666
+l45b8:
+	jp	l46bc
+;
+; Selection 0 - dummy
+;
+l45bb:
+	jp	l46bf
+;
+; Selection 1 - Output character
+; Process XON/XOFF
+; Give carrigae return if line feed detected - if enabled
+;
+l45be:
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl		; Point to ^l46c9
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test XOFF detected
+	jp	nz,l45d0	; Yeap, wait for XON
+	jp	l45d3
+l45d0:
+	jp	l4455
+l45d3:
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl			; Get character
+	push	hl
+	ld	hl,COT
+	push	hl
+	call	l43ea		; Put character thru BIOS
+	pop	de
+	pop	de
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	de,-lf
+	add	hl,de
+	ld	a,h
+	or	l		; Test new line
+	jp	nz,l461b	; Nope
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	ld	l,(hl)		; Get byte ^l46cc
+	ld	h,0
+	ld	de,00010000b	; Test bit set l0010
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	a,h
+	or	l
+	jp	z,l461b		; Nope
+	ld	hl,cr
+	push	hl
+	call	l43f0		; Give carriage return
+	pop	de
+l461b:
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	jp	l46bf
+;
+; Selection 2 - Return state if selected
+;
+l4626:
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl		; Point to ^l46ca
+	ld	l,(hl)
+	ld	a,l
+	or	a		; Test set
+	jp	nz,l4639	; Yeap
+	jp	l4455
+l4639:
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	ld	(hl),0		; Clear state
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	l,(hl)		; Return state at ^l46cb
+	ld	h,0
+	jp	l46bf
+;
+; Selection 3 - Return state
+;
+l4656:
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl
+	inc	hl		; Point to ^l46ca
+	ld	l,(hl)		; Return state at ^l46ca
+	ld	h,0
+	jp	l46bf
+;
+; Selection 4 - Return state
+;
+l4666:
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de		; Point to ^l46cc
+	ld	l,(hl)
+	ex	de,hl
+	ld	hl,l0003
+	add	hl,bc
+	ld	(hl),e		; Save state
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	ld	de,l0004
+	add	hl,de
+	push	hl
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		; Change state
+	ld	hl,l000a
+	add	hl,bc
+	ldhlhl
+	ld	de,00000100b	; Test bit set l0004
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ld	a,h
+	or	l
+	jp	nz,l46b2	; Yeap
+	ld	hl,l0001
+	add	hl,bc
+	ldhlhl
+	inc	hl		; Point to ^l46c9
+	ld	(hl),0		; Clear state
+l46b2:
+	ld	hl,l0003
+	add	hl,bc
+	ld	l,(hl)		; Return current of ^l46cc
+	ld	h,0
+l46bc:
+l46bf:
+	dealloc	l0004
+;
+l46c8:
+	db	'Nonsense!',null
+;
+; Delay and check keyboard pressed
+;
+l46d2:
+	call	l030a		; Get top parameter
+	push	bc
+	inc	hl
+l46d7:
+	dec	hl		; Count down
+	ld	a,h
+	or	l		; Test done
+	jp	nz,l46df	; Nope
+	pop	bc
+	ret
+l46df:
+	ld	de,l2710
+l46e2:
+	dec	de
+	ld	a,d
+	or	e		; Delay a bit
+	jp	nz,l46e2
+	push	hl
+	ld	c,0bh
+	call	l0005		; Test key pressed
+	or	a
+	pop	hl
+	jp	z,l46d7		; Nope
+	push	hl
+	ld	c,1
+	call	l0005		; Get character
+	cp	'C'-'@'		; Test abort
+	jp	z,OS		; Yeap
+	pop	hl
+	jp	l46d7
+;
+; Init random value
+;
+l4702:
+	call	l030a		; Get top parameter
+	ld	a,h
+	or	l		; Test any given
+	jp	z,l4711		; Nope, init it
+	ld	(l0597),hl	; Set value		** NEVER **
+	ld	(l0597+2),hl
+	ret
+l4711:
+	ld	de,l4747
+	push	bc
+	ld	c,9
+	call	l0005		; Tell what we expect
+	ld	hl,lbdbd	; Init random number
+l471d:
+	push	hl
+	ld	c,0bh
+	call	l0005		; Get key state
+	pop	hl
+	inc	hl		; Fix random number
+	inc	hl
+	inc	hl
+	and	1		; Test key pressed
+	jp	z,l471d
+	ld	(l0597),hl
+	ld	(l0597+2),hl
+	ld	c,2
+	ld	e,0dh
+	call	l0005		; Give new line
+	ld	c,2
+	ld	e,0ah
+	call	l0005
+	ld	c,1
+	call	l0005		; Clear pending character
+	pop	bc
+	ret
+;
+l4747:
+	db	'Wait a few seconds, and type a CR: ',eot
+;
+; Calculate random number
+;
+l476b:
+	ld	hl,(l0597)	; Get first entry
+	ex	de,hl
+	ld	a,01001000b	; Init mask
+	and	e		; Mask bits
+	jp	z,l4779
+	jp	pe,l4779
+	scf
+l4779:
+	ld	hl,(l0597+2)
+	ld	a,h
+	rla			; Rotate a bit
+	ld	h,a
+	ld	a,l
+	rla
+	ld	l,a
+	ld	(l0597+2),hl
+	ld	a,d
+	rla
+	ld	h,a
+	ld	a,e
+	rla
+	ld	l,a
+	ld	(l0597),hl
+	ld	a,h
+	and	01111111b
+	ld	h,a
+	ret
+;
+; Execute BIOS call
+;
+l4796:
+	call	l0337		; Unpack all parameters
+	push	bc
+	ld	hl,(l0001)	; Get base of BIOS
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	a,(l059f)	; Get BIOS function
+	ld	b,a
+	add	a,a
+	add	a,b
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Build BIOS entry
+	push	hl
+	ld	hl,(l059f+2)	; Get parameter
+	ld	b,h
+	ld	c,l
+	ld	hl,l47b5	; Get return address
+	ex	(sp),hl		; Save it, get BIOS
+	jp	(hl)		; Go to BIOS function
+;
+; Return from BIOS call
+;
+l47b5:
+	ld	l,a		; Unpack possible parameter
+	ld	h,0
+	pop	bc
+	ret
+;
+l47ba	equ	$
+;
+l4800::
+	end
+

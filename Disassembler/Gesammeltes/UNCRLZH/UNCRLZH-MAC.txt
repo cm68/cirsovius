@@ -1,0 +1,4951 @@
+	title	UNCRrunch LZH v2.0
+
+; DASMed UNCRLZH
+; By W.Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+DMA	equ	0080h
+CCP	equ	0080h
+
+.conin	equ	  1
+.conout	equ	  2
+.string	equ	  9
+.keysta	equ	 11
+.vers	equ	 12
+.seldsk	equ	 14
+.open	equ	 15
+.close	equ	 16
+.srcfrs	equ	 17
+.srcnxt	equ	 18
+.delete	equ	 19
+.rdrec	equ	 20
+.wrrec	equ	 21
+.make	equ	 22
+.curdsk	equ	 25
+.usrcod	equ	 32
+.setdma	equ	 26
+.resdrv	equ	 37
+.mulsec	equ	 44
+.xOS	equ	 48
+.rddate	equ	102
+.wrdate	equ	103
+
+_CIN	equ	3		; BIOS console input
+
+_get	equ	-1
+_ERR	equ	-1
+_FULL	equ	2		; Directory code
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+
+_SYS	equ	10
+DIRLEN	equ	16
+FCBlen	equ	36
+
+FLIST	equ	1+.nam+.ext
+
+reclng	equ	128
+
+PAGLEN	equ	256		; Length of one page
+
+null	equ	00h
+bell	equ	07h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+NOMSB	equ	01111111b
+UPPER	equ	11011111b
+
+add_____ix_ix	macro
+	db	0ddh,029h
+		endm
+
+_NONE	equ	-1
+
+DIGCNT	equ	4		; ASCII digit count
+
+_CMPR	equ	076h
+_SQ	equ	0ffh
+_CR	equ	0feh
+_LZ	equ	0fdh
+
+MEMMAX	equ	168
+MEMMIN	equ	164
+MEWREQ	equ	 64
+MEMUNK	equ	153
+
+SRCPC	equ	256		; Size of search files
+
+RDREC	equ	16		; Size of read buffer
+
+SigRev	equ	20h		; Significant compatability
+
+_scf	equ	037h		; Opcode "SCF"
+or_a	equ	0b7h		; Opcode "OR A"
+_jp	equ	0c3h		; Opcode "JP..."
+;
+; Some mysterious lengths
+;
+l138b	equ	138bh
+l0ffe	equ	0ffeh
+l1000	equ	1000h
+l4000	equ	4000h
+l0200	equ	0200h
+l1400	equ	1400h
+l0800	equ	0800h
+l3000	equ	3000h
+
+l0005	equ	05h
+l0007	equ	07h
+l0008	equ	08h
+l000a	equ	0ah
+l0010	equ	10h
+l0024	equ	24h
+
+l0069	equ	69h
+l006b	equ	6bh
+l0079	equ	79h
+l007b	equ	7bh
+
+l7fff	equ	7fffh
+l8375	equ	8375h
+lffff	equ	0ffffh
+l5000	equ	5000h
+
+	jp	l01dd
+;
+	db	'Z3ENV'		; ZCPR environment descriptor
+	db	1
+l0109:
+	dw	0
+;
+	db	0,0,'CRLZH20 '
+	db	0
+l0116:
+	db	FALSE		; Quiet flag - FALSE for not quiet
+l0117:
+	db	FALSE
+l0118:
+	db	0		; OS flag - 0 for CP/M 3.x
+l0119:
+	db	FALSE		; Inspect flag - FALSE for not inspect
+l011a:
+	db	0
+	db	0
+l011c:
+	db	1fh,10h
+l011e:
+	db	FALSE		; SYStem files enabled - FALSE for not
+l011f:
+	db	'Y'
+	db	'                              '
+l013e:
+	db	'UNCRLZH Version 2.0  Copyright (c) 1987 by S. Greenberg'
+	db	cr,lf
+	db	'        Portions  Copyright (c) 1991 by R. Warren'
+	db	cr,lf
+	db	' May be used/reproduced for non-profit use only'
+	db	cr,lf,lf,eot
+;
+; Enter UNCRLZH
+;
+l01dd:
+	sub	a		; Verify Z80 CPU
+	jp	po,l01e7	; Ok
+	ld	de,l1490
+	jp	l0f9b		; Tell invalid machine and exit
+l01e7:
+	ld	(l2380),sp	; Save entry stack
+	ld	sp,s9900	; Get local stack
+	call	l09b6		; Init environment
+;
+; Re-enter here for each matching file
+;
+l01f1:
+	ld	sp,s9900	; Get local stack
+	ld	a,cr
+	call	l0fac		; Position to start of line
+	xor	a
+	ld	(l2368),a
+	ld	(l23a4),a	; Clear LZH flag
+	ld	de,l231f	; Point to input file FCB
+	call	l0efe		; Prepare FCB
+	inc	de
+	ld	hl,(l237e)	; Point to name of next file
+l020a:
+	ld	a,(hl)		; Get entry
+	or	a		; Test selected
+	jr	nz,l0217	; Yeap
+	ld	bc,FLIST
+	add	hl,bc		; Skip entry if not selected
+	ld	(l237e),hl	; Update list pointer
+	jr	l020a
+l0217:
+	cp	_NONE		; Test end of list
+	jp	z,l102b		; Yeap, return to OS
+	push	af		; Save state of file
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	push	de
+	ld	de,l14bb
+	call	z,l0f93		; Separate visually if verbose
+	pop	de
+	inc	hl
+	ld	bc,.nam+.ext
+	ldir			; Copy name to input file
+	ld	(l237e),hl	; Update list pointer
+	call	l1325		; Initialize all memory
+	ld	a,10000000b	; Init bit state
+	ld	(l23a1),a
+	pop	af		; Get back file state
+	cp	2
+	jr	nz,l0246
+	ld	a,(l2397)	; Get wildcard flag
+	or	a		; Test set
+	jp	nz,l03f6	; Yeap, copy
+l0246:
+	call	l0c41		; Open file
+	jr	nc,l0251	; Got it
+	ld	de,l1422
+	jp	l0409		; File not found
+l0251:
+	ld	de,l2344	; Point to output file FCB
+	call	l0efe		; Prepare FCB
+	inc	de
+	ld	a,' '
+	call	l0fac		; Put blank
+	ld	hl,l231f
+	call	l10b1		; Print name of infile
+	xor	a
+	ld	(l9100),a	; Init stamp to zero
+	call	l0c5d		; Read byte from file
+	jr	nc,l0271	; Ok
+	ld	de,l1412
+	jr	l028a		; File is empty
+l0271:
+	cp	_CMPR		; Test compression anyway
+	jr	nz,l0284	; Nope
+	call	l0c5d		; Read byte from file
+	cp	_CR		; Test crunched
+	jr	z,l02aa
+	cp	_LZ		; Test LZH encoded
+	jr	z,l02a7
+	cp	_SQ		; Test squeezed
+	jr	z,l0297
+l0284:
+	call	l0c51		; Close input file on invalid mode
+	ld	de,l06fc	; Not compressed
+l028a:
+	call	l0f93		; Give message
+	ld	a,(l2397)	; Get wildcard flag
+	or	a		; Test set
+	jp	nz,l03f6	; Yeap, copy file
+	jp	l01f1
+;
+; Found 76FF - squeezed file
+;
+l0297:
+	ld	(l2309),a	; Set squeeze flag
+	call	l0c5d		; Read byte from file
+	ld	l,a		; Build checksum
+	call	l0c5d		; Read byte from file
+	ld	h,a
+	ld	(l23a2),hl	; Save checksum
+	jr	l02aa
+;
+; Found 76FD - LZH encoded file
+;
+l02a7:
+	ld	(l23a4),a	; Set LZH flag
+;
+; Found 76FE - crunched file
+;
+l02aa:
+	ld	de,l2344+.drv	; Point to filename
+	ld	b,.nam+1+.ext	; Set length including delimiter
+l02af:
+	call	l0c5d		; Read character from file
+	or	a		; Test done
+	jr	z,l030f		; Yeap
+	and	NOMSB
+	call	l06c5		; Convert to upper case
+	cp	'.'		; Test type delimiter
+	jr	z,l02c4		; Yeap
+	ld	(de),a		; Unpack name or type
+	inc	de
+	djnz	l02af
+	jr	l02cb
+l02c4:
+	ld	de,l2344+.drv+.nam
+	ld	b,.ext		; Change values
+	jr	l02af
+l02cb:
+	ld	a,(l2309)	; Get squeeze flag
+	or	a		; Test set
+	jp	nz,l0662	; Yeap, nothing more to do
+l02d2:
+	call	l0c5d		; Read byte from file
+	jr	c,l0284		; End of file
+	or	a		; Test end of input
+	jr	z,l030f		; Yeap, header read
+	cp	1
+	jr	nz,l02fb
+;;::-------------------------------------------------------------
+	ld	b,0fh
+	ld	de,l2369
+l02e3:
+	call	l0c5d		; Read byte from file
+	jr	c,l0284		; End of file
+	or	a
+	jr	z,l030f
+	cp	0ffh
+	jr	nz,l02f0
+	cpl
+l02f0:
+	ld	(de),a
+	inc	de
+	djnz	l02e3
+	ld	a,TRUE
+	ld	(l2368),a
+	jr	l02d2
+;;::-------------------------------------------------------------
+l02fb:
+	cp	'['		; Test for date stamp character
+	jr	nz,l02d2	; Nope
+	ld	de,l9100	; Point to stamp
+	jr	l030a		; Copy stamp to bzffer
+l0304:
+	call	l0c5d		; Read byte from file
+	jp	c,l0284		; End of file
+l030a:
+	ld	(de),a		; Unpack stamp
+	inc	de
+	or	a
+	jr	nz,l0304
+l030f:
+	call	l0c5d		; Read byte from file
+	ld	a,(l23a4)	; Get LZH flag
+	or	a		; Test set
+	jr	nz,l0328	; Yeap
+	call	l0c5d		; Read byte from file
+	cp	SigRev		; Check against program revision
+	jp	c,l0659		; Old type crunch
+	jr	z,l0332
+l0322:
+	ld	de,l072e
+	jp	l040f		; Program requires newer version
+l0328:
+	call	l0c5d		; Read byte from file
+	cp	SigRev+1	; Verify valid revision
+	jr	nc,l0322
+	jp	l0659
+l0332:
+	call	l0c5d		; Read checksum flag from file
+	ld	(l239e),a	; Save it
+	call	l0c5d		; Read byte from file
+	call	l0ce0		; Open output file and tell name
+	push	af
+	call	l056c		; Print embedded date stamp
+	pop	af
+	jp	c,l0412		; User wanted to skip this file
+	ld	a,(l2378)	; Get quiet flag
+	or	a		; Test quiet
+	jr	nz,l0352	; Yeap
+	ld	de,l15b7
+	call	l0f90		
+l0352:
+	call	l058f		; Initialize the LZW table
+	ld	de,lffff
+l0358:
+	ld	(l2304),de
+	call	l04c2		; Read bit
+	jp	c,l03a1
+	push	de
+	call	l0418
+	ld	hl,l2306
+	srl	(hl)
+	jr	c,l0376
+	ld	hl,(l2304)
+	ld	a,(l239f)
+	call	l0481
+l0376:
+	pop	de
+	ld	a,(l22ef)
+	or	a
+	jr	z,l0358
+	cp	0feh
+	jr	nz,l0387
+	inc	a
+	ld	(l22ef),a
+	jr	l0358
+l0387:
+	ld	(l2304),de
+	call	l04c2		; Read bit
+	jp	c,l03a1
+	push	de
+	call	l0418
+	ld	hl,(l2304)
+	ld	a,(l239f)
+	call	l0607
+	pop	de
+	jr	l0387
+l03a1:
+	ld	a,e
+	cp	0
+	jr	z,l03d0
+	cp	1
+	jp	nz,l0478
+	ld	hl,0
+	ld	(l22fb),hl
+	ld	(l2301),hl
+	xor	a
+	ld	(l22ef),a
+	call	l058f		; Initialize the LZW table
+	ld	a,9
+	ld	(l22fd),a	; Set bit count
+	ld	a,2
+	ld	(l22fe),a
+	ld	de,lffff
+	ld	a,1
+	ld	(l2306),a
+	jp	l0358
+l03d0:
+	call	l0c5d		; Read byte from file
+	ld	e,a
+	call	l0c5d		; Read byte from file
+	ld	d,a
+	ld	a,(l239e)	; Get checksum flag
+	and	a
+	jr	nz,l03eb
+l03de:
+	ld	hl,(l22f0)
+	sbc	hl,de
+	jr	z,l03eb
+	ld	de,l06ea
+	call	l0f90
+l03eb:
+	call	l0e8c
+	call	l0d48		; Close output file
+	call	l0c51		; Close input file
+	jr	l03fc
+l03f6:
+	call	l0860
+	jp	c,l01f1
+l03fc:
+	call	l0d54
+	ld	hl,(l239a)
+	inc	hl
+	ld	(l239a),hl
+	jp	l01f1
+l0409:
+	call	l0f90
+	jp	l01f1
+l040f:
+	call	l0f90
+l0412:
+	call	l0c51		; Close input file
+	jp	l01f1
+;
+;
+;
+l0418:
+	push	de
+	ex	de,hl
+	ld	a,h
+	add	a,HIGH l3900
+	ld	h,a
+	set	5,(hl)
+	pop	de
+l0421:
+	ld	iy,-(l9000+l0200)
+	add	iy,sp
+	jp	nc,l0586	; Stack overflow
+	push	hl
+	ld	a,d
+	add	a,HIGH l3900
+	ld	h,a
+	ld	l,e
+	ld	a,(hl)
+	and	11011111b
+	cp	80h
+	jr	nz,l0455
+	ld	a,1
+	ld	(l2306),a
+	push	hl
+	ld	hl,(l2304)
+	ld	a,' '
+	ld	(l23a0),a
+	ld	a,(l239f)
+	call	l0481
+	xor	a
+	ld	(l23a0),a
+	pop	hl
+	ld	a,(hl)
+	cp	80h
+	jr	z,l0478
+l0455:
+	ld	d,(hl)
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	e,(hl)
+	bit	7,d
+	jr	nz,l046e
+	res	5,d
+	call	l0421
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	a,(hl)
+l0469:
+	call	l0500
+	pop	hl
+	ret
+l046e:
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	a,(hl)
+	ld	(l239f),a
+	jr	l0469
+l0478:
+	ld	de,l0715
+	call	l0f90
+	jp	l03eb
+;
+;
+;
+l0481:
+	push	af
+	push	hl
+	call	l05de
+	pop	de
+	ld	hl,(l22fb)
+	ld	a,h
+	add	a,HIGH l3900
+	ld	h,a
+	ld	a,(l23a0)
+	or	d
+	ld	(hl),a
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	(hl),e
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	pop	af
+	ld	(hl),a
+	ld	hl,(l22fb)
+	inc	hl
+	ld	(l22fb),hl
+	inc	hl
+	ld	a,(l22fe)
+	cp	h
+	ret	nz
+	sla	a
+	ld	(l22fe),a
+	ld	a,(l22fd)	; Get bit count
+	inc	a		; Update it
+	cp	13		; Test max
+	jr	z,l04bc		; Yeap
+	ld	(l22fd),a	; Save it
+	ret
+l04bc:
+	ld	a,0feh
+	ld	(l22ef),a
+	ret
+;
+; Read bit
+;
+l04c2:
+	ld	de,0		; Init word
+	ld	a,(l22fd)	; Get bit count
+	ld	b,a
+	ld	a,(l23a1)	; Get bit state
+l04cc:
+	sla	a		; Shift bit
+	call	z,l04ec		; Read byte if necessary
+	rl	e		; Shift bit in
+	rl	d
+	djnz	l04cc
+	ld	(l23a1),a	; Set resulting bit state
+	ld	a,d
+	dec	a
+	and	a
+	ret	nz
+	ld	a,e
+	cp	4
+	ret	nc
+	cp	2
+	jr	z,l04c2
+	cp	3
+	jr	z,l04c2
+	scf
+	ret
+;
+; Read byte from file
+;
+l04ec:
+	call	l0c5d		; Read byte from file
+	jr	c,l04f4		; End of file
+	scf
+	rla
+	ret
+l04f4:
+	ld	sp,s9900	; Reset local stack
+	ld	de,l075a	; Unexpected end
+	call	l0f90
+	jp	l03eb
+;
+;
+;
+l0500:
+	exx
+	srl	b
+	jr	c,l0512
+	cp	90h
+	jr	z,l050f
+	ld	c,a
+	exx
+	call	l052c
+	ret
+l050f:
+	inc	b
+	exx
+	ret
+l0512:
+	or	a
+	jr	z,l0525
+	dec	a
+	ld	b,a
+	push	bc
+	ld	b,0
+	exx
+	pop	bc
+l051c:
+	ld	a,c
+	push	bc
+	call	l052c
+	pop	bc
+	djnz	l051c
+	ret
+l0525:
+	ld	a,90h
+	exx
+	call	l052c
+	ret
+l052c:
+	call	l0dc9		; Put to file
+	call	l0ef3
+	ret
+;
+;
+;
+l0533:
+	ld	a,(l2395)
+	or	a
+	ret	nz
+	ld	hl,l231f+_SYS
+	ld	a,'?'
+	cp	(hl)
+	ret	nz
+	ld	a,(l011f)
+	ld	(hl),a
+	ret
+;
+;
+;
+l0544:
+	ld	bc,FLIST
+	ld	ix,l2500	; Point to base file list
+l054b:
+	ld	a,(ix+0)
+	cp	_ERR		; Test end of list
+	ret	z		; Yeap
+	or	a
+	jr	z,l0568
+	ld	a,(ix+10)
+	cp	'Z'
+	jr	z,l0568
+	cp	'Y'
+	jr	z,l0568
+	cp	'Q'
+	jr	z,l0568
+	ld	a,2
+	ld	(ix+0),a
+l0568:
+	add	ix,bc
+	jr	l054b
+;
+; Print embedded date stamp
+;
+l056c:
+	ld	hl,l9100	; Point to stamp
+	ld	b,'('
+	ld	a,(hl)
+	or	a
+	ret	z
+	ld	a,' '
+	call	l0fac		; Put blank
+l0579:
+	ld	a,(hl)
+	or	a
+	ret	z
+	call	l0fac		; Put character
+	cp	']'
+	ret	z
+	inc	hl
+	djnz	l0579
+	ret
+l0586:
+	ld	de,l0748	; Stack overflow
+	ld	sp,s9900	; Reset local stack
+	jp	l0478
+;
+; Initialize the LZW table
+;
+l058f:
+	call	l05b7		; Initialize tables
+	ld	a,' '
+	ld	(l23a0),a
+	xor	a
+	ld	hl,lffff
+l059b:
+	push	hl
+	push	af
+	call	l0481
+	pop	af
+	pop	hl
+	inc	a
+	jr	nz,l059b
+	ld	b,4
+l05a7:
+	push	bc
+	ld	hl,l7fff
+	xor	a
+	call	l0481
+	pop	bc
+	djnz	l05a7
+	xor	a
+	ld	(l23a0),a
+	ret
+;
+; Initialize tables
+;
+l05b7:
+	ld	hl,l3900
+	ld	de,l3900+1
+	ld	bc,l4900-l3900
+	ld	(hl),80h
+	ldir
+	ld	(hl),0
+	ld	bc,l6900-l4900-1
+	ldir
+	ld	hl,l6900
+	ld	de,l6900+1
+	ld	bc,l9100-l6900
+	ld	(hl),80h
+	ldir
+	ld	a,7fh
+	ld	(l6900),a
+	ret
+;
+;
+;
+l05de:
+	ld	b,a
+	call	l0641
+l05e2:
+	ld	c,h
+	ld	a,(hl)
+	cp	80h
+	jr	z,l05ed
+	call	l05f8
+	jr	l05e2
+l05ed:
+	ld	de,(l22fb)
+	ld	(hl),d
+	ld	a,h
+	add	a,HIGH l1400
+	ld	h,a
+	ld	(hl),e
+	ret
+;
+;
+;
+l05f8:
+	ld	de,(l2382)
+	add	hl,de
+	ld	a,h
+	cp	HIGH l6900
+	jr	nc,l0606
+	ld	de,l138b
+	add	hl,de
+l0606:
+	ret
+;
+;
+;
+l0607:
+	call	l0641
+l060a:
+	ld	a,(hl)
+	cp	80h
+	ret	z
+	push	hl
+	ld	d,(hl)
+	ld	a,h
+	add	a,HIGH l1400
+	ld	h,a
+	ld	l,(hl)
+	ld	a,d
+	add	a,HIGH l3900
+	ld	h,a
+	bit	5,(hl)
+	jr	z,l0623
+	pop	hl
+	call	l05f8
+	jr	l060a
+l0623:
+	pop	de
+	ld	de,(l2301)
+	inc	de
+	ld	(l2301),de
+	ld	de,(l2304)
+	ld	a,(l239f)
+	ld	b,a
+	ld	(hl),d
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	(hl),e
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	(hl),b
+	ret
+;
+;
+;
+l0641:
+	ld	e,l
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	xor	h
+	ld	l,a
+	ld	a,e
+	and	00001111b
+	add	a,HIGH l6900
+	ld	h,a
+	inc	hl
+	push	hl
+	ld	de,l8375
+	add	hl,de
+	ld	(l2382),hl
+	pop	hl
+	ret
+;
+;
+;
+l0659:
+	call	l0c5d		; Read checksum flag from file
+	ld	(l239e),a	; Save it
+	call	l0c5d		; Read byte from file
+l0662:
+	ld	a,0ffh
+	ld	(l2307),a
+	call	l0ce0		; Open output file and tell name
+	push	af
+	ld	a,(l2309)	; Get squeeze flag
+	or	a		; Test set
+	call	z,l056c		; Nope, print embedded date stamp
+	pop	af
+	jp	c,l0412
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	ld	de,l15f5
+	call	z,l0f90		; Be verbose
+	exx
+	ld	hl,l3100	; Init buffer address
+	exx
+	ld	hl,l22f2
+	inc	(hl)		; Advance records read
+	ld	hl,(l22f3)
+	dec	hl
+	ld	(l22f3),hl
+	ld	a,'0'
+	ld	(l230b+DIGCNT),a; Init ASCII count
+	ld	hl,l3900	; Init base address
+	ld	a,(l23a4)	; Get LZH flag
+	or	a		; Test set
+	jr	nz,l06ba	; Yeap
+	ld	a,(l2309)	; Get squeeze flag
+	or	a		; Test set
+	jr	nz,l06ad	; Yeap
+	call	l1656		; Process crunched file
+l06a7:
+	jp	nc,l03d0
+	jp	l0478
+l06ad:
+	call	l2038		; Process sqeezed file
+	ld	de,(l23a2)	; Get squeeze checksum
+	jp	nc,l03de
+	jp	l0478
+l06ba:
+	call	l1dbb		; Process LZH file
+	jr	l06a7
+l06bf:
+	ld	de,l1391	; Invalid argument
+	jp	l0fb9
+;
+; Convert character to upper case
+;
+l06c5:
+	cp	'a'
+	ret	c
+	sub	'a'-'A'
+	ret
+;
+l06cb:
+	db	'LZH Uncruncher  Version 2.0 '
+	db	cr,lf,eot
+l06ea:
+	db	'Checksum error.'
+	db	cr,lf,eot
+l06fc:
+	db	'    [ Not compressed ]'
+	db	cr,lf,eot
+l0715:
+	db	'Invalid Crunched File.'
+	db	cr,lf,eot
+l072e:
+	db	'Requires newer version.'
+	db	cr,lf,eot
+l0748:
+	db	'Stack Overflow.'
+	db	cr,lf,eot
+l075a:
+	db	'Unexpected EOF.'
+	db	cr,lf,eot
+l076c:
+	db	'Usage:'
+	db	cr,lf
+	db	'   ',eot
+l0778:
+	db	'UNCRLZH '
+l0780:
+	db	'        '
+l0788:
+	db	' {d',eot
+l078c:
+	db	':}afn {d',eot
+l0795:
+	db	':} {/options}'
+	db	cr,lf
+	db	'Second parameter is destination.'
+	db	cr,lf
+	db	'Options following slash:'
+	db	cr,lf
+	db	'   Q   Quiet mode o',eot
+l07f4:
+	db	cr,lf
+	db	'   I   Inspect (Tag) mode o',eot
+l0812:
+	db	cr,lf
+	db	'   T   Same as I'
+	db	cr,lf
+	db	'   E   ',eot
+l082e:
+	db	'Erase existing files',eot
+l0843:
+	db	cr,lf
+	db	'   S   ',eot
+l084d:
+	db	'clude System files',eot
+l0860:
+	call	l1325		; Initialize all memory
+	ld	a,(l2395)
+	add	a,0ffh
+	ccf
+	ret	c
+	ld	de,l1401
+	call	l0f93
+	ld	hl,l231f
+	call	l10b1		; Print name of infile
+	ld	de,l231f+.drv+.nam+.ext
+	call	l0f11		; Clear remainder of file
+	call	l0c41		; Open file
+	ret	c		; Not found
+	ld	de,l2344	; Point to output file FCB
+	call	l0efe		; Prepare FCB
+	call	l08b4
+	call	l0ce0		; Open output file and tell name
+	jr	nc,l0893
+	call	l0c51		; Close input file
+	scf
+	ret
+l0893:
+	ld	a,eot
+	ld	(l2308),a
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	call	z,l0fa1		; Close line if verbose
+l089f:
+	call	l0c5d		; Read byte from file
+	jr	c,l08a9		; End of file
+	call	l0dc9		; Put to file
+	jr	l089f
+l08a9:
+	call	l0e8c
+	call	l0d48		; Close output file
+	call	l0c51		; Close input file
+	and	a
+	ret
+l08b4:
+	ld	hl,l231f+.drv
+	ld	de,l2344+.drv
+	ld	b,.nam+.ext
+l08bc:
+	ld	a,(hl)
+	and	NOMSB
+	ld	(de),a
+	inc	hl
+	inc	de
+	djnz	l08bc
+	ret
+;
+; Attache files
+;
+l08c5:
+	ld	de,l14c9
+l08c8:
+	call	l0f90		; Tell the rules
+	ld	hl,0
+	ld	(l2393),hl	; Clear file count
+	ld	hl,l2500	; Point to base file list
+l08d4:
+	push	hl
+	ld	hl,(l2393)
+	inc	hl		; Update file count
+	ld	(l2393),hl
+	pop	hl
+	ld	d,h
+	ld	e,l
+	ld	a,(hl)		; Get tag field
+	or	a		; Test end of list
+	jp	m,l0963		; Yeap
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,(l2393)	; Get file count
+	call	l12f4		; Print decimal
+	ld	a,'.'
+	call	l0fac		; Put delimiter
+	ld	a,' '
+	call	l0fac		; Put blank
+	pop	hl
+	pop	de
+	pop	bc
+	inc	hl		; Point to name
+	ld	b,.nam
+	call	l0988		; Print name of file
+	ld	a,'.'
+	call	l0fac		; Put delimiter
+	ld	b,.ext
+	call	l0988		; Print type of file
+	ld	a,':'
+	call	l0fac		; Put delimiter
+	pop	af
+	jr	z,l092c
+	ld	a,'*'
+	call	l0fac		; Put character
+	call	l0992		; Get response
+	cp	'U'		; Test U.ntag
+	jr	nz,l0940
+	ld	a,bs
+	call	l0fac		; Put backspace
+	ld	a,' '
+	call	l0fac
+	xor	a
+	jr	l093a
+l092c:
+	call	l0992		; Get response
+	cp	'T'
+	jr	nz,l0940
+	ld	a,'*'
+	call	l0fac		; Put character
+	ld	a,1		; 1 is T.ag
+l093a:
+	ld	(de),a		; 0 is U.tag
+l093b:
+	call	l0fa1		; Close line
+	jr	l08d4
+l0940:
+	cp	'B'		; Test B.ack one
+	jr	nz,l093b
+	push	hl
+	ld	hl,(l2393)	; Get file count
+	dec	hl		; Fix it
+	ld	a,l
+	ld	d,h
+	or	d		; Verify any remaining
+	jr	nz,l0955
+	pop	hl
+	ld	de,l1541	; Invalid, ring the bell
+	jp	l08c8
+l0955:
+	dec	hl
+	ld	(l2393),hl	; Update file count
+	pop	hl
+	ld	de,-2*FLIST
+	add	hl,de		; Fix pointer
+	call	l0fa1		; Close line
+	jr	l093b
+l0963:
+	ld	de,l152b
+	call	l0f90		; Ask for selections ok
+l0969:
+	call	l0992		; Get response
+	ld	de,l1542
+	cp	'N'		; Test selction ok
+	jp	z,l08c8
+	cp	'Y'
+	jr	z,l097f
+	ld	a,bell
+	call	l0fac		; Put bell
+	jr	l0969
+l097f:
+	ld	a,'Y'
+	call	l0fac		; Put response
+	call	l0fa1		; Close line
+	ret
+;
+; Print part of file
+;
+l0988:
+	ld	a,(hl)
+	and	NOMSB		; No MSB
+	inc	hl
+	call	l0fac		; Put character
+	djnz	l0988
+	ret
+;
+; Get UPPER case character from keyboard
+;
+l0992:
+	call	l09a4		; Get character from keyboard
+	and	NOMSB		; No MSB
+	cp	'C'-'@'		; Test abort
+	jr	nz,l09a1	; Nope
+	ld	de,l1584
+	jp	l1028
+l09a1:
+	and	UPPER		; Return UPPER case
+	ret
+;
+; Read keyboard thru BIOS
+;
+l09a4:
+	push	bc
+	push	de
+	push	hl
+	ld	hl,(OS+1)	; Get BIOS vector
+	ld	de,3*(_CIN-1)
+	add	hl,de		; Point to console input
+	call	l09b5		; Get keyboard
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+l09b5:
+	jp	(hl)
+;
+; Init environment
+;
+l09b6:
+	ld	a,(TPATOP+1)	; Get top page
+	sub	MEMMIN		; Verify minimum free space
+	jr	c,l09c1
+	cp	MEMMAX-MEMMIN	; Test more
+	jr	nc,l09cd
+l09c1:
+	ld	de,l147b	; Not enough memory
+	ld	hl,0
+	ld	(l239a),hl	; Set not enough
+	jp	l1028
+l09cd:
+	cp	MEWREQ		; Test in range
+	jr	c,l09d3
+	ld	a,MEWREQ	; Truncate it
+l09d3:
+	ld	(l238f),a	; Save available memory pages
+	add	a,MEMUNK	; Add space
+	ld	(l2390),a	; Save it
+	ld	hl,(l0109)	; Get ZCPR address
+	ld	a,l		; Test ZCPR system
+	or	h	
+	jr	z,l0a00		; Nope
+;
+; ZCPR related
+;
+	ex	de,hl
+	ld	hl,l0780
+	ld	a,(hl)
+	cp	' '
+	jr	nz,l0a00
+	ld	hl,l0024
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,e
+	or	d
+	jr	z,l0a00
+	ex	de,hl
+	inc	hl
+	ld	de,l0780
+	ld	bc,l0008
+	ldir
+l0a00:
+;
+; ----- Preset defaults -----
+;
+	ld	a,(l0116)
+	ld	(l2378),a	; Preset quiet flag
+	ld	a,(l0117)
+	ld	(l2379),a
+	ld	a,(l0118)
+	ld	(l237a),a	; Preset OS flag
+	ld	a,(l0119)
+	ld	(l237b),a	; Preset inspect flag
+	ld	a,(l011e)
+	ld	(l237d),a	; Preset SYStem files
+;
+; ---------------------------
+;
+	xor	a
+	ld	(l9100),a	; Clear stamp
+	ld	(l239a),a
+	ld	(l239a+1),a
+	call	l0edb		; Get entry DU
+	ld	a,(l238b)	; Get entry user
+	ld	(l238a),a	; Set current user
+	ld	(l231e),a	; Set input user
+	ld	(l2343),a	; Set output user
+	ld	hl,(l0109)
+	ld	a,h
+	or	l
+	jr	nz,l0a83
+	call	l0b65
+	ld	hl,0+256*' '
+	ld	(l2344),hl	; Force empty file
+	ld	de,CCP+1
+	ld	hl,l231f
+	call	l215e		; Parse FCB
+	push	hl
+	ld	ix,l231f
+	call	l0bde
+	ld	a,(l231f+.drv)
+	cp	' '		; Test file name
+	jp	z,l0fbc		; Nope
+	call	l0c17
+	pop	de
+	jr	c,l0ad0
+	ld	hl,l2344
+	call	l215e		; Parse FCB
+	ld	ix,l2344
+	call	l0bde
+	call	l0c17
+	ld	a,(l2344+.drv)
+	cp	' '
+	jr	z,l0ad0
+	ld	de,l1391	; Invalid argument
+	jp	l0fb9
+l0a83:
+	ld	hl,FCB+.drv
+	ld	a,(hl)
+	cp	'/'		; Test help request
+	jp	z,l0fbc
+	cp	' '
+	jp	z,l0fbc
+	dec	hl
+	ld	de,l231f	; Point to input file FCB
+	call	l0efe		; Prepare FCB
+	ld	bc,DIRLEN
+	ldir
+	ld	a,(l0069)
+	ld	(l231e),a	; Change input user
+	ld	a,(l006b)
+	or	a
+	jp	nz,l0c11
+	ld	a,(l0079)
+	ld	(l2343),a	; Set output user
+	ld	a,(l007b)
+	or	a
+	jp	nz,l0c11
+	ld	a,(FCB+DIRLEN)	; Get drive from 2nd FCB
+	ld	(l2344),a
+	ld	hl,CCP
+	ld	c,(hl)		; Get length of input
+	ld	b,0
+	ld	a,'['
+	cpir
+	dec	hl
+	ld	a,b
+	or	c
+	call	nz,l06bf
+	call	l0b65
+l0ad0:
+	ld	a,(l231f)
+	or	a
+	jr	nz,l0ad9
+	ld	a,(l238c)	; Get entry drive
+l0ad9:
+	ld	(l238d),a	; Save drive
+	ld	b,a		; Save entry drive for later
+	ld	a,(l2344)
+	or	a
+	jr	nz,l0ae6
+	ld	a,(l238c)	; Get entry drive
+l0ae6:
+	ld	(l238e),a	; Save drive
+	call	l0c28		; Build drive vector
+	xor	b		; Test same drives
+	ld	(l2396),a	; Save result
+	ld	b,a
+	ld	a,(l231e)	; Get input user
+	ld	c,a
+	ld	a,(l2343)	; Get output user
+	xor	c
+	or	b
+	ld	(l2395),a
+	ld	a,'?'
+	ld	hl,l231f+.drv
+	ld	bc,.nam+.ext
+	cpir			; Find wildcard
+	jr	z,l0b0a		; Yeap
+	xor	a
+l0b0a:
+	ld	(l2397),a	; Re/set wildcard flag
+	xor	a
+	ld	(l2389),a	; Set standard OS
+	ld	a,(l237a)	; Get presetted OS flag
+	cpl
+	ld	(l2388),a	; Set OS flag
+	ld	c,.vers
+	call	BDOS
+	ld	a,30h-1
+	cp	l
+	jr	c,l0b37
+	xor	a
+	ld	(l2388),a	; Force OS flag to CP/M 2.x
+	ld	c,.xOS
+	call	BDOS
+	ld	a,h
+	cp	'S'
+	jr	z,l0b34
+	cp	'D'
+	jr	nz,l0b37
+l0b34:
+	ld	(l2389),a	; Set special OS
+l0b37:
+	ld	de,l06cb
+	call	l0f93
+	call	l0ec3		; Set input user
+	call	l0533
+	ld	de,l231f
+	call	l110c		; Build file list
+	jr	nz,l0b51	; Got at least one file
+	ld	de,l1422
+	jp	l1028		; File not found
+l0b51:
+	call	l135c		; Sort files
+	ld	a,(l237b)	; Get inspect flag
+	or	a
+	call	nz,l08c5	; Attache files on request
+	call	l0544
+	ld	hl,l2500	; Point to base file list
+	ld	(l237e),hl	; Init list pointer
+	ret
+l0b65:
+	ld	a,(CCP)		; Get lenght of input
+	or	a		; Test any input
+	ret	z		; Nope
+	ld	b,a
+	add	a,LOW CCP	; Point to end of command
+	ld	l,a
+	ld	h,0
+	ld	a,' '
+l0b72:
+	cp	(hl)		; Test delimiting blank
+	jr	nz,l0b79	; Nope
+	dec	hl		; Try previous one
+	djnz	l0b72
+	ret
+l0b79:
+	ld	c,1
+l0b7b:
+	dec	hl
+	ld	a,(hl)
+	cp	'/'
+	jr	nz,l0b88
+	dec	hl
+	ld	a,(hl)
+	cp	' '
+	inc	hl
+	jr	z,l0b90
+l0b88:
+	inc	c
+	ld	a,c
+	cp	6
+	ret	nc
+	djnz	l0b7b
+	ret
+l0b90:
+	ld	b,c
+	ld	(hl),null	; Close command line
+l0b93:
+	inc	hl
+	call	l0b9a		; Process option
+	djnz	l0b93
+	ret
+;
+; Process option
+;
+l0b9a:
+	ld	a,(hl)		; Get character
+	ex	de,hl
+	and	UPPER		; Force upper case
+	cp	'S'		; Test S.ystem files
+	jr	z,l0bc0
+	cp	'Q'		; Test Q.uiet mode
+	jr	z,l0bc5
+	cp	'I'		; Test I.nspect mode
+	jr	z,l0bca
+	cp	'T'		; Test T.ag mode
+	jr	z,l0bca
+	cp	'C'		; Test C.??? mode
+	jr	z,l0bca
+	cp	'E'		; Test E.rase mode
+	jr	z,l0bcf
+	cp	'O'		; Test O.??? mode
+	jr	z,l0bcf
+	ld	de,l13c6	; Invalid option
+	jp	l0fb9
+l0bc0:
+	ld	hl,l237d	; Point to SYStem file flag
+	jr	l0bd2
+l0bc5:
+	ld	hl,l2378	; Point to quiet flag
+	jr	l0bd2
+l0bca:
+	ld	hl,l237b	; Point to inspect flag
+	jr	l0bd2
+l0bcf:
+	ld	hl,l2379	; Point to ??? flag
+l0bd2:
+	xor	a
+	or	(hl)
+	jr	z,l0bda
+	ld	(hl),FALSE
+	ex	de,hl
+	ret
+l0bda:
+	ld	(hl),TRUE
+	ex	de,hl
+	ret
+;
+;
+;
+l0bde:
+	push	hl
+	ld	a,h
+	and	l
+	inc	a
+	jr	z,l0c0b
+	ld	a,(ix-1)	; Get user field
+	cp	_NONE		; Test defined
+	jr	nz,l0bf1	; Yeap
+	ld	a,(l238b)	; Get entry user
+	ld	(ix-1),a	; Set it
+l0bf1:
+	ld	hl,(l011c)
+	inc	l
+	cp	l
+	jr	nc,l0c05
+	ld	a,(ix+0)
+	inc	h
+	cp	h
+	pop	hl
+	ret	c
+	ld	de,l13ab
+	jp	l0fb9
+l0c05:
+	ld	de,l13ab
+	jp	l0fb9
+l0c0b:
+	ld	de,l1391	; Invalid argument
+	jp	l0fb9
+l0c11:
+	ld	de,l13ab
+	jp	l0fb9
+l0c17:
+	ld	a,h
+	or	l
+	jr	z,l0c23
+	ld	a,(hl)
+	cp	'['
+	jr	nz,l0c25
+	call	l06bf
+l0c23:
+	scf
+	ret
+l0c25:
+	inc	hl
+	and	a
+	ret
+;
+; Build drive vector
+;
+l0c28:
+	push	af
+	push	bc
+	push	de
+	ld	de,0		; Init vector
+	dec	a		; Make 0 relative
+	ld	b,'P'+1-'A'	; Set bit size
+l0c31:
+	sub	1		; If drive found we get a carry
+	rr	d		; We shift it in
+	rr	e
+	djnz	l0c31
+	ld	(l2398),de	; Save drive vector
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Open existing file
+; Carry set if not found
+;
+l0c41:
+	call	l0ec3		; Set input user
+	ld	de,l231f
+	ld	c,.open
+	call	l0f6b		; Open it
+	inc	a		; Test success
+	and	a
+	ret	nz		; Yeap
+	scf			; Set error
+	ret
+;
+; Close input file
+;
+l0c51:
+	call	l0ec3		; Set input user
+	ld	de,l231f
+	ld	c,.close
+	call	l0f6b		; Close it
+	ret
+;
+; Read byte from file - C set on end of file
+;
+l0c5d:
+	exx
+	ld	a,l
+	sla	a		; Test record boundary
+	or	a
+	call	z,l0c69		; Get next buffer if necessary
+	ld	a,(hl)		; Get byte
+	inc	hl
+	exx
+	ret
+;
+; Read buffer if necessary
+;
+l0c69:
+	ld	a,(l22f2)	; Get records read
+	dec	a		; Count down
+	ld	(l22f2),a
+	and	a		; Test buffer done
+	call	z,l0c7a		; Yeap, fill it
+	ret	c
+	call	l11a1		; Tell progress
+	and	a
+	ret
+;
+; Read buffer from file - Carry set on empty buffer
+;
+l0c7a:
+	push	bc
+	push	de
+	call	l0ec3		; Set input user
+	ld	b,RDREC / 2
+	ld	de,l3100	; Init buffer address
+	ld	l,0		; Clear record count
+	ld	a,(l2388)	; Get OS flag
+	or	a		; Test CP/M 3.x
+	jp	nz,l0caf	; Yeap
+;
+; Read buffer from file for CP/M 2.x
+;
+l0c8d:
+	ld	e,LOW (l3100)
+	call	l0ccf		; Read first part
+	jr	nz,l0ca0	; End of file
+	inc	l		; Update record counter
+	ld	e,LOW (l3100+reclng)
+	call	l0ccf		; Read second part
+	jr	nz,l0ca0	; End of file
+	inc	l		; Update record counter
+	inc	d		; Update record page
+	djnz	l0c8d
+l0ca0:
+	ld	a,l
+l0ca1:
+	ld	(l22f2),a	; Set records read
+	pop	de
+	pop	bc
+	and	a		; Test any record read
+	jr	z,l0cad		; Nope
+	ld	hl,l3100	; Init buffer address
+	ret
+l0cad:
+	scf
+	ret
+;
+; Read buffer from file for CP/M 3.x
+;
+l0caf:
+	ld	c,.setdma
+	call	l0f6b		; Set disk buffer
+	ld	e,RDREC
+	ld	c,.mulsec
+	call	l0f6b		; Set record count
+	ld	de,l231f
+	ld	c,.rdrec
+	call	l0f6b		; Read buffer
+	or	a		; Test early end
+	jr	nz,l0cca	; May be
+	ld	a,RDREC
+	jr	l0ca1
+l0cca:
+	ld	a,(l2386+1)	; Get records really read
+	jr	l0ca1
+;
+; Read record from file
+;
+l0ccf:
+	push	de
+	ld	c,.setdma
+	call	l0f6b		; Set disk buffer
+	ld	de,l231f
+	ld	c,.rdrec
+	call	l0f6b		; Read record
+	pop	de
+	or	a
+	ret
+;
+; Open output file and tell name
+;
+l0ce0:
+	call	l0ebc		; Set output user
+	ld	de,l14a3
+	ld	a,(l2388)	; Get OS flag
+	or	a		; Test CP/M 2.x
+	jr	z,l0cef		; Yeap
+	ld	de,l14ae	; Change string if not
+l0cef:
+	call	l0f93
+	ld	hl,l2344
+	call	l10b1		; Print name of outfile
+	ld	a,(l2379)
+	or	a
+	jr	nz,l0d21
+	ld	c,.setdma
+	ld	de,DMA
+	call	l0f6b		; Set default buffer
+	ld	c,.srcfrs
+	ld	de,l2344
+	call	l0f6b		; Find file
+	inc	a		; Test found
+	jr	z,l0d38		; Nope
+	ld	de,l1597
+	call	l0f93		; Ask for file to delete
+	call	l0f32
+	jr	z,l0d21		; Yeap
+	call	l0fa1		; Close line
+	scf
+	ret
+l0d21:
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	jr	z,l0d30		; Be quiet
+	ld	a,(l2379)
+	or	a
+	jr	nz,l0d30
+	call	l0fa1		; Close line
+l0d30:
+	ld	de,l2344
+	ld	c,.delete
+	call	l0f6b		; Delete file
+l0d38:
+	ld	c,.make
+	call	l0f6b		; Create file
+	inc	a
+	jr	nz,l0d46
+	ld	de,l1432
+	jp	l1028
+l0d46:
+	and	a
+	ret
+;
+; Close output file
+;
+l0d48:
+	call	l0ebc		; Set output user
+	ld	de,l2344
+	ld	c,.close
+	call	l0f6b		; Close file
+	ret
+;
+;
+;
+l0d54:
+	ld	a,(l2389)
+	or	a		; Test standard OS
+	ret	z		; Yeap, ignore next
+	call	l0ec3		; Set input user
+	ld	de,l231f+.drv+.nam+.ext
+	call	l0f11		; Clear remainder of file
+	ld	de,l231f
+	ld	hl,DMA
+	call	l0dab
+	ret	nz
+	ld	a,(l2368)
+	or	a
+	jr	z,l0d88
+	ld	hl,l2369
+	ld	de,DMA
+	ld	bc,l0005
+	ldir
+	ld	hl,l2373
+	ld	de,DMA+10
+	ld	bc,l0005
+	ldir
+l0d88:
+	ld	de,DMA+11
+	ld	a,(de)
+	dec	de
+	or	a
+	jr	nz,l0d98
+	ld	hl,DMA
+	ld	bc,l0005
+	ldir
+l0d98:
+	call	l0ebc		; Set output user
+	ld	de,l2344+.drv+.nam+.ext
+	call	l0f11		; Clear remainder of file
+	ld	de,l2344
+	ld	hl,DMA
+	call	l0db2
+	ret
+;
+;
+;
+l0dab:
+	push	bc
+	push	de
+	push	hl
+	ld	a,.rddate
+	jr	l0db7		; Read stamp
+;
+;
+;
+l0db2:
+	push	bc
+	push	de
+	push	hl
+	ld	a,.wrdate	; Write stamp
+l0db7:
+	pop	de
+	push	de
+	ld	c,.setdma
+	push	af
+	call	l0f6b		; Set disk buffer
+	pop	af
+	pop	hl
+	pop	de
+	ld	c,a
+	call	l0f6b		; Read or write stamp
+	dec	a
+	pop	bc
+	ret
+;
+; Put byte to file
+;
+l0dc9:
+	exx
+	push	af
+	ld	(de),a		; Store byte
+	inc	e
+	ld	a,e
+	sla	a		; Test record boundary
+	jr	nz,l0dec	; Nope
+	call	l118d
+	jr	c,l0dec
+	inc	d		; Advance page
+	ld	a,(l2390)
+	cp	d		; Test top reached
+	jr	nz,l0dec
+	push	bc
+	ld	a,(l238f)	; Get available memory pages
+	sla	a
+	ld	b,a
+	call	l0def		; Write buffer to file
+	pop	bc
+	ld	de,l9900	; Init write buffer
+l0dec:
+	pop	af
+	exx
+	ret
+;
+; Write buffer to file
+;
+l0def:
+	call	l0ebc		; Set output user
+	ld	a,b
+	or	a
+	ret	z
+	ld	de,l9900	; Init write buffer
+	ld	a,(l2388)	; Get OS flag
+	or	a		; Test CP/M 3.x
+	jp	nz,l0e0f	; Yeap
+;
+; Write buffer to file for CP/M 2.x
+;
+l0dff:
+	call	l0e79		; Write record
+	dec	b		; Test more
+	ret	z		; Nope
+	ld	e,LOW (l9900+reclng)
+	call	l0e79		; Write record
+	inc	d		; Update buffer page
+	ld	e,LOW (l9900)
+	djnz	l0dff		; Next write
+	ret
+;
+; Write buffer to file for CP/M 3.x
+;
+l0e0f:
+	ld	c,.setdma
+	call	l0f6b		; Set disk buffer
+	ld	e,b
+	ld	c,.mulsec
+	call	l0f6b		; Set record count
+	ld	de,l2344
+	ld	c,.wrrec
+	call	l0f6b		; Write buffer to file
+	or	a		; Test success
+	ret	z		; Yeap
+l0e24:
+	cp	_FULL		; Test disk full
+	jr	nz,l0e73	; Nope
+	ld	de,l1447
+	call	l0f90		; Tell it
+	call	l0f14		; Close files
+	ld	a,(l2396)
+	or	a		; Test same drives
+	jr	nz,l0e3d	; Nope
+	call	l0fa1		; Close line
+	jp	l102b		; Return to OS
+l0e3d:
+	ld	de,l1546	; Change disk if same drives
+	call	l0f90
+	call	l0f32
+	call	l0fa1		; Close line
+	ld	a,(l238d)	; Get drive
+	dec	a		; Make zero relative
+	ld	e,a
+	ld	c,.seldsk
+	call	l0f6b		; Select disk
+	ld	c,.resdrv
+	ld	de,(l2398)	; Load drive vector
+	call	l0f6b		; Reset drive
+	ld	a,(l238c)	; Get entry drive
+	dec	a
+	ld	e,a
+	ld	c,.seldsk
+	call	l0f6b		; Select disk
+	ld	hl,(l237e)	; Get list pointer
+	ld	de,-FLIST
+	add	hl,de
+	ld	(l237e),hl	; Update list pointer
+	jp	l01f1
+l0e73:
+	ld	de,l145d
+	jp	l1028		; Tell output error
+;
+; Write record
+;
+l0e79:
+	ld	c,.setdma
+	call	l0f6b		; Set disk buffer
+	push	de
+	ld	de,l2344
+	ld	c,.wrrec
+	call	l0f6b		; Write record
+	or	a		; Test success
+	pop	de
+	ret	z		; Yeap
+	jr	l0e24		; Process error
+;
+;
+;
+l0e8c:
+	exx
+	ld	a,e
+	exx
+	cpl
+	inc	a
+	and	reclng-1	; Test record filled
+	jr	z,l0e9d		; Yeap
+	ld	b,a		; Set remaining byte count
+	ld	a,eof
+l0e98:
+	call	l0dc9		; Put EOF to file
+	djnz	l0e98
+l0e9d:
+	exx
+	ex	de,hl
+	ld	bc,l9900	; Init write buffer
+	and	a
+	sbc	hl,bc
+	sla	l
+	rl	h
+	ld	b,h
+	call	l0def		; Write buffer to file
+	call	l1202
+	call	l12b1
+	exx
+	ret
+;
+; Set entry user
+;
+l0eb5:
+	push	bc
+	push	de
+	ld	a,(l238b)	; Get entry user
+	jr	l0ec8
+;
+; Set output user
+;
+l0ebc:
+	push	bc
+	push	de
+	ld	a,(l2343)	; Get output user
+	jr	l0ec8
+;
+; Set input user
+;
+l0ec3:
+	push	bc
+	push	de
+	ld	a,(l231e)	; Get input user
+l0ec8:
+	ld	e,a
+	ld	a,(l238a)	; Get current user
+	cp	e		; Test same
+	jr	z,l0ed8		; No system call if match
+	ld	a,e
+	ld	(l238a),a	; Change current user
+	ld	c,.usrcod
+	call	l0f6b		; Set user
+l0ed8:
+	pop	de
+	pop	bc
+	ret
+;
+; Get entry DU
+;
+l0edb:
+	push	bc
+	push	de
+	ld	c,.usrcod
+	ld	e,_get
+	call	l0f6b		; Get entry user
+	ld	(l238b),a	; Save it
+	ld	c,.curdsk
+	call	l0f6b		; Get entry drive
+	inc	a
+	ld	(l238c),a	; Save it
+	pop	de
+	pop	bc
+	ret
+;
+;
+;
+l0ef3:
+	ld	hl,(l22f0)
+	ld	c,a
+	ld	b,0
+	add	hl,bc
+	ld	(l22f0),hl
+	ret
+;
+; Prepare FCB ^DE
+;
+l0efe:
+	push	de
+	inc	de
+	ld	b,.nam+.ext
+	ld	a,' '
+l0f04:
+	ld	(de),a		; Blank name and extension
+	inc	de
+	djnz	l0f04
+l0f08:
+	ld	b,FCBlen-(.drv+.nam+.ext)
+	xor	a
+l0f0b:
+	ld	(de),a		; Clear remainder
+	inc	de
+	djnz	l0f0b
+	pop	de
+	ret
+;
+; Clear remainder of file
+;
+l0f11:
+	push	de
+	jr	l0f08
+;
+; Close files, erase output file
+;
+l0f14:
+	call	l0d48		; Close output file
+	call	l0c51		; Close input file
+	ld	de,l13f6
+	call	l0f93		; Tell erasing
+	ld	hl,l2344
+	call	l10b1		; Print name of outfile
+	call	l0ebc		; Set output user
+	ld	de,l2344
+	ld	c,.delete
+	call	l0f6b		; Delete file
+	ret
+;
+; Read character from console
+;
+l0f32:
+	ld	c,.conin
+	call	l0f6b		; Read character
+	cp	'C'-'@'		; Test abort
+	jr	nz,l0f41	; Nope
+	ld	de,l1584
+	jp	l1028
+l0f41:
+	cp	'Y'		; Test Y.es
+	ret	z
+	cp	'y'
+	ret
+;
+; HL:=DE DIV BC
+;
+l0f47:
+	ld	a,b
+	cpl
+	ld	b,a
+	ld	a,c
+	cpl
+	ld	c,a
+	inc	bc
+l0f4e:
+	ld	a,17
+	jr	l0f54
+l0f52:
+	adc	hl,hl
+l0f54:
+	add	hl,bc
+	jr	c,l0f5a
+	sbc	hl,bc
+	or	a
+l0f5a:
+	rl	e
+	rl	d
+	dec	a
+	jr	nz,l0f52
+	ret
+;
+; Divide HL by 10
+;
+l0f62:
+	ex	de,hl
+	ld	hl,0		; Init result
+	ld	bc,-10
+	jr	l0f4e		; Divide
+;
+; Do OS call preserving regs
+;
+l0f6b:
+	ex	af,af'
+	push	af
+	ex	af,af'
+	push	bc
+	push	de
+	push	hl
+	exx
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	exx
+	call	BDOS		; Do OS Call
+	ld	(l2386),hl	; Save result
+	exx
+	pop	iy
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	ret
+;
+; Put string ^DE to console
+;
+l0f90:
+	call	l0fa1		; Close line
+l0f93:
+	push	bc
+	ld	c,.string
+	call	l0f6b		; Print string
+	pop	bc
+	ret
+;
+; Put strin to console
+;
+l0f9b:
+	ld	c,.string
+	call	BDOS
+	ret
+;
+; Close line
+;
+l0fa1:
+	ld	a,cr
+	call	l0fac		; Put new line
+	ld	a,lf
+	call	l0fac
+	ret
+;
+; Put character to console
+;
+l0fac:
+	push	af
+	push	bc
+	push	de
+	ld	e,a
+	ld	c,.conout
+	call	l0f6b		; Put to console
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l0fb9:
+	call	l0f93
+l0fbc:
+	ld	de,l013e
+	call	l0f93
+	ld	de,l076c
+	call	l0f93
+	call	l1099
+	ld	de,l0788
+	call	l0f93
+	call	l1085
+	ld	de,l078c
+	call	l0f93
+	call	l1085
+	ld	de,l0795
+	call	l0f93
+	ld	a,(l0116)
+	or	a
+	call	nz,l1063
+	call	z,l105e
+	ld	de,l07f4
+	call	l0f93
+	ld	a,(l0119)
+	or	a
+	call	nz,l1063
+	call	z,l105e
+	ld	de,l0812
+	call	l0f93
+	ld	a,(l0117)
+	or	a
+	call	nz,l106b
+	ld	de,l082e
+	call	l0f93
+	ld	de,l0843
+	call	l0f93
+	ld	a,(l011e)
+	or	a
+	call	z,l1071
+	call	nz,l107b
+	ld	de,l084d
+	call	l0f93
+	jr	l104f
+l1028:
+	call	l0f93
+;
+; Return to OS
+;
+l102b:
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	call	z,l0fa1		; Close line if verbose
+	ld	hl,(l239a)
+	call	l12f4		; Print decimal
+	ld	de,l161c
+	call	l0f93
+	ld	hl,(l239a)
+	dec	hl
+	ld	a,l
+	or	h
+	ld	a,'s'
+	call	nz,l0fac	; Indicate more than one
+	ld	de,l1622
+	call	l0f93
+l104f:
+	call	l0eb5		; Set entry user
+	ld	sp,(l2380)	; Get back entry stack
+	ld	a,(l011a)
+	or	a
+	jp	nz,OS
+	ret
+l105e:
+	ld	a,'n'
+	jp	l0fac		; Put 'n'
+l1063:
+	ld	a,'f'
+	call	l0fac		; Put 'f' twice
+	jp	l0fac
+l106b:
+	ld	de,l14c2
+	jp	l0f93
+l1071:
+	ld	a,'I'
+	call	l0fac		; Put 'In'
+	ld	a,'n'
+	jp	l0fac
+l107b:
+	ld	a,'E'
+	call	l0fac		; Put 'Ex'
+	ld	a,'x'
+	jp	l0fac
+l1085:
+	ld	hl,(l0109)
+	ld	a,l
+	or	h
+	ld	a,75h
+	jp	z,l0fac		; Put 'u'
+	ld	a,'i'
+	call	l0fac		; Put 'ir'
+	ld	a,'r'
+	jp	l0fac
+l1099:
+	ld	hl,l0780
+	ld	a,(hl)
+	cp	' '
+	jr	nz,l10a4
+	ld	hl,l0778
+l10a4:
+	ld	b,8
+l10a6:
+	ld	a,(hl)
+	cp	' '
+	ret	z
+	call	l0fac		; Put character
+	inc	hl
+	djnz	l10a6
+	ret
+;
+; Print name of file ^HL
+;
+l10b1:
+	dec	hl
+	ld	b,(hl)
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	nz,l10bc
+	ld	a,(l238c)	; Get entry drive
+l10bc:
+	add	a,'A'-1
+	call	l0fac		; Put ASCII drive
+	ld	c,0dh
+	ld	a,b
+	cp	0ah
+	jr	c,l10da
+	dec	c
+	ld	b,0
+l10cb:
+	inc	b
+	sub	0ah
+	cp	0ah
+	jr	nc,l10cb
+	push	af
+	ld	a,b
+	add	a,'0'
+	call	l0fac		; Put character
+	pop	af
+l10da:
+	add	a,'0'
+	call	l0fac		; Put character
+	ld	a,':'
+	call	l0fac		; Put delimiter
+	ld	b,9
+	call	l10fc
+	ld	a,'.'
+	call	l0fac		; Put delimiter
+	ld	b,4
+	call	l10fc
+l10f3:
+	ld	a,' '
+	dec	c
+	ret	z
+	call	l0fac		; Put character
+	jr	l10f3
+l10fc:
+	dec	b
+	ret	z
+	ld	a,(hl)
+	and	NOMSB
+	inc	hl
+	cp	' '
+	jr	z,l10fc
+	dec	c
+	call	l0fac		; Put character
+	jr	l10fc
+;
+; Build file list
+;
+l110c:
+	ld	hl,0
+	ld	(l2391),hl	; Clear file count
+	ld	de,DMA
+	ld	c,.setdma
+	call	l0f6b		; Seta disk buffer
+	ld	de,l231f
+	ld	c,.srcfrs
+	call	l0f6b		; Find file
+	cp	_ERR		; Test any there
+	ret	z		; Nope
+	ld	de,l2500	; Init list pointer
+	call	l1145		; Put file to list
+l112b:
+	push	de
+	ld	de,l231f
+	ld	c,.srcnxt
+	call	l0f6b		; Find next file
+	pop	de
+	cp	_ERR		; Test more
+	jr	z,l113e		; Nope
+	call	l1145		; Put file to list
+	jr	l112b		; Try next
+l113e:
+	ld	(de),a		; Mark end
+	ld	hl,(l2391)	; Get file count
+	ld	a,h		; Set success flag
+	or	l
+	ret
+;
+; Put file to list
+;
+l1145:
+	add	a,a		; Entry *32
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,LOW DMA	; Position in buffer
+	ld	l,a
+	ld	h,0
+	ld	a,(l237d)	; Get SYStem file flag
+	or	a		; Test enabled
+	jr	nz,l115e	; Yeap
+	push	hl
+	ld	bc,_SYS
+	add	hl,bc
+	bit	7,(hl)		; Test SYStem file
+	pop	hl
+	ret	nz		; Yeap, ignore file
+l115e:
+	ld	a,(l237b)	; Get inspect flag
+	ld	b,a
+	xor	a
+	or	b
+	jr	z,l1168
+	ld	a,1
+l1168:
+	xor	1		; Build inspect bit
+	ld	b,FLIST
+	push	de
+	jr	l1173
+l116f:
+	ld	a,(hl)
+	ld	c,a
+	and	NOMSB
+l1173:
+	ld	(de),a		; Unpack file
+	inc	hl
+	inc	de
+	djnz	l116f
+	pop	hl
+	ld	hl,(l2391)
+	inc	hl		; Update file count
+	ld	(l2391),hl
+	or	a
+	ld	bc,SRCPC
+	sbc	hl,bc		; Test still room
+	ret	c		; Yeap
+	ld	de,l146b
+	jp	l1028		; Tell too many files
+;
+;
+;
+l118d:
+	push	af
+	push	bc
+	push	hl
+	ld	hl,(l22f5)
+	inc	hl
+	ld	(l22f5),hl
+	ld	hl,l2311+DIGCNT
+	call	l12a1		; Bump count
+	pop	hl
+	pop	bc
+	pop	af
+	ret
+;
+; Tell progress
+;
+l11a1:
+	push	af
+	push	bc
+	push	hl
+	ld	c,.keysta
+	call	l0f6b		; Test key pressed
+	or	a
+	jr	z,l11c1
+	ld	c,.conin
+	call	l0f6b		; Read it
+	cp	'C'-'@'		; Test abort
+	jr	nz,l11c1
+	call	l0fa1		; Close line
+	call	l0f14		; Close files
+	ld	de,l1584
+	jp	l1028
+l11c1:
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	jr	nz,l11de	; Skip if so
+	ld	a,(l22f3)
+	dec	a
+	ld	b,a
+	ld	a,(l2308)
+	or	b
+	and	7
+	jr	z,l11db
+	and	1
+	call	z,l11ef		; Print short count
+	jr	l11de
+l11db:
+	call	l1212
+l11de:
+	ld	hl,(l22f3)
+	inc	hl
+	ld	(l22f3),hl
+	ld	hl,l230b+DIGCNT
+	call	l12a1		; Bump count
+	pop	hl
+	pop	bc
+	pop	af
+	ret
+;
+; Print short count
+;
+l11ef:
+	push	de
+	ld	a,eot		; Force short end
+	ld	(l230b+DIGCNT+1),a
+	ld	de,l230a
+	call	l0f93		; Print short count
+	ld	a,' '
+	ld	(l230b+DIGCNT+1),a
+	pop	de
+	ret
+;
+;
+;
+l1202:
+	push	af
+	ld	a,(l2378)	; Get quiet flag
+	or	a
+	jr	nz,l1210	; Skip if so
+	push	bc
+	push	hl
+	call	l1212
+	pop	hl
+	pop	bc
+l1210:
+	pop	af
+	ret
+;
+;
+;
+l1212:
+	push	de
+	push	ix
+	ld	de,l230a
+	call	l0f93
+	ld	a,(l2308)
+	or	a
+	jr	nz,l1262
+	ld	de,(l22f5)
+	push	de
+	pop	ix
+	ld	hl,(l22f3)
+	ld	(l2384),hl
+	call	l1266
+	ld	a,' '
+	call	l0fac		; Put blank
+	call	l12f4		; Print decimal
+	ld	de,l14b4
+	call	l0f93
+	ld	a,(l2307)
+	or	a
+	jr	nz,l1262
+	ld	hl,l1000
+	ld	a,(l22ef)
+	or	a
+	jr	nz,l1251
+	ld	hl,(l22fb)
+l1251:
+	call	l12f4		; Print decimal
+	ld	a,' '
+	call	l0fac		; Put blanks twice
+	call	l0fac
+	ld	hl,(l2301)
+	call	l12f4		; Print decimal
+l1262:
+	pop	ix
+	pop	de
+	ret
+;
+;
+;
+l1266:
+	ld	hl,0
+	ld	b,h
+	ld	c,l
+	add_____ix_ix
+	adc	hl,hl
+	add	ix,de
+	adc	hl,bc
+	add_____ix_ix
+	adc	hl,hl
+	add_____ix_ix
+	adc	hl,hl
+	add_____ix_ix
+	adc	hl,hl
+	add	ix,de
+	adc	hl,bc
+	add_____ix_ix
+	adc	hl,hl
+	add_____ix_ix
+	adc	hl,hl
+	add_____ix_ix
+	adc	hl,hl
+	push	ix
+	pop	de
+	ld	bc,(l2384)
+	call	l0f47		; HL:=DE DIV BC
+	ex	de,hl
+	srl	h
+	rr	l
+	ret	nc
+	inc	hl
+	ret
+;
+; Bump ASCII count
+;
+l12a1:
+	ld	b,DIGCNT	; Set count
+l12a3:
+	ld	a,(hl)		; Get character
+	or	'0'-' '		; Force digit
+	inc	a		; Bump it
+	ld	(hl),a
+	cp	'9'+1		; Test carry
+	ret	nz		; Nope
+	ld	(hl),'0'	; Force zero
+	dec	hl
+	djnz	l12a3		; Try previous digit
+	ret
+;
+;
+;
+l12b1:
+	push	de
+	push	bc
+	ld	de,l14b8
+	call	l0f93
+	ld	hl,(l22f3)
+	call	l12db
+	ld	de,l14a9
+	call	l0f93
+	ld	a,' '
+	call	l0fac		; Put blank
+	ld	hl,(l22f5)
+	call	l12db
+	ld	a,')'
+	call	l0fac		; Put closure
+	call	l0fa1		; Close line
+	pop	bc
+	pop	de
+	ret
+;
+;
+;
+l12db:
+	ld	de,l0008-1
+	add	hl,de
+	srl	h
+	rr	l
+	srl	h
+	rr	l
+	srl	h
+	rr	l
+	call	l12f4		; Print decimal
+	ld	a,'k'
+	call	l0fac		; Put 'k'
+	ret
+;
+; Print decimal number
+;
+l12f4:
+	call	l0f62		; Divide HL by 10
+	ld	a,l
+	push	af
+	ex	de,hl
+	call	l0f62		; Divide HL by 10
+	ld	a,l
+	push	af
+	ex	de,hl
+	call	l0f62		; Divide HL by 10
+	ld	a,l
+	push	af
+	ex	de,hl
+	call	l0f62		; Divide HL by 10
+	ld	a,l
+	push	af
+	ex	de,hl
+	ld	b,3
+	ld	c,0efh
+l1310:
+	pop	af
+	or	a
+	jr	z,l1316
+	ld	c,0ffh
+l1316:
+	add	a,'0'
+	and	c
+	call	l0fac		; Put character
+	djnz	l1310
+	pop	af
+	add	a,'0'
+	call	l0fac		; Put character
+	ret
+;
+; Initialize all memory
+;
+l1325:
+	ld	hl,l162e
+	ld	de,l22ef
+	ld	bc,l1656-l162e
+	ldir
+	exx
+	ld	hl,l3100	; Init read buffer
+	ld	de,l9900	; Init write buffer
+	ld	bc,0
+	exx
+	ret
+;
+; Swap files ^HL <-> ^DE
+;
+l133c:
+	push	de
+	push	hl
+	ld	b,FLIST
+l1340:
+	ld	a,(de)		; Get characters
+	ld	c,(hl)
+	ex	de,hl
+	ld	(de),a		; Swap them
+	ld	(hl),c
+	inc	hl
+	inc	de
+	djnz	l1340
+	pop	hl
+	pop	de
+	ret
+;
+; Compare files - C set indicates 1st one is less 2nd one
+;
+l134c:
+	push	de
+	push	hl
+	ld	b,.nam+.ext
+l1350:
+	inc	hl
+	inc	de
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l1359	; Not same
+	djnz	l1350
+	scf			; Set not to swap
+l1359:
+	pop	hl
+	pop	de
+	ret
+;
+; Sort files
+;
+l135c:
+	ld	bc,(l2391)	; Get file count
+	ld	(l239c),bc
+	ld	de,l2500	; Point to base file list
+l1367:
+	ld	h,d
+	ld	l,e
+l1369:
+	push	bc
+	call	l134c		; Compare files
+	call	nc,l133c	; Swap files for right direction
+	ld	bc,FLIST
+	add	hl,bc		; Point to next
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1369
+	ld	a,e
+	add	a,FLIST		; Build next entry
+	ld	e,a
+	ld	a,d
+	adc	a,0
+	ld	d,a
+	ld	bc,(l239c)
+	dec	bc		; Count down
+	ld	(l239c),bc
+	ld	a,b
+	or	c		; Test sort complete
+	jr	nz,l1367	; Nope, keep on sorting
+	ret
+;
+l1391:
+	db	bell,'++ Invalid argument ++'
+	db	cr,lf,eot
+l13ab:
+	db	bell,'++ Invalid directory ++'
+	db	cr,lf,eot
+l13c6:
+	db	bell,'++ Invalid option ++'
+	db	cr,lf,eot
+l13de::	;;
+	db	bell,'++ [text] to long ++'
+	db	cr,lf,eot
+l13f6:
+	db	' Erasing: ',eot
+l1401:
+	db	'   Copying...'
+	db	cr,lf,' ',eot
+l1412:
+	db	' [ File empty ]',eot
+l1422:
+	db	'File not found.',eot
+l1432:
+	db	'File creation error.',eot
+l1447:
+	db	cr,lf,'++ Disk Full ++   '
+	db	bell,eot
+l145d:
+	db	'Output error.',eot
+l146b:
+	db	'Too many files.',eot
+l147b:
+	db	'Not enough memory.  ',eot
+l1490:
+	db	'Z-80 CPU required.',eot
+l14a3:
+	db	' --> ',eot
+l14a9:
+	db	' -->',eot
+l14ae:
+	db	' ==> ',eot
+l14b4:
+	db	'%  ',eot
+l14b8:
+	db	' (',eot
+l14bb:
+	db	'----'
+	db	cr,lf,eot
+l14c2:
+	db	'Don''t ',eot
+l14c9:
+	db	' T to Tag files for processing, RETURN to skip.'
+	db	cr,lf
+	db	' B = Back one       U = Untag       ^C = Abort'
+	db	cr,lf,eot
+l152b:
+	db	'Selections OK (Y/N)? ',eot
+l1541:
+	db	bell
+l1542:
+	db	cr,lf,lf,eot
+l1546:
+	db	'Change output disk and press RETURN to continue (^C aborts). ',eot
+l1584:
+	db	cr,lf,'   ++ Aborted ++',eot
+l1597:
+	db	' Erase existing file (Y/[N])? '
+	db	bell,eot
+l15b7:
+	db	'  in    out   rat   ca    cr'
+	db	cr,lf
+	db	' ====  ====  ====  ====  ===='
+	db	cr,lf,eot
+l15f5:
+	db	'  in    out   rat'
+	db	cr,lf
+	db	' ====  ====  ===='
+	db	cr,lf,eot
+l161c:
+	db	' file',eot
+l1622:
+	db	' processed.',eot
+;
+; ## Data to be moved to preset data in memory ##
+;
+l162e:
+	db	0		; l22ef
+	dw	0		; l22f0
+	db	1		; l22f2
+	dw	0		; l22f3
+	dw	0		; l22f5
+	db	0,0,0,0
+	dw	0		; l22fb
+	db	9		; l22fd
+	db	2		; l22fe
+	db	9
+	db	0		;  2300
+	dw	0		; l2301
+	db	0ffh		;  2303
+	dw	-1		; l2304
+	db	1		; l2306
+	db	0		; l2307
+	db	0		; l2308
+	db	0		; l2309
+	db	cr		; l230a
+	db	'    0 /'	; l230b
+	db	'   0',eot	; l2312
+;
+; ###############################################
+;
+; Process crunched file
+;
+l1656::
+	ld	de,PAGLEN-1
+	add	hl,de		; Force next page
+	ld	l,0		; Set page boundary
+	ld	(l23ad),hl	; Save base of crunched data
+	ld	a,HIGH l5000
+	add	a,h
+	ld	h,a
+	push	hl
+	ld	de,0
+	ex	de,hl
+	and	a
+	sbc	hl,de
+	ld	(l23af),hl
+	pop	hl
+	ld	a,h
+	add	a,HIGH l0800
+	ld	h,a
+	ld	(l23aa),sp	; Save stack pointer
+	ld	sp,hl
+	xor	a
+	ld	(l23a5),a
+	ld	a,1
+	ld	(l23a8),a
+	ld	hl,lffff
+	ld	(l23a6),hl
+	exx
+	ld	bc,0
+	exx
+	call	l1899
+	cp	_CMPR
+	jr	nz,l16a6
+	call	l1899
+	cp	_CR
+	jr	z,l16b5
+l169a:
+	ld	a,5
+	jr	l16ac
+l169e:
+	ld	a,4
+	jr	l16ac
+l16a2:
+	ld	a,3
+	jr	l16ac
+l16a6:
+	ld	a,2
+	jr	l16ac
+l16aa:
+	ld	a,1
+l16ac:
+	scf
+l16ad:
+	ld	sp,(l23aa)	; Get back stack pointer
+	ret
+l16b2:
+	xor	a
+	jr	l16ad
+l16b5:
+	call	l1899
+	or	a
+	jr	nz,l16b5
+	call	l1899
+	call	l1899
+	ld	b,a
+	ld	a,10h
+	sub	b
+	jr	c,l16aa
+	call	l1899
+	call	l1899
+	call	l17ec
+	and	a
+	ex	af,af'
+	ld	de,lffff
+l16d5:
+	ld	(l23a6),de
+	call	l1793
+	jp	c,l16b2
+	push	de
+	call	l1707
+	ld	hl,l23a8
+	srl	(hl)
+	jr	c,l16f3
+	ld	hl,(l23a6)
+	ld	a,(l23ac)
+	call	l1753
+l16f3:
+	pop	de
+	ld	a,(l23a5)
+	or	a
+	jr	z,l16d5
+l16fa:
+	call	l1793
+	jp	c,l16b2
+	push	de
+	call	l1707
+	pop	de
+	jr	l16fa
+l1707:
+	ld	iy,(l23af)
+	add	iy,sp
+	jp	nc,l169e
+	push	hl
+	ld	a,(l23ae)
+	add	a,d
+	ld	h,a
+	ld	l,e
+	ld	a,(hl)
+	cp	80h
+	jr	nz,l1732
+	ld	a,1
+	ld	(l23a8),a
+	push	hl
+	ld	hl,(l23a6)
+	ld	a,(l23ac)
+	call	l1753
+	pop	hl
+	ld	a,(hl)
+	cp	80h
+	jp	z,l16a2
+l1732:
+	ld	d,(hl)
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	e,(hl)
+	bit	7,d
+	jr	nz,l1749
+	call	l1707
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	a,(hl)
+l1744:
+	call	l17c2
+	pop	hl
+	ret
+l1749:
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	a,(hl)
+	ld	(l23ac),a
+	jr	l1744
+;
+;
+;
+l1753:
+	push	af
+	push	hl
+	call	l186d
+	ld	h,a
+	ld	a,(l23ae)
+	add	a,h
+	ld	h,a
+	pop	de
+	pop	af
+	ld	c,a
+l1761:
+	ld	b,h
+	ld	a,(hl)
+	cp	80h
+	jr	z,l177d
+	ld	a,h
+	add	a,HIGH l3000
+	ld	h,a
+	ld	a,(hl)
+	or	a
+	jr	z,l1779
+	ld	b,a
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	l,(hl)
+	ld	h,b
+	jp	l1761
+l1779:
+	ld	h,b
+	call	l181c
+l177d:
+	ld	(hl),d
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	(hl),e
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	(hl),c
+	ld	bc,lffff
+	add	ix,bc
+	ret	c
+	ld	a,b
+	ld	(l23a5),a
+	ret
+l1793:
+	ex	af,af'
+	ccf
+	jr	nc,l17b1
+	ex	af,af'
+	call	l1899
+	ld	d,a
+	call	l1899
+	ld	(l23a9),a
+	srl	d
+	rra
+	srl	d
+	rra
+	srl	d
+	rra
+	srl	d
+	rra
+	ld	e,a
+	jr	l17bc
+l17b1:
+	ex	af,af'
+	call	l1899
+	ld	e,a
+	ld	a,(l23a9)
+	and	00001111b
+	ld	d,a
+l17bc:
+	ld	a,d
+	or	e
+	add	a,0ffh
+	ccf
+	ret
+l17c2:
+	exx
+	srl	b
+	jr	c,l17d4
+	cp	90h
+	jr	z,l17d1
+	ld	c,a
+	exx
+	call	l18b6
+	ret
+l17d1:
+	inc	b
+	exx
+	ret
+l17d4:
+	or	a
+	jr	z,l17e5
+	dec	a
+	ld	b,a
+	push	bc
+	ld	b,0
+	exx
+	pop	bc
+	ld	a,c
+l17df:
+	call	l18b6
+	djnz	l17df
+	ret
+l17e5:
+	ld	a,90h
+	exx
+	call	l18b6
+	ret
+l17ec:
+	ld	ix,l0ffe
+	call	l1800		; Initialise crunch data
+	xor	a
+l17f4:
+	push	af
+	ld	hl,lffff
+	call	l1753
+	pop	af
+	inc	a
+	jr	nz,l17f4
+	ret
+;
+; Initialise crunch data
+;
+l1800:
+	ld	hl,(l23ad)	; Get base of crunched data
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	a,80h
+	ld	bc,l1000
+	ld	(hl),a
+	ldir
+	ld	(hl),0
+	ld	bc,l4000
+	ldir
+	ld	a,7fh
+	ld	hl,(l23ad)	; Get base of crunched data
+	ld	(hl),a
+	ret
+;
+;
+;
+l181c:
+	push	bc
+	push	de
+	push	hl
+	ld	a,l
+	add	a,65h
+	ld	l,a
+	jr	nc,l1832
+	inc	h
+	ld	a,(l23ae)
+	add	a,10h
+	cp	h
+	jr	nz,l1832
+	ld	a,(l23ae)
+	ld	h,a
+l1832:
+	ld	a,(l23ae)
+	add	a,0fh
+	sub	h
+	ld	b,a
+	ld	a,l
+	cpl
+	inc	a
+	jr	nz,l183f
+	inc	b
+l183f:
+	ld	c,a
+	ld	d,h
+	ld	e,l
+	ld	a,80h
+	cpir
+	jr	z,l185c
+	ld	hl,(l23ad)	; Get base of crunched data
+	ld	a,(l23ae)
+	ld	b,a
+	ld	a,d
+	sub	b
+	ld	b,a
+	ld	c,e
+	ld	a,80h
+	cpir
+	jr	z,l185c
+	jp	l16a6
+l185c:
+	dec	hl
+	ex	de,hl
+	pop	hl
+	ld	a,h
+	add	a,HIGH l3000
+	ld	h,a
+	ld	(hl),d
+	ld	a,h
+	add	a,HIGH l1000
+	ld	h,a
+	ld	(hl),e
+	ex	de,hl
+	pop	de
+	pop	bc
+	ret
+;
+;
+;
+l186d:
+	ld	de,0
+	ld	b,d
+	ld	c,a
+	add	hl,bc
+	set	3,h
+	sra	h
+	rr	l
+	ld	c,h
+	ld	a,l
+	adc	hl,de
+	jr	c,l188e
+	ld	b,0ch
+l1881:
+	srl	c
+	rra
+	jr	nc,l1889
+	ex	de,hl
+	add	hl,de
+	ex	de,hl
+l1889:
+	add	hl,hl
+	djnz	l1881
+	ex	de,hl
+	add	hl,hl
+l188e:
+	rla
+	add	hl,hl
+	rla
+	add	hl,hl
+	rla
+	add	hl,hl
+	rla
+	ld	l,h
+	and	0fh
+	ret
+l1899:
+	push	bc
+	push	de
+	push	hl
+	ex	af,af'
+	push	af
+	ex	af,af'
+	exx
+	push	bc
+	exx
+	push	ix
+	call	l0c5d		; Read byte from file
+	pop	ix
+	exx
+	pop	bc
+	exx
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	pop	hl
+	pop	de
+	pop	bc
+	jp	c,l169a
+	ret
+l18b6:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ex	af,af'
+	push	af
+	ex	af,af'
+	exx
+	push	bc
+	exx
+	push	ix
+	call	l052c		; Put byte to file
+	pop	ix
+	exx
+	pop	bc
+	exx
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+l18d2:
+	db	'UU8080/Z80 LZH coding Copyright (c) 1989, 1991 by Roger Warren.'
+	db	cr,lf
+	db	'May be used or reproduced on a non-profit basis only.'
+	db	cr,lf
+;
+;
+;
+l194a:
+	xor	a
+	jp	l1960
+l194e:
+	ld	a,1
+	jp	l195f
+l1953:
+	ld	a,2
+	jp	l195f
+l1958:
+	ld	a,3
+	jp	l195f
+l195d:
+	ld	a,4
+l195f:
+	scf
+l1960:
+	ld	sp,0
+	ret
+l1964:
+	ds	11
+;
+	dw	0
+	db	00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h
+	db	00h,00h,00h,00h,00h,00h,00h
+	db	01h,01h,01h,01h,01h,01h,01h
+	db	01h,01h,01h,01h,01h,01h,01h
+	db	01h,01h,02h,02h,02h,02h,02h
+	db	02h,02h,02h,02h,02h,02h,02h
+	db	02h,02h,02h,02h,03h,03h,03h
+	db	03h,03h,03h,03h,03h,03h,03h
+	db	03h,03h,03h,03h,03h,03h,04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,06h,06h,06h,06h,06h,06h
+	db	06h,06h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,08h,08h,08h,08h
+	db	08h,08h,08h,08h,09h,09h,09h
+	db	09h,09h,09h,09h,09h,0ah,0ah
+	db	0ah,0ah,0ah,0ah,0ah,0ah,0bh
+	db	0bh,0bh,0bh,0bh,0bh,0bh,0bh
+	db	0ch,0ch,0ch,0ch,0dh,0dh,0dh
+	db	0dh,0eh,0eh,0eh,0eh,0fh,0fh
+	db	0fh,0fh,10h,10h,10h,10h,11h
+	db	11h,11h,11h,12h,12h,12h,12h
+	db	13h,13h,13h,13h,14h,14h
+	db	14h,14h
+	db	15h,15h,15h,15h,16h,16h,16h
+	db	16h,17h,17h,17h,17h,18h,18h
+	db	19h,19h,1ah,1ah,1bh,1bh,1ch
+	db	1ch,1dh,1dh,1eh,1eh,1fh,1fh
+	db	20h,20h,21h,21h,22h,22h,23h
+	db	23h,24h,24h
+	db	25h,25h,26h,26h,27h,27h,28h
+	db	28h,29h,29h,2ah,2ah,2bh,2bh
+	db	2ch,2ch,2dh,2dh,2eh,2eh,2fh
+	db	2fh,30h,31h
+	db	32h,33h,34h,35h,36h,37h,38h
+	db	39h,3ah,3bh,3ch,3dh,3eh,3fh
+	db	03h,03h,03h,03h,03h,03h,03h
+	db	03h,03h,03h
+	db	03h,03h,03h
+	db	03h,03h,03h,03h,03h,03h,03h
+	db	03h,03h,03h,03h,03h,03h,03h
+	db	03h,03h,03h,03h,03h,04h,04h
+	db	04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	04h,04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	04h,04h,04h,04h,04h,04h,04h
+	db	04h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,05h,05h,05h,05h,05h
+	db	05h,05h,06h,06h,06h,06h,06h
+	db	06h,06h,06h,06h,06h,06h,06h
+	db	06h,06h,06h,06h,06h,06h,06h
+	db	06h,06h,06h,06h,06h,06h,06h
+	db	06h,06h,06h,06h,06h,06h,06h
+	db	06h,06h,06h,06h,06h,06h,06h
+	db	06h,06h,06h,06h,06h,06h,06h
+	db	06h,07h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,07h,07h,07h,07h
+	db	07h,07h,07h,07h,07h,07h,07h
+	db	08h,08h,08h,08h,08h,08h,08h
+	db	08h,08h,08h,08h,08h,08h,08h
+	db	08h,08h
+
+l0275	equ	0275h
+l0276	equ	0276h
+l04ea	equ	04eah
+
+l1b64::
+	push	bc
+;
+; (1) Set 083bh-0ab1h to (word) 1
+;
+l1b66	equ	$+1
+	ld	hl,l083b
+	ld	bc,013bh	;;l0ab1-l083b / 2;;l013b
+	ld	de,1
+l1b6e:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1b6e
+;
+; (2) Set 1487h-16fdh to (word) 04eah
+;
+l1b79	equ	$+1
+	ld	hl,l1487
+	ld	bc,013bh	;;l16fd-l1487 / 2;;l013b
+	ld	de,l04ea
+l1b81:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	de
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1b81
+;
+; (3) Set 1211h-1487h to (word) even numbers 0, 2, 4, .. , 0272h
+;
+l1b8e	equ	$+1
+	ld	hl,l1211
+	ld	bc,013bh	;;l1487-l1211 / 2;;l013b
+	ld	de,0
+l1b96:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	de
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1b96
+;
+; (4) Set 0ab1h-0d25h to (word) table values ????
+;
+l1ba3	equ	$+1
+	ld	hl,l083b
+	ld	bc,013ah	;;l0ab1-l083b / 2 -1;;l013a
+l1ba9	equ	$+1
+	ld	de,l0ab1
+l1bab:
+	push	bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	add	a,c
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	inc	hl
+	adc	a,b
+	ld	(de),a
+	inc	de
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1bab
+
+l1bc2	equ	$+1
+	ld	hl,l16fd
+	ld	bc,013ah	;;l013a
+	ld	de,0
+l1bca:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1bca
+
+l1bd9	equ	$+1
+	ld	hl,l0d27
+	ld	bc,013ah	;;l013a
+	ld	de,l0276
+l1be1:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	de
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1be1
+	ld	hl,lffff
+l1bf5	equ	$+1
+	ld	(l0d25),hl
+	inc	hl
+l1bf9	equ	$+1
+	ld	(l120f),hl
+	pop	bc
+	ret
+;
+;
+;
+l1bfd:
+	push	bc
+l1bff	equ	$+1
+	ld	hl,(l0d23)
+	ld	a,80h
+	cp	h
+	jp	nz,l1c0d
+	ld	a,0
+	cp	l
+	call	z,l1cad
+l1c0d:
+	ld	hl,(l1c93)
+	add	hl,hl
+l1c12	equ	$+1
+	ld	de,l1211
+	add	hl,de
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+l1c19:
+	ld	(l1c93),hl
+	ex	de,hl
+l1c1e	equ	$+1
+	ld	hl,l083b
+	add	hl,de
+	ld	c,(hl)
+	inc	(hl)
+	inc	hl
+	ld	(l1c43),hl
+	ld	b,(hl)
+	jp	nz,l1c2c
+	inc	(hl)
+l1c2c:
+	inc	hl
+	ld	a,c
+	sub	(hl)
+	inc	hl
+	ld	a,b
+	sbc	a,(hl)
+	jp	c,l1c9f
+l1c35:
+	inc	de
+	inc	de
+	inc	hl
+	ld	a,c
+	sub	(hl)
+	inc	hl
+	ld	a,b
+	sbc	a,(hl)
+	jp	nc,l1c35
+	inc	bc
+	push	de
+l1c43	equ	$+1
+	ld	de,$-$
+	dec	hl
+	dec	hl
+	ld	a,(hl)
+	ld	(de),a
+	ld	(hl),b
+	dec	de
+	dec	hl
+	ld	a,(hl)
+	ld	(de),a
+	ld	(hl),c
+	pop	hl
+	ld	(l1c79),hl
+l1c54	equ	$+1
+	ld	bc,l1487
+	add	hl,bc
+	ex	de,hl
+	ld	hl,(l1c93)
+	add	hl,bc
+	ld	a,(de)
+	ld	(l1c85+1),a
+	ld	c,(hl)
+	ld	(hl),a
+	ld	a,c
+	ld	(de),a
+	inc	hl
+	inc	de
+	ld	a,(de)
+	ld	(l1c85+2),a
+	ld	b,(hl)
+	ld	(hl),a
+	ld	a,b
+	ld	(de),a
+l1c6f	equ	$+1
+	ld	hl,l0d27
+	add	hl,bc
+	ld	a,c
+	sub	0eah
+	ld	a,b
+	sbc	a,4
+l1c79	equ	$+1
+	ld	de,$-$
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	nc,l1c85
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l1c85:
+	ld	bc,$-$
+l1c89	equ	$+1
+	ld	hl,l0d27
+	add	hl,bc
+	ld	a,c
+	sub	0eah
+	ld	a,b
+	sbc	a,4
+l1c93	equ	$+1
+	ld	bc,$-$
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	jp	nc,l1c9f
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+l1c9f:
+l1ca0	equ	$+1
+	ld	hl,l0d27
+	add	hl,de
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	or	h
+	jp	nz,l1c19
+	pop	bc
+	ret
+l1cad:
+	push	bc
+	ld	hl,l0275
+	push	hl
+l1cb3	equ	$+1
+	ld	hl,l1487
+l1cb6	equ	$+1
+	ld	de,l083b
+	ld	bc,0
+l1cbb:
+	push	de
+	ld	e,(hl)
+	inc	hl
+	ld	a,4
+	cp	(hl)
+	jp	c,l1ccd
+	jp	nz,l1cf0
+	ld	a,0e9h
+	cp	e
+	jp	nc,l1cf0
+l1ccd:
+	ld	a,e
+	ex	de,hl
+l1cd0	equ	$+1
+	ld	hl,l1487
+	add	hl,bc
+	ld	(hl),a
+	inc	hl
+	ld	a,(de)
+	ld	(hl),a
+	pop	hl
+	push	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	inc	hl
+	ld	a,h
+	or	a
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	push	de
+	ex	de,hl
+l1ce7	equ	$+1
+	ld	hl,l083b
+	add	hl,bc
+	ld	(hl),a
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	inc	bc
+	inc	bc
+l1cf0:
+	inc	hl
+	pop	de
+	inc	de
+	inc	de
+	ex	(sp),hl
+	dec	hl
+	ld	a,h
+	or	l
+	ex	(sp),hl
+	jp	nz,l1cbb
+	pop	hl
+	ld	hl,013ah	;;l013a
+	ld	bc,l0276
+	ld	de,0
+l1d06:
+	push	hl
+	push	de
+l1d09	equ	$+1
+	ld	hl,l083b
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	add	hl,de
+	ex	de,hl
+	push	bc
+l1d18	equ	$+1
+	ld	hl,l083b
+	add	hl,bc
+l1d1b:
+	dec	bc
+	dec	bc
+	dec	hl
+	ld	a,d
+	cp	(hl)
+	dec	hl
+	jp	c,l1d1b
+	jp	nz,l1d2c
+	ld	a,e
+	cp	(hl)
+	jp	c,l1d1b
+l1d2c:
+	inc	bc
+	inc	bc
+	pop	hl
+	push	hl
+	push	de
+	push	bc
+	ld	d,b
+	ld	e,c
+	ld	a,l
+	sub	c
+	ld	c,a
+	ld	a,h
+	sbc	a,b
+	ld	b,a
+	or	c
+	jp	z,l1d68
+	push	bc
+l1d40	equ	$+1
+	ld	hl,l083b
+	add	hl,de
+	add	hl,bc
+	ld	d,h
+	ld	e,l
+	inc	de
+	dec	hl
+l1d48:
+	ld	a,(hl)
+	ld	(de),a
+	dec	hl
+	dec	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1d48
+	pop	bc
+	pop	de
+	push	de
+l1d56	equ	$+1
+	ld	hl,l1487
+	add	hl,de
+	add	hl,bc
+	ld	d,h
+	ld	e,l
+	inc	de
+	dec	hl
+l1d5e:
+	ld	a,(hl)
+	ld	(de),a
+	dec	hl
+	dec	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1d5e
+l1d68:
+	pop	bc
+l1d6a	equ	$+1
+	ld	hl,l083b
+	add	hl,bc
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l1d72	equ	$+1
+	ld	hl,l1487
+	add	hl,bc
+	pop	bc
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	dec	hl
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	inc	bc
+	inc	bc
+	ld	a,h
+	or	l
+	jp	nz,l1d06
+	ld	bc,l04ea
+l1d8a:
+	dec	bc
+	dec	bc
+l1d8d	equ	$+1
+	ld	hl,l1487
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+l1d94	equ	$+1
+	ld	hl,l0d27
+	add	hl,de
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ld	a,4
+	cp	d
+	jp	c,l1dad
+	jp	nz,l1da9
+	ld	a,0e9h
+	cp	e
+	jp	c,l1dad
+l1da9:
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+l1dad:
+	ld	a,b
+	or	c
+	jp	nz,l1d8a
+	pop	bc
+	ret
+;;l1db4:
+	push	af
+	ld	a,'7'		; Set SCF
+	jp	l1dbe
+	db	' '
+l1dbe	equ	1dbeh
+
+l0002	equ	2
+
+;
+; Process LZH file
+;
+l1dbb::
+	push	af
+	ld	a,or_a		; Set OR A
+	ld	(l1dd3),a
+	pop	af
+	ld	(l1f8c),hl	; Save base address
+	call	l1f42		; Test enough memory
+	jp	c,l195d		; Nope, error
+	ld	sp,hl
+	call	l1f77
+	xor	a
+	ld	(l23b1),a
+l1dd3:
+	or	a
+	jp	c,l1e00
+	call	l2020		; Read byte from file
+	jp	c,l1958
+	cp	_CMPR
+	jp	nz,l1953
+	call	l2020		; Read byte from file
+	jp	c,l1958
+	cp	_LZ
+	jp	nz,l1953
+	ld	c,0
+l1def:
+	call	l2020		; Read byte from file
+	or	a
+	jp	z,l1e00
+	dec	c
+	jp	c,l1958
+	jp	nz,l1def
+	jp	l1958
+l1e00:
+	call	l2020		; Read byte from file
+	call	l2020		; Read byte from file
+	cp	' '+1
+	jp	nc,l194e
+	cp	' '
+	ld	a,_scf		; SCF
+	jp	c,l1e14
+	ld	a,or_a
+l1e14:
+	ld	(l1eb5),a
+	ld	(l1ed6),a
+	call	l2020		; Read byte from file
+	call	l2020		; Read byte from file
+	xor	a
+	ld	(l1f1a+1),a
+	call	l1b64
+	ld	bc,07c4h	;;l07c4
+l1e2b	equ	$+1
+	ld	hl,$-$
+l1e2d:
+	ld	(hl),' '
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1e2d
+	ld	hl,07c4h	;;l07c4
+	push	hl
+l1e3a:
+	call	l1ee7
+	ld	a,h
+	cp	1
+	jp	nc,l1e57
+	ld	a,l
+	call	l202a		; Put byte to file
+	ld	c,l
+	pop	de
+l1e4a	equ	$+1
+	ld	hl,$-$
+	add	hl,de
+	ld	(hl),c
+	inc	de
+	ld	a,d
+	and	00000111b
+	ld	d,a
+	push	de
+	jp	l1e3a
+l1e57:
+	jp	nz,l1e60
+	ld	a,l
+	cp	0
+	jp	z,l1ea3
+l1e60:
+	ld	de,0ff00h	;;lff00
+	add	hl,de
+	ld	a,h
+	or	a
+	jp	m,l1958
+	ld	de,l0002
+	add	hl,de
+	ld	b,h
+	ld	c,l
+	call	l1ea7
+	inc	hl
+	pop	de
+	push	de
+	ld	a,e
+	sub	l
+	ld	l,a
+	ld	a,d
+	sbc	a,h
+	and	00000111b
+	ld	h,a
+l1e7d:
+	ex	de,hl
+l1e7f	equ	$+1
+	ld	hl,$-$
+	add	hl,de
+	ld	a,(hl)
+	ex	de,hl
+	ex	(sp),hl
+	push	hl
+l1e87	equ	$+1
+	ld	de,$-$
+	add	hl,de
+	ld	(hl),a
+	call	l202a		; Put byte to file
+	pop	hl
+	inc	hl
+	ld	a,h
+	and	00000111b
+	ld	h,a
+	ex	(sp),hl
+	inc	hl
+	ld	a,h
+	and	00000111b
+	ld	h,a
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l1e7d
+	jp	l1e3a
+l1ea3:
+	pop	de
+	jp	l194a
+l1ea7:
+	push	bc
+	call	l1f31
+	push	hl
+	push	hl
+	ld	de,1a64h	;;l1a64
+	add	hl,de
+	ld	c,(hl)
+	pop	de
+	dec	c
+	dec	c
+l1eb5:
+	nop			; May be "OR A" or "SCF"
+	jp	c,l1eba
+	dec	c
+l1eba:
+	dec	c
+	jp	m,l1ec9
+	push	de
+	call	l1f1a
+	pop	de
+	add	hl,de
+	add	hl,de
+	ex	de,hl
+	jp	l1eba
+l1ec9:
+	pop	hl
+	ld	bc,l1964
+	add	hl,bc
+	ld	l,(hl)
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+l1ed6:
+	nop			; May be "OR A" or "SCF"
+	jp	c,l1edf
+	ld	a,1fh
+	jp	l1ee2
+l1edf:
+	add	hl,hl
+	ld	a,'?'
+l1ee2:
+	and	e
+	or	l
+	ld	l,a
+	pop	bc
+	ret
+l1ee7:
+	push	bc
+l1ee9	equ	$+1
+	ld	hl,(l196f)
+	ld	b,h
+	ld	c,l
+l1eed:
+	ld	a,c
+	sub	0eah
+	ld	a,b
+	sbc	a,4
+	jp	nc,l1f05
+	call	l1f1a
+	add	hl,hl
+	add	hl,bc
+l1efc	equ	$+1
+	ld	de,l1487
+	add	hl,de
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	jp	l1eed
+l1f05:
+	ld	hl,-l04ea
+	add	hl,bc
+	or	a
+	ld	a,h
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	push	hl
+	ld	(l1c93),hl
+	call	l1bfd
+	pop	hl
+	pop	bc
+	ret
+l1f1a:
+	ld	a,$-$
+	add	a,a
+	jp	nz,l1f28
+	call	l2020		; Read byte from file
+	jp	c,l1958
+	scf
+	adc	a,a
+l1f28:
+	ld	(l1f1a+1),a
+	ld	a,0
+	ld	h,a
+	adc	a,a
+	ld	l,a
+	ret
+l1f31:
+	ld	de,l0008
+l1f34:
+	call	l1f1a
+	add	a,d
+	add	a,d
+	ld	d,a
+	dec	e
+	jp	nz,l1f34
+	ld	l,a
+	ld	h,0
+	ret
+;
+; Test enough memory - C set says not
+;
+l1f42:
+	push	de
+	push	hl
+	ex	de,hl
+	ld	hl,2*3
+	add	hl,sp
+	ld	(l1960+1),hl
+	ld	hl,1a71h	;;l1a71
+	add	hl,de		; Build max required address
+	ex	de,hl
+	ld	hl,(TPATOP)
+	inc	hl
+	ld	a,e		; Test enough memory
+	sub	l
+	ld	a,d
+	sbc	a,h
+	jp	nc,l1f73	; Nope
+	pop	bc
+	ld	hl,(l1960+1)
+	dec	hl
+	ld	a,l
+	sub	c
+	ld	a,h
+	sbc	a,b
+	jp	c,l1f6f
+	ld	a,l
+	sub	e
+	ld	a,h
+	sbc	a,d
+	jp	c,l1f74		; Ok, got enough
+l1f6f:
+	ex	de,hl
+	pop	de
+	or	a
+	ret
+l1f73:
+	pop	hl
+l1f74:
+	pop	de
+	scf
+	ret
+;
+;
+;
+l1f77:
+	ld	bc,l0022 / 4
+	ld	hl,l1f98
+l1f7d:
+	ld	a,b
+	or	c
+	ret	z
+	dec	bc
+	push	bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+l1f8c	equ	$+1
+	ld	hl,$-$		; Get base address
+	add	hl,bc
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	pop	bc
+	jp	l1f7d
+;
+;
+;
+l083b	equ	083bh
+l0ab1	equ	0ab1h
+l0d23	equ	0d23h
+l0d25	equ	0d25h
+l0d27	equ	0d27h
+l120f	equ	120fh
+l1211	equ	1211h
+l1487	equ	1487h
+l16fd	equ	16fdh
+l196f	equ	196fh
+
+l1f98::
+	dw	l083b		; Offset to base address
+	dw	l1b66		; Address
+	dw	l1487
+	dw	l1b79
+	dw	l1211
+	dw	l1b8e
+	dw	l083b
+	dw	l1ba3
+	dw	l0ab1
+	dw	l1ba9
+	dw	l16fd
+	dw	l1bc2
+	dw	l0d27
+	dw	l1bd9
+	dw	l0d25
+	dw	l1bf5
+	dw	l120f
+	dw	l1bf9
+	dw	l0d23
+	dw	l1bff
+	dw	l1211
+	dw	l1c12
+	dw	l083b
+	dw	l1c1e
+	dw	l1487
+	dw	l1c54
+	dw	l0d27
+	dw	l1c6f
+	dw	l0d27
+	dw	l1c89
+	dw	l0d27
+	dw	l1ca0
+	dw	l1487
+	dw	l1cb3
+	dw	l083b
+	dw	l1cb6
+	dw	l1487
+	dw	l1cd0
+	dw	l083b
+	dw	l1ce7
+	dw	l083b
+	dw	l1d09
+	dw	l083b
+	dw	l1d18
+	dw	l083b
+	dw	l1d40
+	dw	l1487
+	dw	l1d56
+	dw	l083b
+	dw	l1d6a
+	dw	l1487
+	dw	l1d72
+	dw	l1487
+	dw	l1d8d
+	dw	l0d27
+	dw	l1d94
+	dw	0
+	dw	l1e2b
+	dw	0
+	dw	l1e4a
+	dw	0
+	dw	l1e7f
+	dw	0
+	dw	l1e87
+	dw	l196f
+	dw	l1ee9
+	dw	l1487
+	dw	l1efc
+l0022	equ	$-l1f98
+;
+; Read byte from file
+;
+l2020::
+	push	hl
+	push	de
+	push	bc
+	call	l0c5d		; Read byte from file
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Put byte to file
+;
+l202a:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l23b1
+	dec	(hl)
+	call	l052c		; Put byte to file
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Process sqeezed file
+;
+l2038::
+	ld	de,PAGLEN-1
+	add	hl,de		; Force next page
+	ld	l,0		; Set page boundary
+	ld	(l23b2),hl	; Save base of sqeezed data
+	ld	hl,l2079
+	ld	de,(l23b2)	; Get base of sqeezed data
+	ld	bc,l0010
+	ldir
+	ld	hl,(l23b2)	; Get base of sqeezed data
+	ld	bc,l1000-l0010
+	ldir
+	call	l2134		; Read byte from file
+	cp	_CMPR
+	jr	nz,l2063
+	call	l2134		; Read byte from file
+	cp	_SQ
+	jr	z,l2067
+l2063:
+	scf
+	ret
+l2065:
+	and	a
+	ret
+l2067:
+	call	l2134		; Read byte from file
+	call	l2134		; Read byte from file
+l206d:
+	ld	b,' '
+	call	l2134		; Read byte from file
+	or	a
+	jr	z,l2089
+	djnz	l206d
+	jr	l2063
+l2079:
+	srl	b
+	call	z,l20e8
+	jr	c,l2083
+	ld	a,0
+	ret
+l2083:
+	ld	a,0
+	ret
+	nop
+	nop
+	nop
+l2089:
+	call	l2134		; Read byte from file
+	ld	c,a
+	call	l2134		; Read byte from file
+	ld	b,a
+	sub	2
+	jp	nc,l2063
+	ld	hl,(l23b2)	; Get base of sqeezed data
+	ld	de,l0007
+	add	hl,de
+	ld	de,l000a
+l20a0:
+	call	l20ae
+	call	l20ae
+	add	hl,de
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l20a0
+	jr	l20f0
+l20ae:
+	push	bc
+	call	l2134		; Read byte from file
+	ld	c,a
+	call	l2134		; Read byte from file
+	or	a
+	jp	m,l20d7
+	sla	c
+	rla
+	sla	c
+	rla
+	sla	c
+	rla
+	sla	c
+	rla
+	ld	b,a
+	ld	a,(l23b3)
+	add	a,b
+	ld	b,a
+l20cc:
+	push	bc
+	ld	(hl),_jp
+	inc	l
+	pop	bc
+	ld	(hl),c
+	inc	l
+	ld	(hl),b
+	inc	l
+	pop	bc
+	ret
+l20d7:
+	cp	0feh
+	jr	z,l20e3
+	ld	a,c
+	cpl
+	inc	l
+	ld	(hl),a
+	inc	l
+	inc	l
+	pop	bc
+	ret
+l20e3:
+	ld	bc,l2107
+	jr	l20cc
+l20e8:
+	call	l2134		; Read byte from file
+	ld	b,a
+	scf
+	rr	b
+	ret
+l20f0:
+	exx
+	ld	bc,0
+	exx
+	ld	hl,(l23b2)	; Get base of sqeezed data
+	push	hl
+	pop	ix
+	ld	b,0
+l20fd:
+	call	l2105
+	call	l210c
+	jr	l20fd
+l2105:
+	jp	(ix)
+l2107:
+	inc	sp
+	inc	sp
+	jp	l2065
+l210c:
+	exx
+	srl	b
+	jr	c,l211e
+	cp	90h
+	jr	z,l211b
+	ld	c,a
+	exx
+	call	l2148		; Put byte to file
+	ret
+l211b:
+	inc	b
+	exx
+	ret
+l211e:
+	or	a
+	jr	z,l212d
+	dec	a
+	ld	b,a
+	ld	a,c
+l2124:
+	exx
+	call	l2148		; Put byte to file
+	exx
+	djnz	l2124
+	exx
+	ret
+l212d:
+	ld	a,90h
+	exx
+	call	l2148		; Put byte to file
+	ret
+;
+; Read byte from file
+;
+l2134:
+	push	bc
+	push	de
+	push	hl
+	exx
+	push	bc
+	exx
+	push	ix
+	call	l0c5d		; Read byte from file
+	pop	ix
+	exx
+	pop	bc
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Put byte to file
+;
+l2148:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	exx
+	push	bc
+	exx
+	push	ix
+	call	l052c		; Put byte to file
+	pop	ix
+	exx
+	pop	bc
+	exx
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Parse FCB
+;
+l215e::
+	push	hl
+	dec	hl
+	ld	(hl),_NONE	; Set no user
+	inc	hl
+	call	l22b5		; Init FCB
+	pop	hl
+	push	hl
+	call	l22d4		; Skip spaces
+	dec	de
+	call	l2296
+	jp	z,l2237
+	push	de
+	ld	b,4
+l2175:
+	call	l2296
+	jp	z,l2184
+	inc	de
+	dec	b
+	jp	nz,l2175
+	pop	de
+	jp	l2203
+l2184:
+	cp	':'
+	pop	de
+	jp	nz,l2203
+	ld	bc,0
+l218d:
+	call	l2296
+	jp	z,l21d3
+	inc	de
+	sub	'0'
+	jp	c,l224d
+	cp	0ah
+	jp	nc,l21b7
+	ld	b,a
+	ld	a,c
+	add	a,a
+	add	a,a
+	add	a,c
+	add	a,a
+	add	a,b
+	ld	c,a
+	ld	b,1
+	cp	10h
+	jp	nc,l224d
+	dec	hl
+	ld	a,(hl)
+	inc	hl
+	inc	a
+	jp	nz,l224d
+	jp	l218d
+l21b7:
+	inc	b
+	dec	b
+	jp	z,l21bf
+	dec	hl
+	ld	(hl),c
+	inc	hl
+l21bf:
+	sub	11h
+	jp	c,l224d
+	cp	10h
+	jp	nc,l224d
+	inc	(hl)
+	dec	(hl)
+	jp	nz,l224d
+	inc	a
+	ld	(hl),a
+	jp	l218d
+l21d3:
+	inc	de
+	inc	b
+	dec	b
+	jp	z,l2203
+	dec	hl
+	ld	(hl),c
+	inc	hl
+	jp	l2203
+	push	hl
+	call	l22b5		; Init FCB
+	call	l22d4		; Skip spaces
+	ld	a,(de)
+	cp	':'
+	dec	de
+	pop	hl
+	push	hl
+	jp	nz,l2203
+	call	l2296
+	jp	z,l2237
+	sub	'A'
+	jp	c,l224d
+	cp	'P'+1-'A'
+	jp	nc,l224d
+	inc	de
+	inc	de
+	inc	a
+	ld	(hl),a
+l2203:
+	inc	hl
+	call	l2296
+	jp	z,l2237
+	ld	bc,256*(.nam-1)+0
+l220d:
+	ld	a,(de)
+	cp	'.'
+	jp	z,l2221
+	cp	';'
+	jp	z,l2252
+	call	l2270
+	jp	nz,l220d
+	jp	l2237
+l2221:
+	inc	de
+	pop	hl
+	push	hl
+	ld	bc,.drv+.nam
+	add	hl,bc
+	ld	bc,256*(.ext-1)+0
+l222b:
+	ld	a,(de)
+	cp	';'
+	jp	z,l2252
+	call	l2270
+	jp	nz,l222b
+l2237:
+	pop	bc
+	push	de
+	call	l22d4		; Skip spaces
+	dec	de
+	call	l2296
+	pop	hl
+	ret	nz
+	ld	hl,0
+	or	a
+	ret	z
+	cp	cr
+	ret	z
+	ex	de,hl
+	ret
+l224c:
+	pop	bc
+l224d:
+	pop	bc
+	ld	hl,lffff
+	ret
+l2252:
+	inc	de
+	pop	hl
+	push	hl
+	ld	bc,l0010
+	add	hl,bc
+	ld	bc,0701h	;;l0701
+l225c:
+	call	l2270
+	jp	nz,l225c
+	ld	a,7
+	sub	b
+	pop	hl
+	push	hl
+	ld	bc,001ah	;;l001a
+	add	hl,bc
+	ld	(hl),a
+	ld	a,(de)
+	jp	l2237
+l2270:
+	call	l2296
+	ret	z
+	cp	' '
+	inc	de
+	jp	c,l224c
+	inc	b
+	dec	b
+	jp	m,l224c
+	inc	c
+	dec	c
+	jp	nz,l2289
+	cp	'*'
+	jp	z,l228e
+l2289:
+	ld	(hl),a
+	inc	hl
+	dec	b
+	or	a
+	ret
+l228e:
+	ld	(hl),'?'
+	inc	hl
+	dec	b
+	jp	p,l228e
+	ret
+l2296:
+	ld	a,(de)
+	push	hl
+	ld	hl,l22e1	; Point to delimiter table
+l229b:
+	cp	(hl)		; Test delimiter
+	jp	z,l22a6		; Yeap
+	inc	(hl)
+	dec	(hl)		; Test end of table
+	inc	hl
+	jp	nz,l229b	; Nope, try next
+	or	a		; Set no delimiter
+l22a6:
+	pop	hl
+	ret	z
+	cp	'a'
+	ret	c
+	cp	'z'+1
+	jp	nc,l22b2
+	and	UPPER AND NOMSB
+l22b2:
+	and	NOMSB
+	ret
+;
+; Init FCB
+;
+l22b5:
+	xor	a
+	ld	(hl),a
+	inc	hl
+	ld	bc,256*' '+.nam+.ext
+	call	l22cd		; Blank name and type
+	ld	bc,256*0+(DIRLEN-(.drv+.nam+.ext))
+	call	l22cd
+	ld	bc,256*' '+.nam
+	call	l22cd		; Blank password part
+	ld	bc,.drv+.nam+.ext
+l22cd:
+	ld	(hl),b
+	inc	hl
+	dec	c
+	jp	nz,l22cd
+	ret
+;
+; Skip spaces
+;
+l22d4:
+	ld	a,(de)		; Get character
+	inc	de
+	cp	' '		; Test blank
+	jp	z,l22d4
+	cp	tab		; Maybe tab
+	jp	z,l22d4
+	ret
+;
+l22e1:
+	db	cr,tab,' .,:;[]=<>|',null
+;
+; +++++ Initialized on entry +++++
+;
+l22ef::
+	db	0
+l22f0:
+	dw	0
+l22f2:
+	db	0		; Number of records read
+l22f3:
+	dw	0
+l22f5:
+	dw	0
+	db	0,0,0,0
+l22fb:
+	dw	0
+l22fd:
+	db	0		; Bit count
+l22fe:
+	db	0
+	db	0
+
+l2301	equ	2301h
+l2304	equ	2304h
+l2306	equ	2306h
+l2307	equ	2307h
+l2308	equ	2308h
+l2309	equ	2309h		; Squeeze flag
+l230a	equ	230ah
+l230b	equ	230bh		; Four ASCII digits follow
+l2311	equ	2311h		; Four ASCII digits follow
+;
+; ++++++++++++++++++++++++++++++++
+;
+l2317	equ	2317h
+
+l231e	equ	231eh		; Input user area
+l231f	equ	231fh		; Input file FCB
+
+l2343	equ	2343h		; Output user area
+l2344	equ	2344h		; Output file FCB
+
+l2368	equ	2368h
+l2369	equ	2369h
+l2373	equ	2373h
+
+l2378	equ	2378h		; Quiet flag [0 is not quiet]
+l2379	equ	2379h
+l237a	equ	237ah		; OS flag [0 for CP/M 3.x]
+l237b	equ	237bh		; Inspect flag [0 for not]
+l237d	equ	237dh		; SYStem files enabled [0 for not]
+l237e	equ	237eh		; File list pointer
+l2380	equ	2380h		; Entry stack pointer
+l2382	equ	2382h
+l2384	equ	2384h
+l2386	equ	2386h		; I/O result on system call
+l2388	equ	2388h		; OS flag [0 for CP/M 2.x]
+l2389	equ	2389h		; Standard OS flag [0 is standard]
+l238a	equ	238ah		; Current user
+l238b	equ	238bh		; Entry user
+l238c	equ	238ch		; Entry drive
+l238d	equ	238dh		; Work drive
+l238e	equ	238eh		; Dtto.
+l238f	equ	238fh		; Available memory pages
+l2390	equ	2390h		; Top page of memory
+l2391	equ	2391h		; Count of files found
+l2393	equ	2393h		; File count
+l2395	equ	2395h
+l2396	equ	2396h		; Same drive flag
+l2397	equ	2397h		; Wildcard flag
+l2398	equ	2398h		; Drive vector
+l239a	equ	239ah
+l239c	equ	239ch		; Work file count
+l239e	equ	239eh		; Checksum flag
+l239f	equ	239fh
+l23a0	equ	23a0h
+l23a1	equ	23a1h		; Bit state
+l23a2	equ	23a2h		; Squeeze checksum
+l23a4	equ	23a4h		; LZH flag
+l23a5	equ	23a5h
+l23a6	equ	23a6h
+l23a8	equ	23a8h
+l23a9	equ	23a9h
+l23aa	equ	23aah		; Crunch stack pointer
+l23ac	equ	23ach
+l23ad	equ	23adh		; Base of crunched data
+l23ae	equ	23aeh
+l23af	equ	23afh
+l23b1	equ	23b1h
+l23b2	equ	23b2h		; Base of sqeezed data
+l23b3	equ	23b3h
+
+l2500	equ	2500h		; File list base pointer
+l3100	equ	3100h		; Read buffer - 16 records [RDREC*reclng]
+l3900	equ	3900h
+l4900	equ	4900h
+l6900	equ	6900h
+l9000	equ	9000h
+l9100	equ	9100h		; Stamp array
+s9900	equ	9900h		; ^^^^ Local stack
+l9900	equ	9900h		; Write buffer
+
+	end
+

@@ -1,0 +1,454 @@
+	title	Installer For Screen Oriented Editor
+	name	('EDINST')
+
+; Installer for small screen oriented editor EDY
+; DASMed and slightly optimized by W.Cirsovius
+
+OS	equ	0000h
+BDOS	equ	0005h
+
+.conin	equ	 1
+.condir	equ	 6
+.string	equ	 9
+.resdsk	equ	13
+.open	equ	15
+.close	equ	16
+.wrseq	equ	21
+.setdma	equ	26
+
+OSerr	equ	-1
+
+_get	equ	-1
+
+reclng	equ	128
+
+bell	equ	07h
+lf	equ	0ah
+cr	equ	0dh
+esc	equ	1bh
+eot	equ	'$'
+
+UPPMASK	equ	010111111b
+
+PHASADR	equ	0200h
+
+;
+; ## The next two records will be saved in EDY.COM ##
+; ##        Parts are the image of EDY.COM         ##
+;
+l0103:
+	.phase	PHASADR
+l0200:
+	db	0feh,000h,020h,002h,018h,003h,0cdh
+	db	021h,002h,0c1h,0d1h,0e1h,0c9h,0e5h
+	db	0d5h,0c5h,021h,086h,002h,07eh,0feh
+	db	000h,020h,002h,018h,003h,0cdh,021h
+	db	002h,0c1h,0d1h,0e1h,0c9h,07eh,023h
+	db	0b7h,0c8h,0e5h,05fh,00eh,006h,0cdh
+	db	005h,000h,0e1h,018h,0f2h
+;
+	db	'VCT2VDO25 ',lf,'      '
+;
+; >>> Terminal definition placed here <<<
+;
+l0240:
+	db	'                '	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	0,0,0,0,0,0,0,0		; Erase to end of line
+	db	0			; Cursor row offset
+	db	0			; Cursor column offset
+	db	0			; Row Column
+	db	0,0,0,0,0,0,0,0		; Cursor setting prefix
+	db	0,0,0,0,0,0,0,0		; Clear screen
+	db	0,0,0,0,0,0,0,0		; Insert a line
+	db	0,0,0,0,0,0,0,0		; Delete a line
+	db	0,0,0,0,0,0,0,0		; Revers video
+	db	0,0,0,0,0,0,0,0		; Normal video
+	db	0,0
+;
+; >>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<
+;
+l0290:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+l02a0:
+	db	0			; Call block menu
+l02a1:
+	db	0			; ESCape character
+l02a2:
+	db	0			; Insert character
+l02a3:
+	db	0			; Delete character
+l02a4:
+	db	0			; Cursor down
+l02a5:
+	db	0			; Cursor up
+l02a6:
+	db	0			; Cursor left
+l02a7:
+	db	0			; Cursor right
+;
+	db	0,0,0,0,0,0,0,0,0,0
+;
+	db	0e5h,0d5h,0c5h,01eh,0ffh,00eh,006h
+	db	0cdh,005h,000h,0feh,000h,028h,010h
+	db	0f5h,03ah,01eh,01bh,0feh,000h,0f1h
+	db	028h,007h,0ddh,021h,01ch,01bh,0cdh
+	db	0f5h,002h,0c1h,0d1h,0e1h,0c9h,0e5h
+	db	0d5h,0c5h,03ah,01ch,01bh,0feh,000h
+	db	028h,009h,0ddh,021h,01ch,01bh,0cdh
+	db	034h,003h,018h,00ah,01eh,0ffh,00eh
+	db	006h,0cdh,005h,000h,0b7h,028h,0f6h
+	db	0c3h,01eh,017h,0c9h,0d5h,0f5h,0ddh
+	db	05eh,008h,0ddh,056h,009h,012h,013h
+	db	0ddh
+;
+; ###################################################
+;
+	.dephase
+;
+; Terminal list
+;
+; Terminal 1: ZENITH/CPC6128
+;
+TermList:
+	db	'ZENITH/CPC6128 ',eot	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	esc,'K',0,0,0,0,0,0	; Erase to end of line
+	db	' '			; Cursor row offset
+	db	' '			; Cursor column offset
+	db	1			; Row Column
+	db	esc,'Y',0,0,0,0,0,0	; Cursor setting prefix
+	db	esc,'E',0,0,0,0,0,0	; Clear screen
+	db	esc,'L',0,0,0,0,0,0	; Insert a line
+	db	esc,'M',0,0,0,0,0,0	; Delete a line
+	db	esc,'p',0,0,0,0,0,0	; Revers video
+	db	esc,'q',0,0,0,0,0,0	; Normal video
+	db	0,0
+;
+; Terminal 2: ZENITH / JOYCE
+;
+l0253:
+	db	'ZENITH / JOYCE ',eot	; Name of terminal
+	db	30			; Rows on terminal
+	db	89			; Columns on terminal
+	db	0
+	db	esc,'K',0,0,0,0,0,0	; Erase to end of line
+	db	' '			; Cursor row offset
+	db	' '			; Cursor column offset
+	db	1			; Row Column
+	db	esc,'Y',0,0,0,0,0,0	; Cursor setting prefix
+	db	esc,'E',0,0,0,0,0,0	; Clear screen
+	db	esc,'L',0,0,0,0,0,0	; Insert a line
+	db	esc,'M',0,0,0,0,0,0	; Delete a line
+	db	esc,'p',0,0,0,0,0,0	; Revers video
+	db	esc,'q',0,0,0,0,0,0	; Normal video
+	db	0,0
+;
+; Terminal 3: CPC 464/664
+;
+l02a3:
+	db	'CPC 464/664    ',eot	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	0,0,0,0,0,0,0,0		; Erase to end of line
+	db	1			; Cursor row offset
+	db	1			; Cursor column offset
+	db	0			; Column Row
+	db	1fh,0,0,0,0,0,0,0	; Cursor setting prefix
+	db	0ch,0,0,0,0,0,0,0	; Clear screen
+	db	0,0,0,0,0,0,0,0		; Insert a line
+	db	0,0,0,0,0,0,0,0		; Delete a line
+	db	18h,0,0,0,0,0,0,0	; Revers video
+	db	18h,0,0,0,0,0,0,0	; Normal video
+	db	0,0
+;
+; Terminal 4: 
+;
+l02f3:
+	db	'TA PC Standard ',eot	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	esc,'K',0,0,0,0,0,0	; Erase to end of line
+	db	' '			; Cursor row offset
+	db	' '			; Cursor column offset
+	db	1			; Row Column
+	db	esc,'Y',0,0,0,0,0,0	; Cursor setting prefix
+	db	esc,'E',0,0,0,0,0,0	; Clear screen
+	db	0,0,0,0,0,0,0,0		; Insert a line
+	db	0,0,0,0,0,0,0,0		; Delete a line
+	db	1ch,0,0,0,0,0,0,0	; Revers video
+	db	12h,0,0,0,0,0,0,0	; Normal video
+	db	0,0
+;
+; Terminal 5: TA PC HD-BIOS
+;
+l0343:
+	db	'TA PC HD-BIOS  ',eot	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	0,0,0,0,0,0,0,0		; Erase to end of line
+	db	' '			; Cursor row offset
+	db	' '			; Cursor column offset
+	db	1			; Row Column
+	db	esc,'Y',0,0,0,0,0,0	; Cursor setting prefix
+	db	esc,'E',0,0,0,0,0,0	; Clear screen
+	db	0,0,0,0,0,0,0,0		; Insert a line
+	db	0,0,0,0,0,0,0,0		; Delete a line
+	db	1ch,0,0,0,0,0,0,0	; Revers video
+	db	12h,0,0,0,0,0,0,0	; Normal video
+	db	0,0
+;
+; Terminal 6: TA PC DUEH-BIOS
+;
+l0393:
+	db	'TA PC DUEH-BIOS',eot	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	esc,'K',0,0,0,0,0,0	; Erase to end of line
+	db	' '			; Cursor row offset
+	db	' '			; Cursor column offset
+	db	1			; Row Column
+	db	esc,'Y',0,0,0,0,0,0	; Cursor setting prefix
+	db	esc,'E',0,0,0,0,0,0	; Clear screen
+	db	esc,'F',0,0,0,0,0,0	; Insert a line
+	db	esc,'G',0,0,0,0,0,0	; Delete a line
+	db	1ch,0,0,0,0,0,0,0	; Revers video
+	db	12h,0,0,0,0,0,0,0	; Normal video
+	db	0,0
+;
+; Terminal 7: ADM31 / C 128
+;
+l03e3:
+	db	'ADM31 / C 128  ',eot	; Name of terminal
+	db	24			; Rows on terminal
+	db	79			; Columns on terminal
+	db	0
+	db	esc,'T',0,0,0,0,0,0	; Erase to end of line
+	db	' '			; Cursor row offset
+	db	' '			; Cursor column offset
+	db	1			; Row Column
+	db	esc,'=',0,0,0,0,0,0	; Cursor setting prefix
+	db	esc,':',0,0,0,0,0,0	; Clear screen
+	db	0,0,0,0,0,0,0,0		; Insert a line
+	db	0,0,0,0,0,0,0,0		; Delete a line
+	db	esc,'G4',0,0,0,0,0	; Revers video
+	db	esc,'G0',0,0,0,0,0	; Normal video
+	db	0,0
+;
+	db	-1
+;
+; Install EDY.COM
+;
+l0434:
+	ld	de,l048a
+	ld	c,.open
+	call	BDOS		; Open file
+	cp	OSerr		; Test success
+	jp	z,l0474		; Nope
+	ld	de,l0200-PHASADR+l0103
+	ld	c,.setdma
+	call	BDOS		; Set 1st buffer
+	ld	de,l048a
+	ld	c,.wrseq	; Write 1st record	*** WHY ***
+	cp	0		; Test success		*** WHY ***
+	jp	nz,l047f	; Nope			*** WHY ***
+	call	BDOS		;			*** WHY ***	
+	ld	de,l0200-PHASADR+l0103+reclng
+	ld	c,.setdma
+	call	BDOS		; Set 2nd buffer
+	ld	de,l048a
+	ld	c,.wrseq	; Write 2nd record	*** WHY ***
+	cp	0		; Test success		*** WHY ***
+	jp	nz,l047f	; Nope			*** WHY ***
+	call	BDOS		;			*** WHY ***
+	ld	de,l048a
+	ld	c,.close
+	call	BDOS		; Close file
+	ret
+l0474:
+	ld	de,l082e
+	call	string		; Tell file not found
+	jp	OS
+l047f:
+	ld	de,l0852
+	call	string		; Tell write error
+	jp	OS
+l048a:
+	db	0
+	db	'EDY     COM'
+	ds	20
+	db	2
+	ds	3
+;
+; Get character from keyboard
+;
+l04ae:
+	ld	e,_get
+	ld	c,.condir
+	call	BDOS		; Get character
+	cp	0		; Test any
+	jp	z,l04ae		; Wait for it
+	ret
+;
+; Print string ^DE on console
+;
+string:
+	ld	c,.string
+	call	BDOS		; Give message
+	ret
+;
+; Enter the installer
+;
+EDINST:
+	ld	de,$HELP
+	call	string		; Give some help
+l04c3:
+	ld	hl,TermList	; Init base pointer to terminals
+l04c6:
+	ex	de,hl		; Copy pointer		
+	push	de
+	call	string		; Print type of terminal
+	call	l04ae		; Get character from keyboard
+	cp	'C'-'@'		; Test abort
+	jp	z,OS		; Yeap
+	cp	esc
+	jp	z,OS
+	cp	' '		; Test start
+	jr	z,l04f6		; Yeap
+	ld	de,$CRLF
+	call	string
+	pop	hl
+	ld	de,l0253-TermList
+	add	hl,de		; Point to next terminal
+	ld	a,(hl)
+	cp	-1		; Test end of list
+	jr	nz,l04c6	; Yeap, get next
+	jr	l04c3		; Else restart
+l04f6:
+	pop	hl
+	ld	de,l0240-PHASADR+l0103
+	ld	bc,l0253-TermList
+	ldir			; Unpack definition
+	ld	de,l0642
+	call	string		; Tell installedan ask for installation of other keys
+	ld	c,.conin
+	call	BDOS		; Get response
+	and	UPPMASK
+	cp	'J'
+	jr	nz,l0591		; Nope, skip asking
+l0521:z
+	ld	de,l06fd
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a0-PHASADR+l0103),a
+
+	ld	de,l073f
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a1-PHASADR+l0103),a
+
+	ld	de,l075b
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a2-PHASADR+l0103),a
+
+	ld	de,l0777
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a3-PHASADR+l0103),a
+
+	ld	de,l0793
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a4-PHASADR+l0103),a
+
+	ld	de,l07af
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a5-PHASADR+l0103),a
+
+	ld	de,l07cb
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a6-PHASADR+l0103),a
+
+	ld	de,l07e7
+	call	string
+	call	l04ae		; Get character from keyboard
+	ld	(l02a7-PHASADR+l0103),a
+
+l0591:
+	ld	de,l0803
+	call	string		; Testt EDY will be installed now
+	call	l0434
+	ld	c,.resdsk
+	call	BDOS		; Reset disk system
+	jp	OS		; Exit
+;
+$HELP:
+	db	'EDINST V. 1.1 Installation f. EDY.COM  (c) acw-Soft'
+	db	cr,lf,lf
+	db	'Es folgt eine Auswahl von Terminals.'
+	db	cr,lf
+	db	'^C <ESC> =Abbruch. Tippen Sie <LEERTASTE> zum installieren!'
+	db	cr,lf,lf,eot
+$CRLF:
+	db	cr,lf,eot
+l0642:
+	db	'<----- INSTALLIERT!'
+	db	cr,lf,lf,lf
+	db	'Zusaetzlich zu den WordStar-Codes kann EDY in den grundlegenden Editier-'
+	db	cr,lf
+	db	'Funktionen an die Tastatur-Codes Ihres Rechners '
+	db	'angepa~t werden.'
+	db	cr,lf
+	db	'Wollen Sie das (J) ? ',eot
+l06fd:
+	db	cr,lf
+	db	'Tippen Sie die jeweilige Taste fuer:'
+	db	cr,lf
+	db	'Aufruf BLOCKMENU         ',eot
+l073f:
+	db	cr,lf
+	db	'<ESCAPE> Taste           ',eot
+l075b:
+	db	cr,lf
+	db	'Zeichen einfuegen INSERT ',eot
+l0777:
+	db	cr,lf
+	db	'Zeichen loeschen  DELETE ',eot
+l0793:
+	db	cr,lf
+	db	'Pfeiltaste  PFEIL AB     ',eot
+l07af:
+	db	cr,lf
+	db	'Pfeiltaste  PFEIL AUF    ',eot
+l07cb:
+	db	cr,lf
+	db	'Pfeiltaste  PFEIL LINKS  ',eot
+l07e7:
+	db	cr,lf
+	db	'Pfeiltaste  PFEIL RECHTS ',eot
+l0803:
+	db	cr,lf
+	db	'Danke. EDY.COM wird jetzt installiert.'
+	db	cr,lf,eot
+l082e:
+	db	bell,'Programm EDY.COM nicht gefunden!'
+	db	cr,lf,eot
+l0852:
+	db	bell,'Fehler beim Schreiben!'
+	db	cr,lf,eot
+;
+	db	'Cltaste  PFEIL RECHT'
+
+	end	EDINST
+

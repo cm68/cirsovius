@@ -1,0 +1,285 @@
+	title	AMSTRAD Serial Sender
+	name	('CPS')
+
+; DASMed version of simple CPS8256 transfer
+; DASMed by W.Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+IFTP	equ	FALSE		; Schneider CPS8256 manual (1985)
+;IFTP	equ	TRUE		; Internet page
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+BDOS	equ	0005h
+FCB	equ	005ch
+DMA	equ	0080h
+
+OS	macro
+	rst	0
+	endm
+
+.string	equ	 9
+.auxin	equ	 3
+.auxout	equ	 4
+.open	equ	15
+.close	equ	16
+.rdseq	equ	20
+
+OSerr	equ	255
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+
+reclng	equ	128
+
+bell	equ	07h
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+STX	equ	2
+ETX	equ	3
+ACK	equ	6
+
+	ld	a,(FCB+.drv)	; Get name of file
+	cp	' '		; Test file defined
+	jp	z,NoName	; .. nope
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Open file
+	cp	OSerr		; Verify it is present
+	jp	z,NoFile	; .. nope
+	call	SendFile	; Send file
+	ld	c,.close
+	call	BDOS		; Close file
+	ld	de,$READY
+	ld	c,.string
+	call	BDOS		; Tell job done
+	OS			; Exit
+;
+; Send file
+;
+SendFile:
+	ld	hl,-1
+	ld	(BlkNmbr),hl	; Init block number
+WaitACK:
+	ld	e,STX
+	ld	c,.auxout
+	call	BDOS		; Send STX
+	call	TestACK		; Test ACK received
+	jp	nc,WaitACK	; .. nope, wait
+NextRec:
+	ld	hl,(BlkNmbr)	; Update block number
+	inc	hl
+	ld	(BlkNmbr),hl
+	call	SendFN		; Send 16 byte filename
+	call	SendBLKNo	; Send block number
+	call	ReadRec		; Read record from file and build checksum
+	or	a		; Test end of file
+	jp	nz,EndFile	; .. yeap
+Resend:
+	call	SendLen		; Send length of data block
+	call	SendData	; Send data
+	call	SendCks		; Send checksum
+	call	TestACK		; Test ACK received
+	jr	c,NextRec	; .. yeap, get next record
+	call	SendFN		; Send 16 byte filename if NAK
+	call	SendBLKNo	; Send block number
+	jp	Resend		; Resend data
+Retry:
+	call	SendFN		; Send 16 byte filename
+	call	SendBLKNo	; Send block number
+EndFile:
+	ld	e,0
+	ld	c,.auxout
+	call	BDOS		; Send NUL
+	ld	hl,0
+	ld	(CheckSum),hl	; Clear checksum
+	call	SendCks		; Send checksum
+	call	TestACK		; Test ACK received
+	jp	nc,Retry	; .. nope
+	ret
+;
+; Test ACK received
+; EXIT	Carry flag set if not
+;
+TestACK:
+	ld	c,.auxin
+	call	BDOS		; Get response from serial line
+	cp	ETX		; Test abort
+	jp	nz,VrfyACK	; Nope
+	pop	af		; Clear stack level to main
+	pop	af
+	ld	de,$ABORT
+	ld	c,.string
+	call	BDOS		; Tell abort
+	ret
+VrfyACK:
+	cp	ACK		; Test ACKnowledge
+	scf
+	ret	z		; .. yeap
+	ccf			; Indicate not
+	ret
+;
+; Send 16 byte filename
+;
+; Sequence consist of:
+;
+;  1 byte:  drive: single upper-case letter or '@' to indicate default drive
+; 11 bytes: 8-byte filename and 3-byte extension in upper-case (no dot)
+;  4 bytes: four NULs (0x0)
+;
+SendFN:
+	ld	hl,FCB
+	ld	a,(hl)		; Get drive
+	or	'@'		; Make ASCII
+	ld	e,a
+	ld	c,.auxout
+	push	hl
+	call	BDOS		; Send drive
+	pop	hl
+	inc	hl
+IF	IFTP
+	ld	b,.nam+.ext
+	jp	SendFCB		; Send filename and extension
+ELSE
+	ld	b,.nam+.ext+4
+	jp	SendBytes	; Send filename and extension
+ENDIF
+;
+; Send block number
+;
+SendBLKNo:
+	ld	hl,BlkNmbr	; Point to block number
+	ld	b,2		; .. two bytes
+	jp	SendBytes	; Send it
+;
+; Send length of data block
+;
+SendLen:
+	ld	e,reclng
+	ld	c,.auxout
+	call	BDOS		; Send it
+	ret
+;
+; Send data
+;
+SendData:
+	ld	hl,DMA		; Point to disk buffer
+	ld	b,reclng	; Set length
+	jp	SendBytes
+;
+; Send checksum
+;
+SendCks:
+	ld	hl,CheckSum	; Point to checksum
+	ld	b,2		; Set length
+	jp	SendBytes
+;
+; Read record from file and build checksum
+; EXIT	Accu holds result of file access
+;	(0 means ok, else end of file or error)
+;
+ReadRec:
+	ld	hl,0
+	ld	(CheckSum),hl	; Clear checksum
+	ld	c,.rdseq
+	ld	de,FCB
+	call	BDOS		; Read record
+	ld	hl,DMA		; Load buffer address
+	ld	b,reclng	; Set length
+BuildCks:
+	push	hl
+	ld	d,0
+	ld	e,(hl)		; Get byte
+	ld	hl,(CheckSum)
+	add	hl,de		; Update checksum
+	ld	(CheckSum),hl
+	pop	hl
+	inc	hl		; Go thru buffer
+	dec	b
+	jp	nz,BuildCks
+	ret
+;
+; Send bytes
+; ENTRY	Reg HL points to data
+;	Reg B holds length
+;
+SendBytes:
+	push	hl
+	push	bc
+	ld	e,(hl)		; Get byte
+	ld	c,.auxout
+	call	BDOS		; Send it
+	pop	bc
+	pop	hl
+	inc	hl
+	dec	b		; Send all
+	jp	nz,SendBytes
+	ret
+;
+; Tell no file name given
+;
+NoName:
+	ld	de,NO$NAME
+	ld	c,.string
+	call	BDOS		; Tell error
+	OS			; Exit
+;
+; Tell file not found
+;
+NoFile:
+	ld	de,NO$FILE
+	ld	c,.string
+	call	BDOS		; Tell error
+	OS			; Exit
+IF	IFTP
+;
+; Send filename and extension
+; ENTRY	Reg HL points to FCB
+;	Reg B holds length
+;
+SendFCB:
+	call	SendBytes	; Send file data
+	ld	b,4		; Set length for zero filling
+SendNUL:
+	ld	e,0
+	ld	c,.auxout
+	push	bc
+	call	BDOS		; Send zeroes
+	pop	bc
+	dec	b
+	jp	nz,SendNUL
+	ret
+ENDIF
+;
+NO$NAME:
+	db	lf,bell,'No file specified.'
+	db	cr,lf,lf
+	db	'Transfer aborted'
+	db	cr,lf,lf,eot
+NO$FILE:
+	db	lf,bell,'File not found.'
+	db	cr,lf,lf
+	db	'Transfer aborted'
+	db	cr,lf,lf,eot
+$ABORT:
+	db	lf,bell,'Transfer Aborted by other end.'
+	db	cr,lf,lf,eot
+$READY:
+	db	lf,'Transfer complete.'
+	db	cr,lf,lf,eot
+BlkNmbr:
+	dw	0
+CheckSum:
+	dw	0
+
+	end
+

@@ -1,0 +1,731 @@
+	title	Label Declaration
+	name	('LABDASM')
+
+; Build reference list from disassembled source
+; This one searches for CALL instructions
+
+; Dynamic routines base upon Mike Gabrielson
+; from his article "Binary Tree Manipulation mit dem 8080"
+; (Dr.Dobbs, unknown issue)
+
+; First written in TURBO PASCAL
+; Translated by nerd W.Cirsovius into fiddly assembler
+
+; @Copyleft W.Cirsovius, all wrongs reserved :-)
+
+	maclib base80.lib
+
+	entry	$memry
+
+	ext	string,filnam,crlf,decout,upplin,@crlf
+	ext	open,creatd,close,closef,dskput,fillin,emplin
+
+NIL	equ	0
+
+SStr	equ	 20
+LStr	equ	255
+
+LABCNT	equ	8		; Labels per line
+
+	dseg
+$memry:
+	ds	2
+cidx:
+	ds	2
+codx:
+	ds	2
+DUMP:
+	db	FALSE
+Symcnt:
+	dw	0
+First:
+	ds	2
+Root:
+	dw	NIL
+Last:
+	ds	2
+Flinelen:
+	dw	0
+FLine:
+	db	LStr
+	ds	LStr
+symbol:
+	ds	1+SStr
+symptr:
+	ds	2
+$HELP:
+	db	'Build reference list from disassembled source'
+	db	cr,lf
+	db	'This one searches for CALL instructions'
+	db	cr,lf,l
+	db	'Call it:'
+	db	cr,lf,l
+	db	tab,'LAB [+]source [destination]'
+	db	cr,lf,lf
+	db	'Prefix "+" enables dump of labels inserted'
+	db	cr,lf,eot
+FI	equ	FCB
+FO:
+	ds	DIRlen
+$SSM:
+	db	'SSM'
+$NOFI:
+	db	'Cannot find source file ',eot
+$SAMFI:
+	db	'Files must be different',eot
+$MEMOVL:
+	db	'Not enough memory - abort',eot
+$CREC:
+	db	'Cannot create file ',eot
+$CLOSE:
+	db	'Cannot close file ',eot
+$WRERR:
+	db	'Error writing file ',eot
+$INSERT:
+	db	cr,lf
+	db	'  -->> Insert ',eot
+$END1:
+	db	'File ',eot
+$END2:
+	db	' written with ',eot
+;	db	
+	db	'    '
+$DEC:
+	db	'65535',eot
+$END3:
+	db	' symbols',cr,lf,eot
+$EMPTY:
+	db	'No symbols in list'
+	db	cr,lf,eot
+$LABCNT:
+	db	' symbols found:'
+	db	cr,lf
+	db	'--------------------'
+	db	cr,lf,eot
+	cseg
+;
+; Error routines
+;
+IOwr:
+	ld	de,FI
+	call	close		; Close file
+	ld	de,$WRERR	; Tell write error
+	jr	IO
+IOcr:
+	ld	de,$CREC	; Tell creation error
+	jr	IO
+IOcl:
+	ld	de,$CLOSE	; Tell close error
+	jr	IO
+NoFI:
+	ld	de,$NOFI	; Tell no file
+IO:
+	call	string
+	ld	de,FI+.fdrv
+	call	filnam		; Tell name of file
+	jr	ErrNL
+SamFI:
+	ld	de,$SAMFI
+	jr	ErrDo
+ErrDo:
+	call	string		; Put error message
+ErrNL:
+	call	crlf		; Close line
+	jp	OS
+MemOvl:
+	ld	de,$MEMOVL
+	jr	ErrDo
+;
+; Search for real CALL
+;
+; (1)	The first character after CALL *MUST* be
+;	a white space
+; (2)	If CALL at first position then the search is done
+; (3)	If CALL at any position the first character
+;	before CALL *MUST* be white space
+;
+isCALL:
+;
+; Check if CALL found anyway
+;
+	ld	hl,(cidx)	; Check only if CALL found
+	ld	a,l
+	or	h		; Test CALL found
+	ret	z		; Nope, exit
+;
+; Verify white space after CALL
+;
+	ld	de,4
+	call	white		; Verify white space
+	ret	nz		; Nope
+;
+; Test if at first position
+;
+	ld	hl,(cidx)	; Get position
+	dec	hl
+	ld	a,l
+	or	h		; Test at first position
+	jr	z,findCALL	; Yeap
+;
+; Verify white space before CALL
+;
+	ld	de,-1
+	call	white		; Verify white space
+	ret	nz		; Do it if condition met only
+;
+; Extract argument of CALL
+;
+findCALL:
+	ld	hl,(cidx)	; Get index
+	ld	bc,FLine+3
+	add	hl,bc		; Position to start of CALL
+fndPos:
+	inc	hl
+	call	isspace		; Find space
+	jr	z,fndPos	; End of loop if not
+	ld	ix,symbol
+	ld	(ix),0		; Reset symbol length
+	ld	(symptr),ix	; Init pointer
+	dec	hl
+fndSym:
+	inc	hl
+	call	isspace		; Find space
+	jr	z,endSym	; End of loop
+	cp	';'		; Test comment
+	jr	z,endSym	; End if so
+	cp	' '		; Test end condition
+	jr	c,endSym
+	ld	ix,symbol
+	inc	(ix)		; Update length
+	ld	ix,(symptr)
+	inc	ix
+	ld	(ix),a		; Put character to symbol
+	ld	(symptr),ix
+	jr	fndSym
+;
+; At this time label may contain condition code from CALL:
+;
+; CALL C,LABEL or CALL CC,LABEL
+;
+; "C," or "CC," must be deleted for real label now
+;
+endSym:
+	ld	hl,symbol+2	; Init pointer
+	ld	b,2		; Init length
+;
+; Try "C,LABEL"
+;
+	ld	a,(hl)		; Get character
+	cp	','		; Test possible one character condition code
+	jr	z,delCC
+;
+; Try "CC,LABEL"
+;
+	inc	hl		; Fix pointer
+	inc	b		; Fix length
+	ld	a,(hl)
+	cp	','		; Test possible two character condition code
+delCC:
+	call	z,killC		; Delete CC
+;
+; Now we have a clean label
+; Put into list if a new one
+;
+	ld	hl,symbol
+	ld	c,(hl)		; Get length
+	ld	b,0
+	add	hl,bc
+	inc	hl
+	ld	(hl),null	; Close symbol
+	push	hl
+	ld	hl,Root+1
+	ld	e,(hl)		; Load pointer
+	dec	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	bc,symbol+1
+	call	lookup		; Insert label
+	pop	hl		; Get back end pointer
+	ret	nc		; Already in list
+	ld	(hl),eot	; Close symbol
+	ld	hl,(Symcnt)	; Get counter
+	inc	hl		; Update count
+	ld	(Symcnt),hl
+	ld	a,(DUMP)	; Get dump flag
+	or	a		; Test dump
+	ret	z		; Nope, exit
+	ld	de,$INSERT
+	call	string		; Tell name of symbol inserted
+	ld	de,symbol+1
+	call	string
+	ret
+;
+; Delete prefix "CC," or "C," of label
+; ENTRY	Reg HL points to comma
+;	Reg B holds characters to be deleted
+;
+killC:
+	inc	hl		; Skip comma
+	ld	de,symbol+1
+	ld	a,SStr
+	sub	b		; Calculate length
+	ld	c,a
+	ld	ix,symbol
+	ld	a,(ix)
+	sub	b
+	ld	(ix),a		; Set new length
+	ld	b,0
+	ldir			; Overwrite
+	ret
+;
+; Find white space in line
+; ENTRY	Reg DE holds offset
+; EXIT	Zero flag set if white space
+;
+white:
+	ld	bc,FLine
+	ld	hl,(cidx)
+	add	hl,de		; Set offset
+	add	hl,bc		; Position in line
+isspace:
+	ld	a,(hl)		; Get character
+	cp	' '		; Test space
+	ret	z		; Got it
+	cp	tab		; Test tabulator
+	ret
+;
+; Find colon in line
+; ENTRY	Reg DE points to line
+;	Reg B holds length of line
+; EXIT	Reg HL holds resulting position or ZERO
+;
+posColon:
+	ld	l,e		; Copy pointer
+	ld	h,d
+SrcColon:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	';'		; Test colon
+	jr	z,FndC		; Ok, got it
+	djnz	SrcColon
+	ld	hl,0		; Return NUL if no match
+	ret
+FndC:
+	or	a
+	sbc	hl,de		; Return position
+	ret
+;
+; Find CALL in line
+; ENTRY	Reg DE points to line
+;	Reg B holds length of line
+; EXIT	Reg HL holds resulting position or ZERO
+;
+posCALL:
+	ld	l,e		; Copy pointer
+	ld	h,d
+SrcCALL:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'C'		; Test start of CALL
+	jr	nz,NoCALL	; Nope
+	call	VrfyCALL	; Verify ALL follows
+	jr	z,FndC		; Ok, got it
+NoCALL:
+	djnz	SrcCALL
+	ld	hl,0		; Return NUL if no match
+	ret
+;
+; Verify CALL is real
+; ENTRY	Reg HL points to string
+; EXIT	Zero flag set if CALL verified
+;
+VrfyCALL:
+	push	hl
+	pop	ix		; Copy pointer
+	ld	a,'A'
+	cp	(ix+0)		; Look for ALL
+	ret	nz
+	ld	a,'L'
+	cp	(ix+1)
+	ret	nz
+	cp	(ix+2)
+	ret
+;
+; Compare files
+; ENTRY	Reg HL and reg DE point to FCBs
+; EXIT	Tero flag set on match
+;
+cmpFCB:
+	ld	b,.fdrv+.fname+.fext
+cmp:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	ret	nz		; No match
+	inc	de
+	inc	hl
+	djnz	cmp
+	ret			; Exit here on match
+;
+; Give help on invalid input
+;
+Help:
+	ld	de,$HELP
+	call	string		; Tell what we're doing
+	jp	OS		; Then exit
+;
+; Get second file from single one
+;
+GetFromOneFile:
+	ld	hl,FCB		; Point to file
+	ld	de,FO
+	ld	bc,.fdrv+.fname
+	ldir			; Copy it
+	ld	hl,$SSM		; Point to type
+	ld	bc,.fext
+	ldir			; Set new type
+	ret
+;
+; Get second file from second one
+;
+GetTwoFiles:
+	ld	hl,FCB2		; Point to file
+	ld	de,FO
+	ld	bc,DIRlen
+	ldir			; Copy it
+	ret
+;
+; Delete '+' from filename
+; ENTRY	Reg HL points to filename starting with '+'
+;
+deldump:
+	ld	e,l		; Copy pointer
+	ld	d,h
+	inc	hl
+	ld	bc,.fname-1
+	ldir			; Overwrite '+'
+	ld	a,' '
+	ld	(de),a		; Clear last character
+	ret
+;
+;
+; List symbols
+;
+listSymbols:
+	ld	hl,(Root)	; Load Root
+	ld	a,h
+	ld	h,l
+	ld	l,a
+	or	h
+	push	af		; Test symbols in tree
+	call	nz,telltree	; Tell them
+	pop	af
+	call	z,emptree	; Tell no symbols in list
+	ret
+;
+; Process empty list
+;
+emptree:
+	ld	de,$EMPTY
+	call	string		; Tell it
+	ret
+;
+; Process list
+;
+telltree:
+	call	crlf		; Close console
+	ld	de,$DEC
+	call	fix5
+	call	FString		; Tell number of labels found
+	ld	de,$LABCNT
+	call	FString
+	ld	c,0		; Clear label count
+	call	putree		; Output in alphabetical order
+	ret
+;
+; Fix ASCII number for 5 places
+; ENTRY	Reg DE points to number
+; EXIT	Reg DE points to 5 digit number
+;
+fix5:
+	push	hl
+	ex	de,hl
+	ld	c,-5-1		; Init length
+fixit:
+	ld	a,(hl)		; Get digit
+	cp	eot		; Test end of line
+	jr	z,fixed		; Yeap
+	inc	c		; Fix length
+	inc	hl
+	jr	fixit
+fixed:
+	ld	b,-1
+	add	hl,bc		; Position pointer
+	ex	de,hl
+	pop	hl
+	ret
+;
+; Put line to file
+; ENTRY	Reg DE points to line
+; EXIT	Carry set on write error
+;
+FString:
+	ld	b,eot
+	call	emplin		; Put it
+	ret	nc
+	jp	IOwr
+;
+; #############################################################################
+;
+; Binary tree routines based upon Mike Gabrielson
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; Find ASCII string in symbol tree
+; ENTRY	Reg BC holds address of string to look for, terminated by NUL
+;	Reg DE holds address of ROOT pointer
+;	Reg HL holds contents of ROOT pointer
+; EXIT	Reg HL holds address of tree node containing the string
+;	Carry flag set if a new node had to be grown
+;	else carry flag cleared (symbol already in tree)
+;
+lookup:
+	call	search		; Symbol already in tree?
+	ret	nc		; Yes, all done
+	ld	hl,(First)	; No, get address of node about to sprout
+	push	hl		; Save address of new node for return
+	ex	de,hl		; HL := address of last pointer SEARCHed
+	ld	(hl),d		; Replace grounded pointer with address
+	inc	hl		; Of new node
+	ld	(hl),e
+	xor	a		; Clear register A
+	ld	(de),a		; And ground the two subtree pointers in the
+	inc	de		; New node
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+savnam:
+	ld	a,(bc)		; Get next character from caller's string
+	ld	(de),a		; Save in new node
+	inc	bc		; Adjust pointers for next character
+	inc	de
+	cp	null		; Was that the end of the string?
+	jr	nz,savnam	; No
+	ex	de,hl		; Get address of next available byte into HL
+	ld	(first),hl	; Save new FIRST
+;
+; ++++ Check for enough memory (not included in original source) ++++
+;
+	ld	de,(Last)
+	or	a
+	sbc	hl,de		; Test free space
+	jp	nc,MemOvl	; Nope, no more memory
+;
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+;
+	pop	hl		; Yes, restore address of new node
+	scf			; Indicate new node was grown for caller
+	ret
+;
+; Search symbol tree for an ASCII string
+; ENTRY	Reg BC holds address of string to look for, terminated by NUL
+;	Reg DE holds address of ROOT pointer
+;	Reg HL holds contents of ROOT pointer
+; EXIT	Carry set if string not found in tree
+;	(DE = address of last grounded pointer)
+;	else carry cleared
+;	(string found, HL = address of node
+;	 containing the matching string)
+;===============================================================
+;
+search:
+	ld	a,h		; Is the pointer grounded,
+	or	l		; Indicating end of tree?
+	scf			; (assume "yes")
+	ret	z		; Yes, end of tree, string not found
+	push	bc		; No, save address of caller's string
+	push	hl		; Save address of node
+	inc	hl		; Skip past the node's
+	inc	hl		; Left and right subtree pointers
+	inc	hl		; And stop at the first character
+	inc	hl		; Of the node's string
+nextc:
+	ld	a,(bc)		; Get character from caller's string.
+	cp	(hl)		; Same as character in node's string?
+	jr	nz,tested	; No, wrong node
+	inc	bc		; Yes,
+	inc	hl		; Point to next character pair
+	cp	null		; Was that the end of the strings?
+	jr	nz,nextc	; No, test next pair
+tested:
+	pop	hl		; Restore address of node
+	pop	bc		; Restore address of caller's string
+	ret	z		; Done if strings matched (carry's cleared)
+	jr	c,left		; Pick left subtree if caller's string is low
+	inc	hl		; Else get address of right subtree pointer
+	inc	hl
+left:
+	ld	d,(hl)		; Get address of subtree into DE
+	inc	hl
+	ld	e,(hl)
+	ex	de,hl		; Then into HL
+	dec	de		; Leave DE pointing to last node accessed
+	jr	search		; Continue searching down the tree
+;
+; Output symbol tree in alphabetical order
+; ENTRY	Reg HL holds contents of ROOT pointer
+; =============================================================
+;
+putree:
+	push	de		; Save pointer to the pointer when reentered
+	push	hl		; Save address of node
+	ld	d,(hl)		; Get pointer to left subtree into DE
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ex	de,hl		; Then into HL	
+	ld	a,h		; No left subtree?	
+	or	l		; (pointer grounded?)	
+	call	nz,putree	; Subtree exists, traverse it now	
+	ex	de,hl		; Restore address of original node to HL
+	inc	hl		; Skip right subtree pointer	
+	inc	hl		; And get address of symbol narae	
+	call	putnam		; Output the ASCII string	
+	dec	hl		; Get node's right subtree pointer into DE
+	ld	e,(hl)
+	dec	hl
+	ld	d,(hl)
+	ex	de,hl		; Then into HL	
+	ld	a,h		; No right subtree?	
+	or	l		; (pointer grounded?)	
+	call	nz,putree	; Subtree exists, traverse it now	
+	pop	hl		; Restore stack	
+	pop	de
+	ret
+;
+; #############################################################################
+;
+; Put label to file
+; ENTRY	Reg HL points to label
+;
+putnam:
+	push	de
+	push	hl
+	ex	de,hl
+	ld	b,null
+	call	emplin		; Put label to file
+	ld	a,tab
+	call	nc,dskput	; Give tabulator
+	jp	c,IOwr
+	inc	c		; Update count
+	ld	a,c
+	and	LABCNT-1	; Test all printed in line
+	ld	de,@crlf
+	call	z,Fstring	; Close line if so
+	pop	hl
+	pop	de
+	ret
+;
+; #####################
+; ### Start program ###
+; #####################
+;
+MAIN:
+	ld	hl,(TPAtop)	; Load top of memory
+	ld	sp,hl		; Set for stack
+	dec	h		; Let some space
+	dec	h
+	ld	(Last),hl	; Save as final address
+	ld	a,(FCBnam)	; Get name of first file
+	cp	' '		; Verify name given
+	jp	z,Help		; Give help if not
+	ld	a,(FCBnm2)	; Get name of second file
+	cp	' '		; Test name given
+	push	af
+	call	z,GetFromOneFile; Get from first file
+	pop	af
+	call	nz,GetTwoFiles	; Get from second file
+	ld	hl,FI+.fdrv	; Point to first character of name
+	ld	a,(hl)
+	sub	'+'		; Test dump
+	sub	1
+	sbc	a,a		; Build flag
+	ld	(DUMP),a
+	call	nz,deldump	; Remove dump 
+	ld	hl,FO+.fdrv	; Point to first character of name
+	ld	a,(hl)
+	cp	'+'		; Test dump
+	call	z,deldump	; Remove dump 
+	ld	hl,FI
+	ld	de,FO
+	call	cmpFCB		; Verify not same files
+	jp	z,SamFI		; Invalid if so
+	ld	de,FI
+	call	open		; Open file
+	jp	c,NoFI		; File not found
+	ld	hl,($memry)
+	ld	(First),hl	; Init root memory
+	xor	a
+	ld	(hl),a		; Ground chain
+	inc	hl
+	ld	(hl),a
+ScanFile:
+	ld	de,FLine
+	ld	b,null
+	call	fillin		; Read line
+	jr	c,EndFI		; End of file
+	ld	(Flinelen),a	; Save count
+	push	af
+	push	af
+	inc	de
+	call	upplin		; Make upper line
+	pop	bc		; Get back length
+	call	posCALL		; Find CALL
+	ld	(cidx),hl	; Save position
+	pop	bc
+	call	posColon	; Find comment colon
+	ld	(codx),hl	; Save its position
+	ld	a,l
+	or	h		; Test comment colon found
+	jr	z,tstCALL	; Nope, test CALL
+	ex	de,hl
+	ld	hl,(cidx)
+	or	a
+	sbc	hl,de		; Test comment colon before CALL
+	jr	nc,ScanFile	; Yeap, skip check
+;
+; Either comment colon NOT found
+; Or colon after CALL - test really a CALL
+;
+tstCALL:
+	call	isCALL		; Test call really found
+	jr	ScanFile	; Next line
+EndFI:
+	ld	hl,FO		; Point to file
+	ld	de,FI
+	ld	bc,DIRlen
+	ldir			; Copy it
+	ld	de,FI
+	call	creatd		; Create file
+	jp	c,IOcr		; Cannot create
+	ld	hl,(Symcnt)	; Get symbol counter
+	ld	de,$DEC
+	ld	b,eot
+	call	decout		; Convert count
+	call	listSymbols	; List symbols
+	call	closef		; Close file
+	jp	c,IOcl		; Cannot close
+	ld	de,$END1
+	call	string		; Tell result
+	ld	de,FI+.fdrv
+	call	filnam		; Tell name of file
+	ld	de,$END2
+	call	string		; Tell result
+	ld	de,$DEC
+	call	string		; Print count
+	ld	de,$END3
+	call	string		; Tell result
+	jp	OS
+
+	end	MAIN
+

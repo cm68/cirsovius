@@ -1,0 +1,649 @@
+	title	PUT RSX
+	name	('PUTRSX')
+
+; The DASMed version of the DRs PUT.COM RSX
+; By W. Cirsovius
+
+.false	equ	0
+.true	equ	1
+
+BDOS	equ	0005h
+DMA	equ	0080h
+
+.conout	equ	 2
+.string	equ	 9
+.rdkbd	equ	10
+.seldsk	equ	14
+.close	equ	16
+.wrseq	equ	21
+.setdma	equ	26
+.resdrv	equ	37
+.ldOVL	equ	59
+.RSX	equ	60
+.free	equ	98
+
+_CI	equ	0fdh
+_CSt	equ	0feh
+
+.CON	equ	0
+
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+reclng	equ	128
+
+$INIRSX	equ	84h
+
+SCB$CCP	equ	0b4h
+SCB$DEL	equ	0d3h
+SCB$LST	equ	0d4h
+SCB$USR	equ	0e0h
+
+RESDRV	equ	00100000b
+
+_JP	equ	0c3h
+
+;
+; ###################
+; #### RSX HEADER ###
+;
+	ds	6		; Serial number
+Start:
+	jp	PUT.RSX		; Enter RSX
+.BDOS:
+	jp	BDOS+1		; Jump to next RSX
+	dw	BDOS+2		; Adsress of previous RSX
+Remove:
+	db	-1		; Remove flag
+	db	0		; Memory flag
+	db	'PUT     '	; Name of RSX
+	db	0		; Loader flag
+	dw	0		; Reserved
+;
+; ###################
+;
+; Fill capture record with eof
+;
+PutEOF:
+	ld	a,(BufPtr)	; Get record pointer
+	or	a		; Test at start position
+	jp	z,EndRSX
+	ld	e,eof
+	call	Put		; Fill record with EOF
+	jp	PutEOF
+;
+; Execute redirected BDOS code
+; ENTRY	Reg C holds character to be put
+;
+CharOut:
+	ld	e,c		; Unpack character
+	ld	a,(RedirCod)	; Get BDOS code
+	ld	c,a
+	ld	a,1
+	jp	Vector
+;
+; Enter RSX
+;
+PUT.RSX:
+	xor	a
+Vector:
+	ld	(StateFlag),a	; Set state
+	pop	hl		; Get caller
+	push	hl
+	ld	a,(Start+2)	; Get page to our RSX
+	cp	h		; Test call from there
+	jp	c,ContextSW	; Call from inside
+	ld	a,c		; Get BDOS function
+	cp	.RSX		; Test RSX call
+	jp	z,RSXcal
+	cp	.setdma		; Test set disk buffer
+	jp	z,DMAcal
+	cp	.seldsk		; Test select disk
+	jp	c,DskAcc
+	cp	.free		; Test release blocks
+	jp	nc,DskAcc
+	cp	.resdrv		; Test reset disk system
+	jp	z,DskAcc
+ContextSW:
+	ld	a,(StateFlag)
+	ld	hl,StateTab
+TabJP:
+	add	a,a		; Double index
+	call	AddAdr		; Get pointer
+	ld	b,(hl)		; Fetch address
+	inc	hl
+	ld	h,(hl)
+	ld	l,b
+	jp	(hl)
+;
+; BDOS functions 0..13, 37 and 98..255 - disk access found
+;
+DskAcc:
+	ld	hl,OS.cod	; Point to BDOS filter table
+	ld	b,0		; Clear index
+SrcDskAcc:
+	ld	a,(hl)
+	cp	c		; Test in list
+	jp	z,FndDskAcc	; Yeap, so process it
+	inc	b		; Advance index
+	inc	hl
+	inc	a		; Test end of list
+	jp	nz,SrcDskAcc	; Nope
+	jp	ContextSW	; Go the normal way
+FndDskAcc:
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	(StkSav),hl	; Save it
+	ld	sp,Stack	; Get local stack
+	push	de
+	push	bc
+	ld	hl,(SCBbase)	; Get SCB base
+	ld	a,(SYSflg)	; Get system flag
+	or	a		; Test set
+	call	nz,TstRes	; Yeap, test any to be reset
+	jp	z,NoDskRes	; If not, skip
+	ld	a,c		; Get BDOS function
+	cp	.rdkbd		; Test read line from keyboard
+	jp	nz,ResSP
+	ld	hl,EOFflg
+	dec	(hl)		; Test flag
+	call	m,PutEOF	; Close file if zero
+	jp	ResSP
+NoDskRes:
+	ld	a,(InpFlg)	; Test input redirection
+	or	a
+	jp	z,NoInpRed	; Nope
+	ld	l,SCB$LST	; Point to SCB list echo
+	ld	a,(hl)
+	or	a		; Test echo
+	jp	nz,NoLstEch	; Yeap
+	ld	a,b		; Get index
+	cp	2		; Test block I/O
+	jp	nc,ResSP	; Nope
+NoInpRed:
+	ld	a,(ECHOflg)	; Get echo flag
+NoLstEch:
+	ld	(LstFlg),a	; Set flag
+	ld	hl,RetAdr
+	push	hl		; Set return address
+	ld	a,b		; Get index
+	ld	hl,ExeTab
+	jp	TabJP
+;
+; Direct console I/O
+;
+ConDir:
+	ld	a,e
+	cp	_CI		; Test input
+	jp	c,ConOut	; Nope, output
+	cp	_CSt		; Test status
+	ret	z		; Exit if so
+	jp	c,ConIn		; Console input
+	call	.BDOS		; Do BDOS call
+	or	a		; Test any key pressed
+	jp	z,ExCons	; Nope
+	jp	ConEcho		; Echo character
+;
+; Console input
+;
+ConIn:
+	call	ContextSW
+ConEcho:
+	ld	e,a
+	push	af
+	call	EchoCh		; Echo character
+	pop	af
+	cp	cr		; Test end of line
+	jp	nz,ExCons	; Nope
+	push	af
+	ld	a,(LstFlg)	; Test echo flag
+	or	a
+	ld	e,lf
+	ld	c,.conout
+	call	z,.BDOS		; Output line feed if not set
+	ld	a,(Device)	; Test console device
+	or	a
+	call	nz,EchoCh	; Echo character
+	pop	af
+ExCons:
+	ld	hl,(StkSav)	; Reload stack address
+	ld	sp,hl
+	ld	l,a		; Get character
+;
+; Console state
+;
+ConSta:
+	ret
+;
+; Return from redirection call
+;
+RetAdr:
+	ld	a,(LstFlg)	; Test echo flag
+	or	a
+	jp	z,ExCons	; Not set
+ResSP:
+	pop	bc
+	pop	de
+	ld	hl,(StkSav)	; Reload stack address
+	ld	sp,hl
+	jp	ContextSW
+;
+; Redirected direct console output
+;
+ConOut:
+	ld	a,(Device)	; Test console device
+	or	a
+	ret	nz		; Nope
+;
+; Redirected list or console output
+;
+EchoCh:
+	ld	a,e
+	cp	eof		; Test end of file
+	jp	z,CtrlOut
+	call	CtrlFilter	; Look for filter
+	jp	nc,Put		; None
+CtrlOut:
+	push	af
+	ld	e,'^'
+	call	Put		; Indicate control
+	pop	af
+	or	'A'-1
+	ld	e,a
+;
+; Put character in reg E to capture file
+;
+Put:
+	ld	hl,BufPtr	; Point to record pointer
+	ld	a,(hl)		; Get index
+	push	hl
+	inc	hl		; Set base buffer address
+	call	AddAdr		; Get pointer
+	ld	(hl),e		; Store character
+	pop	hl
+	inc	(hl)		; Advance record pointer
+	ret	p		; Still in range
+	ld	c,.wrseq
+	call	DiskIO		; Write record to file
+	call	nz,EndRSX	; Error
+	xor	a
+	ld	(BufPtr),a	; Clear record pointer
+	ld	hl,SavBLM
+	dec	(hl)		; Count down block mask
+	ret	p
+	call	Close		; Close file
+	call	nz,EndRSX	; Cannot close it
+	ld	hl,BLM
+	ld	a,(hl)		; Get disk block mask
+	dec	hl
+	ld	(hl),a		; Reset block mask
+	ret
+;
+; Close capture file
+;
+Close:
+	ld	c,.close
+;
+; Perform write or close file
+;
+DiskIO:
+	push	bc
+	ld	de,CaptBuf	; Point to disk buffer
+	call	SetDMA		; Set it
+	pop	bc
+	ld	hl,(SCBbase)	; Get SCB base
+	push	hl
+	ld	de,SysSav
+	push	de
+	call	SavEnv		; Save SCB code
+	ld	l,SCB$USR	; Point to SCB user number
+	call	SavEnv		; Save einvironment
+	dec	hl		; Fix address for multi sector count
+	ld	(hl),1		; Set one sector
+	ld	l,SCB$USR	; Point to SCB user number
+	ld	de,CurUsr
+	ld	a,(de)		; Get entry user
+	ld	(hl),a		; Store into FCB
+	inc	de
+	call	.BDOS		; Do BDOS call
+	pop	hl
+	pop	de
+	push	af
+	call	SavEnv		; Reset old SCB values
+	ld	e,SCB$USR
+	call	SavEnv
+	ld	hl,(SysDMA)	; Get disk buffer address
+	ex	de,hl
+	call	SetDMA		; Set it
+	pop	af
+	or	a
+	ret
+;
+; End of RSX
+;
+EndRSX:
+	call	Close		; Close file
+	ld	de,$PUT.ERR
+	call	nz,PutStr	; Tell error if any pending
+	ld	hl,-1
+	ld	(_EOFRSX),hl	; Disable RSX call
+	ld	hl,Remove
+	ld	(hl),-1		; Set remove
+	ld	a,(BDOS+2)	; Test where we are
+	cp	h
+	ld	c,.ldOVL
+	ld	de,0
+	call	z,.BDOS		; Remove all RSXs
+	ld	a,(BankFlg)	; Get bank flag
+	inc	a
+	ret	z		; Exit on BIOS redirection
+	ld	hl,(WarmJ+1)	; Get BIOS warmstart
+	ex	de,hl
+	ld	hl,(Warm@)
+	ld	(hl),e		; Reset boot vector
+	inc	hl
+	ld	(hl),d
+	ld	hl,(BIOS.CV+1)	; Get device vector
+	ex	de,hl
+	ld	hl,(BIOS.CV@)
+	ld	(hl),e		; Reset device vector
+	inc	hl
+	ld	(hl),d
+	ret	m
+	ld	hl,(WarmV)
+	ld	(hl),_JP	; Reset jumps
+	ld	hl,(CO@)
+	ld	(hl),_JP
+	ret
+;
+; Set disk buffer ^DE
+;
+SetDMA:
+	ld	c,.setdma
+	jp	.BDOS		; Set disk buffer
+;
+; Print string ^DE on console
+;
+PutStr:
+	ld	c,.string
+	jp	.BDOS		; Put string to console
+;
+; Save system environment
+;
+SavEnv:
+	ld	b,_SavLen
+EnvLoop:
+	ld	a,(hl)
+	ld	(de),a		; Unpack it
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,EnvLoop
+	ret
+;
+; Add byte in Accu to 16 bit in reg HL
+;
+AddAdr:
+	add	a,l		; Add byte
+	ld	l,a
+	ret	nc
+	inc	h		; Remember carry
+	ret
+;
+; Test disk system to be reset - Z set if not
+;
+TstRes:
+	ld	hl,(SCBbase)	; Get SCB base
+	ld	l,SCB$CCP	; Point to SCB CCP bits
+	ld	a,(hl)
+	and	RESDRV		; Test reset all drives
+	ret
+;
+; BDOS function set disk buffer
+;
+DMAcal:
+	ex	de,hl
+	ld	(SysDMA),hl	; Store buffer address
+	ex	de,hl
+	jp	.BDOS		; Do it
+;
+; Close capture file
+;
+CapClose:
+	ld	sp,Stack	; Get local stack
+	call	Close		; Close file
+	jp	WarmJ		; BIOS warmstart
+;
+; BDOS function direct RSX call
+;
+RSXcal:
+	ld	a,(de)		; Get number of RSX
+	cp	$INIRSX		; Test init call
+	ld	hl,SCBbase	; Return block address
+	ret	z
+	ld	b,a
+	ld	a,(_FCBRSX)	; Get RSX number
+	cp	b		; Test return FCB
+	ld	hl,$FCB		; Point to system file on match
+	ret	z
+	ld	a,(_EOFRSX)	; Get next RSX number
+	cp	b		; Test close file request
+	jp	z,PutEOF
+	jp	ContextSW
+;
+; Filter control character in reg E - C set if no filter
+;
+CtrlFilter:
+	ld	a,(FILTflg)	; Get filter flag
+	or	a		; Test set
+	ld	a,e
+	ret	z		; Nope
+	cp	cr		; Filter special controls
+	ret	z
+	cp	lf
+	ret	z
+	cp	tab
+	ret	z
+	cp	bs
+	ret	z
+	cp	' '
+	ret
+;
+; Print string
+;
+String:
+	ld	hl,(SCBbase)	; Get SCB base
+	ld	l,SCB$DEL	; Point to SCB end of text character
+	ld	a,(de)
+	cp	(hl)
+	ret	z
+	inc	de
+	push	de
+	ld	e,a
+	call	EchoCh		; Echo character
+	pop	de
+	jp	String
+;
+; Read from keyboard
+;
+ConBuf:
+	ld	a,(LstFlg)	; Get echo flag
+	or	a
+	jp	nz,NoBuffEcho	; Set
+	push	de
+	ld	de,$PUT
+	call	PutStr		; Tell we expect an input
+	pop	de
+	ld	c,.rdkbd
+NoBuffEcho:
+	pop	hl
+	push	de
+	call	.BDOS		; Read line
+	pop	hl
+	inc	hl
+	ld	b,(hl)		; Get length
+	inc	b
+ConBufEcho:
+	dec	b		; Test end
+	jp	z,ConBufEx	; Yeap
+	inc	hl
+	ld	e,(hl)
+	push	bc
+	push	hl
+	call	EchoCh		; Echo character
+	pop	hl
+	pop	bc
+	jp	ConBufEcho
+ConBufEx:
+	ld	a,(Device)	; Test console device
+	or	a
+	push	af
+	ld	e,cr
+	call	nz,EchoCh	; Echo character if not
+	pop	af
+	ld	e,lf
+	call	nz,EchoCh
+	jp	ExCons
+;
+; List block on printer or console
+;
+..Block:
+	ex	de,hl
+	ld	e,(hl)		; Fetch address of string
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	c,(hl)		; Fetch length
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+BlockLoop:
+	ld	a,b		; Test end
+	or	c
+	ret	z
+	push	bc
+	push	hl
+	ld	e,(hl)
+	call	EchoCh		; Echo character
+	pop	hl
+	inc	hl
+	pop	bc
+	dec	bc
+	jp	BlockLoop
+;
+StateFlag:
+	db	0
+;				INDEX	LIST	INPUT	CONSOLE
+ExeTab:
+	dw	EchoCh		;  0	.lstout	  --	  --
+	dw	..Block		;  1	.lstblk	  --	  --
+;
+	dw	EchoCh		;  2	.conout	  --	.conout
+	dw	ConSta		;  3	.consta	  --	.consta
+	dw	ConDir		;  4	.condir	.condir	.condir	
+	dw	String		;  5	.string	  --	.string
+	dw	ConIn		;  6	.conin	.conin	.conin
+	dw	ConBuf		;  7	.rdkbd	.rdkbd	.rdkbd
+	dw	Close		;  8	.resdsk	.resdsk	.resdsk
+	dw	Close		;  9	.resdrv	.resdrv	.resdrv
+	dw	Close		; 10	.trunc	.trunc	.trunc
+	dw	..Block		; 11	.conblk	  --	.conblk
+;
+; >>>>>>>>>>>> MOVED FROM PUT.COM <<<<<<<<<<<<
+;
+SCBbase:
+	dw	Remove		; + 0 (0x00) : SCB base goes here
+.BIOS:
+	ld	c,e		; + 2 (0x02) : BIOS entry
+BIOS.CV:
+	jp	CharOut		; + 3 (0x03) : Jump to BIOS device address
+BIOS.CV@:
+	dw	CapClose	; + 6 (0x06) : BIOS device vector
+CO@:
+	dw	0		; + 8 (0x08) : SCB device vector
+WarmJ:
+	jp	$-$		; +10 (0x0A) : BIOS warmstart
+Warm@:
+	dw	0		; +13 (0x0D) : Address of BIOS warm start
+WarmV:
+	dw	0		; +15 (0x0F) : SCB pointer of warm start
+RedirCod:
+	db	.conout		; +17 (0x11) : BDOS function
+BankFlg:
+	db	0		; +18 (0x12) : Redirection flag
+OS.cod:
+	db	-1		; +19 (0x13) : BDOS filtered functions
+	ds	12
+Device:
+	db	.CON		; +32 (0x20) : Console device
+InpFlg:
+	db	.false		; +33 (0x21) : Input redirection
+ECHOflg:
+	db	.true		; +34 (0x22) : Echo flag
+FILTflg:
+	db	.false		; +35 (0x23) : Filter flag
+;
+; RSX numbers
+;
+_EOFRSX:
+	db	-1		; +36 (0x24) : LST: 0x89, Def. 0x85, CONIN 0x8D
+_FCBRSX:
+	db	-1		; +37 (0x25) : LST: 0x8a, Def. 0x86, CONIN 0x8E
+SavBLM:
+	db	0		; +38 (0x26) : Block mask
+BLM:
+	db	0		; +39 (0x27) : Disk block mask
+SYSflg:
+	db	0		; +40 (0x28) : System flag
+CurUsr:
+	db	0		; +41 (0x29) : Current user
+$FCB:
+	db	-1,'SYSOUT  $$$'; +42 (0x2A) : SYS file FCB
+	ds	21
+BufPtr:
+	db	0		; +75 (0x4B) : Record pointer
+;
+; >>>>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<<<
+;
+; Disk buffer follows
+;
+CaptBuf:
+	ds	reclng
+;
+; Run table
+;
+StateTab:
+	dw	.BDOS		; Normal BDOS entry
+	dw	.BIOS		; BIOS Character redirection entry
+SysDMA:
+	dw	DMA
+;
+	db	0
+LstFlg:
+	db	0		; Echo flag
+EOFflg:
+	db	1
+SysSav:
+	ds	7		; Save area starting at SCB address
+_SavLen	equ	$-SysSav
+	ds	7		; Save area for user, search code, search FCB
+				; search mode, multi sectors and error mode
+$PUT.ERR:
+	db	cr,lf
+	db	'PUT ERROR: FILE ERASED'
+	db	cr,lf,eot
+$PUT:
+	db	cr,lf
+	db	'PUT>',eot
+;
+	ds	2*51
+Stack	equ	$
+StkSav:
+	dw	0
+
+	end
+

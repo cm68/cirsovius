@@ -1,0 +1,270 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-d.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:20 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>Appendix D</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center>
+<p><a NAME="D"></a><b><u><font size=+2>APPENDIX D</font></u></b>
+<p><b>LISTING OF "<a href="diorand-pli.txt">DIORAND</a>"</b>
+<br><b>SHOWING EXTENDED RANDOM ACCESS CALLS</b></center>
+
+<br>
+<br>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: DIORAND
+
+L: List Source Program
+
+%include 'diomod.dcl';
+%include 'fcb.dcl';
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+PL/I-80 V1.0, COMPILATION OF: DIORAND
+
+   1 a 0000 diorand:
+   2 a 0006     proc options(main);
+   3 a 0006     /* random access tests for 2.0 and 2.2 */
+   4 a 0006
+   5+c 0006     dcl
+   6+c 0006         memptr entry         returns (ptr),
+   7+c 0006         memsiz entry         returns (fixed(15)),
+   8+c 0006         memwds entry         returns (fixed(15)),
+   9+c 0006         dfcb0  entry         returns (ptr),
+  10+c 0006         dfcb1  entry         returns (ptr),
+  11+c 0006         dbuff  entry         returns (ptr),
+  12+c 0006         reboot entry,
+  13+c 0006         rdcon  entry         returns (char(1)),
+  14+c 0006         wrcon  entry         (char(1)),
+  15+c 0006         rdrdr  entry         returns (char(1)),
+  16+c 0006         wrpun  entry         (char(1)),
+  17+c 0006         wrlst  entry         (char(1)),
+  18+c 0006         coninp entry         returns (char(1)),
+  19+c 0006         conout entry         (char(1)),
+  20+c 0006         rdstat entry         returns (bit(1)),
+  21+c 0006         getio  entry         returns (bit(8)),
+  22+c 0006         setio  entry         (bit(8)),
+  23+c 0006         wrstr  entry         (ptr),
+  24+c 0006         rdbuf  entry         (ptr),
+  25+c 0006         break  entry         returns (bit(1)),
+  26+c 0006         vers   entry         returns (bit(16)),
+  27+c 0006         reset  entry,
+  28+c 0006         select entry         (fixed(7)),
+  29+c 0006         open   entry   (ptr) returns (fixed(7)),
+  30+c 0006         close  entry   (ptr) returns (fixed(7)),
+  31+c 0006         sear   entry   (ptr) returns (fixed(7)),
+  32+c 0006         searn  entry         returns (fixed(7)),
+  33+c 0006         delete entry   (ptr),
+  34+c 0006         rdseq  entry   (ptr) returns (fixed(7)),
+  35+c 0006         wrseq  entry   (ptr) returns (fixed(7)),
+  36+c 0006         make   entry   (ptr) returns (fixed(7)),
+  37+c 0006         rename entry   (ptr),
+  38+c 0006         logvec entry         returns (bit(16)),
+  39+c 0006         curdsk entry         returns (fixed(7)),
+  40+c 0006         setdma entry         (ptr),
+  41+c 0006         allvec entry         returns (ptr),
+  42+c 0006         wpdisk entry,
+  43+c 0006         rovec  entry         returns (bit(16)),
+  44+c 0006         filatt entry         (ptr),
+  45+c 0006         getdpb entry         returns (ptr),
+  46+c 0006         getusr entry         returns (fixed(7)),
+  47+c 0006         setusr entry   (fixed(7)),
+  48+c 0006         rdran  entry   (ptr) returns (fixed(7)),
+  49+c 0006         wrran  entry   (ptr) returns (fixed(7)),
+  50+c 0006         filsiz entry   (ptr),
+  51+c 0006         setrec entry   (ptr),
+  52+c 0006         resdrv entry         (bit(16)),
+  53+c 0006         wrranz entry   (ptr) returns (fixed(7));
+  54 c 0006
+  55 c 0006     dcl
+  56 c 0006         1 database,
+  57+c 0006           2 name1,
+  58+c 0006             3 drive fixed(7),  /* drive number */
+  59+c 0006             3 fname char(8),   /* file name */
+  60+c 0006             3 ftype char(3),   /* file type */
+  61+c 0006             3 fext  fixed(7),  /* file extent */
+  62+c 0006             3 space (3) bit(8),/* filler */
+  63+c 0006           2 name2,             /* used in rename */
+  64+c 0006             3 drive2 fixed(7),
+  65+c 0006             3 fname2 char(8),
+  66+c 0006             3 ftype2 char(3),
+  67+c 0006             3 fext2  fixed(7),
+  68+c 0006             3 space2 (3) bit(8),
+  69+c 0006           2 crec  fixed(7),    /* current record */
+  70+c 0006           2 rrec  fixed(15),   /* random record */
+  71+c 0006           2 rovf  fixed(7);    /* random rec overflow */
+  72 c 0006
+  73 c 0006     dcl
+  74 c 0006         lower char(26) static initial
+  75 c 0006         ('abcdefghijklmnopqrstuvwxyz'),
+  76 c 0006         upper char(26) static initial
+  77 c 0006         ('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+  78 c 0006
+  79 c 0006     dcl
+  80 c 0006         /* simple variables */
+  81 c 0006         i        fixed,
+  82 c 0006         fn       char(20),
+  83 c 0006         c        char(1),
+  84 c 0006         code     fixed(7),
+  85 c 0006         mode     fixed(2),
+  86 c 0006         zerofill bit(1),
+  87 c 0006         version  bit(16);
+  88 c 0006
+  89 c 0006     dcl
+  90 c 0006         /* overlays on default buffer */
+  91 c 0006         bitbuf (128) bit(8)  based(dbuff()),
+  92 c 0006         buffer char(127) var based(dbuff());
+  93 c 0006
+  94 c 0006     put skip list('Random Access Test');
+  95 c 0022     /* check version number for 2.0 */
+  96 c 0022     version = vers();
+  97 c 0028     if substr(version,9,8) < '20'b4 then
+  98 c 0031         do;
+  99 c 0031         put skip list('You Need Version 2');
+ 100 c 004D         stop;
+ 101 c 0050         end;
+ 102 c 0050     put skip list('Zero Record Fill?');
+ 103 c 006C     get list(c);
+ 104 c 0086     zerofill = (c = 'Y' ! c = 'y') &
+ 105 c 00B5         substr(version,9,8) >= '22'b4;
+ 106 c 00B5
+ 107 c 00B5     /* read and process file name */
+ 108 c 00B5     put skip list('Data Base Name: ');
+ 109 c 00D1     get list(fn);
+ 110 c 00EB     fn = translate(fn,upper,lower);
+ 111 c 0110
+ 112 c 0110     /* process optional drive prefix */
+ 113 c 0110     i = index(fn,':');
+ 114 c 0120     if i = 0 then
+ 115 c 0129         drive = 0;
+ 116 c 0131     else
+ 117 c 0131     if i = 2 then
+ 118 c 013B         do;
+ 119 c 013B         /* convert character to drive code */
+ 120 c 013B         drive = index(upper,substr(fn,1,1));
+ 121 c 0153         if drive = 0 ! drive > 16 then
+ 122 c 016C             do;
+ 123 c 016C             put skip list('Bad Drive Name');
+ 124 c 0188             stop;
+ 125 c 018B             end;
+ 126 c 018B         fn = substr(fn,i+1);
+ 127 c 01A4         end;
+ 128 c 01A4
+ 129 c 01A4     /* get file name and optional type */
+ 130 c 01A4     i = index(fn,'.');
+ 131 c 01B4     if i = 0 then
+ 132 c 01BD         do;
+ 133 c 01BD         /* no file type specified, use .DAT */
+ 134 c 01BD         fname = fn;
+ 135 c 01CA         ftype = 'DAT';
+ 136 c 01D9         end;
+ 137 c 01D9     else
+ 138 c 01D9         do;
+ 139 c 01D9         fname = substr(fn,1,i-1);
+ 140 c 01F5         ftype = substr(fn,i+1);
+ 141 c 020F         end;
+ 142 c 020F
+ 143 c 020F     /* clear the extent field */
+ 144 c 020F     fext = 0;
+ 145 c 0214
+ 146 c 0214     if open(addr(database)) = -1 then
+ 147 c 0225         do;
+ 148 c 0225         put skip list('Creating New Database');
+ 149 c 0241         if make(addr(database)) = -1 then
+ 150 c 0252             do;
+ 151 c 0252             put skip list('No Directory Space');
+ 152 c 026E             stop;
+ 153 c 0274             end;
+ 154 c 0274         end;
+ 155 c 0274     else
+ 156 c 0274         do;
+ 157 c 0274         call filsiz(addr(database));
+ 158 c 0280         put skip list('File Size:',rrec,' Records');
+ 159 c 02B2         end;
+ 160 c 02B2
+ 161 c 02B2     /* main processing loop */
+ 162 c 02B2         do while('1'b);
+ 163 c 02B2         call setrec(addr(database));
+ 164 c 02BE         put skip list('Current Record',rrec);
+ 165 c 02E5         put skip list('Read(0),Write(1),Quit(2)? ');
+ 166 c 0301         get list(mode);
+ 167 c 031A         if mode < 2 then
+ 168 c 0322             do;
+ 169 c 0322             put skip list('Record Number? ');
+ 170 c 033E             get list(rrec);
+ 171 c 035B             rovf = 0;
+ 172 c 0360             end;
+ 173 c 0360         if mode = 0 then
+ 174 c 0367             do;
+ 175 c 0367             code = rdran(addr(database))%3b.html
+ 176 c 0376             if code = 0.html then
+ 177 c 037D                 do;
+ 178 c 037D                 if bitbuf(1) = '00'b4 then
+ 179 c 0386                     put skip list('Zero Record');
+ 180 c 03A5                 else
+ 181 c 03A5                     put skip list(buffer);
+ 182 c 03C2                 end;
+ 183 c 03C2             else
+ 184 c 03C2                 put skip list('Return Code',code);
+ 185 c 03F0             end;
+ 186 c 03F0         else
+ 187 c 03F0         if mode = 1 then
+ 188 c 03F7             do;
+ 189 c 03F7             put skip list('Data: ');
+ 190 c 0413             get list(buffer);
+ 191 c 042F             if zerofill then
+ 192 c 0436                 code = wrranz(addr(database))%3b.html
+ 193 c 0448             else
+ 194 c 0448                 code = wrran.html (addr(database));
+ 195 c 0457             if code ^= 0 then
+ 196 c 045E                 put skip list('Return Code',code);
+ 197 c 048C             end;
+ 198 c 048C         else
+ 199 c 048C         if mode = 2 then
+ 200 c 0494             do;
+ 201 c 0494             if close(addr(database)) = -1 then
+ 202 c 04A5                 put skip list('Read/Only');
+ 203 c 04C1             stop;
+ 204 c 04C7             end;
+ 205 c 04C7         end;
+ 206 a 04C7     end diorand;
+
+CODE SIZE = 04C7
+DATA AREA = 0183
+END  COMPILATION
+</pre>
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-e.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-c.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-e.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-c.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-d.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:20 GMT -->
+</html>

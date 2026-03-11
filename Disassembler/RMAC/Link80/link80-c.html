@@ -1,0 +1,307 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-c.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:20 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>Appendix C</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center>
+<p><a NAME="C"></a><b><u><font size=+2>APPENDIX C</font></u></b><b><u><font size=+2></font></u></b>
+<p><b>LISTING OF "<a href="diocopy-pli.txt">DIOCOPY</a>"</b>
+<br><b>SHOWING DIRECT CP/M FILE I/O OPERATIONS</b></center>
+<b></b>
+<br>
+<br>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: DIOCOPY
+
+L: List Source Program
+
+%include 'diomod.dcl';
+%include 'fcb.dcl';
+%include 'fcb.dcl';
+%include 'fcb.dcl';
+%include 'fcb.dcl';
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+PL/I-80 V1.0, COMPILATION OF: DIOCOPY
+
+   1 a 0000 diocopy:
+   2 a 0006     proc options(main);
+   3 a 0006     /* file to file copy program */
+   4 a 0006     /* (all source lines begin with tabs) */
+   5 a 0006
+   6 c 0006     %replace
+   7 c 0006         bufwds by 64,   /* words per buffer */
+   8 c 0006         quest  by 63,   /* ASCII '?' */
+   9 c 0006         true   by '1'b,
+  10 c 0006         false  by '0'b;
+  11 c 0006
+  12+c 0006     dcl
+  13+c 0006         memptr entry         returns (ptr),
+  14+c 0006         memsiz entry         returns (fixed(15)),
+  15+c 0006         memwds entry         returns (fixed(15)),
+  16+c 0006         dfcb0  entry         returns (ptr),
+  17+c 0006         dfcb1  entry         returns (ptr),
+  18+c 0006         dbuff  entry         returns (ptr),
+  19+c 0006         reboot entry,
+  20+c 0006         rdcon  entry         returns (char(1)),
+  21+c 0006         wrcon  entry         (char(1)),
+  22+c 0006         rdrdr  entry         returns (char(1)),
+  23+c 0006         wrpun  entry         (char(1)),
+  24+c 0006         wrlst  entry         (char(1)),
+  25+c 0006         coninp entry         returns (char(1)),
+  26+c 0006         conout entry         (char(1)),
+  27+c 0006         rdstat entry         returns (bit(1)),
+  28+c 0006         getio  entry         returns (bit(8)),
+  29+c 0006         setio  entry         (bit(8)),
+  30+c 0006         wrstr  entry         (ptr),
+  31+c 0006         rdbuf  entry         (ptr),
+  32+c 0006         break  entry         returns (bit(1)),
+  33+c 0006         vers   entry         returns (bit(16)),
+  34+c 0006         reset  entry,
+  35+c 0006         select entry         (fixed(7)),
+  36+c 0006         open   entry   (ptr) returns (fixed(7)),
+  37+c 0006         close  entry   (ptr) returns (fixed(7)),
+  38+c 0006         sear   entry   (ptr) returns (fixed(7)),
+  39+c 0006         searn  entry         returns (fixed(7)),
+  40+c 0006         delete entry   (ptr),
+  41+c 0006         rdseq  entry   (ptr) returns (fixed(7)),
+  42+c 0006         wrseq  entry   (ptr) returns (fixed(7)),
+  43+c 0006         make   entry   (ptr) returns (fixed(7)),
+  44+c 0006         rename entry   (ptr),
+  45+c 0006         logvec entry         returns (bit(16)),
+  46+c 0006         curdsk entry         returns (fixed(7)),
+  47+c 0006         setdma entry         (ptr),
+  48+c 0006         allvec entry         returns (ptr),
+  49+c 0006         wpdisk entry,
+  50+c 0006         rovec  entry         returns (bit(16)),
+  51+c 0006         filatt entry         (ptr),
+  52+c 0006         getdpb entry         returns (ptr),
+  53+c 0006         getusr entry         returns (fixed(7)),
+  54+c 0006         setusr entry   (fixed(7)),
+  55+c 0006         rdran  entry   (ptr) returns (fixed(7)),
+  56+c 0006         wrran  entry   (ptr) returns (fixed(7)),
+  57+c 0006         filsiz entry   (ptr),
+  58+c 0006         setrec entry   (ptr),
+  59+c 0006         resdrv entry         (bit(16)),
+  60+c 0006         wrranz entry   (ptr) returns (fixed(7));
+  61 c 0006
+  62 c 0006     dcl
+  63 c 0006         1 destfile,
+  64+c 0006           2 name1,
+  65+c 0006             3 drive fixed(7),  /* drive number */
+  66+c 0006             3 fname char(8),   /* file name */
+  67+c 0006             3 ftype char(3),   /* file type */
+  68+c 0006             3 fext  fixed(7),  /* file extent */
+  69+c 0006             3 space (3) bit(8),/* filler */
+  70+c 0006           2 name2,             /* used in rename */
+  71+c 0006             3 drive2 fixed(7),
+  72+c 0006             3 fname2 char(8),
+  73+c 0006             3 ftype2 char(3),
+  74+c 0006             3 fext2  fixed(7),
+  75+c 0006             3 space2 (3) bit(8),
+  76+c 0006           2 crec  fixed(7),    /* current record */
+  77+c 0006           2 rrec  fixed(15),   /* random record */
+  78+c 0006           2 rovf  fixed(7);    /* random rec overflow */
+  79 c 0006
+  80 c 0006     dcl
+  81 c 0006         dfcb0p ptr,
+  82 c 0006         1 sourcefile based(dfcb0p),
+  83+c 0006           2 name1,
+  84+c 0006             3 drive fixed(7),  /* drive number */
+  85+c 0006             3 fname char(8),   /* file name */
+  86+c 0006             3 ftype char(3),   /* file type */
+  87+c 0006             3 fext  fixed(7),  /* file extent */
+  88+c 0006             3 space (3) bit(8),/* filler */
+  89+c 0006           2 name2,             /* used in rename */
+  90+c 0006             3 drive2 fixed(7),
+  91+c 0006             3 fname2 char(8),
+  92+c 0006             3 ftype2 char(3),
+  93+c 0006             3 fext2  fixed(7),
+  94+c 0006             3 space2 (3) bit(8),
+  95+c 0006           2 crec  fixed(7),    /* current record */
+  96+c 0006           2 rrec  fixed(15),   /* random record */
+  97+c 0006           2 rovf  fixed(7);    /* random rec overflow */
+  98 c 0006
+  99 c 0006     dcl
+ 100 c 0006         1 dfcb1file based(dfcb1()),
+ 101+c 0006           2 name1,
+ 102+c 0006             3 drive fixed(7),  /* drive number */
+ 103+c 0006             3 fname char(8),   /* file name */
+ 104+c 0006             3 ftype char(3),   /* file type */
+ 105+c 0006             3 fext  fixed(7),  /* file extent */
+ 106+c 0006             3 space (3) bit(8),/* filler */
+ 107+c 0006           2 name2,             /* used in rename */
+ 108+c 0006             3 drive2 fixed(7),
+ 109+c 0006             3 fname2 char(8),
+ 110+c 0006             3 ftype2 char(3),
+ 111+c 0006             3 fext2  fixed(7),
+ 112+c 0006             3 space2 (3) bit(8),
+ 113+c 0006           2 crec  fixed(7),    /* current record */
+ 114+c 0006           2 rrec  fixed(15),   /* random record */
+ 115+c 0006           2 rovf  fixed(7);    /* random rec overflow */
+ 116 c 0006
+ 117 c 0006     dcl
+ 118 c 0006         1 renfile,
+ 119+c 0006           2 name1,
+ 120+c 0006             3 drive fixed(7),  /* drive number */
+ 121+c 0006             3 fname char(8),   /* file name */
+ 122+c 0006             3 ftype char(3),   /* file type */
+ 123+c 0006             3 fext  fixed(7),  /* file extent */
+ 124+c 0006             3 space (3) bit(8),/* filler */
+ 125+c 0006           2 name2,             /* used in rename */
+ 126+c 0006             3 drive2 fixed(7),
+ 127+c 0006             3 fname2 char(8),
+ 128+c 0006             3 ftype2 char(3),
+ 129+c 0006             3 fext2  fixed(7),
+ 130+c 0006             3 space2 (3) bit(8),
+ 131+c 0006           2 crec  fixed(7),    /* current record */
+ 132+c 0006           2 rrec  fixed(15),   /* random record */
+ 133+c 0006           2 rovf  fixed(7);    /* random rec overflow */
+ 134 c 0006
+ 135 c 0006     dcl
+ 136 c 0006         answer char(1),
+ 137 c 0006         extcnt fixed(7);
+ 138 c 0006
+ 139 c 0006     dcl
+ 140 c 0006         /* buffer management */
+ 141 c 0006         eofile bit(8),
+ 142 c 0006         i      fixed(15),
+ 143 c 0006         m      fixed(15),
+ 144 c 0006         nbuffs fixed(15),
+ 145 c 0006         memory (0:0) bit(16) based(memptr());
+ 146 c 0006
+ 147 c 0006     /* compute number of buffs, 64 words each */
+ 148 c 0006     nbuffs = divide(memwds(),bufwds,15);
+ 149 c 0017     if nbuffs = 0 then
+ 150 c 0020         do;
+ 151 c 0020         put skip list('No Buffer Space');
+ 152 c 003C         call reboot();
+ 153 c 003F         end;
+ 154 c 003F
+ 155 c 003F     /* initialize fcb's */
+ 156 c 003F     dfcb0p = dfcb0();
+ 157 c 0045     destfile = dfcb1file;
+ 158 c 0054
+ 159 c 0054     /* copy fcb to rename file, count extents */
+ 160 c 0054     renfile = destfile;
+ 161 c 0060     /* search all extents by inserting '?' */
+ 162 c 0060     renfile.fext = quest;
+ 163 c 0065     if sear(addr(renfile)) ^= -1 then
+ 164 c 0076         do;
+ 165 c 0076         extcnt = 1;
+ 166 c 007B             do while(searn() ^= -1);
+ 167 c 0083             extcnt = extcnt + 1;
+ 168 c 008A             end;
+ 169 c 008A         put edit
+ 170 c 00C1             ('OK to Delete ',extcnt,' Extent(s)?(Y/N)')
+ 171 c 00C1             (skip,a,f(3),a);
+ 172 c 00C1         get list(answer);
+ 173 c 00DB         if ^ (answer = 'Y' ! answer = 'y') then
+ 174 c 00FF             call reboot();
+ 175 c 0102         end;
+ 176 c 0102
+ 177 c 0102     /* destination file will be deleted later */
+ 178 c 0102     destfile.ftype = '$$$';
+ 179 c 010E     /* delete any existing x.$$$ file */
+ 180 c 010E     call delete(addr(destfile));
+ 181 c 011A
+ 182 c 011A     /* open the source file, if possible */
+ 183 c 011A     if open(addr(sourcefile)) = -1 then
+ 184 c 012B         do;
+ 185 c 012B         put skip list('No Source File');
+ 186 c 0147         call reboot();
+ 187 c 014A         end;
+ 188 c 014A
+ 189 c 014A     /* source file opened, create $$$ file */
+ 190 c 014A     destfile.fext = 0;
+ 191 c 014F     destfile.crec = 0;
+ 192 c 0154     if make(addr(destfile)) = -1 then
+ 193 c 0165         do;
+ 194 c 0165         put skip list('No Directory Space');
+ 195 c 0181         call reboot();
+ 196 c 0184         end;
+ 197 c 0184
+ 198 c 0184     /* $$$ temp file created, now copy from source */
+ 199 c 0184     eofile = false;
+ 200 c 0189         do while (^eofile);
+ 201 c 0190         m = 0;
+ 202 c 0196             /* fill buffers */
+ 203 c 0196             do i = 0 repeat (i+1) while (i&gt;nbuffs);
+ 204 c 01A6             call setdma(addr(memory(m)));
+ 205 c 01B9             m = m + bufwds;
+ 206 c 01C3             if rdseq(addr(sourcefile)) ^= 0 then
+ 207 c 01D4                 do;
+ 208 c 01D4                 eofile = true;
+ 209 c 01D9                 /* truncate buffer */
+ 210 c 01D9                 nbuffs = i;
+ 211 c 01E9                 end;
+ 212 c 01E9             end;
+ 213 c 01E9         m = 0;
+ 214 c 01EF             /* write buffers */
+ 215 c 01EF             do i = 0 to nbuffs-1;
+ 216 c 0206             call setdma(addr(memory(m)));
+ 217 c 0219             m = m + bufwds;
+ 218 c 0223             if wrseq(addr(destfile)) ^= 0 then
+ 219 c 0234                 do;
+ 220 c 0234                 put skip list('Disk Full');
+ 221 c 0250                 call reboot();
+ 222 c 0260                 end;
+ 223 c 0260             end;
+ 224 c 0260         end;
+ 225 c 0260
+ 226 c 0260     /* close destination file and rename */
+ 227 c 0260     if close(addr(destfile)) = -1 then
+ 228 c 0271         do;
+ 229 c 0271         put skip list('Disk R/O');
+ 230 c 028D         call reboot();
+ 231 c 0290         end;
+ 232 c 0290
+ 233 c 0290     /* destination file closed, erase old file */
+ 234 c 0290     call delete(addr(renfile));
+ 235 c 029C
+ 236 c 029C     /* now rename $$$ file to old file name */
+ 237 c 029C     destfile.name2 = renfile.name1;
+ 238 c 02AB     call rename(addr(destfile));
+ 239 c 02B7     call reboot();
+ 240 a 02BA     end diocopy;
+
+CODE SIZE = 02BD
+DATA AREA = 00EF
+END  COMPILATION
+</pre>
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-d.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-b.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-d.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-b.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-c.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:20 GMT -->
+</html>

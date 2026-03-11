@@ -1,0 +1,1019 @@
+;
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+; @@                                                 @@
+; @@ THIS MUST BE THE VERY FIRST MODULE TO BE LINKED @@
+; @@                                                 @@
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;
+U.BDOS	macro
+IF	@@DU
+	call	U..BDOS
+ENDIF	;@@DU
+	ENDM
+;
+; Start any program, jump over run time routines
+;
+Stack:
+	jp	StrtPrg		; Jump
+;
+; ############################################################
+;
+; CRT dependend control sequences
+; Start control sequence with length of it
+; Null indicates end of control string
+;
+	db	16		; .. length of control
+$CRTINIT:
+	db	0		; *** NONE
+	ds	15
+$CRTEXIT:
+	db	0		; *** NONE
+	ds	15
+@ScrCol:
+	db	ScrCol
+@ScrRow:
+	db	ScrRow
+;
+; Position cursor prefix
+;
+$GOTOXY:
+	db	4,esc,'Y',0,0
+;
+; Set window size
+;
+$WINDOW:
+	db	6,esc,'X',0,0,0,0
+;
+; Clear screen
+;
+$CLRSCR:
+	db	2,esc,'E'
+;
+; Home cursor
+;
+$HOME:
+	db	2,esc,'H'
+;
+; Insert line
+;
+$INSLINE:
+	db	2,esc,'L'
+;
+; Delete line
+;
+$DELLINE:
+	db	2,esc,'M'
+;
+; Clear to end of line
+;
+$CLREOL:
+	db	2,esc,'K'
+;
+; Normal video
+;
+$NORVIDEO:
+	db	2,esc,'q'
+;
+; Low video
+;
+$LOWVIDEO:
+	db	2,esc,'p'
+;
+; ############################################################
+;
+; Procedure CRTINIT
+;
+CrtInit:
+	ld	hl,$CRTINIT	; Get control
+	jr	OutCtrl		; .. print
+;
+; Procedure CRTEXIT
+;
+CrtExit:
+	ld	hl,$CRTEXIT	; Get control
+;
+; Output screen control
+; ENTRY	Reg HL points to control started with length
+; EXIT	Carry set if no string defined
+;
+OutCtrl:
+	ld	a,(hl)		; Test any definition
+	or	a
+	scf
+	ret	z		; .. no - carry set
+OutCtrlLoop:
+	inc	hl
+	push	af
+	push	hl
+	ld	a,(hl)
+	call	ChrConOut	; Print
+	pop	hl
+	pop	af
+	dec	a		; Count down
+	ret	z		; .. no more - carry reset
+	jr	OutCtrlLoop
+;
+; Give new line
+;
+NL:
+	call	String		; Simple CR LF
+	db	cr,lf,eot
+	ret
+;
+; Print character on console
+; ENTRY	Accu holds character
+;
+ChrConOut:
+	ld	l,a		; Save character
+	push	hl
+	call	XConout		; .. type
+	ret
+;
+; Output immediate string to console
+;
+String:
+	push	hl		; Save string address
+	ld	hl,ChrConOut	; Init console output
+..String:
+	ld	(StrEXE+1),hl	; .. save device
+	pop	hl
+	ex	(sp),hl
+	push	af
+	push	bc
+	push	de
+StrLoop:
+	ld	a,(hl)
+	inc	hl
+	or	a		; Test end
+	jr	z,StrEnd
+	push	hl
+StrEXE:
+	call	ChrConOut	; Type
+	pop	hl
+	jr	StrLoop
+StrEnd:
+	pop	de
+	pop	bc
+	pop	af
+	ex	(sp),hl		; Get back caller
+	ret
+;
+; Procedure DELAY(val)
+;
+Delay:
+	ld	a,l
+	or	h
+	ret	z		; Test any value
+	ld	a,8*CPUspeed	; Get delay
+deloop:
+	ex	(sp),hl		; Waste time..  5 cycles
+	ex	(sp),hl		; .. 10
+	ex	(sp),hl		; .. 15
+	ex	(sp),hl		; .. 20
+	push	bc		; .. 23
+	ld	bc,1234		; .. 26
+	pop	bc		; .. 29
+	dec	a		; .. 30
+	jr	nz,deloop	; Check done
+	dec	hl
+	jr	Delay		; Test total end
+;
+; Procedure CLRSCR
+;
+ClrScr:
+	push	hl
+	push	af
+	push	bc
+	push	de
+	ld	hl,$HOME
+	call	OutCtrl		; Home cursor
+	ld	hl,$CLRSCR	; .. and clear screen
+OutCtrlDelay:
+	call	OutCtrl
+	pop	de
+	pop	bc
+	pop	af
+	pop	hl
+	ret
+;
+; Procedure DELLINE
+;
+DelLine:
+	push	hl
+	ld	hl,$DELLINE
+..OutCtrlDelay:
+	push	af
+	push	bc
+	push	de
+	jr	OutCtrlDelay	; Give control
+;
+; Procedure INSLINE
+;
+InsLine:
+	push	hl
+	ld	hl,$INSLINE
+	jr	..OutCtrlDelay	; Give control
+;
+; Procedure CLREOL
+;
+ClrEol:
+	push	hl
+	ld	hl,$CLREOL
+	jr	..OutCtrlDelay	; Give control
+;
+; Procedure LOWVIDEO
+;
+LowVideo:
+	push	af
+	ld	a,(Video)	; Check state of video
+	or	a
+	jr	z,NoVideo	; .. already LOW
+	push	hl
+	xor	a
+	ld	hl,$LOWVIDEO	; .. give control
+ProcCtrl:
+	push	bc
+	push	de
+	ld	(Video),a	; Set LOW
+	call	OutCtrl
+	pop	de
+	pop	bc
+	pop	hl
+NoVideo:
+	pop	af
+	ret
+;
+; Procedure NORMVIDEO
+;
+NormVideo:
+	push	af
+	ld	a,(Video)	; Check state of video
+	cp	-1
+	jr	z,NoVideo	; .. already normal
+	push	hl
+	ld	a,-1
+	ld	hl,$NORVIDEO
+	jr	ProcCtrl	; .. give control
+;
+; Position cursor
+; ENTRY	Reg H holds x_val
+;	Reg L holds y_val
+;
+ExecXY:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	de,$GOTOXY+3
+	ld	a,l		; Get Y
+	call	SetXorY		; Set for control
+	ld	a,h		; Get X
+	call	SetXorY		; Set for control
+	ld	hl,$GOTOXY
+	call	OutCtrl		; Output control
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Set cursor control
+; ENTRY	Reg C holds offset within control string
+;	Accu holds value for position
+;
+SetXorY:
+	add	a,' '		; Add offset
+	ld	(de),a		; Save ASCII
+	inc	de
+	ret
+;
+; Set window
+; ENTRY	Reg HL holds lower position
+;	Rest of dimesion on stack
+;
+Window:
+	pop	ix
+	pop	de		; Get right position
+	pop	bc
+	ld	h,c		; Get upper position
+	pop	bc
+	ld	d,c		; Get left position
+	push	ix
+	ld	ix,$WINDOW+3
+	call	SetWdw		; Set 1st part
+	inc	ix
+	ex	de,hl
+	call	SetWdw		; .. 2nd part
+	ld	hl,$WINDOW
+	call	OutCtrl		; Output control
+	ret
+;
+; Set window values
+;
+SetWdw:
+	ld	a,h
+	add	a,' '
+	ld	(ix),a		; Set dimensions
+	add	a,l
+	dec	a
+	ld	(ix+2),a
+	ret
+;
+; Get position of cursor
+; EXIT	Reg H holds  vertical  position
+;	Reg L holds horizontal position
+;
+Where:
+	call	XBIOS		; Do extended BIOS call
+	dw	TE_ASK
+	ret
+;
+; Extended BIOS call
+;
+XBIOS:
+	jp	$-$
+;
+; Get max horizontal window size
+; EXIT	Reg HL holds size
+;
+MaxX:
+	call	Where		; Get both
+	ld	a,e		; Extract horizontal
+	jr	RetX..Y
+;
+; Get max vertical window size
+; EXIT	Reg HL holds size
+;
+MaxY:
+	call	Where		; Get both
+	ld	a,d		; Extract vertical
+	jr	RetX..Y
+;
+; Get horizontal position of cursor
+; EXIT	Reg HL holds position
+;
+WhereX:
+	call	Where		; Get both
+	ld	a,l		; Extract horizontal
+	jr	RetX..Y
+;
+; Get vertical position of cursor
+; EXIT	Reg HL holds position
+;
+WhereY:
+	call	Where		; Get both
+	ld	a,h		; Extract horizontal
+RetX..Y:
+	inc	a		; .. make 1 relative
+	jr	BIOSchar
+;
+; Test key pressed
+; EXIT	Reg HL holds 1 if key pressed
+;
+KeyPressed:
+	ld	de,..const	; Set function
+	call	BIOSinternal	; .. do via BIOS
+	and	1		; Extract bit
+	jr	BIOSchar
+;
+; Read character from console
+; EXIT	Reg HL holds character
+;
+ReadKBD:
+	ld	de,..conin	; Set function
+BIOScharcall:
+	call	BIOSinternal	; .. do via BIOS
+BIOSchar:
+	ld	l,a		; Expand to 16 bit
+	ld	h,0
+	ret
+;
+; Read character from auxiliary device
+; EXIT	Reg HL holds character
+;
+AUXin:
+	ld	de,..auxin	; Set function
+	jr	BIOScharcall	; .. go BIOS
+;
+; Write character to list device
+; ENTRY	Character on stack
+;
+List:
+	ld	de,..list	; Set function
+	jr	OutCommChr	; .. execute
+;
+; Write character to auxiliary device
+; ENTRY	Character on stack
+;
+AUXout:
+	ld	de,..auxout	; Set function
+	jr	OutCommChr	; .. execute
+;
+; Write character to console
+; ENTRY	Character on stack
+;
+Conout:
+	ld	de,..conout	; Set function
+OutCommChr:
+	pop	hl		; Get PC
+	pop	bc		; .. and character into C
+	push	hl		; Bring back PC
+	ld	a,(CBreak)	; Test break possible
+	or	a
+	jr	z,BIOSinternal	; .. no
+	push	de
+	push	bc
+	call	XConstat	; Get console state
+	ld	a,h
+	or	l
+	jr	z,doBIOSout	; .. test any key
+	call	StatChk		; .. get key
+	cp	Xoff		; Test XOFF
+	jr	nz,doBIOSout
+	call	StatChk
+	cp	CtrlC		; .. test Ctrl C
+	jp	z,halt		; Halt if so
+doBIOSout:
+	pop	bc
+	pop	de
+BIOSinternal:
+	ld	hl,(OS+1)	; Get BIOS base
+	add	hl,de
+	jp	(hl)		; .. run
+;
+; Init TURBO program
+; ENTRY	Reg HL holds top of RAM
+;	Reg B holds break mode
+;		($C- B=00)
+;		($C+ B=FF)
+;	Reg C holds interrupt mode
+;		($U- C=00)
+;		($U+ C=rst)
+;	[rst may be the opcode for the requested
+;	 RST opcode, typically F7 or EF]
+;
+IniPrg:
+	ld	(TopRam),hl	; Save address
+	ld	a,b
+	ld	(CBreak),a	; Set $C mode
+	ld	a,c
+	or	a		; Test break selected
+	jr	z,noRST		; .. no
+	ld	a,.JP
+	ld	(@RST),a	; Set new jump vector
+	ld	hl,Ctrl.C
+	ld	(@RST+1),hl
+noRST:
+	ld	hl,IOjump
+	ld	de,XConstat
+	ld	bc,IOlen
+	ldir			; Move IO vectors
+	ld	hl,StdIOtab
+	ld	de,baseFIB
+	ld	bc,StdIOlen
+	ldir			; Init FIB
+	xor	a
+	ld	l,a
+	ld	h,a
+	ld	(IOResult),a	; Clear IO erroe
+	ld	(curptr),hl	; .. and some pointers
+	ld	(topptr),hl
+	ld	a,.maxbuf
+	ld	(buflen),a	; Set buffer length
+	ld	(Video),a
+	ld	c,.ErrMode
+	ld	e,_ErrCode
+	call	BDOS		; Set extended error code
+IF	@@DU
+	call	UsrGet		; Get current user
+	ld	(CurUsr),a	; .. save
+ENDIF	;@@DU
+	ret
+IF	@@DU
+CurUsr:
+	db	0
+ENDIF	;@@DU
+;
+; I/O table will be moved into absolute 00A0H
+;
+IOjump:
+	jp	KeyPressed
+	jp	ReadKBD
+	jp	Conout
+	jp	List
+	jp	AUXout
+	jp	AUXin
+	jp	Conout
+	jp	ReadKBD
+IOlen	equ	$-IOjump
+;
+; Standard IO control table
+;
+StdIOtab:
+	db	11000001b	; Input Output for CON
+	db	0
+	db	10000010b	; Input for KBD
+	db	0
+	db	01000011b	; Output for CON, KBD
+	db	0
+	db	11000100b	; Input Output for AUX
+	db	0
+	db	11000101b	; Input Output for USR
+	db	0
+	db	11000001b	; Input output for CON
+	db	0
+StdIOlen	equ	$-StdIOtab
+;
+; Put character to console
+; ENTRY	Accu holds character
+;
+ChrPutCon:
+	push	bc		; Save regs
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	push	af
+	ld	l,a		; Unpack character
+	ld	h,0
+	push	hl
+	call	XConout		; Execute type
+	pop	af
+BIOSpop:
+	pop	iy		; .. get back regs
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Get character from console
+; EXIT	Accu holds character
+;
+StatChk:
+	push	bc		; .. save a bit
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	call	XConin		; Get into HL
+	ld	a,l		; .. to Accu
+	jr	BIOSpop		; Exit
+;
+; Build proper FCB from string
+;
+buildFCB:
+	ld	c,NOT FALSE	; Allow wildcards
+	jr	Parse
+;
+; Build proper FCB from string -- Program entry
+;
+; NOTE: Set C<>0 to handel wildcards
+;
+assignFCB:
+	ld	c,FALSE		; *** WILDCARD FLAG
+	ld	de,(TopRam)	; Get text pointer
+	ld	a,(de)		; Get length
+	ld	l,a
+	ld	h,0
+	inc	de
+	add	hl,de
+	ld	(hl),eot	; Set end
+Parse:
+	push	bc		; Save flag
+	ld	(P.PB),de	; Set up parse control block
+IF	@@DU
+	call	GetDU		; Get drive and user
+	pop	de
+	jr	c,AssErr	; .. error
+	push	de
+	ld	(P.PB),hl	; Fix parse control block
+	ld	(FCB-2),bc	; Save DU
+ENDIF	;@@DU
+	ld	de,P.PB
+	ld	c,.Parse
+	call	BDOS		; Get FCB
+IF	@@DU
+	ld	a,(FCB-2)	; Fetch drive
+	ld	(FCB),a
+ENDIF	;@@DU
+	pop	bc
+	ld	a,l
+	and	h		; Test error
+	inc	a
+	jr	z,AssErr
+	ld	hl,FCB+1
+	ld	a,(hl)		; Test empty file
+	cp	' '
+	ld	a,_EmpAss
+	jr	z,..AssErr	; .. error
+	inc	c
+	dec	c		; Test wildcard allowed
+	ret	nz		; .. yeap
+	ld	hl,FCB+1
+	ld	bc,Fname+Fext
+	ld	a,'?'
+	cpir			; Look for wildcard
+	ret	nz		; .. nice, none
+AssErr:
+	ld	a,_BadAss
+..AssErr:
+	ld	(IOResult),a	; Set error
+	ret
+P.PB:
+	dw	$-$,FCB
+;
+IF	@@DU
+;
+; Get drive and/or user from string
+; ENTRY	Reg pair DE points to string
+; EXIT	Reg C holds drive
+;	Reg B holds user
+;	Reg E holds definition bits:
+;	 Bit 0 set indicates drive defined
+;	 Bit 1 set indicates user  defined
+;	If bit is reset, reg B and C hold default values
+;	Carry set on error
+;	Reg HL fixed over DU:
+;
+SkpBlk:
+	inc	de
+GetDU:
+	ld	a,(de)
+	cp	' '
+	jr	z,SkpBlk	; Skip blanks
+	cp	tab
+	jr	z,SkpBlk	; .. and tabs
+	ex	de,hl
+	push	hl
+	ld	e,0		; .. set no drive and user
+	ld	b,4		; Set length of max DU:
+TestDU:
+	call	IsDelimiter	; Find delimiter
+	jr	z,ItIsDU	; .. yeap
+	inc	hl
+	djnz	TestDU		; Test more
+DefDU:
+	pop	hl
+	call	UsrGet		; .. and user
+	ld	b,a
+..D:
+	push	hl
+	push	bc
+	call	RetDsk		; Get drive
+	pop	bc
+	pop	hl
+	inc	a
+	ld	c,a
+	or	a
+	ret
+ItIsDU:
+	cp	':'		; Verify expected one
+	jr	nz,DefDU	; .. nope
+	ld	b,0		; .. clear user
+	pop	hl		; Get back pointer
+UsrLoop:
+	call	IsDelimiter	; Test delimiter
+	inc	hl
+	jr	z,DUend		; .. yeap
+	call	DoUPCASE	; Get UPPER case
+	sub	'0'		; Strip off ASCII offset
+	jr	c,ParseErr	; .. invalid range
+	cp	9+1		; Test possible drive
+	jr	nc,IsDrv?	; .. maybe
+	ld	d,a
+	ld	a,b
+	add	a,a		; .. old *10
+	add	a,a
+	add	a,b
+	add	a,a
+	add	a,d		; .. add new
+	ld	b,a
+	cp	MaxUsr+1	; Test range
+	jr	nc,ParseErr	; .. error
+	set	1,e		; Set user
+	bit	2,e		; Verify no previous user
+	jr	z,UsrLoop
+	jr	ParseErr	; .. should *NOT* be
+IsDrv?:
+	bit	1,e		; Test user
+	jr	z,NoUsr
+	set	2,e		; .. set it
+NoUsr:
+	sub	'A'-'0'		; Test range of drive
+	jr	c,ParseErr	; .. error
+	cp	'P'-'A'+1
+	jr	nc,ParseErr
+	bit	0,e		; Verify default drive
+	jr	nz,ParseErr	; .. should be
+	inc	a
+	ld	c,a		; .. set drive
+	set	0,e
+	jr	UsrLoop		; Try user
+ParseErr:
+	scf			; Set error
+	ret
+DUend:
+	bit	0,e		; Test drive
+	call	z,..D		; .. get current
+	bit	1,e		; Test user
+	ld	a,b
+	call	z,UsrGet	; .. get if not
+	ld	b,a
+	or	a
+	ret
+;
+; Test character a delimiter
+; ENTRY	Reg HL points to string
+; EXIT	Zero flag set if delimiter
+;	Accu holds character in UPPER case
+;
+IsDelimiter:
+	ld	a,(hl)
+	push	hl
+	push	bc
+	ld	hl,DelimTab	; Get table
+	ld	bc,dellen
+	cpir			; .. compare
+	pop	bc
+	pop	hl
+	ret
+;
+; Delimiter table
+;
+DelimTab:
+	db	cr,tab,' .,:;[]=<>|',eot
+dellen	equ	$-DelimTab
+;
+; Return logged user
+; EXIT	Accu holds user
+;
+UsrGet:
+	push	hl
+	push	bc
+	ld	a,_Get
+	call	LogUsr		; Fetch user
+	pop	bc
+	pop	hl
+	ret
+;
+; Log user if not set
+; ENTRY	Reg DE points to FCB : -1 is new user
+;
+U..BDOS:
+	dec	de
+	ld	a,(de)		; Get user
+	inc	de
+	ld	hl,CurUsr
+	cp	(hl)		; Test user already set
+	ret	z		; .. yeap
+	ld	(hl),a		; .. set it
+	push	bc
+	push	de
+	call	LogUsr		; .. also by OS
+	pop	de
+	pop	bc
+	ret
+ENDIF	;@@DU
+;
+; Convert character to UPPER case
+; ENTRY	Accu holds character
+; EXIT	Accu holds UPPER case character
+;
+DoUPCASE:
+	cp	'a'		; Test range a..z
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; .. convert to A..Z
+	ret
+;
+; Output hex word
+; ENTRY	Reg HL holds word
+;
+GetHXwrd:
+	ld	a,h		; Get HI
+	call	GetHXbyt
+	ld	a,l		; .. then LO
+;
+; Output hex byte
+; ENTRY	Accu holds nibble
+;
+GetHXbyt:
+	push	af		; Save
+	rra			; .. get HI four bits
+	rra
+	rra
+	rra
+	call	GetHXnibl
+	pop	af		; .. then LO
+;
+; Output hex nibble
+; ENTRY	Accu holds nibble
+;
+GetHXnibl:
+	and	LoMask		; Mask LO
+	add	a,090h		; .. dirty trick
+	daa
+	adc	a,040H		; .. to get ASCII
+	daa
+	jp	ChrPutCon	; .. type
+;
+; Get byte from 16 bit
+; ENTRY	Reg HL holds 16 bit signed integer
+; EXIT	Accu holds 0 and carry set if HL<0
+;	Accu holds -1 and carry reset if HL>256
+;	Accu holds low part and carry reset else
+;
+VALget:
+	xor	a		; Clear result
+	scf			; Set carry
+	bit	sgn.bit,h	; Test sign
+	ret	nz		; .. return zero
+	ld	a,h		; Test HI>0
+	or	a
+	ld	a,l
+	ret	z		; .. return LO if HI=0
+	ld	a,-1		; .. return -1 else
+	ret
+;
+; Test enough space
+; ENTRY	Reg HL holds 1st free address
+;	Reg DE holds last free address
+;	Reg BC holds top of ram
+;	Accu holds run mode
+;
+RangChk:
+	ld	(RunMode),a	; Set mode
+	push	bc
+	call	IniPntr		; Init heap
+	pop	bc
+	ld	hl,(BDOS+1)
+	or	a
+	sbc	hl,bc		; Test memory available
+	jp	c,NoRam		; .. no, exit
+	ex	de,hl
+	pop	de		; Get back caller
+	ld	bc,-FCBlen-$DU$
+	add	hl,bc
+	ld	(SrcFCB),hl	; Save for search
+	ld	bc,-RecLng
+	add	hl,bc
+	ld	(SrcDMA),hl
+	ld	sp,hl		; Change stack
+	ld	bc,-1024
+	add	hl,bc		; Allow 1kbyte space
+	ld	(RecurPtr),hl
+	xor	a
+	ld	l,a
+	ld	h,a
+	ld	(Curr.PC),hl	; Reset current PC
+	ld	(OvrDrv),a	; .. overlay drive
+	ld	a,.JP
+	ld	(RestVect),a	; Init restart
+	ld	hl,Restart
+	ld	(ErrorPtr),hl
+	ex	de,hl
+	ld	(Base.PC),hl	; Get caller for base
+	jp	(hl)		; .. jump back
+;
+; Function FINDNEXT
+;
+FndNxt:
+	ld	c,.SrcNxt
+	jr	..GoFnd
+;
+; Function FINDFIRST(mask)
+; ENTRY	<SP> holds search mask
+;
+FndFrs:
+	pop	ix
+	ld	hl,0
+	add	hl,sp
+	ld	c,(hl)		; Get length
+	ld	b,0
+	inc	hl
+	ld	de,(SrcFCB)
+	ld	a,c
+	or	a
+	jr	nz,LdFnd
+	push	hl
+	ld	hl,$$Wld
+	ld	bc,_Wld
+	ldir
+	pop	hl
+	jr	..SkpFnd
+LdFnd:
+	ldir			; Save string
+..SkpFnd:
+	ld	sp,hl
+	push	ix
+	xor	a
+	ld	(de),a		; Clear end
+	ld	de,(SrcFCB)
+	push	de
+	call	buildFCB	; Get FCB
+	call	EmpFCB		; Set wildcard on empty FCB
+	pop	de		; Get search FCB
+	ld	hl,FCB-$DU$
+	ld	bc,FCBlen+$DU$
+	ldir			; .. unpack mask
+	ld	c,.SrcFrs
+..GoFnd:
+	ld	de,(SrcDMA)
+	push	de
+	push	bc
+	call	SetDMA		; Set buffer
+	pop	bc
+	ld	de,(SrcFCB)
+IF	@@DU
+	inc	de
+ENDIF	;@@DU
+	U.BDOS
+	call	BDOS		; .. search
+	pop	de		; Get back buffer
+	ld	hl,(TopRam)	; Get pointer to string
+	ld	(hl),0		; .. clear
+	inc	a		; Test success
+	jr	z,..AssFnd	; .. nope
+	push	hl
+	ex	de,hl
+	ld	bc,32
+Src..:
+	dec	a
+	jr	z,..Fnd
+	add	hl,bc		; Fix buffer
+	jr	Src..
+..Fnd:
+	inc	hl		; .. skip 1st entry
+	push	de
+	push	hl
+	ld	hl,(SrcFCB)
+IF	@@DU
+	inc	hl
+ENDIF	;@@DU
+	ld	a,(hl)
+	dec	a
+	call	m,RetDsk	; Get disk on default
+	pop	de
+	pop	hl
+	inc	hl
+	add	a,'A'		; .. make drive real
+	ld	(hl),a
+	inc	hl
+	ld	(hl),':'
+	ld	bc,Fname*256+3	; Set length for D: and .
+	call	DeParse		; Unpack to string
+	inc	hl
+	ld	(hl),'.'
+	ld	b,Fext
+	call	DeParse
+	pop	hl
+	ld	(hl),c		; Set length
+..AssFnd:
+	jp	AssAnyString	; .. put string to stack
+;
+; Convert FCB to string
+;
+DeParse:
+	ld	a,(de)
+	and	NoMSB
+	cp	' '		; Test blank
+	jr	z,EndDeParse
+	inc	de
+	inc	hl
+	ld	(hl),a		; .. unpack
+	inc	c
+	djnz	DeParse
+	ret
+EndDeParse:
+	inc	b		; Test done
+	dec	b
+	ret	z
+..EndDe..:
+	inc	de
+	djnz	..EndDe..
+	ret
+;
+; Set wildcard on empty FCB
+;
+EmpFCB:
+	ld	hl,FCB+1
+	ld	a,(hl)
+	cp	' '		; Test empty
+	ret	nz		; .. nope
+	ld	b,Fname+Fext
+..Emp:
+	ld	(hl),'?'	; .. set it
+	inc	hl
+	djnz	..Emp
+	ret
+;
+SrcFCB:
+	dw	0
+SrcDMA:
+	dw	0
+$$Wld:
+	db	'*.*'
+_Wld	equ	$-$$Wld
+

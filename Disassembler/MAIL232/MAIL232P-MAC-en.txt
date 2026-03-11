@@ -1,0 +1,114 @@
+	title	Patch for MAIL232
+	name	('MAILP')
+
+; Patch tables for Baud Rates
+
+; Copyright (C)	Werner Cirsovius
+;		Hohe Weide 44
+;		D-20253 Hamburg
+;		Phone: +49/40/4223247
+
+; This version of MAIL232 starts as follows:
+
+; 0100h	ld   hl,(0001)  ; Get base of BIOS
+; 0103h	ld   de,0057
+; 0106h	add  hl,de      ; Calculate XBIOS
+; 0107h	ld   (0b4e),hl
+; 010ah	call 0757       ; Set up hi memory
+
+	.z80
+	aseg
+
+SApara	equ	00bch		; XBIOS vector for getting UART parameters
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; Internal addresses out of MAIL232
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+PATCH	equ	010ah		; Where patch changes MAIL232
+
+COMOVE	equ	0757h		; Address at 010BH
+XBIOS	equ	0b4dh		; XBIOS access
+
+TXBAUD	equ	0e3ch		; Value for transmit baud rate
+RCBAUD	equ	0e3dh		; Value for receive baud rate
+
+TX$BAUD	equ	0bc2h		; ASCII value of transmit baud rate
+RC$BAUD	equ	0bd7h		; ASCII value of receive baud rate
+
+$BAUD	equ	0de2h		; ASCII baud table
+;
+; Step 1 : Change vector to address behind MAIL232
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; Call SID and set value of MAILP to hex value called NEXT
+;
+MAILP	equ	1100h
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+	org	PATCH
+
+	call	MAILP		; Call Baud rate setting
+
+; -----------------------------------------------
+
+	org	MAILP
+
+MAILP:
+	call	SetTables
+;
+; The next address is from location 010BH of MAIL232
+;
+	jp	COMOVE
+;
+; The job itself
+; ++++++++++++++
+;	
+SetTables:
+;
+; Step 2 : Read Baud Rate and insert into the tables
+;
+; Step 2.1 : Read Baud Rate and insert into the binary tables
+;
+	call	XBIOS		; Get UART baud rate
+	dw	SApara
+;
+; NOTE:	XBIOS   values go from 1 up to 15,
+;	MAIL232 values go from 0 up to 14 !
+;
+	dec	c		; Fix values
+	ld	a,c
+	ld	(TXBAUD),a	; Store them
+;
+	dec	b
+	ld	a,b
+	ld	(RCBAUD),a
+	push	bc
+;
+; Step 2.2 : Read Baud Rate and insert into the ASCII tables
+;
+	ld	de,RC$BAUD	; Store receive baud rate
+	call	ASCII.Baud
+
+	pop	bc
+	ld	a,c
+	ld	de,TX$BAUD	; Store transmit baud rate
+;
+; Insert ASCII value from table indexed by Accu
+;
+ASCII.Baud:
+	ld	hl,$BAUD
+	add	a,a		; *4
+	add	a,a
+	add	a,l		; Calculate address
+	ld	l,a
+	jr	nc,no.CY
+	inc	h
+no.CY:
+	ld	bc,4
+	ldir			; Move characters
+	ret
+
+	end
+

@@ -1,0 +1,176 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-2.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:18 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>RMAC Relocating Macro Assembler</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center><b><u><font size=+2>2. RMAC RELOCATING MACRO ASSEMBLER</font></u></b></center>
+
+<p><br>
+<p>The CP/M Relocating macro Assembler, called RMAC, is a modified version
+of the CP/M Macro Assembler (MAC). RMAC produces a relocatable object file
+(REL), rather than an absolute object file (HEX), which may be linked with
+other modules produced by RMAC, or other language translators such as PL/I-80,
+to produce an absolute file ready for execution.
+<p>The differences between RMAC and MAC are described in the following
+sections. For a complete description of the assembly language and macro
+facilities, see CP/M MAC Macro Assembler: Language Manual and Application
+Guide.
+<br>&nbsp;
+<p><a NAME="2.1"></a><b><u><font size=+1>2.1. RMAC Operation</font></u></b>
+<p>RMAC is invoked by typing
+<br>&nbsp;
+<blockquote><tt>RMAC filename.filetype</tt></blockquote>
+
+<p><br>followed by optional assembly parameters. If the filetype is not
+specified, ASM is assumed. RMAC produces three files: a list file (PRN),
+a symbol file (SYM), and a relocatable object file (REL). Characters entered
+in the source file in lower case appear in lower case in the list file,
+except for macro expansions.
+<p>The assembly parameter "H" in MAC, used to control the destination of
+the HEX file, has been replaced by "R", which controls the destination
+of the REL file. Directing the REL file to the console or printer (RX or
+RP) is not allowed, since the REL file does not contain ASCII characters.
+<p>Example:
+<br>&nbsp;
+<blockquote><tt>RMAC TEST $PX SB RB</tt></blockquote>
+
+<p><br>directs RMAC to assemble the file TEST.ASM, send the PRN file to
+the console, and put the symbol file (SYM) and the relocatable object file
+(REL) on drive B.
+<br>&nbsp;
+<p><a NAME="2.2"></a><b><u><font size=+1>2.2. Expressions</font></u></b>
+<p>The operand field of a statement may consist of a complex arithmetic
+expression (as described in the MAC manual, section 3) with the following
+restrictions:
+<blockquote>1) In the expression A+B, if A evaluates to a relocatable value
+or an external, then B must be a constant.
+<p>2) In the expression A-B, if A is an external, then B must be a
+constant.
+<p>3) In the expression A-B, if A evaluates to a relocatable value,
+then:
+<blockquote>a) B must be a constant, or
+<p>b) B must be a relocatable value of the same relocation type as A (both
+must appear in a CSEG, DSEG, or in the same COMMON block).</blockquote>
+4) In all other arithmetic and logical operations, both operands must be
+absolute.</blockquote>
+An expression error ('E') will be generated if an expression does not follow
+the above restrictions.
+<br>&nbsp;
+<p><a NAME="2.3"></a><b><u><font size=+1>2.3. Assembler Directives</font></u></b>
+<p>The following assembler directives have been added to support relocation
+and linking of modules:
+<br>&nbsp;
+<blockquote>ASEG use absolute location counter
+<br>CSEG use code location counter
+<br>DSEG use data location counter
+<br>COMMON use common location counter
+<br>PUBLIC symbol may be referenced in another module
+<br>EXTRN symbol is defined in another module
+<br>NAME name of module</blockquote>
+The directives ASEG, CSEG, DSEG and COMMON allow program modules to be
+split into absolute, code, data and common segments, which may be rearranged
+in memory as needed at link time. The PUBLIC and EXTRN directives provide
+for symbolic references between program modules.
+<p>NOTE: While symbol names may be up to 16 characters, the first six characters
+of all symbols in PUBLIC, EXTRN and COMMON statements must be unique, since
+symbols are truncated to six characters in the object module.
+<br>&nbsp;
+<p><a NAME="2.3.1"></a><b><u>2.3.1. The ASEG Directive</u></b>
+<p>The ASEG statement takes the form
+<br>&nbsp;
+<blockquote><tt>label ASEG</tt></blockquote>
+
+<p><br>and instructs the assembler to use the absolute location counter
+until otherwise directed. The physical memory locations of statements following
+an ASEG are determined at assembly time by the absolute location counter,
+which defaults to 0 and may be reset to another value by an ORG statement
+following the ASEG statement.
+<br>&nbsp;
+<p><a NAME="2.3.2"></a><b><u>2.3.2. The CSEG Directive</u></b>
+<p>The CSEG statement takes the form
+<br>&nbsp;
+<blockquote><tt>label CSEG</tt></blockquote>
+
+<p><br>and instructs the assembler to use the code location counter until
+otherwise directed. This is the default condition when RMAC begins an assembly.
+The physical memory locations of statements following a CSEG are determined
+at link time.
+<br>&nbsp;
+<p><a NAME="2.3.3"></a><b><u>2.3.3. The DSEG Directive</u></b>
+<p>The DSEG statement takes the form
+<br>&nbsp;
+<blockquote><tt>label DSEG</tt></blockquote>
+
+<p><br>and instructs the assembler to use the data location counter until
+otherwise directed. The physical memory locations of statements following
+a DSEG are determined at link time.
+<br>&nbsp;
+<p><a NAME="2.3.4"></a><b><u>2.3.4. The COMMON Directive</u></b>
+<p>The COMMON statement takes the form
+<br>&nbsp;
+<blockquote><tt>COMMON /identifier/</tt></blockquote>
+
+<p><br>and instructs the assembler to use the COMMON location counter until
+otherwise directed. The physical memory locations of statements following
+a COMMON statement are determined at link time.
+<br>&nbsp;
+<p><a NAME="2.3.5"></a><b><u>2.3.5. The PUBLIC Directive</u></b>
+<p>The PUBLIC statement takes the form
+<br>&nbsp;
+<blockquote><tt>PUBLIC label{,label, ... ,label}</tt></blockquote>
+
+<p><br>where each label is defined in the program. Labels appearing in
+a PUBLIC statement may be referred to by other programs which are linked
+using LINK-80.
+<br>&nbsp;
+<p><a NAME="2.3.6"></a><b><u>2.3.6. The EXTRN Directive</u></b>
+<p>The form of the EXTRN statement is
+<br>&nbsp;
+<blockquote><tt>EXTRN label{,label, ... ,label}</tt></blockquote>
+
+<p><br>The labels appearing in an EXTRN statement may be referenced but
+must not be defined in the program being assembled. They refer to labels
+in other programs which have been declared PUBLIC.
+<br>&nbsp;
+<p><a NAME="2.3.7"></a><b><u>2.3.7. The NAME Directive</u></b>
+<p>The form of the NAME statement is
+<br>&nbsp;
+<blockquote><tt>NAME 'text string'</tt></blockquote>
+
+<p><br>The NAME statement is optional. It is used to specify the name of
+the relocatable object module produced by RMAC. If no NAME statement appears,
+the filename of the source file is used as the name of the object module.
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-3.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-1.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-3.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-1.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-2.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:18 GMT -->
+</html>

@@ -1,0 +1,1835 @@
+	title	Scan TP 3 compiled file
+	name	('TPSCAN')
+
+	maclib	BASE80.LIB
+
+; Program scans TURBO Pascal compiled program.
+
+; Call it:
+
+;	TPSCAN {-S|M} file{.ext}
+
+; Scans thru file{.ext}. ext defaults to COM.
+
+; Option -S suppresses scan result while option -M suppresses map display.
+
+	entry	$memry
+
+	ext	divrec,string,crlf,conino,incasc,cmdarg
+	ext	open,dskred,fseek,dskget,dskugt,rdbfp
+
+ARGC	equ	2		; Max arguments
+
+CallDep	equ	20		; Allowes number of nested calls
+
+MAXROW	equ	24		; Lines on terminal
+
+_Type	equ	1
+_Ref	equ	2
+_PC	equ	2
+
+LabLen	equ	_Type+_Ref+_PC
+
+_JP	equ	0c3h
+_CALL	equ	0cdh
+_RET	equ	0c9h
+
+_LD.BC	equ	001h
+_LD.DE	equ	011h
+_LD.HL	equ	021h
+_LD.SP	equ	031h
+_LD.A	equ	03eh
+
+_CB	equ	0cbh
+_ED	equ	0edh
+_FD	equ	0fdh
+
+_B0.L	equ	045h
+
+_POP.IY	equ	0e1h
+_PSH.IY	equ	0e5h
+
+_S.H.B	equ	042h
+_S.H.D	equ	052h
+_LD.DE.	equ	05bh
+_LDIR	equ	0b0h
+
+TP3strt	equ	020e2h		; Start of TURBO header
+HeadLen	equ	29		; Bytes in TURBO header
+
+TP3halt	equ	020d4h		; TURBO HALT
+
+SYSINI1	equ	0364h		; TURBO init, part I
+SYSINI2	equ	04d4h		; TURBO init, part II
+
+ImStrg	equ	054dh		; TURBO immediate string on stack
+ImWrt	equ	17bah		; TURBO immediate string to be written
+OVERLAY	equ	1c59h		; TURBO overlay call
+
+OVLNOT:
+	call	Abort
+	db	'OVERLAY not supported',eot
+TellBreak:
+	call	Abort
+	db	'User break, program aborted',eot
+TellDummy:
+	call	Abort
+	db	'Program contains "begin end." only',eot
+Error1:
+	call	Abort
+	db	'Cannot find source file',eot
+Error2:
+	call	Abort
+	db	'Missing record in file',eot
+Error3:
+	call	Abort
+	db	'Invalid start of file',eot
+Error4:
+	call	Abort
+	db	'Invalid TURBO version',eot
+Error5:
+	call	Abort
+	db	'Premature end of file',eot
+Error6:
+	call	Abort
+	db	'Invalid code',eot
+Error7:
+	call	Abort
+	db	'Invalid address',eot
+Error8:
+	call	Abort
+	db	'Not enough memory',eot
+Error9:
+	call	Abort
+	db	'Internal error',eot
+Err10:
+	call	Abort
+	db	'Too many calls',eot
+Err11:
+	call	Abort
+	db	'Ret not possible',eot
+Err12:
+	call	Abort
+	db	'Invalid start of program',eot
+Error13:
+	call	Abort
+	db	'Program scans TURBO Pascal compiled program.'
+	db	cr,lf,lf
+	db	'Call it:'
+	db	cr,lf,lf
+	db	tab,'TPSCAN {-S|M} file{.ext}'
+	db	cr,lf,lf
+	db	'Scans thru file{.ext}. ext defaults to COM.'
+	db	cr,lf,lf
+	db	'Option -S suppresses scan result while option -M suppresses map display.',eot
+Abort:
+	pop	de
+	call	String		; Give final message
+	jp	OS
+;
+; Position address in reg HL within file
+;
+Posfile:
+	ld	de,-TPA
+	add	hl,de		; Make 0 relative
+	ld	a,reclng-1
+	and	l		; Calculate start pointer
+	ld	(rdbfp),a	; Save current pointer
+	call	divrec		; Get record number
+	xor	a
+	ld	de,FCB
+	call	fseek		; Read record
+	ret
+;
+; Verify correct address in reg DE
+;
+vrfy16:
+	call	fget16		; Get word
+	or	a
+	sbc	hl,de		; Verify correct one
+	ret	z
+	jp	Error7
+;
+; Verify correct code in reg C
+;
+vrfy8:
+	call	fget8		; Get byte
+	cp	c		; Verify it
+	ret	z
+	jp	Error6
+;
+; Read next word from file into reg HL
+;
+fget16:
+	call	fget8		; Get lo
+	ld	l,a
+	call	fget8		; Get hi
+	ld	h,a
+	ret
+;
+; Unget byte from file
+;
+fuget:
+	call	dskugt		; Unget byte
+	push	hl
+	ld	hl,(CurPC)	; Get PC
+	dec	hl
+	jr	PCst		; Update it
+;
+; Read next byte from file
+;
+fget8:
+	call	dskget		; Get byte
+	jp	c,Error5	; Early end
+	push	hl
+	ld	hl,(CurPC)	; Get PC
+	inc	hl
+PCst:
+	ld	(CurPC),hl	; Update it
+	pop	hl
+	ret
+;
+; Test three byte opcodes - Z set says yes
+;
+is3Byte:
+	ld	hl,Tab3Byte+Len3Byte-1
+	ld	bc,Len3Byte
+	jr	isxByte		; Search it
+;
+; Test two byte opcodes - Z set says yes
+;
+is2Byte:
+	ld	hl,Tab2Byte+Len2Byte-1
+	ld	bc,Len2Byte
+	jr	isxByte		; Search it
+;
+; Test one byte opcode - Z set says yes
+;
+is1Byte:
+	ld	hl,Tab1Byte+Len1Byte-1
+	ld	bc,Len1Byte
+isxByte:
+	cpdr			; Search it
+	ret
+;
+; ###########
+; # M A I N #
+; ###########
+;
+TPSCAN:
+	call	IniMem		; Initialize memory
+	call	IniARG		; Get from command line
+	call	IniRun		; Initialize a run
+	call	IniFile		; Initialize file to be scanned
+	ld	hl,TP3strt	; Get start address
+	call	Posfile		; Position in file
+	call	HEADER		; Load header
+	call	check1stJP	; Process 1st JP
+;
+; Due to possible constants within a compiled program the
+; scanner follows the calls of the compiled routines/functions
+;
+; ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; The main loop
+;
+TPLOOP:
+	ld	de,(EndPC)
+	ld	hl,(CurPC)
+	ld	(LabPC),hl	; Save address in case of label
+	or	a
+	sbc	hl,de		; Test end
+	jr	nc,EndTP
+	call	DecodeOPC	; Decode opcode
+	jr	TPLOOP
+;
+; ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; End of scan
+;
+EndTP:
+	ld	c,0
+	ld	de,0
+	call	CloseLabel	; Close label table
+	ld	bc,(LabelCount)	; Get number of labels
+	ld	de,_Type	; Offset to address referenced to
+	ld	hl,(Memptr)	; Get base address
+	call	Sort		; Sort labels found
+;
+; Sort was done for 1st entry which is the reference address
+; Due to the scanning thru the program the related PCs
+; are not sorted. This will be done in the following step
+;
+	ld	bc,(LabelCount)	; Get number of labels
+	ld	ix,(Memptr)	; Get base address
+	ld	de,LabLen
+NxtSubSrc:
+	call	CmpItems	; Compare two consecutive items
+	call	z,SubSort	; Sort them if same
+	add	ix,de		; Advance to next item
+	dec	bc		; Count down
+	ld	a,b
+	or	c		; Test more
+	jr	nz,NxtSubSrc	; Yeap
+	ld	hl,DispOpt
+	bit	7,(hl)		; Test display enabled
+	jr	z,EndDsp	; Nope
+;
+; Display the different types of labels
+;
+	ld	ix,TypeTable	; Point to type table
+DspLoop:
+	ld	a,(ix+0)
+	or	a		; Test end
+	jr	z,EndDsp
+	call	DspType		; Display type
+	inc	ix
+	jr	DspLoop
+EndDsp:
+	ld	hl,DispOpt
+	bit	6,(hl)		; Test map enabled
+	call	nz,TellMap	; Tell memory map
+	jp	OS
+;
+; Tell memory map
+;
+TellMap:
+	call	Wt.crlf
+	ld	de,$MEMMAP
+	call	Wt.string	; Tell what's coming
+	call	Wt.crlf
+	call	TellSubrs	; Tell subroutines
+	ld	hl,(MAINstrt)	; Get start of main
+	ld	de,$MAINbeg
+	call	st$Word
+	ld	hl,(EndPC)	; Get end of main
+	dec	hl
+	ld	de,$MAINend
+	call	st$Word
+	ld	de,$MAIN
+	call	Wt.string	; Print it
+	ret
+;
+; Tell subroutines
+;
+TellSubrs:
+	call	GetLabVal	; Init values
+NxtSubrs:
+	ld	a,c
+	or	b		; Test done
+	jr	z,IsSubr	; Yeap
+	ld	a,(iy+0)
+	res	7,a
+	cp	'C'		; Test subroutine
+	call	z,StSubr	; Store value if so
+	exx
+	add	iy,bc
+	exx
+	dec	bc
+	jr	NxtSubrs
+IsSubr:
+	bit	7,e		; Any subroutine found?
+	ld	hl,(MAINstrt)	; Get start of main
+	call	z,StSubrEnd	; Print it if so
+	ret
+;
+; Store final procedure/function address into 2nd part
+;
+StSubrEnd:
+	push	af		; Dummy
+	push	af		; Force write - we enter here with Z set
+	jr	StSubr2nd
+;
+; Store address into 1st and/or 2nd part
+;
+StSubr:
+	push	de
+	ld	e,(iy+1)	; Get address
+	ld	d,(iy+2)
+	ld	hl,(PrevAddr)	; Get previous address
+	or	a
+	sbc	hl,de		; Test same
+	ex	de,hl
+	pop	de
+	ret	z		; Ignore if so
+	ld	(PrevAddr),hl	; Set previous address
+	bit	7,e		; Ist it the very 1st entry?
+	res	7,e		; Indicate got one
+	push	de		; Save entry
+	push	af
+	jr	z,StSubr2nd	; Got 2nd entry
+	call	SetType		; Get type
+	ld	de,$SUBRfrom
+	jr	StSubr1st	; Do 1st entry
+StSubr2nd:
+	ld	de,$SUBRto	; Change address
+	dec	hl		; Get previous address on 2nd one
+StSubr1st:
+	call	st$Word		; Store address
+	pop	af		; Test print
+	call	z,prSubr	; Print line
+	pop	de		; Get back state
+	ret
+;
+; Print map line
+;
+prSubr::
+	ld	de,$SUBR
+	call	string		; Output line
+	call	TstSubType	; Indicate possible parameters
+	call	Wt.crlf
+	inc	hl		; Fix address
+	ld	de,$SUBRfrom
+	call	st$Word		; Store address
+	push	bc
+	ld	b,SUB.no
+	ld	hl,$SUBRno
+	call	incasc		; Increment number
+	pop	bc
+SetType:
+	ld	a,(iy+0)	; Get type
+	ld	(SubrParType),a
+	ret
+;
+; Indicate possible parameters
+;
+TstSubType:
+	ld	a,(SubrParType)	; Get type
+	rla			; Test any parameter
+	ld	de,$PARAM
+	call	c,string	; Yeap, indicate it
+	ret
+
+	dseg
+SubrParType:
+	ds	1
+$MEMMAP:
+	db	'--- MEMORY MAP ---',eot
+$PARAM:
+	db	' - with parameters',eot
+;
+$SUBR:
+	db	'0x'
+$SUBRfrom:
+	db	'xxxx - 0x'
+$SUBRto:
+	db	'xxxx : Subroutine '
+Sub$num:
+	db	'   '
+$SUBRno:
+	db	'1'
+SUB.no	equ	$-Sub$num
+	db	eot
+;
+$MAIN:
+	db	'0x'
+$MAINbeg:
+	db	'xxxx - 0x'
+$MAINend:
+	db	'xxxx : MAIN',eot
+	cseg
+;
+; Sort sub items
+;
+SubSort:
+	push	bc
+	push	de
+	push	ix		; Save current pointer
+;
+	push	ix
+	ld	hl,2		; Init count
+FndMoreSub:
+	add	ix,de		; Point to next
+	call	CmpItems	; Compare two consecutive items
+	jr	nz,EndSubSort	; Nope, end
+	inc	hl		; Count items
+	jr	FndMoreSub
+EndSubSort:
+	ld	c,l		; Copy count
+	ld	b,h
+	pop	hl		; Get back base address
+	ld	de,_Type+_Ref	; Set offset
+	call	Sort		; Sort
+;
+	pop	ix
+	pop	de
+	pop	bc
+	ret
+;
+; Compare two consecutive items - Z set says equal
+;
+CmpItems:
+	ld	a,(ix+_Type)	; Compare addresses
+	cp	(ix+_Type+LabLen)
+	ret	nz		; No match
+	ld	a,(ix+_Type+1)
+	cp	(ix+_Type+1+LabLen)
+	ret
+;
+; Decode opcode
+;
+; Remember not all possible opcodes are used by the TURBO.
+;
+; So using INLINE instructions may fall into an error
+;
+DecodeOPC:
+;
+; Part 1: Find one byte opcodes
+;
+; Usually these codes are ignored but take care of the RET instruction
+;
+; Supported one byte opcodes by TURBO:
+;
+; 009h    ADD	HL,BC
+; 019h    ADD	HL,DE
+; 01Bh    DEC	DE
+; 023h    INC	HL
+; 029h    ADD	HL,HL
+; 02Bh    DEC	HL
+; 054h    LD	D,H
+; 056h    LD	D,(HL)
+; 05Dh    LD	E,L
+; 05Eh    LD	E,(HL)
+; 065h    LD	H,L
+; 067h    LD	H,A
+; 06Ch    LD	L,H
+; 06Eh    LD	L,(HL)
+; 06Fh    LD	L,A
+; 072h    LD	(HL),D
+; 073h    LD	(HL),E
+; 07Ah    LD	A,D
+; 07Ch    LD	A,H
+; 07Dh    LD	A,L
+; 0A2h    AND	D
+; 0A3h    AND	E
+; 0B3h    OR	E
+; 0B7h    OR	A
+; 0C1h    POP	BC
+; 0C5h    PUSH	BC
+; 0C9h    RET
+; 0D1h    POP	DE
+; 0D5h    PUSH	DE
+; 0D9h    EXX
+; 0E1h    POP	HL
+; 0E5h    PUSH	HL
+; 0EBh    EX	DE,HL
+;
+	call	fget8		; Get byte
+	cp	_RET		; Test possible return form procedure/function
+	jr	nz,Tst1Byte	; Nope
+	call	ret.instr
+	ret
+Tst1Byte:
+	call	is1Byte		; Test one byte code
+	ret	z		; Yeap
+;
+; Part 2: Find two byte opcodes
+;
+; These codes are ignored
+;
+; Supported two byte opcodes by TURBO:
+;
+; 006h    LD	B,nn
+; 026h    LD	H,nn
+; 02Eh    LD	L,nn
+; 0EEh    XOR	nn
+;
+	call	is2Byte		; Test two byte code
+	jr	nz,mby3Byte	; Yeap
+	call	fget8		; Skip byte
+	ret
+;
+; Part 3: Find three byte opcodes
+;
+; These codes are interpreted
+;
+; Supported three byte opcodes by TURBO:
+;
+; 001h    LD	BC,nnnn
+; 011h    LD	DE,nnnn
+; 021h    LD	HL,nnnn
+; 022h    LD	(nnnn),HL
+; 02Ah    LD	HL,(nnnn)
+; 032h    LD	(nnnn),A
+; 0C2h    JP	NZ,nnnn
+; 0C3h    JP	nnnn
+; 0CAh    JP	Z,nnnn
+; 0CDh    CALL	nnnn
+; 0D2h    JP	NC,nnnn
+; 0DAh    JP	C,nnnn
+;
+mby3Byte:
+	call	is3Byte		; Test three byte code
+	jr	nz,TstSpec
+	call	fget16		; Get address/value
+	ex	de,hl
+	ld	hl,Exe3Byte
+	add	hl,bc
+	add	hl,bc
+	ld	c,(hl)		; Fetch address
+	inc	hl
+	ld	b,(hl)
+	push	bc		; Execute routine
+	ret
+;
+; Part 4: Check special prefix 0xCB, 0xED or 0xFD
+;
+TstSpec:
+	push	af
+	call	fget8
+	ld	b,a		; Get opcode
+	pop	af
+	cp	_CB		; Test CB prefix
+	jr	nz,isED
+;
+; Part 4a: Check prefix 0xCB
+;
+; Supported opcode by TURBO:
+;
+; 0CB45h  BIT	0,L
+;
+	ld	a,_B0.L		; Test BIT 0,L
+	cp	b
+	ret	z		; Ok
+	jr	invOPc
+isED:
+	cp	_FD		; Test FD prefix
+	jr	nz,isFD
+;
+; Part 4b: Check prefix 0xFD
+;
+; Supported opcodes by TURBO:
+;
+; 0FDE1h  POP	IY
+; 0FDE5h  PUSH	IY
+;
+	ld	a,_POP.IY
+	cp	b		; Test allowed
+	ret	z
+	ld	a,_PSH.IY
+	cp	b
+	ret	z		; Ok
+	jr	invOPc
+isFD:
+	cp	_ED		; Test ED prefix
+	jr	nz,invOPc
+;
+; Part 4c: Check prefix 0xED
+;
+; Supported opcodes by TURBO:
+;
+; 0ED42h  SBC	HL,BC
+; 0ED52h  SBC	HL,DE
+; 0ED5Bh  LD	DE,(nnnn)
+; 0EDB0h  LDIR
+;
+	ld	a,_S.H.B
+	cp	b		; Test allowed
+	ret	z
+	ld	a,_S.H.D
+	cp	b
+	ret	z
+	ld	a,_LDIR
+	cp	b
+	ret	z
+	ld	a,_LD.DE.
+	cp	b
+	jr	nz,invOPc
+	pop	hl
+	call	fget16		; Get address/value
+	ex	de,hl
+	jp	varref
+;
+; Invalid opcode found - display code and related PC
+;
+invOPc:
+	ld	de,$ILOP1
+	call	st$Byte
+	ld	hl,(CurPC)	; Get PC
+	dec	hl
+	dec	hl
+	ld	de,$ILOP2
+	call	st$Word
+	ld	de,$ILOP
+	call	string		; Tell invalid
+	jp	OS
+;
+; Display type if selected
+;
+DspType:
+	call	GetLabVal	; Init values
+NxtType:
+	ld	a,c
+	or	b		; Test done
+	ret	z		; Yeap
+	ld	a,(iy+0)
+	res	7,a
+	cp	(ix+0)		; Test same type
+	jr	nz,NotSame
+	bit	7,e		; Is prefix typed?
+	call	nz,TellType	; Nope
+	call	TypeAddr	; Type it
+NotSame:
+	exx
+	add	iy,bc
+	exx
+	dec	bc
+	jr	NxtType
+;
+; Type address of reference and possible name of RTL
+;
+TypeAddr:
+	push	de
+	ld	l,(iy+3)	; Get address
+	ld	h,(iy+4)
+	ld	de,$TYPEADR
+	call	st$Word
+	ld	l,(iy+1)	; Get reference
+	ld	h,(iy+2)
+	call	isNewAddr
+	jr	z,SkpRTL	; Skip RTL display if previousley done
+	ld	de,$TYPEREF
+	call	st$Word
+	ld	de,$TYPEMSG
+	call	string
+	ld	a,(ix+0)
+	cp	'I'		; Test RTL access
+	call	z,TellFunction
+EndAddr:
+	call	Wt.crlf
+	pop	de
+	ret
+SkpRTL:
+	ld	de,$NORTL
+	call	string
+	ld	de,$TYPEADR
+	call	string
+	jr	EndAddr
+;
+; Init label values found
+;
+GetLabVal:
+	ld	bc,LabLen	; Set length of label
+	exx
+	ld	bc,(LabelCount)	; Get label count
+	ld	iy,(Memptr)	; Init pointer
+	set	7,e		; Indicate nothing found
+	ld	hl,0
+	ld	(PrevAddr),hl	; Clear previous address
+	ret
+
+	dseg
+$TYPEMSG:
+	db	'Access '
+$TYPEREF:
+	db	'xxxx at address '
+$TYPEADR:
+	db	'xxxx',eot
+$NORTL:
+	db	'                     + ',eot
+PrevAddr:
+	ds	2
+	cseg
+;
+; Test address in HL already typed - Z set says yes
+;
+isNewAddr:
+	ex	de,hl
+	ld	hl,(PrevAddr)	; Get previous address
+	or	a
+	sbc	hl,de		; Test it
+	ex	de,hl
+	ret	z		; Yeap, we got it
+	ld	(PrevAddr),hl	; Set previous address
+	ret
+;
+; Display RTL name if defined
+;
+TellFunction:
+	push	ix
+	ld	ix,SuppTab	; Init table pointer
+NxtFunc:
+	ld	a,(ix+0)
+	or	(ix+1)		; Test done
+	jr	z,UnkFunc	; Yeap, not in list
+	ld	a,l
+	cp	(ix+0)		; Test match
+	jr	nz,NoFunc
+	ld	a,h
+	cp	(ix+1)
+	jr	nz,NoFunc
+prUnk:
+	ld	de,typ$sep
+	call	string		; Give prefix
+	push	ix
+	pop	de
+	inc	de
+	inc	de
+	call	string		; Tell name
+	pop	ix
+	ret
+UnkFunc:
+	ld	ix,Un$Supp-2
+	jr	prUnk
+NoFunc:
+	ld	de,SupLen
+	add	ix,de		; Advance in table
+	jr	NxtFunc
+
+	dseg
+Un$Supp:
+	db	'    *** UNKNOWN ***',eot
+SuppTab:
+	dw	0005h
+	db	'BDOS   ',eot
+SupLen	equ	$-SuppTab
+	dw	021Dh
+	db	'Delay  ',eot
+	dw	023Eh
+	db	'ClrScr ',eot
+	dw	0259h
+	db	'DelLine',eot
+	dw	0262h
+	db	'InsLine',eot
+	dw	026Bh
+	db	'LowVid ',eot
+	dw	0284h
+	db	'NormVid',eot
+	dw	0299h
+	db	'ClrEol ',eot
+	dw	030Ah
+	db	'CrtInit',eot
+	dw	0310h
+	db	'CrtExit',eot
+	dw	0508h
+	db	'RecOn  ',eot
+	dw	0522h
+	db	'RecOff ',eot
+	dw	052Ch
+	db	'Ld Real',eot
+	dw	053Ah
+	db	'AssStrg',eot
+	dw	ImStrg
+	db	'Imm Str',eot
+	dw	055Dh
+	db	'SET Stk',eot
+	dw	0581h
+	db	'SET Ini',eot
+	dw	0591h
+	db	'SET Ele',eot
+	dw	059Bh
+	db	'SET Con',eot
+	dw	05D1h
+	db	'St Real',eot
+	dw	05E2h
+	db	'AssStrg',eot
+	dw	0601h
+	db	'AssStrg',eot
+	dw	0612h
+	db	'Ass SET',eot
+	dw	0623h
+	db	'Ass SET',eot
+	dw	0638h
+	db	'Set SET',eot
+	dw	064Ch
+	db	'Idx Chk',eot
+	dw	0656h
+	db	'Rng Chk',eot
+	dw	0666h
+	db	'TO     ',eot
+	dw	0676h
+	db	'DOWNTO ',eot
+	dw	067Fh
+	db	'Int  = ',eot
+	dw	0688h
+	db	'Real = ',eot
+	dw	068Dh
+	db	'Strg = ',eot
+	dw	0692h
+	db	'Int  <>',eot
+	dw	069Bh
+	db	'Real <>',eot
+	dw	06A0h
+	db	'Strg <>',eot
+	dw	06A5h
+	db	'Int  >=',eot
+	dw	06AEh
+	db	'Real >=',eot
+	dw	06B3h
+	db	'Strg >=',eot
+	dw	06B8h
+	db	'Int  <=',eot
+	dw	06C2h
+	db	'Real <=',eot
+	dw	06C7h
+	db	'Strg <=',eot
+	dw	06CCh
+	db	'Int  > ',eot
+	dw	06D6h
+	db	'Real > ',eot
+	dw	06DBh
+	db	'Strg > ',eot
+	dw	06E0h
+	db	'Int  < ',eot
+	dw	06E9h
+	db	'Real < ',eot
+	dw	06EEh
+	db	'Strg < ',eot
+	dw	06F3h
+	db	'Int SQR',eot
+	dw	06F5h
+	db	'Int MUL',eot
+	dw	070Fh
+	db	'Int DIV',eot
+	dw	073Bh
+	db	'Random ',eot
+	dw	0745h
+	db	'Int MOD',eot
+	dw	074Eh
+	db	'SHL    ',eot
+	dw	0756h
+	db	'SHR    ',eot
+	dw	0780h
+	db	'Int ABS',eot
+	dw	078Bh
+	db	'ODD(x) ',eot
+	dw	07F7h
+	db	'To Int ',eot
+	dw	083Dh
+	db	'Str Add',eot
+	dw	086Bh
+	db	'Copy   ',eot
+	dw	08A3h
+	db	'Length ',eot
+	dw	08B2h
+	db	'Pos    ',eot
+	dw	08F3h
+	db	'Delete ',eot
+	dw	0920h
+	db	'Insert ',eot
+	dw	0996h
+	db	'Chr Str',eot
+	dw	09E9h
+	db	'Rea Add',eot
+	dw	09F2h
+	db	'Rea Sub',eot
+	dw	09F7h
+	db	'Rea SQR',eot
+	dw	09FAh
+	db	'Rea MUL',eot
+	dw	09FFh
+	db	'Rea DIV',eot
+	dw	0BFDh
+	db	'INT(x) ',eot
+	dw	0C34h
+	db	'FRAC(x)',eot
+	dw	0C46h
+	db	'SQRT(x)',eot
+	dw	0C7Fh
+	db	'COS(x) ',eot
+	dw	0C87h
+	db	'SIN(x) ',eot
+	dw	0D2Bh
+	db	'LN(x)  ',eot
+	dw	0DB6h
+	db	'EXP(x) ',eot
+	dw	0E46h
+	db	'ATAN(x)',eot
+	dw	0FB4h
+	db	'Random ',eot
+	dw	0FD0h
+	db	'ROUND  ',eot
+	dw	0FDEh
+	db	'TRUNC  ',eot
+	dw	1008h
+	db	'To Real',eot
+	dw	11A3h
+	db	'Cnv Rea',eot
+	dw	12DDh
+	db	'SET <> ',eot
+	dw	12E1h
+	db	'SET =  ',eot
+	dw	12FCh
+	db	'Sub SET',eot
+	dw	1300h
+	db	'Sub SET',eot
+	dw	1318h
+	db	'SET Add',eot
+	dw	1326h
+	db	'SET Sub',eot
+	dw	1333h
+	db	'SET Prc',eot
+	dw	134Fh
+	db	'IN Set ',eot
+	dw	136Fh
+	db	'ASS Txt',eot
+	dw	1370h
+	db	'ASS Unt',eot
+	dw	13FEh
+	db	'REW Txt',eot
+	dw	13FFh
+	db	'RES Txt',eot
+	dw	1469h
+	db	'CLS Txt',eot
+	dw	0149Bh
+	db	'Std I/O',eot
+	dw	14A9h
+	db	'Inp I/O',eot
+	dw	14BAh
+	db	'Wrt Txt',eot
+	dw	14CBh
+	db	'READLN ',eot
+	dw	14CCh
+	db	'READ   ',eot
+	dw	1644h
+	db	'RD Chr ',eot
+	dw	164Dh
+	db	'RD Byte',eot
+	dw	164Eh
+	db	'RD Int ',eot
+	dw	1672h
+	db	'RD Real',eot
+	dw	168Eh
+	db	'RD Strg',eot
+	dw	16ABh
+	db	'End RD ',eot
+	dw	1722h
+	db	'WR Chr ',eot
+	dw	1726h
+	db	'WR Int ',eot
+	dw	1779h
+	db	'WR Real',eot
+	dw	178Bh
+	db	'WR Bool',eot
+	dw	17AAh
+	db	'WR Strg',eot
+	dw	ImWrt
+	db	'WR Imm ',eot
+	dw	17CDh
+	db	'WritelN',eot
+	dw	17D7h
+	db	'Sek EOL',eot
+	dw	17DCh
+	db	'EOLN   ',eot
+	dw	17E1h
+	db	'Sek EOF',eot
+	dw	17E6h
+	db	'EOF    ',eot
+	dw	1810h
+	db	'REW Rec',eot
+	dw	1811h
+	db	'RES Rec',eot
+	dw	187Ah
+	db	'CLS Rec',eot
+	dw	18A4h
+	db	'Ini Rec',eot
+	dw	18B6h
+	db	'RD Rec ',eot
+	dw	18DCh
+	db	'WR Rec ',eot
+	dw	19A5h
+	db	'FLUSH  ',eot
+	dw	19D5h
+	db	'SEEK   ',eot
+	dw	1A49h
+	db	'Unt EOF',eot
+	dw	1A55h
+	db	'FilePos',eot
+	dw	1A5Dh
+	db	'FileSiz',eot
+	dw	1A6Fh
+	db	'REW Unt',eot
+	dw	1A70h
+	db	'RES Unt',eot
+	dw	1AB0h
+	db	'CLS Unt',eot
+	dw	1ABAh
+	db	'BLKWR  ',eot
+	dw	1ABEh
+	db	'BLKRD  ',eot
+	dw	1AEDh
+	db	'BLKWRRS',eot
+	dw	1AF1h
+	db	'BLKRDRS',eot
+	dw	1B6Fh
+	db	'SEEK   ',eot
+	dw	1B93h
+	db	'ERASE  ',eot
+	dw	1BA5h
+	db	'RENAME ',eot
+	dw	1BEAh
+	db	'EXECUTE',eot
+	dw	1BEBh
+	db	'CHAIN  ',eot
+	dw	OVERLAY
+	db	'Overlay',eot
+	dw	1CDBh
+	db	'Ovr Drv',eot
+	dw	1CE5h
+	db	'NEW    ',eot
+	dw	1D7Ah
+	db	'DISPOSE',eot
+	dw	1E3Dh
+	db	'MEMAVAL',eot
+	dw	1E44h
+	db	'MAXAVAL',eot
+	dw	1EA3h
+	db	'MARK   ',eot
+	dw	1EABh
+	db	'RELEASE',eot
+	dw	1EBDh
+	db	'STR Rea',eot
+	dw	1EBEh
+	db	'STR Int',eot
+	dw	1EF3h
+	db	'VAL Rea',eot
+	dw	1EF4h
+	db	'VAL Int',eot
+	dw	1F48h
+	db	'RANDMIZ',eot
+	dw	1F4Eh
+	db	'FILCHAR',eot
+	dw	1F64h
+	db	'MOVE   ',eot
+	dw	1F7Dh
+	db	'PARASTR',eot
+	dw	1F9Bh
+	db	'PARACNT',eot
+	dw	1FDBh
+	db	'GotoXY ',eot
+	dw	1FE4h
+	db	'UPCASE ',eot
+	dw	1FEAh
+	db	'BIOS   ',eot
+	dw	1FF1h
+	db	'IORES  ',eot
+	dw	201Bh
+	db	'Chk I/O',eot
+	dw	TP3halt
+	db	'HALT   ',eot
+;
+	dw	0
+typ$sep:
+	db	tab,'; ',eot	
+	cseg
+;
+; Give title of type
+;
+TellType:
+	res	7,e		; Indicate title displayed
+	push	bc
+	push	de
+	push	hl
+	ld	hl,TypeTable+TL-1
+	ld	bc,TL
+	cpdr			; Find type
+	jp	nz,Error9	; Very bad error
+	ld	de,type$del
+	call	Wt.string	; Give delimiter
+	ld	hl,TTmsg
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	call	string		; Tell type
+	call	Wt.crlf
+	ld	de,type$del
+	call	Wt.string
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+
+	dseg
+TypeTable:
+	db	'ICJRKV'
+TL	equ	$-TypeTable
+	db	0
+TTmsg:
+	dw	type$I
+	dw	type$C
+	dw	type$J
+	dw	type$R
+	dw	type$K
+	dw	type$V
+;
+type$I:
+	db	'  RTL calls:',eot
+type$C:
+	db	'  Prg calls:',eot
+type$J:
+	db	'  Prg jumps:',eot
+type$R:
+	db	'Prg ref jps:',eot
+type$K:
+	db	'  Const acc:',eot
+type$V:
+	db	'    Var acc:',eot
+type$del:
+	db	'------------',eot
+	cseg
+;
+; Store hex word in HL at ^DE
+;
+st$Word:
+	ld	a,h		; Get hi first
+	call	st$Byte
+	ld	a,l
+;
+; Store hex byte in Accu at ^DE
+;
+st$Byte:
+	push	af
+	rra			; Get hi bits
+	rra
+	rra
+	rra
+	call	st$Nib
+	pop	af		; Same for lo bits
+st$Nib:
+	and	LoMask
+	add	a,090h
+	daa
+	adc	a,040h
+	daa
+	ld	(de),a
+	inc	de
+	ret
+
+	dseg
+$ILOP:
+	db	'Invalid opcode 0x'
+$ILOP1:
+	db	'xx at address 0x'
+$ILOP2:
+	db	'xxxx - Abort'
+	db	cr,lf,eot
+Tab1Byte:
+	db	009h,019h,01Bh,023h,029h,02Bh,054h,056h,05Dh,05Eh,065h,067h
+	db	06Ch,06Eh,06Fh,072h,073h,07Ah,07Ch,07Dh,0A2h,0A3h,0B3h
+;;	db	0B7h,0C1h,0C5h,0C9h,0D1h,0D5h,0D9h,0E1h,0E5h,0EBh
+	db	0B7h,0C1h,0C5h,     0D1h,0D5h,0D9h,0E1h,0E5h,0EBh
+Len1Byte	equ	$-Tab1Byte
+
+Tab2Byte:
+	db	006h,026h,02Eh,0EEh
+Len2Byte	equ	$-Tab2Byte
+
+Tab3Byte:
+	db	001h,011h,021h,022h,02Ah,032h,0C2h,0C3h,0CAh,0CDh,0D2h,0DAh
+Len3Byte	equ	$-Tab3Byte
+
+Exe3Byte:
+	dw	const16		; 001h
+	dw	const16		; 011h
+	dw	const16		; 021h
+	dw	varref		; 022h
+	dw	varref		; 02Ah
+	dw	varref		; 032h
+	dw	jpccref		; 0C2h
+	dw	jpref		; 0C3h
+	dw	jpccref		; 0CAh
+	dw	calref		; 0CDh
+	dw	jpccref		; 0D2h
+	dw	jpccref		; 0DAh
+$COM:
+	db	'COM'
+CurPC:
+	dw	TP3strt
+EndPC:
+	dw	0
+MAINstrt:
+	ds	2
+LabPC:
+	ds	2
+EndVAR:
+	dw	0
+StrtVAR:
+	dw	0
+$memry:
+	ds	2
+heap:
+	ds	2
+MEMTOP:
+	ds	2
+LabelCount:
+	dw	0
+LabExch:
+	ds	3
+VJ:
+	ds	2
+VI:
+	ds	2
+
+	cseg
+;
+; Sort labels (Bubblesort)
+;
+; Entry	Reg BC holds number of elements to be sorted
+;	Reg DE holds offset to element to be sorted
+;	Reg HL points to start of data
+;
+; Each element has the following format:
+;
+; Byte  1  : Type character (I,C,J,R,V,K)
+; Bytes 2,3: Address or value of type
+; Bytes 4,5: Address of label reference
+;
+Sort:
+	ld	(SortCount),bc	; Save number of elements
+	ld	(SortOffset),de	; Save item offset
+	ld	(SortBase),hl	; Save base
+;
+	ld	de,2		; Init loop
+Sortl2:
+	ld	(VI),de
+	ld	hl,(SortCount)
+	or	a
+	sbc	hl,de		; Test within range
+	ret	c		; End
+	add	hl,de		; Init inner loop
+Sortl1:
+	ld	(VJ),hl
+	ld	de,(VI)
+	or	a
+	sbc	hl,de		; Test done
+	jr	c,Sort2		; Yeap
+	add	hl,de
+	dec	hl
+	dec	hl
+	ld	e,l		; * 1
+	ld	d,h
+	add	hl,hl		; * 2
+	add	hl,hl		; * 4
+	add	hl,de		; * 5
+	ld	de,(SortBase)
+	add	hl,de		; Position element
+	push	hl
+	push	hl
+	pop	ix		; Copy address
+	ld	bc,(SortOffset)
+	add	hl,bc		; Position to element
+	ld	c,(hl)		; Get value
+	inc	hl
+	ld	b,(hl)
+	pop	hl
+	ld	de,LabLen
+	add	hl,de		; Point to next element
+	push	hl
+	pop	iy		; Copy this address, too
+	ld	de,(SortOffset)
+	add	hl,de		; Skip character
+	ld	e,(hl)		; Get this value, too
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	or	a
+	sbc	hl,bc		; Test less
+	jr	nc,Sort1	; Nope
+;
+; Swap elements
+;
+	ld	b,Lablen
+Swap:
+	ld	c,(ix+0)	; Swap elements
+	ld	a,(iy+0)
+	ld	(ix+0),a
+	ld	(iy+0),c
+	inc	ix
+	inc	iy
+	djnz	Swap
+Sort1:
+	ld	hl,(VJ)
+	dec	hl		; Fix loops
+	jr	Sortl1
+Sort2:
+	ld	de,(VI)
+	inc	de
+	jr	Sortl2
+;
+SortCount:
+	ds	2
+SortOffset:
+	ds	2
+SortBase:
+	ds	2
+;
+; 16 Bit held in reg pair DE
+;
+; Found constant reference
+;
+; If its value is within variable range insert as type V
+; If it is within program code insert as type K
+;
+const16:
+	ld	hl,TP3strt+HeadLen
+	or	a
+	sbc	hl,de
+	jr	z,conref
+	ret	nc
+	ld	hl,(StrtVAR)
+	or	a
+	sbc	hl,de
+	ret	c
+	ld	hl,(EndVAR)
+	or	a
+	sbc	hl,de
+	jr	c,varref
+	jr	z,varref
+	ld	hl,(EndPC)
+	or	a
+	sbc	hl,de
+	ret	c
+conref:
+	ld	c,'K'
+	jr	LabelSet
+;
+; Found unconditional jump reference
+;
+jpref:
+	call	isRTL		; Test RTL reference
+	jr	nc,LabelSet	; Yeap
+	ld	c,'J'
+	jr	LabelSet
+;
+; Found call reference
+;
+calref:
+	call	isRTL		; Test RTL reference
+	push	af
+	call	nc,LabelSet	; Yeap
+	pop	af
+	jr	c,EnablePC
+	call	FixPC		; Fix on RTL reference
+	ret
+EnablePC:
+	ld	c,'C'
+	call	LabelSet	; Insert label
+	call	call.instr	; Do the call
+	ret
+;
+; Found variable reference
+;
+varref:
+	ld	c,'V'
+	jr	LabelSet
+;
+; Found conditional jump reference
+;
+jpccref:
+	ld	c,'R'
+;
+; Insert label with type in reg C and value in reg DE
+;
+LabelSet:
+	call	SameLabel	; Test same label
+	ret	z		; Ignore it
+	ld	hl,(LabelCount)	; Get count
+	inc	hl		; Advance it
+	ld	(LabelCount),hl
+CloseLabel:
+	ld	hl,(heap)
+	ld	(hl),c		; Unpack label
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	de
+	ld	de,(LabPC)
+	ld	(hl),e		; Insert label PC
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(heap),hl
+	ld	de,(MEMTOP)
+	or	a
+	sbc	hl,de		; Test enogh memory
+	pop	de
+	ret	c
+	jp	Error8
+;
+; Test same label already in table - Z set says yes
+;
+SameLabel:
+	ld	hl,(LabelCount)	; Get count
+	ld	a,l
+	or	h
+	sub	1
+	sbc	a,a
+	ret	nz		; No label here
+	ld	iy,LabPC
+	ld	ix,(Memptr)	; Init pointer
+NxtLabel:
+	call	isSameLabel	; Test same label
+	ret	z		; Yeap, got it
+	push	bc
+	ld	bc,LabLen
+	add	ix,bc		; Point to next label
+	pop	bc
+	dec	hl
+	ld	a,l
+	or	h
+	jr	nz,NxtLabel
+	dec	a		; Set not in table
+	ret
+;
+; Test same label - Z set says yes
+;
+isSameLabel:
+	ld	a,(ix+0)
+	res	7,a
+	cp	c		; Now compare
+	ret	nz
+	ld	a,(ix+1)
+	cp	e
+	ret	nz
+	ld	a,(ix+2)
+	cp	d
+	ret	nz
+	ld	a,(ix+3)
+	cp	(iy+0)
+	ret	nz
+	ld	a,(ix+4)
+	cp	(iy+1)
+	ret
+;
+; Test address DE within RTL - C set if not
+;
+isRTL:
+	ld	hl,OVERLAY
+	or	a
+	sbc	hl,de		; Test overlay which is not supported
+	jp	z,OVLNOT
+	ld	hl,TP3strt
+	or	a
+	sbc	hl,de		; Test against first address behind RTL
+	ld	c,'I'
+	ret
+;
+; Fix PC for special RTL calls - l054d or l17ba
+;
+; Both calls follows a string defined as:
+;
+;	DB	LEN
+;	DB	c1,c2,..,cLEN
+;
+; For an empty string only LEN=0 follows.
+;
+FixPC:
+	ld	hl,ImStrg
+	or	a
+	sbc	hl,de		; Test it
+	jr	z,FixIt
+	ld	hl,ImWrt
+	or	a
+	sbc	hl,de		; Test it
+	ret	nz
+FixIt:
+	call	fget8		; Get count
+	ld	b,a
+	inc	b		; Check special one
+	dec	b
+	ret	z
+SkpIt:
+	call	fget8		; Get characters
+	djnz	SkpIt		; And throw them away
+	ret
+;
+; Verify system call with address in reg DE
+;
+vrfSYS:
+	ld	c,_CALL
+	call	vrfy8		; Verify correct code
+	call	vrfy16		; Verify correct address
+	ret
+;
+; Read Header
+;
+HEADER:
+;
+; ld sp,00100h
+;
+	ld	c,_LD.SP
+	call	vrfy8		; Verify correct code
+	ld	de,TPA
+	call	vrfy16		; Verify correct address
+;
+; ld hl,LASTVAR-128
+;
+	ld	c,_LD.HL
+	call	vrfy8		; Verify correct code
+	call	fget16		; Get address and throw away
+;
+; ld bc,MASK
+;
+	ld	c,_LD.BC
+	call	vrfy8		; Verify correct code
+	call	fget16		; Get value and throw away
+;
+; call 00364h
+;
+	ld	de,SYSINI1
+	call	vrfSYS		; Verify next call
+;
+; ld hl,FIRSTFREE
+;
+	ld	c,_LD.HL
+	call	vrfy8		; Verify correct code
+	call	fget16		; Get address
+	ld	(EndPC),hl	; Save for end address
+;
+; ld de,LASTFREE
+;
+	ld	c,_LD.DE
+	call	vrfy8		; Verify correct code
+	call	fget16		; Get address
+	ld	(EndVAR),hl	; Save for variable end
+;
+; ld bc,LASTVAR
+;
+	ld	c,_LD.BC
+	call	vrfy8		; Verify correct code
+	call	fget16		; Get address
+	ld	(StrtVAR),hl	; Save for variable start
+;
+; ld a,1
+;
+	ld	c,_LD.A
+	call	vrfy8		; Verify correct code
+	ld	c,1
+	call	vrfy8		; Verify correct value
+;
+; call 004d4h
+;
+	ld	de,SYSINI2
+	call	vrfSYS		; Verify next call
+	ret
+;
+; Perform return from program's procedure or function
+;
+ret.instr:
+	ld	hl,(CallBalance)
+	ld	a,l
+	or	h		; Verify stack not empty
+	jp	z,Err11		; Error if so
+	dec	hl
+	ld	(CallBalance),hl
+	ld	hl,(CALL.RET)
+	dec	hl
+	ld	d,(hl)		; Get back address
+	dec	hl
+	ld	e,(hl)
+	ld	(CALL.RET),hl
+	ex	de,hl		; Get back new PC
+	jr	PosPC		; Position PC
+;
+; Perform call to program's procedure or function
+;
+call.instr:
+	ld	hl,(CallBalance)
+	ld	bc,CallDep
+	or	a
+	sbc	hl,bc		; Test in range
+	jp	nc,Err10	; Error if so
+	add	hl,bc
+	inc	hl		; Update level
+	ld	(CallBalance),hl
+	push	de
+	ld	de,(CurPC)	; Get current PC
+	ld	hl,(CALL.RET)
+	ld	(hl),e		; Save it
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(CALL.RET),hl
+	pop	hl		; Get back new PC
+	call	PosPC		; Position PC
+;
+; Procedures and functions my start with 'JP xxxx'
+;
+	call	TstJP		; Test JP follows
+;
+; Procedures/functions start with 'POP IY' if parameters are given
+;
+	call	fget16		; Get next two bytes
+	ld	de,256*_POP.IY+_FD
+	or	a
+	sbc	hl,de		; Test it
+	jr	nz,NoParam
+	ld	ix,(heap)
+	set	7,(ix-LabLen)	; Indicate parameter
+NoParam:
+	call	fuget		; Bring back two bytes
+	call	fuget
+	ret
+;
+; Test JP follows
+;
+TstJP:
+	call	fget8		; Get next byte
+	cp	_JP		; Test JP
+	jp	nz,fuget	; Nope, bring byte back
+	call	fget16		; Get address
+	call	PosPC		; And set it
+	ret
+;
+; Check very 1st JP
+;
+check1stJP:
+	call	fget8
+	cp	_JP		; Verify jp follows
+	jp	nz,Err12	; Error if not
+	call	fget16		; Get address
+	ld	de,TP3halt
+	or	a
+	sbc	hl,de		; Test empty program
+	jp	z,TellDummy	; Yeap give info and exit
+	add	hl,de
+	ld	(MAINstrt),hl	; Set start of MAIN
+PosPC:
+	ld	(CurPC),hl	; Set it
+	call	Posfile		; Position in file
+	ret
+
+	dseg
+Memptr:
+	ds	2
+CALL.RET:
+	ds	2
+CallBalance:
+	dw	0
+ARGV:
+	ds	2*ARGC
+DispOpt:
+	db	11000000b
+	cseg
+;
+; Initialize command line
+;
+IniARG:
+	ld	b,ARGC		; Get max input
+	ld	hl,ARGV
+	ld	de,CCPlen
+	call	cmdarg		; Get arguments
+	jp	c,Error13	; Invalid count
+	dec	a		; Test any option
+	ret	z		; Nope
+	ld	hl,FCB2
+	ld	de,FCB
+	ld	bc,.fdrv+.fname+.fext
+	ldir			; Unpack file
+	ld	hl,(ARGV)	; Get pointer to 1st argument
+	ld	a,(hl)
+	cp	'-'		; Must be prefix
+	jp	nz,Error13
+	inc	hl
+	ld	a,(hl)
+	ld	c,01000000b
+	cp	'S'		; Test -S
+	jr	z,SetOpt
+	ld	c,10000000b
+	cp	'M'		; Test -M
+	jp	nz,Error13
+SetOpt:
+	ld	a,c
+	ld	(DispOpt),a	; Set option
+	ret
+;
+; Initialize memory
+;
+IniMem:
+	ld	hl,($memry)	; Get first free memory address
+	ld	(CALL.RET),hl	; Set for base of call/ret
+	ld	de,2*CallDep
+	add	hl,de		; Allow some space
+	ld	(Memptr),hl	; Set for free base address
+	ld	(heap),hl	; Init heap
+	ld	hl,(TPATOP)	; Get top of memory
+	dec	hl
+	pop	bc		; Get caller
+	ld	sp,hl		; Set new stack
+	push	bc		; Bring back caller
+	dec	h		; Allow one stack page
+	ld	(MEMTOP),hl	; Set max memory
+	ret
+;
+; Initialize a run
+;
+IniRun:
+	ld	hl,fseek-1
+	set	0,(hl)		; Force sequential read
+	call	iniConsole	; Init console page length
+	ld	de,FCBext
+	ld	hl,$COM		; Init default extension
+	ld	a,(de)		; Test extension given
+	cp	' '
+	ret	nz		; Yeap
+	ld	bc,.fext
+	ldir			; Unpack
+	ret
+;
+; Initialize file to be scanned
+;
+IniFile:
+	ld	de,FCB
+	call	open		; Try to find file
+	jp	c,Error1	; Not found
+	call	dskred		; Read 1st record
+	jp	c,Error2	; Should be at least one
+	ld	a,(DMA)		; Get first byte
+	cp	_JP		; Must be a jump
+	jp	nz,Error3
+	ld	hl,(DMA+1)	; Get jump address
+	ld	de,TP3strt
+	or	a
+	sbc	hl,de		; Verify TP 3
+	jp	nz,Error4
+	ret
+;
+; Init console page length
+;
+iniConsole:
+	ld	a,MAXROW
+	ld	(ConMaxRow),a
+	dec	a
+	ld	(ConRow),a	; Simple store value
+	ret
+;
+; Print string and test more space on console
+;
+Wt.string:
+	call	string		; Give message followed by new line
+;
+; Give new line and test more space on console
+;
+Wt.crlf:
+	call	crlf		; Give new line
+	ld	a,(ConRow)
+	dec	a		; Decrement lines count
+	ld	(ConRow),a
+	ret	nz		; Still more
+	call	iniConsole	; Reset page length
+	ld	de,$MORE
+	call	string		; Tell waiting
+	call	conino		; Get character
+	push	af
+	ld	de,NO$MORE
+	call	string		; Erase line
+	pop	af
+	cp	'C'-'@'		; Test abort
+	jp	z,TellBreak	; Tell abort
+	ret
+
+	dseg
+ConMaxRow:
+	ds	1
+ConRow:
+	ds	1
+$MORE:
+	db	'<< MORE >>',eot
+NO$MORE:
+	db	cr,'          ',cr,eot
+	cseg
+
+	end	TPSCAN
+

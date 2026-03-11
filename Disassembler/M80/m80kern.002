@@ -1,0 +1,1728 @@
+;
+; Index 14 : Z80 block instructions
+;
+; CPD, CPDR, CPI, CPIR, IND, INDR, INI, INIR, LDD, LDDR, LDI
+; LDIR, NEG, OTDR, OTIR, OUTD, OUTI, RETI, RETN, RLD, RRD
+;
+ED.code:
+	ld	a,ED		; Give prefix
+	call	wrt.code
+;
+; Index 0 : Single byte 8080 instructions
+;
+; CMA, CMC, DAA, DI, EI, HLT, NOP, PCHL, RAL
+; RAR, RC, RET, RIM, RLC, RM, RNC, RNZ, RP
+; RPE, RPO, RRC, RZ, SIM, SPHL, STC, XCHG, XTHL
+;
+; Index 13 : Single byte Z80 instructions
+;
+; CCF, CPL, DAA, DI, EI, EXX, HALT, NOP
+; RLA, RLCA, RRA, RRCA, SCF
+;
+sngl.code:
+	ld	a,c		; Get code from table
+	call	wrt.code	; .. write
+	jp	succ.ptr
+;
+; Index 1 : Register reference 8080 instructions
+;
+; LDAX, STAX
+;
+ldx.code:
+	push	bc
+	call	get.byte	; Get register
+	call	RegBC.DE	; Validate regs
+	jr	wr.code		; .. write
+;
+; Index 2 : Register referenece 8080 instructions
+;
+; DAD, DCX, INX, POP, PUSH
+;
+rp.code:
+	push	bc
+	call	get.byte	; Get register
+	call	RegPair		; Validate reg pair
+wr.code:
+	pop	bc		; Get back code
+	jp	InsCode		; .. insert code
+;
+; Index 3 : 8 bit register reference 8080 instructions
+;
+; ADC, ADD, ANA, CMP, ORA, SBB, SUB, XRA
+;
+math.code:
+	push	bc
+	call	get.byte	; Get register
+	call	Reg		; .. validate it
+	pop	bc
+	add	a,c		; .. combine code
+	jp	wrt.code	; .. write
+;
+; Index 4 : 8 bit 8080 instructions
+;
+; DCR, INR, RST
+;
+r8.code:
+	push	bc
+	call	get.byte	; Get value
+	call	Reg		; .. check it
+	jr	wr.code
+;
+; Index 5 : Immediate byte 8080 instructions
+;
+; ACI, ADI, ANI, CPI, IN, ORI, OUT, SBI, SUI, XRI
+;
+imm.code:
+	ld	a,c
+	push	af		; Save code
+	call	get.byte	; Get operand
+	ld	c,a
+	pop	af
+	call	wrt.code	; Write code
+	ld	a,c		; .. and operand
+	jp	WrVal8
+;
+; Index 6 : 8080 direct address reference instructions
+;
+; CALL, CC, CM, CNC, CNZ, CP, CPE, CPO, CZ, JC, JM, JMP
+; JNC, JNZ, JP, JPE, JPO, JZ, LDA, LHLD, SHLD, STA
+;
+addr.code:
+	ld	a,c
+	push	af
+	call	get.val		; Get address
+	pop	af
+	call	wrt.code	; Write code
+	jp	WrVal16		; ..and address
+;
+; Index 7 : 8080 register move instruction
+;
+;  MOV
+;
+mov.code:
+	push	bc
+	call	get.byte	; Get reg 1
+	call	Reg		; .. validate
+	pop	bc
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	add	a,c		; .. put into base
+	ld	c,a
+	push	bc
+	call	ChkComma	; Verify comma
+	call	get.byte	; Get reg 2
+	call	Reg		; .. validate, too
+	pop	bc
+	add	a,c		; Get total code
+	cp	.HALT		; Validate
+	call	z,A.err		; .. error
+	jp	wrt.code	; Write code
+;
+; Index 8 : 8080 immediate move instruction
+;
+; MVI
+;
+mvi.code:
+	push	bc
+	call	get.byte	; Get reg
+	call	Reg		; .. validate
+	pop	bc
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	add	a,c		; .. combine code
+	push	af
+	call	ChkComma	; Verify comma
+	call	get.byte	; Get byte
+	ld	c,a
+	pop	af
+	call	wrt.code	; Write code
+	ld	a,c
+	jp	WrVal8		; .. and byte
+;
+; Index 9 : 8080 two byte immediate load instruction
+;
+; LXI
+;
+lxi.code:
+	push	bc
+	call	get.byte	; Get reg pair
+	pop	bc
+	call	RegPair		; .. validate it
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	add	a,c
+	push	af
+	call	ChkComma	; Verify comma
+	call	get.val		; Get address
+	pop	af
+	call	wrt.code	; Write code
+	jp	WrVal16		; .. and address
+;
+; Check comma, process error if not
+;
+ChkComma:
+	call	pred.ptr
+	call	chk.char
+	cp	','		; Check comma
+	call	nz,O.err	; .. should be
+	ret
+;
+; Validate reg pairs BC and DE
+;
+RegBC.DE:
+	or	a		; Test reg B
+	ret	z
+	cp	_D		; .. or D
+	ret	z
+	and	_D		; .. correct it
+	jp	A.err		; Give error
+;
+; Validate reg pair
+;
+RegPair:
+	cp	_ACCU		; Test accu
+	push	af
+	jr	nc,rp.ill	; .. error
+	and	1		; Validate correct pair
+	jr	z,rp.ok
+rp.ill:
+	call	A.err		; .. register error
+rp.ok:
+	pop	af
+	and	_ACCU-1		; Force right pair
+	ret
+;
+; Validate register
+;
+Reg:
+	cp	_ACCU+1		; Test range
+	ret	c		; .. ok
+	and	_ACCU		; Force right reg
+	jp	A.err		; .. error
+;
+; Get byte, reg or reg pair
+; EXIT	Accu holds byte
+;
+get.byte:
+	call	get.val
+	ld	a,d		; Test HI zero
+	or	a
+	jr	z,get..byte
+	inc	a		; Check >0
+	call	nz,A.err	; .. error if so
+get..byte:
+	ld	a,e
+	ret
+;
+; Index 10 : Several Z80 instructions
+;
+; ADC, ADD, AND, CALL, CP, DEC, DJNZ, EX, IN, INC, JP
+; JR, LD, OR, OUT, POP, PUSH, RET, RST, SBC, SUB, XOR
+;
+z80.codes:
+	ld	b,0		; .. dummy
+	jr	im..cod
+;
+; Index 11 : Z80 shift and bit set instructions
+;
+; BIT, RES, RL, RLC, RR, RRC, SET, SLA, SRA, SRL
+;
+CB.code:
+	ld	b,CB		; Set prefix
+	jr	im..cod
+;
+; Index 12 : Z80 interrupt mode
+;
+; IM
+;
+im.code:
+	ld	b,ED
+im..cod:
+	ld	e,c		; Get index to 1st table
+	ld	d,0
+	ld	hl,Z80.code.table
+	add	hl,de
+	ld	e,(hl)		; Fetch index to 2nd table
+	inc	hl
+	ld	c,(hl)		; .. and op code
+	ld	hl,Z80.exec.table
+	add	hl,de
+	ld	e,(hl)		; Fetch execution address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; .. execute
+;
+; Z80 code : IM
+;
+Z.IM.code:
+	push	bc
+	call	get.byte	; Get operand
+	cp	IMmax+1		; Test valid range
+	call	nc,A.err	; .. invalid
+	call	ResNul?		; Verify function balanced
+	pop	bc
+	ld	a,b
+	call	wrt.code	; Write code
+	ld	a,e
+	cp	1		; Map operand
+	ccf
+	adc	a,0
+	and	IMmax+1
+;
+; Insert code into base opcode
+; ENTRY	Reg C holds base opcode
+;	Accu holds code to be inserted
+;
+InsCode:
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	add	a,c		; .. insert code
+	jp	wrt.code
+;
+; Z80 code : RST
+;
+Z.rst.code:
+	push	bc
+	call	get.byte	; Get address
+	and	r.p		; Mask and validate
+	cp	e
+	call	nz,A.err	; .. error
+	call	ResNul?		; Verify function ok
+	pop	bc
+	add	a,c		; Get code
+	jp	wrt.code	; Write it
+;
+; Z80 codes : POP, PUSH
+;
+Z.pop.code:
+	push	bc
+	call	l114e
+	call	c,A.err
+	and	IRbit		; Test index register
+	call	nz,ProcIX.IY	; .. process it
+	pop	bc
+	call	ParenCls	; Verify parentheses closed
+	ld	a,(Func.Val)
+	and	MaskOdd		; Mask reg pair
+	jr	InsCode
+;
+; Z80 code : RET
+;
+Z.ret.code:
+	call	Function	; Get function
+	ld	a,(Func.Err)	; .. test RET only
+	or	a
+	jr	nz,Z.ret.only
+	call	l1148
+	ld	a,(Func.Res)
+	cp	30h
+	call	nz,l1001
+	ld	a,(Func.Val)
+	and	Mask3		; Mask condition
+	ld	c,.RETc		; Build conditinal RET
+	jr	InsCode
+Z.ret.only:
+	ld	a,.RET		; Set RET
+	jp	wrt.code
+;
+; Process index register
+;
+ProcIX.IY:
+	ld	a,(Func.Val)	; Get function
+	and	20h		; Mask bit
+	add	a,DD		; Get resulting code
+	call	wrt.code	; Write prefix
+	ld	a,_HL
+	ld	(Func.Val),a	; .. change function to HL
+	ret
+;
+;
+;
+l1001:
+	cp	10h
+	jp	nz,A.err
+	ld	a,(Func.Val)
+	inc	a
+	cp	2
+	jr	z,l1015
+	dec	a
+	cp	6
+	jp	nz,A.err
+l1015:
+	inc	a
+	ld	(Func.Val),a
+	ret
+;
+; Get value
+; EXIT	Carry set if comma found
+;	PARENFLG set if parentehesis found
+;
+GetExpr:
+	push	bc
+	xor	a
+	ld	(ParenFlg),a
+	call	white.space	; .. no blanks
+	call	pred.ptr	; Set pointer
+	cp	'('		; Test parenthesis
+	jr	nz,l102d	; .. no
+	ld	(ParenFlg),a
+l102d:
+	call	get.val		; Get value
+	ld	a,c
+	sub	','		; Test more
+	pop	bc
+	or	a
+	ret	nz		; .. nope
+	call	l1148
+	ld	a,(Func.Res)
+	cp	30h
+	call	nz,l1001
+	scf
+	ret
+;
+; Z80 code : CALL
+;
+Z.call.code:
+	call	GetExpr		; Test call only
+	jr	nc,Z.call.only	; .. yeap
+	ld	c,.CALLc	; Set base
+Z.wr.cc.adr:
+	ld	a,(Func.Val)	; Get condition
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	and	r.p		; .. mask
+	add	a,c		; combine it
+	ld	c,a
+	push	bc
+	call	get.val		; Get address
+	call	ResNul?		; Check function ok
+	pop	bc
+Z.call.only:
+	ld	a,c
+	call	wrt.code	; Write code
+	jp	WrVal16		; .. and address
+;
+; Z80 code : JP
+;
+Z.jp.code:
+	call	GetExpr		; Test jump only
+	jr	c,Z.jp.cond	; .. no, conditional
+	ld	a,(Func.Res)	; Test result
+	cp	20h
+	ccf
+	jr	nc,Z.call.only	; .. jump only
+	cp	28h		; Test index
+	call	z,ProcIX.IY	; .. yeap
+	call	ParenOpn	; Check open
+	ld	a,(Func.Val)
+	cp	4
+	call	nz,A.err
+	call	l1148
+	ld	a,.PCHL
+	jp	wrt.code	; Write JP  (HL), (IX) or (IY)
+Z.jp.cond:
+	ld	c,.JPc
+	jr	Z.wr.cc.adr
+;
+; Z80 code : JR
+;
+Z.jr.code:
+	call	GetExpr		; Test condition
+	jr	nc,Z.jr.only	; .. nope
+	ld	a,(Func.Val)
+	cp	_cC+1		; Check condition ok
+	call	nc,A.err	; .. nope
+	and	Mask2		; Mask it
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	add	a,.JRc		; Add base code
+	ld	c,a
+	push	bc
+	call	get.val		; Get address
+	pop	bc
+Z.jr.only:
+	call	GetDspl		; Get displacement
+	ld	a,c
+	ld	c,b
+	call	wrt.code	; Write code
+	ld	a,c
+	jp	wrt.code	; .. and displacement
+;
+; Get displacement for JR, DJNZ instruction
+;
+GetDspl:
+	ld	a,(AdrMod)	; Get address mode
+	ld	b,a
+	and	10000000b	; Test bit
+	jp	nz,E.err
+	call	ResNul?
+	ld	a,b
+	and	00000011b
+	ld	b,a
+	call	l1b6a
+	cp	b
+	jp	nz,R.err
+	cp	00000011b
+	jr	nz,l10e2
+	push	de
+	ld	de,(l3dda)
+	ld	hl,(l3dde)
+	call	cmp.HL.DE
+	pop	de
+	jp	nz,R.err
+l10e2:
+	call	l1b6a
+	inc	hl
+	inc	hl
+	ex	de,hl
+	call	sub.HL.DE
+	ld	a,d
+	or	a
+	ld	b,e
+	jr	z,l10fb
+	inc	a
+	jp	nz,A.err
+	ld	a,b
+	or	a
+	jp	p,A.err
+	ret
+l10fb:
+	ld	a,b
+	or	a
+	jp	m,A.err
+	ret
+;
+; Z80 code : DJNZ
+;
+Z.djnz.code:
+	push	bc
+	call	get.val		; Get value
+	pop	bc
+	jp	Z.jr.only	; .. insert code
+;
+;
+;
+l1109:
+	call	ChkComma	; Check comma
+l110c:
+	push	bc
+	xor	a
+	ld	(ParenFlg),a
+	call	white.space
+	call	pred.ptr
+	cp	'('
+	jr	nz,l111f
+	ld	(ParenFlg),a
+l111f:
+	call	get.val
+	pop	bc
+	ld	a,(Func.Res)
+	or	a
+	ret	z
+	cp	30h
+	call	z,A.err
+	ld	l,a
+	ld	a,(ParenFlg)
+	or	a
+	ld	a,l
+	jr	z,l1148
+	cp	'('
+	jr	nz,l1148
+l113b:
+	ld	a,d
+	or	a
+	ret	z
+	inc	a
+	ld	d,a
+	ret	z
+	call	A.err
+l1148:
+	ld	a,d
+	or	e
+	call	nz,A.err
+	ret
+;
+;
+;
+l114e:
+	call	l110c
+	ld	a,(Func.Res)
+	or	a
+	jp	z,A.err
+	cp	20h
+	ret
+;
+; Verify parentheses open
+;
+ParenOpn:
+	ld	a,(ParenFlg)	; Test state
+	or	a
+	call	z,A.err		; .. closed
+	ret
+;
+; Verify parentheses closed
+;
+ParenCls:
+	ld	a,(ParenFlg)	; Test state
+	or	a
+	call	nz,A.err	; .. open
+	ret
+;
+;
+;
+l116b:
+	call	l110c
+l116e:
+	ld	a,(Func.Res)
+	cp	10h
+	ret	nz
+	ld	a,(Func.Val)
+	cp	8
+	ret	c
+	jp	A.err
+;
+; Z80 code : OUT
+;
+Z.out.code:
+	call	l116b
+	call	ChkComma	; Check comma
+	call	ParenOpn	; Check open
+	ld	a,(Func.Res)	; Test expanded code
+	cp	10h
+	jr	z,l11af		; .. yeap
+	or	a
+	call	nz,A.err
+	call	l113b
+	ld	a,.OUT
+	call	wrt.code
+	ld	a,e
+	call	WrVal8		; Write byte
+	call	l114e
+	call	nc,A.err
+	ld	a,(Func.Val)
+	cp	7
+	call	nz,A.err
+	jr	ParenCls	; Check closure ok
+l11af:
+	ld	a,(Func.Val)
+	dec	a
+	call	nz,A.err
+	call	l114e
+	call	nc,A.err
+	call	ParenCls	; Check closure ok
+	ld	a,ED		; Give prefix
+	call	wrt.code
+	call	ParenCls	; Check closure ok
+	call	l116e
+	ld	c,..OUT		; Give code
+	jp	InsCode
+;
+; Z80 code : IN
+;
+Z.in.code:
+	call	l114e
+	call	nc,A.err
+	call	ParenCls	; Check closure ok
+	call	l116e
+	push	af
+	call	l1109
+	call	ParenOpn	; Check open
+	ld	a,(Func.Res)	; Test expanded
+	cp	10h
+	jr	z,l1200		; .. yeap
+	or	a
+	call	nz,A.err
+	ld	a,.IN
+	call	wrt.code
+	pop	af
+	cp	7
+	call	nz,A.err
+	call	l113b
+	ld	a,e
+	jp	WrVal8		; Write byte
+l1200:
+	ld	a,(Func.Val)
+	dec	a
+	call	nz,A.err
+	ld	a,ED		; Give prefix
+	call	wrt.code
+	pop	af
+	ld	c,..IN
+	jp	InsCode		; .. give code
+;
+; Z80 code : EX
+;
+Z.ex.code:
+	call	l114e
+	call	c,A.err
+	call	ChkComma	; Check comma
+	call	l2065
+	jr	z,l1252		; .. expanded
+	ld	a,(Func.Val)
+	cp	2
+	jr	z,l1266
+	cp	6
+	call	nz,A.err
+	call	ParenOpn	; Check open
+	call	l114e
+	call	c,A.err
+	call	ParenCls	; Check closure ok
+	call	l1148
+	ld	a,(Func.Res)
+	cp	28h
+	call	z,ProcIX.IY	; Perform index
+	ld	a,(Func.Val)
+	cp	4
+	call	nz,A.err
+	ld	a,.XTHL		; Give EX (SP),HL or IX, IY
+	jp	wrt.code
+l1252:
+	call	ParenCls	; Check closure ok
+	call	l114e
+	call	c,A.err
+	call	l2065
+	call	nz,A.err
+	ld	a,.EXAFAF	; Give EX AF,AF'
+	jp	wrt.code
+l1266:
+	call	ParenCls	; Check closure ok
+	call	l114e
+	call	c,A.err
+	ld	a,(Func.Res)
+	cp	20h
+	call	nz,A.err
+	ld	a,(Func.Val)
+	cp	4
+	call	nz,A.err
+	ld	a,.XCHG		; Give EX DE,HL
+	jp	wrt.code
+;
+; Z80 codes : BIT, RES, SET
+;
+Z.bit.code:
+	push	bc
+	call	get.byte	; Get bit position
+	cp	8
+	call	nc,A.err	; .. overflow
+	and	Mask3
+	add	a,a		; *2
+	add	a,a		; *4
+	add	a,a		; *8
+	pop	bc
+	add	a,c		; Build code
+	ld	c,a
+	call	ChkComma	; Must follow coma
+;
+; Z80 codes : RL, RLC, RR, RRC, SLA, SRA, SRL
+;
+Z.shf.code:
+	call	l116b
+	or	a
+	jr	l129d
+l129c:
+	scf
+l129d:
+	push	af
+	ld	a,(Func.Res)
+	cp	28h		; Test index
+	push	af
+	call	z,ProcIX.IY	; .. get it
+	pop	hl
+	pop	af
+	push	hl
+	push	af
+	ld	a,CB
+	call	nc,wrt.code	; Write bit prefix
+	pop	af
+	jr	c,l12ba
+	pop	af
+	ld	a,e
+	call	z,WrVal8	; Write byte
+	push	af
+l12ba:
+	push	af
+	ld	a,(Func.Res)
+	or	a
+	call	z,A.err
+	and	20h
+	ld	a,(Func.Val)
+	jr	nz,l12d4
+	add	a,c
+	call	wrt.code
+	call	ParenCls	; Check closure ok
+	pop	af
+	pop	af
+	ret
+l12d4:
+	cp	4
+	call	nz,A.err
+	ld	a,6
+	add	a,c
+	call	wrt.code
+	call	ParenOpn	; Check open
+	pop	af
+	jr	c,l132f
+	pop	af
+	ret
+;
+; Z80 codes : DEC, INC
+;
+Z.inc.dec:
+	call	l116b
+	ld	a,(Func.Res)
+	or	a
+	call	z,A.err
+	cp	10h
+	jr	z,l1322
+	cp	28h
+	push	af
+	call	z,ProcIX.IY
+	ld	a,(Func.Val)
+	cp	4
+	jr	nz,l130d
+	ld	a,(ParenFlg)
+	or	a
+	jr	nz,l132a
+l130d:
+	call	ParenCls	; Check closure ok
+	pop	af
+	ld	a,c
+	dec	c
+	cp	.DCR		; Test 8 bit decrement
+	jr	nz,l131a
+	ld	c,.DCX		; .. change it
+l131a:
+	ld	a,(Func.Val)
+	and	6
+	jp	InsCode
+l1322:
+	ld	a,(Func.Val)
+l1325:
+	and	7
+	jp	InsCode
+l132a:
+	ld	a,6
+	call	l1325
+l132f:
+	pop	af
+	ld	a,e
+	call	z,WrVal8	; Write byte
+	ret
+;
+; Z80 codes : AND, CP, OR, SUB, XOR
+;
+Z.log.code:
+	call	l110c
+	ld	a,(Func.Res)
+	or	a
+	jr	z,l1369
+	cp	10h
+	jr	z,l1360
+	cp	28h		; Test index
+	push	af
+	call	z,ProcIX.IY	; .. execute
+	call	ParenOpn	; Check open
+	ld	a,(Func.Val)
+	and	7
+	cp	4
+	call	nz,A.err
+	ld	a,6
+	add	a,c
+	call	wrt.code
+	jr	l132f
+l1360:
+	ld	a,(Func.Val)
+	and	7
+	add	a,c
+	jp	wrt.code
+l1369:
+	ld	a,46h		; ??????
+	add	a,c
+	call	wrt.code
+	call	l113b
+	ld	a,e
+	jp	WrVal8		; Write byte
+;
+; Z80 codes : ADC, SBC
+;
+Z.math.16:
+	call	l114e
+	call	ChkComma	; Check comma
+	call	ParenCls	; Check closure ok
+	ld	a,(Func.Res)
+	cp	10h
+	jr	z,l13b4
+	cp	20h
+	call	nz,A.err
+	ld	a,(Func.Val)
+	cp	4
+	call	nz,A.err
+	ld	a,ED
+	call	wrt.code
+	ld	a,c
+	xor	10h
+	rra
+	and	8
+	add	a,.SBC
+	ld	c,a
+l13a2:
+	call	l114e
+	call	nz,A.err
+	call	l2065
+	call	z,A.err
+	call	ParenCls	; Check closure ok
+	jp	l131a
+l13b4:
+	ld	a,(Func.Val)
+	cp	7
+	call	nz,A.err
+	jp	Z.log.code
+;
+; Z80 code : ADD
+;
+Z.math:
+	call	l114e
+	call	ChkComma	; Check comma
+	call	ParenCls	; Check closure ok
+	ld	a,(Func.Res)
+	cp	10h
+	jr	z,l13b4
+	cp	28h
+	jr	z,l13e2
+	ld	a,(Func.Val)
+	cp	4
+	call	nz,A.err
+	ld	c,9
+	jr	l13a2
+l13e2:
+	ld	a,(Func.Val)
+	push	af
+	call	ProcIX.IY
+	call	l114e
+	call	c,A.err
+	push	af
+	call	l2065
+	call	z,A.err
+	call	ParenCls	; Check closure ok
+	ld	a,(Func.Val)
+	cp	4
+	call	z,A.err
+	ld	b,a
+	pop	af
+	ld	a,b
+	jr	z,l140f
+	pop	af
+	cp	b
+	call	nz,A.err
+	ld	a,4
+	push	af
+l140f:
+	pop	bc
+	and	6
+	ld	c,9
+	jp	InsCode
+;
+;
+;
+l1417:
+	ld	a,(Func.Res)
+	cp	10h
+	call	nz,A.err
+	ret
+;
+; Z80 code : LD
+;
+Z.ld.code:
+	call	l110c
+	ld	a,(Func.Res)
+	or	a
+	jr	z,l145b
+	cp	10h
+	jp	z,l1534
+	ld	a,(ParenFlg)
+	or	a
+	jp	z,l14c1
+	ld	a,(Func.Val)
+	and	00000110b
+	cp	00000100b
+	jp	z,l1599
+	call	nc,A.err
+	push	af
+	call	l110c
+	call	ParenCls	; Check closure ok
+	call	l1417
+	ld	a,(Func.Val)
+	cp	7
+	call	nz,A.err
+	ld	c,.STAX		; Base LD (rp),A
+	pop	af		; Get reg
+	jp	InsCode		; .. give code
+l145b:
+	push	de
+	call	l1628
+	call	ParenOpn	; Check open
+	ld	a,(l3ebd)
+	push	af
+	ld	a,(AdrMod)	; Get address mode
+	push	af
+	call	l1109
+	call	ParenCls	; Check closure ok
+	ld	a,(Func.Res)
+	or	a
+	call	z,A.err
+	cp	20h
+	jr	c,l14b1
+	ld	a,(Func.Val)
+	ld	c,a
+	and	00000110b
+	cp	00000100b
+	jr	z,l14a1
+	ld	a,ED
+	call	wrt.code
+	ld	a,c
+	ld	c,.LD.adr	; Give LD (adr),rp
+	call	InsCode		; .. put code
+l1492:
+	call	l1628
+	pop	af
+	ld	(AdrMod),a	; Set mode
+	pop	af
+	ld	(l3ebd),a
+	pop	de
+	jp	WrVal16		; Write address
+l14a1:
+	ld	a,(Func.Res)
+	cp	28h
+	call	z,ProcIX.IY	; Get index
+	ld	a,.SHLD
+	call	wrt.code	; Write LD (adr),HL, IX or IY
+	jr	l1492
+l14b1:
+	ld	a,(Func.Val)
+	cp	7
+	call	nz,A.err
+	ld	a,.STA
+	call	wrt.code	; Give LD (adr),A
+	jr	l1492
+l14c1:
+	ld	a,(Func.Val)
+	push	af
+	call	l1109
+	ld	a,(Func.Res)
+	cp	20h
+	jr	nc,l14f1
+	or	a
+	call	nz,A.err
+	ld	a,(ParenFlg)
+	or	a
+	jr	nz,l150a
+	ld	c,1
+	pop	af
+	push	af
+	and	60h
+	add	a,9dh
+	cp	0c0h
+	call	nc,wrt.code
+	pop	af
+	and	6
+	call	InsCode
+	jp	WrVal16
+l14f1:
+	call	nz,ProcIX.IY
+	pop	af
+	cp	6
+	call	nz,A.err
+	call	ParenCls	; Check closure ok
+	ld	a,(Func.Val)
+	cp	4
+	call	nz,A.err
+	ld	a,.SPHL
+	jp	wrt.code
+l150a:
+	pop	af
+	ld	(Func.Val),a
+	ld	c,a
+	and	6
+	cp	4
+	jr	nz,l1524
+	ld	a,c
+	cp	40h
+	call	nc,ProcIX.IY
+	ld	a,.LHLD
+	call	wrt.code	; Write LD HL,(adr)
+	jp	WrVal16		; .. and address
+l1524:
+	ld	a,ED
+	call	wrt.code	; Give prefix
+	ld	a,c
+	and	MaskOdd		; Get reg
+	ld	c,.LD.rp
+	call	InsCode		; Write LD rp,(adr)
+	jp	WrVal16
+l1534:
+	call	ParenCls	; Check closure ok
+	ld	a,(Func.Val)
+	cp	8
+	jr	nc,l157d
+	push	af
+	call	l1109
+	ld	a,(Func.Res)
+	or	a
+	jr	nz,l155e
+	ld	a,(ParenFlg)
+	or	a
+	jr	nz,l15ca
+	call	l113b
+	ld	c,.MVI
+	pop	af
+	call	InsCode		; Write LD r,data
+	ld	a,e
+	jp	WrVal8		; Write byte
+l155e:
+	ld	a,(Func.Res)
+	cp	10h
+	call	z,l160a
+	cp	' '
+	jr	nz,l1573
+	ld	a,(Func.Val)
+	cp	4
+	jr	c,l15d8
+l1573:
+	pop	af
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,.MOV		; Get MOV r1,r2
+	ld	c,a
+	jp	l129c		; .. build code
+l157d:
+	push	af
+	call	l1109
+	call	l1417
+	ld	a,(Func.Val)
+	cp	7
+	call	nz,A.err
+	ld	a,ED
+	call	wrt.code	; Give prefix
+	pop	af
+	and	1
+	ld	c,.LDIA		; Build LD I,A or LD A,I
+	jp	InsCode
+l1599:
+	ld	a,(Func.Val)
+	push	de
+	push	af
+	call	l1628
+	call	l1109
+	call	ParenCls	; Check closure ok
+	pop	af
+	push	af
+	and	60h
+	add	a,9dh
+	cp	0c0h
+	call	nc,wrt.code
+	ld	c,70h
+	ld	a,(Func.Res)
+	or	a
+	jp	z,l15e9
+	call	l129c
+	call	l1628
+	pop	af
+	pop	de
+	cp	40h
+	ld	a,e
+	call	nc,WrVal8	; Write offset
+	ret
+l15ca:
+	pop	af
+	cp	7
+	call	nz,A.err
+	ld	a,.LDA
+	call	wrt.code	; Write LD A,(adr)
+	jp	WrVal16
+l15d8:
+	call	ParenOpn	; Check open
+	pop	af
+	cp	7
+	call	nz,A.err
+	ld	a,(Func.Val)
+	ld	c,.LDAX
+	jp	InsCode		; Write LD A,(rp)
+l15e9:
+	call	l113b
+	call	ParenCls	; Check closure ok
+	ld	a,.MVI.M
+	call	wrt.code	; Write LD (HL),data
+	ld	c,e
+	ld	b,d
+	call	l1628
+	pop	af
+	pop	de
+	cp	40h
+	ld	a,e
+	call	nc,WrVal8	; Give offset
+	call	l1628
+	ld	e,c
+	ld	d,b
+	ld	a,c
+	jp	WrVal8		; Give byte
+l160a:
+	ld	a,(Func.Val)
+	cp	8
+	ld	c,a
+	ld	a,(Func.Res)
+	ret	c
+	pop	hl
+	pop	af
+	cp	7
+	call	nz,A.err
+	ld	a,ED
+	call	wrt.code	; Give prefix
+	ld	a,c
+	and	1
+	ld	c,.LDAI
+	jp	InsCode		; Write LD A,I
+;
+; Swap output lines
+;
+l1628:
+	push	bc
+	push	de
+	push	hl
+	ld	hl,line.flag
+	ld	de,LineCpy
+	ld	b,LinLen
+l1633:
+	ld	c,(hl)
+	ld	a,(de)
+	ld	(hl),a
+	ld	a,c
+	ld	(de),a
+	inc	hl
+	inc	de
+	djnz	l1633
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Check function result balanced
+;
+ResNul?:
+	push	af
+	ld	a,(Func.Res)
+	or	a		; Test it
+	call	nz,Q.err	; .. error
+	pop	af
+	ret
+;
+; Write code
+; ENTRY	Accu holds code to be written
+;
+wrt.code:
+	ld	b,a
+	ld	a,(pass)
+	or	a
+	scf
+	call	nz,l1662
+	push	hl
+	ld	hl,(CurPtr)
+	inc	hl		; Bump pointer
+	ld	(CurPtr),hl
+	pop	hl
+	jp	nz,rel.data
+	ret
+;
+;
+;
+l1662:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	call	l2768
+	ld	hl,(code.ptr)
+	ld	de,out.l.code+12
+	call	cmp.HL.DE
+	push	bc
+	call	nc,l192b
+	pop	bc
+	ld	hl,(code.ptr)
+	ex	de,hl
+	ld	a,(Oopt)	; Test octal listing
+	or	a
+	jp	z,l16d3		; .. nope
+	ld	h,b
+	xor	a
+	add	hl,hl
+	adc	a,a
+	add	hl,hl
+	adc	a,a
+	add	a,'0'		; Get 1st digit
+	ld	(de),a
+	inc	de
+	ld	b,2		; Two digits in a byte
+l168e:
+	xor	a
+	ld	c,3		; Set bit count
+l1691:
+	add	hl,hl
+	adc	a,a
+	dec	c
+	jr	nz,l1691
+	add	a,'0'
+	ld	(de),a		; .. store digit
+	inc	de
+	djnz	l168e
+l169f:
+	ex	de,hl
+	pop	af
+	push	af
+	jr	c,l16ca
+	ld	a,(line.flag)
+	and	0a0h		; Test mode
+	jr	z,l16ca		; .. absolute
+	and	80h
+	jr	nz,l16c8
+	ld	a,(AdrMod)	; Get address mode
+	and	Mask2
+	cp	_ds		; Test mode
+	jr	c,l16c5
+	jr	z,l16c2
+	ld	(hl),$com	; Set COMMON
+	jr	l16ca
+l16c2:
+	ld	(hl),$ds	; Set data relative
+	jr	l16ca
+l16c5:
+	ld	(hl),$cs	; Set code relative
+	jr	l16ca
+l16c8:
+	ld	(hl),$ext	; Set EXTERNAL
+l16ca:
+	inc	hl
+	ld	(code.ptr),hl
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l16d3:
+	call	cnv.hex.byte	; Get hex address
+	jr	l169f		; .. go mark
+;
+; Write byte to ??????????????
+; ENTRY	Accu holds byte
+;
+WrVal8:
+	ld	b,a
+	ld	a,(line.flag)
+	or	40h
+	ld	(line.flag),a
+	ld	a,(pass)
+	or	a
+	call	nz,l1662
+	push	hl
+	ld	hl,(CurPtr)
+	inc	hl		; Bump pointer
+	ld	(CurPtr),hl
+	pop	hl
+	jr	nz,l16fe
+	ret
+;
+;
+;
+l16f6:
+	ld	a,(line.flag)
+	and	NOT 40h		; Clear flag
+	ld	(line.flag),a
+l16fe:
+	push	hl
+	ld	hl,line.flag
+	ld	a,(hl)
+	and	ErrBit		; Test error bit
+	jr	z,l1711
+	call	E.err
+	ld	a,(hl)
+	and	40h
+	jp	l17b4
+l1711:
+	ld	a,(hl)
+	and	0a0h
+	jp	z,l17b9		; .. absolute code
+	push	de
+	push	bc
+	inc	hl
+	ld	a,(hl)
+	and	Mask6
+	ld	b,a
+l171e:
+	ld	a,b
+	or	a
+	jp	z,l179a
+	inc	hl
+	dec	b
+	ld	a,(hl)
+	or	a
+	jp	m,l1737
+	ld	(l3ecd),a
+	ld	a,'A'		; Set Arithmetic operator
+	ld	e,010b		; .. length
+l1731:
+	call	MS.LnkItm	; Write item
+	jr	l171e
+l1737:
+	and	NoMSB
+	rra
+	jr	c,l1768
+	cp	3
+	jr	nz,l1753
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	b
+	dec	b
+	ld	(l3dde),de
+	push	bc
+	ld	b,a
+	call	rel.spec
+	pop	bc
+l1753:
+	ld	(l3ecd),a
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	b
+	dec	b
+	ld	(l3ece),de
+	ld	a,'C'		; Set Arithmetic fixup
+	ld	e,100b		; .. length
+	jr	l1731
+l1768:
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	b
+	dec	b
+	push	bc
+	push	hl
+	ex	de,hl
+	dec	hl
+	ld	a,(hl)
+	cp	ModLen		; Test max length
+	jr	c,l177a
+	ld	a,ModLen	; .. truncate
+l177a:
+	inc	a
+	ld	(MS.len),a	; .. set length
+	dec	a
+	ld	bc,6
+	add	hl,bc
+	ld	b,a
+	ld	de,MS.ID
+	ld	a,'B'		; Set arithmetic fixup
+	ld	(de),a
+l178a:
+	inc	de
+	inc	hl
+	ld	a,(hl)
+	ld	(de),a		; Unpack reference
+	djnz	l178a
+	call	WrMS.Lnk	; Write item
+	pop	hl
+	pop	bc
+	jp	l171e
+l179a:
+	ld	a,(line.flag)
+	and	40h
+	push	af
+	ld	a,1
+	jr	nz,l17a7
+	ld	a,2
+l17a7:
+	ld	(l3ecd),a
+	ld	a,'A'		; Set arithmetic operator
+	ld	e,010b		; .. length
+	call	MS.LnkItm	; Write item
+	pop	af
+	pop	bc
+	pop	de
+l17b4:
+	ld	b,0
+	call	z,rel.data
+l17b9:
+	call	rel.data
+	pop	hl
+	ret
+;
+; Set special MICROSOFT link item
+; ENTRY	Accu  holds MS-LINK item subtype ID
+;	Reg E holds 3 bit length of additional field
+;
+MS.LnkItm:
+	ld	(MS.ID),a	; .. save ID
+	ld	a,e
+	ld	(MS.len),a	; .. and length
+WrMS.Lnk:
+	ld	a,(Sopt)	; Test special code allowed
+	or	a
+	jp	z,S.err		; .. no
+	push	bc
+	push	hl
+	ld	hl,MS.Field	; Init pointer
+	ld	(BField),hl
+	ld	c,0100b		; Give special code
+	call	rel.code
+	pop	hl
+	pop	bc
+	ret
+;
+; Write 16 bit value to ???????????
+; ENTRY	??????????????
+;
+WrVal16:
+	ld	a,(pass)	; Test pass
+	or	a
+	call	nz,l18c9	; .. only pass 2
+	push	hl
+	ld	hl,(CurPtr)
+	inc	hl		; Bump pointer
+	inc	hl		; .. twice
+	ld	(CurPtr),hl
+	pop	hl
+	ret	z
+	ld	a,(AdrMod)	; Get address mode
+	ld	b,a
+	ld	a,(line.flag)
+	and	40h
+	ld	a,b
+	call	z,l1893
+	ld	a,(AdrMod)	; Get address mode
+	ld	b,a
+	call	rel.spec
+	ld	hl,(code.ptr)
+	and	83h
+	jr	nz,l180f
+	inc	hl
+	ld	(code.ptr),hl
+	ld	b,e
+	call	rel.data
+	ld	b,d
+	jp	rel.data
+l180f:
+	ld	a,b
+	and	80h
+	push	bc
+	jr	nz,l1826
+	ld	a,b
+	and	Mask2
+	cp	_ds		; Test mode
+	jp	m,l1837
+	jr	z,l1834
+	ld	(hl),$com	; Indicate COMMON
+	jr	l1839
+l1826:
+	ld	(hl),$ext	; Set EXTERNAL
+	ex	de,hl
+	ld	hl,(l3ebf)
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ex	de,hl
+	jr	l1839
+l1834:
+	ld	(hl),$ds	; Set data relative
+	jr	l1839
+l1837:
+	ld	(hl),$cs	; Set code relative
+l1839:
+	pop	bc
+	inc	hl
+	inc	hl
+	ld	(code.ptr),hl
+	call	rel.spec
+	ld	a,b
+	and	80h
+	jr	z,l1850
+	ld	a,(line.flag)
+	and	40h
+	jp	nz,l16f6
+l1850:
+	ld	a,b
+	and	Mask2
+	push	bc
+	jr	z,l1888
+	call	rel.ctrl
+	ld	b,e
+	call	rel.byte
+	ld	b,d
+	call	rel.byte
+l1862:
+	pop	bc
+	ld	a,b
+	and	80h
+	ret	z
+	ld	hl,(CurPtr)	; Get pointer
+	dec	hl
+	dec	hl
+	ex	de,hl
+	ld	hl,(l3ebf)
+	inc	hl
+	ld	a,(code.flag)
+	ld	b,a
+	ld	a,(hl)
+	and	0fch
+	or	b
+	ld	(hl),a
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	de,(l3ddc)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ret
+l1888:
+	ld	b,e
+	call	rel.data
+	ld	b,d
+	call	rel.data
+	jr	l1862
+;
+;
+;
+l1893:
+	push	af
+	or	a
+	jp	p,pop.flag
+	ld	a,(l3ebe)
+	ld	(AdrMod),a	; Set address mode
+	ld	a,(l3ebd)
+	or	a
+	jr	z,pop.flag
+	push	hl
+	push	bc
+	push	de
+	ld	a,b
+	call	rel.spec
+	and	Mask2
+	jr	nz,l18b3
+	ld	a,d
+	or	e
+l18b3:
+	ld	c,1001b
+	call	nz,rel.code	; Give external offset
+	xor	a
+	ld	(l3ebd),a
+	pop	de
+	pop	bc
+	ld	hl,(l3ebf)
+	inc	hl
+	ld	a,(hl)
+	ld	(AdrMod),a	; Set address mode
+	pop	hl
+pop.flag:
+	pop	af
+	ret
+;
+; Convert number to octal string
+;
+l18c9:
+	push	af
+	push	hl
+	push	de
+	ld	hl,(code.ptr)
+	ld	de,out.l.code+8
+	call	cmp.HL.DE
+	call	nc,l192b
+	ld	hl,(code.ptr)
+	ex	de,hl
+	pop	hl
+	push	hl
+	ld	a,(Oopt)	; Test octal listing
+	or	a
+	jp	z,cnv.hex.wrd	; .. nope
+	xor	a
+	add	hl,hl
+	adc	a,'0'
+	ld	(de),a		; Set 1st digit
+	inc	de
+	push	bc
+	ld	b,5		; Five digits in a word
+l18ee:
+	xor	a
+	ld	c,3		; Set bit count
+l18f1:
+	add	hl,hl
+	adc	a,a
+	dec	c
+	jr	nz,l18f1
+	add	a,'0'
+	ld	(de),a		; .. make ASCII
+	inc	de
+	djnz	l18ee
+l18ff:
+	ld	(code.ptr),de	; .. save pointer
+	pop	bc
+	pop	de
+	pop	hl
+	pop	af
+	ret
+;
+; Convert hex word to ASCII
+; ENTRY	Reg HL holds hex word
+;	Reg DE points to conversion buffer
+;
+cnv.hex.wrd:
+	push	bc
+	ld	b,h		; Copy into reg B
+	call	cnv.hex.byte	; .. convert HI
+	ld	b,l
+	call	cnv.hex.byte	; .. and LO
+	jr	l18ff
+;
+; Convert byte to hex ASCII
+; ENTRY	Reg B holds byte to be converted
+;	Reg DE points to conversion buffer
+;
+cnv.hex.byte:
+	ld	a,b		; Get byte
+	rra			; .. extract high bits
+	rra
+	rra
+	rra
+	call	cnv.hex.nibble	; Convert HI
+	ld	a,b		; .. get byte back for LO
+cnv.hex.nibble:
+	call	get.hex.nibble
+	ld	(de),a		; Store character
+	inc	de		; .. bump buffer
+	ret
+;
+; Convert nibble to ASCII character
+; ENTRY	Accu holds nibble
+; EXIT	Accu holds ASCII character
+;
+get.hex.nibble:
+	and	LoMask		; .. extract low bits
+	add	a,90h		; Convert to hex ASCII
+	daa
+	adc	a,40h
+	daa
+	ret
+

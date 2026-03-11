@@ -1,0 +1,3735 @@
+	title	Video Oriented editor
+	name	('VDO25B')
+
+; DASMed version of the screen editor VDO25B.COM
+; By W. Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	not FALSE
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+DMA	equ	0080h
+CCP	equ	DMA
+sFCB	equ	00c0h
+
+SYSTOP	equ	0defeh		; Dummy top of memory
+
+.conin	equ	 1
+.lstout	equ	 5
+.condir	equ	 6
+.string	equ	 9
+.resdsk	equ	13
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.rename	equ	23
+.retdsk	equ	25
+.setdma	equ	26
+.usrcod	equ	32
+
+_get	equ	-1
+
+OSerr	equ	-1
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+_DIR	equ	16
+_DIRlen	equ	32
+
+fcblen	equ	 35
+reclng	equ	128
+
+null	equ	00h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+esc	equ	1bh
+eot	equ	'$'
+DEL	equ	7fh
+
+NoMSB	equ	01111111b
+MSB	equ	10000000b
+UPPMASK	equ	01011111b
+CHRMASK	equ	00011111b
+
+SCRLIN	equ	 24		; Lines on screen
+SCRCOL	equ	 80		; Columns on screen
+
+QUELEN	equ	128		; Length of character queue
+
+STRLEN	equ	128		; Length of input string
+
+	ld	sp,ll1c11	; Get local stack
+	call	ll1b28		; Init environment
+	jp	l0119		; Start over
+;
+; PATCH
+;
+l0109:
+	call	l02b2		; Get character from keyboard
+	ld	a,(l1b1c)
+	cp	0		; Test any in queue
+	ret	nz		; Yeap
+	call	l101c
+	call	l14af		; Disable get character
+	ret
+;
+; ###############
+; ## Start VDO ##
+; ###############
+;
+l0119:
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	call	l198f		; Do the edit job
+	call	l01b4		; Put cursor to start of screen
+	ld	a,(l1b1a)	; Get user disk
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Select it
+	ld	hl,(l1a67)	; Get back warmstart address
+	ld	(OS+1),hl	; Reset it
+	jp	OS
+;
+; Put character to console
+;
+l013b:
+	push	hl
+	push	de
+	push	bc
+	ld	e,a		; Get character
+	ld	c,.condir
+	call	BDOS		; Put to console
+	ld	hl,l1a4e
+	inc	(hl)		; Advance column
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Delete to end of line
+;
+l014c:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l0253	; Get control string
+	call	l0221		; Print it
+	pop	bc
+	pop	de
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	hl,l1a4d
+	inc	(hl)		; Advance row
+	pop	hl
+	call	l0164		; Position cursor
+	ret
+;
+; Position cursor
+;
+l0164:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l025e	; Get control string
+	call	l0221		; Print it
+	ld	a,(l025d)	; Get direction
+	cp	0
+	jp	nz,l0194
+;
+; Colum first then row
+;
+	ld	a,(l025c)
+	ld	b,a
+	ld	a,(l1a4e)	; Get column
+	add	a,b		; Build value
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Put column
+	ld	a,(l025b)
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	add	a,b		; Build value
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Put row
+	jp	l01b0
+;
+; Row first then colum
+;
+l0194:
+	ld	a,(l025b)
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	add	a,b		; Build value
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Put row
+	ld	a,(l025c)
+	ld	b,a
+	ld	a,(l1a4e)	; Get column
+	add	a,b		; Build value
+	ld	e,a
+	ld	c,.condir
+	call	BDOS		; Put column
+l01b0:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Put cursor to start of screen
+;
+l01b4:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l0266	; Get control string
+	call	l0221		; Print it
+	pop	bc
+	pop	de
+	pop	hl
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	(l1a4d),a	; And row
+	call	l0164		; Position cursor
+	ret
+;
+; Insert a line
+;
+l01cb:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l026e	; Get control string
+	ld	a,(hl)
+	cp	0		; Test control defined
+	jr	nz,l01db	; Yeap
+	call	l14a9		; Enable get character
+	jr	l01de
+l01db:
+	call	l0221		; Print control string
+l01de:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Delete a line
+;
+l01e2:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l0276	; Get control string
+	ld	a,(hl)
+	cp	0		; Test control defined
+	jr	nz,l01f2	; Yeap
+	call	l14a9		; Enable get character
+	jr	l01f5
+l01f2:
+	call	l0221		; Print control string
+l01f5:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Turn hilite on
+;
+l01f9:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l027e	; Get control string
+	ld	a,(hl)
+	cp	0		; Test control defined
+	jr	nz,l0206	; Yeap
+	jr	l0209
+l0206:
+	call	l0221		; Print control string
+l0209:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Turn hilite off
+;
+l020d:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,l0286	; Get control string
+	ld	a,(hl)
+	cp	0		; Test control defined
+	jr	nz,l021a	; Yeap
+	jr	l021d
+l021a:
+	call	l0221		; Print control string
+l021d:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Put zero closed control string ^HL to console
+;
+l0221:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	ret	z		; Yeap
+	push	hl
+	ld	e,a		; Unpack character
+	ld	c,.condir
+	call	BDOS		; Put to console
+	pop	hl
+	jr	l0221
+;
+; ++++++++++++++++++++++++++++++++++++++++++++++
+; +++ MACHINE DEPENDENT SCREEN CONFIGURATION +++
+; ++++++++++++++++++++++++++++++++++++++++++++++
+;
+l022f::
+	db	'VCT2'
+	db	'VDO25 '
+	db	null
+;
+	db	'Kaypro, no hilite     '
+l0250:
+	db	SCRLIN		; Lines on screen
+l0251:
+	db	SCRCOL		; Columns on screen
+	db	0
+l0253:				; Delete to end of line
+	db	18h
+	ds	7
+l025b:
+	db	' '		; Row offset
+l025c:
+	db	' '		; Column offset
+l025d:
+	db	1		; Direction (1-row/column)
+l025e:				; Cursor lead in
+	db	esc,'='
+	ds	6
+l0266:				; Cursor start position
+	db	1ah
+	ds	7
+l026e:				; Insert line
+	db	esc,'E'
+	ds	6
+l0276:				; Delete line
+	db	esc,'R'
+	ds	6
+l027e:				; Hilite on
+	ds	8
+l0286:				; Hilite off
+	ds	8
+;
+	ds	16
+	db	4
+l029f:
+	db	0		; Columns on screen
+	ds	18
+;
+; ++++++++++++++++++++++++++++++++++++++++++++++
+; +++       END OF SCREEN CONFIGURATION      +++
+; ++++++++++++++++++++++++++++++++++++++++++++++
+;
+; Get character from keyboard
+;
+l02b2::
+	push	hl
+	push	de
+	push	bc
+	ld	e,_get
+	ld	c,.condir
+	call	BDOS		; Get character
+	cp	null		; Test any
+	jr	z,l02d0		; Nope skip
+	push	af
+	ld	a,(l1b1c+2)	; Test free place in queue
+	cp	0
+	pop	af		;		**** WHY ****
+	jr	z,l02d0		;		**** WHY ****
+	ld	ix,l1b1c
+	call	l02f5		; Put character into queue
+l02d0:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Input character from keyboard or out of queue
+;
+l02d4:
+	push	hl
+	push	de
+	push	bc
+	ld	a,(l1b1c)	; Test any in queue
+	cp	0
+	jr	z,l02e7		; Nope, get from keyboard
+	ld	ix,l1b1c
+	call	l0334		; Get character from queue
+	jr	l02f1
+l02e7:
+	ld	e,_get
+	ld	c,.condir
+	call	BDOS		; Get character
+	or	a
+	jr	z,l02e7		; Wait for 'real' input
+l02f1:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Put character into queue
+;
+l02f5:
+	push	de		; Save pointer
+	push	af		; And character
+	ld	e,(ix+8)	; Get current output queue pointer
+	ld	d,(ix+9)
+	ld	(de),a		; Store character
+	inc	de		; Advance pointer
+	ld	(ix+9),d
+	ld	(ix+8),e
+	ld	a,(ix+6)	; Test end reached
+	cp	e
+	jr	nz,l031d	; Nope
+	ld	a,(ix+7)
+	cp	d
+	jr	nz,l031d
+	ld	d,(ix+5)
+	ld	e,(ix+4)
+	ld	(ix+8),e	; Reset pointer
+	ld	(ix+9),d
+l031d:
+	inc	(ix+0)		; Increment input offset
+	jr	nz,l0325
+	inc	(ix+1)		; Remember hi
+l0325:
+	ld	a,(ix+2)
+	dec	(ix+2)		; Decrement output offset
+	or	a
+	jr	nz,l0331
+	dec	(ix+3)		; Remember hi
+l0331:
+	pop	af
+	pop	de
+	ret
+;
+; Get character from queue
+;
+l0334:
+	push	de		; Save pointer
+	ld	e,(ix+10)	; Get current output queue pointer
+	ld	d,(ix+11)
+	ld	a,(de)		; Get character
+	push	af
+	inc	de		; Advance pointer
+	ld	(ix+11),d
+	ld	(ix+10),e
+	ld	a,(ix+6)	; Test end reached
+	cp	e
+	jr	nz,l035c	; Nope
+	ld	a,(ix+7)
+	cp	d
+	jr	nz,l035c
+	ld	d,(ix+5)
+	ld	e,(ix+4)
+	ld	(ix+10),e	; Reset pointer
+	ld	(ix+11),d
+l035c:
+	inc	(ix+2)		; Increment output offset
+	jr	nz,l0364
+	inc	(ix+3)		; Remember hi
+l0364:
+	ld	a,(ix+0)
+	dec	(ix+0)		; Decrement onput offset
+	or	a
+	jr	nz,l0370
+	dec	(ix+1)		; Remember hi
+l0370:
+	pop	af
+	pop	de
+	ret
+;
+; Command ^QT : Set tab stops
+;
+l0373::
+	call	l0d24
+	db	'Tab stop (2,4,8,16): ',null
+	ld	hl,CCP
+	call	l0645		; Read line
+	ld	hl,CCP
+	ld	e,0
+l0397::
+	ld	a,(hl)
+	sub	'0'
+	cp	9+1
+	jr	nc,l03aa
+	ld	d,a
+	ld	a,e
+	add	a,a
+	ld	e,a
+	add	a,a
+	add	a,a
+	add	a,e
+	add	a,d
+	ld	e,a
+	inc	hl
+	jr	l0397
+l03aa:
+	ld	a,e
+	cp	2
+	jr	z,l03c1
+	cp	4
+	jr	z,l03c1
+	cp	8
+	jr	z,l03c1
+	cp	16
+	jr	z,l03c1
+	ld	a,9
+	ld	(l1a58),a	; Set illegal tab stop
+	ret
+l03c1:
+	dec	a
+	ld	(l1ba8),a	; Set tab stop
+	ret
+;
+; Redirected warm start
+;
+l03c6:
+	ld	sp,ll1c11-2	; Get back stack
+	call	l04e7		; Put status line on screen
+	ld	a,3
+	ld	(l1a58),a	; Set input/output failure
+	jp	l19f2
+;
+; Put character to printer
+;
+l03d4:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	e,a		; Get character
+	ld	c,.lstout
+	call	BDOS		; Print it
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Prepare FCB
+;
+l03e3:
+	xor	a
+	ld	hl,FCB+_EX
+	ld	b,fcblen-_EX
+l03e9:
+	ld	(hl),a
+	inc	hl
+	djnz	l03e9
+	ret
+;
+; Load file into memory ^HL with max length in reg B
+;
+; Returns:
+;
+; NZ NC  End of file
+;  Z NC  File too big
+; NZ  C  File error
+;
+l03ee:
+	push	bc
+	push	hl
+	call	l03e3		; Prepare FCB
+	ld	c,.setdma
+	ld	de,DMA
+	call	BDOS		; Set disk buffer
+	ld	c,.open
+	ld	de,FCB
+	call	BDOS		; Open file
+	inc	a		; Test file on disk
+	jr	z,l0441		; Nope, error
+	ld	c,.rdseq
+	ld	de,FCB
+	call	BDOS		; Read first record
+	or	a		; Test any here
+	jr	nz,l0441	; Nope, empty file
+	jr	l041e
+l0413:
+	ld	c,.rdseq
+	ld	de,FCB
+	call	BDOS		; Read next record
+	or	a		; Test end
+	jr	nz,l0447	; Yeap
+l041e:
+	call	l02b2		; Get character from keyboard
+	pop	hl		; Get back load address
+	ld	de,DMA		; Init disk buffer
+	ld	b,reclng
+l0427:
+	ld	a,(de)		; Get character
+	and	NoMSB		; Less hi bit
+	cp	lf		; Test new line
+	jr	z,l043b
+	cp	eof		; Test end of file
+	jr	z,l0448
+	inc	hl		; Advance text pointer
+	ld	(hl),a		; Save character
+	ex	(sp),hl		; Get count
+	dec	hl		; Decrement
+	ld	a,h
+	or	l		; Test zero
+	ex	(sp),hl
+	jr	z,l044c
+l043b:
+	inc	de		; Skip new line
+	djnz	l0427
+	push	hl
+	jr	l0413
+l0441:
+	pop	bc
+	pop	bc
+	or	1		; Set NZ  C : File error
+	scf
+	ret
+l0447:
+	pop	bc
+l0448:
+	pop	bc
+	or	1		; Set NZ NC : End of file
+	ret
+l044c:
+	pop	bc
+	xor	a		; Set Z NC  File too big
+	ret
+;
+; Write text to disk
+;
+l044f:
+	push	hl
+	add	hl,bc
+	ld	(hl),eof
+	ld	c,.retdsk
+	call	BDOS
+	push	af
+	ld	c,.resdsk
+	call	BDOS
+	ld	c,.seldsk
+	pop	af
+	ld	e,a
+	call	BDOS
+	ld	hl,FCB
+	ld	de,FCB+_DIR
+	ld	bc,.drv+.nam
+	ldir
+	ld	hl,l1a50
+	ld	bc,.ext
+	ldir
+	ld	c,.delete
+	ld	de,FCB+_DIR
+	call	BDOS
+	ld	c,.rename
+	ld	de,FCB
+	call	BDOS
+	call	l03e3		; Prepare FCB
+	ld	c,.make
+	ld	de,FCB
+	call	BDOS
+	inc	a
+	jr	z,l04c0
+	pop	hl
+	ld	de,DMA
+	ld	b,reclng
+l049c:
+	ld	a,(hl)
+	call	l04c6		; Put to file
+	ld	a,(hl)
+	cp	cr
+	jr	nz,l04ab
+	ld	a,lf
+	call	l04c6		; Put to file
+	xor	a
+l04ab:
+	inc	hl
+	cp	eof
+	jr	nz,l049c
+	ld	c,.close
+	ld	de,FCB
+	call	BDOS
+	inc	a
+	ret	nz
+	ld	a,3
+	ld	(l1a58),a	; Set input/output failure
+	ret
+l04c0:
+	ld	a,5
+	ld	(l1a58),a	; Set disk full
+	ret
+;
+; Put character to file
+;
+l04c6:
+	ld	(de),a
+	cp	eof
+	jr	z,l04ce
+	inc	de
+	dec	b
+	ret	nz
+l04ce:
+	push	hl
+	ld	c,.wrseq
+	ld	de,FCB
+	call	BDOS
+	push	af
+	call	l02b2		; Get character from keyboard
+	pop	af
+	pop	hl
+	ld	de,DMA
+	ld	b,reclng
+	or	a
+	ret	z
+	pop	de
+	jr	l04c0
+;
+; Put status line on screen
+;
+l04e7:
+	call	l01b4		; Put cursor to start of screen
+	call	l0d24
+$STAT	equ	$
+	db	'    VDO25 '
+$FN	equ	$-$STAT
+	db	'               Ln '
+$LN	equ	$-$STAT
+	db	'     Cl '
+$CL	equ	$-$STAT
+	db		'     Insert '
+$INSERT	equ	$-$STAT
+	db	'     FC '
+$FC	equ	$-$STAT
+	db	'        Space'
+$SPACE	equ	$-$STAT+1
+;		'    VDO25                Ln      Cl      Insert      FC         Space'
+;		          111111111122222222223333333333444444444455555555556666666666
+;		 123456789012345678901234567890123456789012345678901234567890123456789
+	db	cr,null
+	call	l05a9		; Print filename
+	call	l0a72		; Tell toggle on/off
+	ret
+;
+; Give statistic
+;
+l053b:
+	ld	a,(l1a4d)	; Get row
+	push	af		; Save
+	ld	a,(l1a4e)	; And column
+	push	af		; Save, too
+	ld	a,0
+	ld	(l1a4d),a	; Clear row
+	ld	a,$LN
+	ld	(l1a4e),a	; Set column
+	call	l0164		; Position cursor
+	call	l01f9		; Turn hilite on
+	ld	de,(l1a63)	; Get line within text window
+	ld	hl,(l05a7)	; Get start window line
+	ld	d,0
+	add	hl,de		; Build real line
+	inc	hl
+	call	l05f9		; Display it
+	ld	a,$CL
+	ld	(l1a4e),a	; Set column
+	call	l0164		; Position cursor
+	ld	hl,(l1a64)	; Get column
+	ld	h,0
+	inc	hl
+	call	l05f9		; Display it
+	ld	a,$SPACE
+	ld	(l1a4e),a	; Set column
+	call	l0164		; Position cursor
+	call	l0738		; Get free space
+	ld	h,b
+	ld	l,c
+	call	l05f9		; Display it
+	ld	a,$FC
+	ld	(l1a4e),a	; Set column
+	call	l0164		; Position cursor
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	de,(l1b0e)	; Get start of text
+	or	a
+	sbc	hl,de		; Calculate space
+	inc	hl
+	call	l05f9		; Display it
+	pop	af
+	ld	(l1a4e),a	; Reset column
+	pop	af
+	ld	(l1a4d),a	; And column
+	call	l0164		; Position cursor
+	call	l020d		; Turn hilite off
+	ret
+;
+l05a7:
+	dw	0		; Base line of current text window
+;
+; Print filename
+;
+l05a9:
+	ld	a,$FN
+	ld	(l1a4e),a	; Set column
+	xor	a
+	ld	(l1a4d),a	; Clear row
+	call	l0164		; Position cursor
+	call	l01f9		; Turn hilite on
+	ld	a,(FCB)
+	or	a
+	jr	z,l05c8
+	add	a,'A'-1
+	call	l013b		; Put to console
+	ld	a,':'
+	call	l013b
+l05c8:
+	ld	hl,FCB+.drv
+	ld	b,.nam
+l05cd:
+	ld	a,(hl)
+	cp	' '
+	jr	z,l05d8
+	call	l013b		; Put to console
+	inc	hl
+	djnz	l05cd
+l05d8:
+	ld	hl,FCB+.drv+.nam
+	ld	a,'.'
+	ld	b,1+.ext
+l05df:
+	call	l013b		; Put to console
+	ld	a,(hl)
+	inc	hl
+	dec	b
+	jr	nz,l05df
+l05e7:
+	ld	a,(l1a4e)	; Get column
+	cp	$FN+.nam+.ext
+	jr	nc,l05f5
+	ld	a,' '
+	call	l013b		; Put to console
+	jr	l05e7
+l05f5:
+	call	l020d		; Turn hilite off
+	ret
+;
+; Put decimal in number in reg HL to console
+;
+l05f9:
+	ld	d,0		; Set no leading zeroes
+	ld	e,5		; Set length of decimal digits
+	call	l0622		; Divide
+	dw	-10000
+	call	l0622
+	dw	-1000
+	call	l0622
+	dw	-100
+	call	l0622
+	dw	-10
+	ld	d,'0'
+	call	l0622
+	dw	-1
+	inc	e
+l0619:
+	dec	e		; Test length
+	ret	z		; Got it
+	ld	a,' '		; Fill remainder with blanks
+	call	l013b
+	jr	l0619
+;
+; Divide HL by immediate number
+;
+l0622:
+	ex	(sp),hl
+	ld	c,(hl)		; Get immediate number
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ex	(sp),hl
+	ld	a,'0'		; Init resulting digit
+l062a:
+	push	hl
+	add	hl,bc		; Divide
+	jr	nc,l0633	; Got quotient
+	inc	a		; Update quotient
+	inc	sp		; Fix stack
+	inc	sp
+	jr	l062a
+l0633:
+	pop	hl		; Get back last number
+	cp	'0'		; Test zero result
+	jr	nz,l063b	; Nope
+	ld	a,d		; Get filler
+	jr	l063d
+l063b:
+	ld	d,'0'		; Set end of leading zeroes
+l063d:
+	cp	0		; Test leading zero
+	ret	z		; Yeap, ignore
+	call	l013b		; Put to console
+	dec	e		; Count down
+	ret
+;
+; Read characters into buffer ^HL
+;
+l0645:
+	push	hl
+	call	l02d4		; Input character
+	pop	hl
+	cp	cr		; Test end
+	jr	z,l0694		; Yeap
+	cp	'S'-'@'		; Test delete last character
+	jr	z,l066e
+	cp	bs
+	jr	z,l066e
+	cp	DEL
+	jr	z,l066e
+	ld	(hl),a		; Save character
+	inc	hl
+	cp	' '		; Test control
+	jr	nc,l0669	; Nope
+	add	a,'@'
+	push	af
+	ld	a,'^'
+	call	l013b		; Put to console
+	pop	af
+l0669:
+	call	l013b		; Put to console
+	jr	l0645		; Read line
+l066e:
+	ld	a,CCP		;		**** ERROR: Not always in CCP
+	cp	l		; Test at left most position
+	jr	z,l0645		; Yeap, skip deleting
+	dec	hl
+	ld	a,(hl)
+	push	hl
+	ld	hl,l1a4e	; Point to column
+	dec	(hl)		; Get previous
+	cp	' '		; Test control
+	jr	nc,l067f
+	dec	(hl)		; Fix for previous again
+l067f:
+	call	l0164		; Position cursor
+	ld	a,' '
+	call	l013b		; Blank two characters
+	ld	a,' '
+	call	l013b
+	dec	(hl)		; Fix for two characters
+	dec	(hl)
+	call	l0164		; Position cursor
+	pop	hl
+	jr	l0645
+l0694:
+	ld	(hl),null	; Close line
+	ret
+;
+; Initialize memory
+;
+l0697:
+	ld	hl,(l1b0e)	; Get start of text
+	dec	hl
+	ld	(hl),cr		; Close it
+	ld	hl,(TPATOP)	; Get top of memory address
+	dec	h		; Less one page
+	ld	(hl),cr		; Close it
+	dec	hl
+	ld	(hl),cr
+	ld	(l1b12),hl	; Save end addresses
+	dec	hl
+	ld	(l1b14),hl
+	ret
+;
+; Clear block marker
+;
+l06ae:
+	ld	hl,0
+	ld	(l1a53),hl	; Clear block start marker
+	ld	(l1a55),hl	; Clear block end marker
+	ret
+;
+; BC:=HL-BC+1
+;
+l06b8:
+	push	hl
+	add	a,0		; Clear carry without changing Accu
+	sbc	hl,bc		; Get difference
+	ld	b,h
+	ld	c,l
+	inc	bc		; Fix it
+	pop	hl
+	ret
+;
+;
+;
+l06c2:
+	call	l072e		; Build gap BC:=HL-Top_pointer
+	ret	c
+	ld	de,(l1b10)	; Get current text pointer
+	inc	de
+	ld	hl,(l1b12)	; Get top pointer
+	ldir
+	ld	(l1b12),hl
+	dec	de
+	ld	(l1b10),de	; Set current text pointer
+	ret
+;
+;
+;
+l06d9:
+	call	l0723		; Build gap BC:=-Current_pointer-HL
+	ret	c
+	ld	de,(l1b12)	; Get top pointer
+	dec	de
+	ld	hl,(l1b10)	; Get current text pointer
+	lddr
+	ld	(l1b10),hl	; Set current text pointer
+	inc	de
+	ld	(l1b12),de
+	ret
+;
+;
+;
+l06f0:
+	push	hl
+	push	de
+	ex	de,hl
+	ld	hl,(l1b14)	; Get end address
+	or	a
+	sbc	hl,de
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l06fc:
+	push	de
+	push	hl
+	ld	de,(l1b10)	; Get current text pointer
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	jr	nc,l0711
+	pop	hl
+	push	hl
+	ld	de,(l1b12)	; Get top pointer
+	or	a
+	sbc	hl,de
+l0711:
+	pop	hl
+	pop	de
+	ret
+;
+;
+;
+l0714:
+	push	hl
+	push	de
+	ld	de,(l1b0e)	; Get start of text
+	or	a
+	sbc	hl,de
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0720:
+	ld	hl,(l1b0e)	; Get start of text
+;
+; Build gap BC:=-Current_pointer-HL
+;
+l0723:
+	ld	b,h
+	ld	c,l
+	ld	hl,(l1b10)	; Get current text pointer
+	jp	l06b8		; BC:=HL-BC+1
+;
+;
+;
+l072b:
+	ld	hl,(l1b14)	; Get end address
+;
+; Build gap BC:=HL-Top_pointer
+;
+l072e:
+	push	hl
+	ld	hl,(l1b12)	; Get top pointer
+	ld	b,h
+	ld	c,l
+	pop	hl
+	jp	l06b8		; BC:=HL-BC+1
+;
+; Get free space
+;
+l0738:
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	b,h
+	ld	c,l
+	ld	hl,(l1b12)	; Get top pointer
+	dec	hl
+	dec	hl
+	jp	l06b8		; BC:=HL-BC+1
+;
+; Command ^E : Move cursor up a line
+;
+l0745:
+	call	l0fe6		; Move cursor left
+	jr	nc,l0763	; Start of text reached
+	jr	z,l074e		; End of line found
+	jr	l0745
+l074e:
+	ld	a,(l026e)	; Test insert line defined
+	cp	0
+	jr	nz,l0763	; Yeap
+	ld	a,(l1a4d)	; Get row
+	cp	1
+	ld	a,cr
+	jr	nz,l0763
+	call	l14a9		; Enable get character
+	ld	a,cr
+l0763:
+	call	l084f
+	ret
+;
+; Command ^X : Move cursor down a line
+;
+l0767:
+	call	l0fbe		; Move cursor right
+	jr	nc,l078e	; End of text
+	jr	z,l0770		; Got new line
+	jr	l0767		; Move on
+l0770:
+	ld	a,(l0276)	; Test delete line defined
+	cp	0
+	jr	nz,l078e	; Yeap
+	push	bc
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	cp	b
+	ld	a,cr
+	pop	bc
+	jr	nz,l078e
+	call	l14a9		; Enable get character
+	ld	a,cr
+	call	l0d41
+l078e:
+	call	l084f
+	ret
+;
+; Command ^QR : places the cursor at the start of the text
+;
+l0792::
+	ld	hl,0
+	ld	(l05a7),hl	; Clear start window line
+	ld	hl,(l1b0e)	; Get start of text
+	call	l06d9
+	ld	hl,(l1b0e)	; Get start of text
+	ld	(l1b0c),hl	; Unpack for bottom pointer
+	call	l14a9		; Enable get character
+	ret
+;
+; Command ^QC : places the cursor at the bottom of the text
+;
+l07a8::
+	ld	hl,(l1b14)	; Get end address
+	call	l06c2
+	call	l0720
+	inc	bc
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	a,cr
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	e,a
+	ld	a,cr
+l07be:
+	cpdr
+	jp	po,l07c8
+	dec	e
+	jr	z,l07c8
+	jr	l07be
+l07c8:
+	inc	hl
+	inc	hl
+	ld	(l1b0c),hl	; Save bottom pointer
+	call	l07d1
+	ret
+;
+;
+;
+l07d1:
+	ld	hl,(l1b0c)	; Get bottom pointer
+	ld	de,(l1b0e)	; Get start of text
+	or	a
+	sbc	hl,de
+	ld	de,0
+	ld	a,h
+	or	l
+	jr	z,l07f0
+	ld	b,h
+	ld	c,l
+	ld	hl,(l1b0c)	; Get bottom pointer
+	ld	a,cr
+l07e9:
+	cpdr
+	inc	de
+	jp	pe,l07e9
+	dec	de
+l07f0:
+	ld	(l05a7),de	; Save start window line
+	ret
+;
+; Command ^A : Move cursor a word to the left
+;
+l07f5:
+	call	l0fe6		; Move cursor left
+	ret	z		; End of line found
+	ret	nc		; Start of text reached
+	call	l080a		; Test character a control character
+	jr	z,l07f5		; Nope
+l07ff:
+	call	l0fe6		; Move cursor left
+	ret	nc		; Start of text reached
+	ret	z		; End of line found
+	call	l080a		; Test character a control character
+	jr	nz,l07ff	; Yeap
+	ret
+;
+; Test character a control character
+; Z set says no
+;
+l080a:
+	cp	' '+1		; Test range
+	jr	c,l0810		; It's control
+	xor	a		; Set no control
+	ret
+l0810:
+	or	a		; Set control
+	ret
+;
+; Command ^F : Move cursor a word to the right
+;
+l0812:
+	call	l0fbe		; Move cursor right
+	ret	z		; End of line
+	ret	nc		; End of text
+	call	l080a		; Test character a control character
+	jr	nz,l0812	; Yeap
+l081c:
+	call	l0fbe		; Move cursor right
+	ret	z		; End of line
+	ret	nc		; End of text
+	call	l080a		; Test character a control character
+	jr	z,l081c		; Nope
+	ret
+;
+; Command DEL : Delete character left of cursor
+;
+l0827::
+	call	l0fe6		; Move cursor left
+	ret	nc		; Start of text reached
+	call	l0d41
+	call	l0a97		; Delete character right at cursor
+	ret
+;
+; Command ^C : Move cursor a page down
+;
+l0832::
+	push	af
+	ld	a,(l1b16)	; Get lines on screen
+	ld	b,a
+	pop	af
+l0838:
+	push	bc
+	call	l0fbe		; Move cursor right
+	pop	bc
+	jr	nc,l084b	; End of text
+	jr	nz,l0838	; Move on if not new line
+	call	l14a9		; Enable get character
+	push	bc
+	call	l0f5a
+	pop	bc
+	djnz	l0838
+l084b:
+	call	l084f
+	ret
+;
+;
+;
+l084f:
+	call	l0fe6		; Move cursor left
+	jr	nc,l085b	; Start of text reached
+	jr	z,l0858		; End of line found
+	jr	l084f
+l0858:
+	call	l0fbe		; Move cursor right
+l085b:
+	ld	c,0		; Clear column position
+	ld	a,(l1a64)	; Get column
+	ld	e,a
+l0861:
+	ld	a,c
+	cp	e
+	ret	z
+	jr	c,l086a
+	call	l0fe6		; Move cursor left
+	ret
+l086a:
+	push	de
+	push	bc
+	call	l0fbe		; Move cursor right
+	pop	bc
+	pop	de
+	ret	nc		; End of text
+	jr	z,l0879		; End of line
+	call	l0e79		; Fix character/column count
+	jr	l0861
+l0879:
+	call	l0fe6		; Move cursor left
+	ret
+;
+; Command ^R : Move a page up
+;
+l087d::
+	push	af
+	ld	a,(l1b16)	; Get lines on screen
+	ld	b,a
+	pop	af
+l0883:
+	push	bc
+	call	l08cb
+	pop	bc
+	jr	c,l0898
+	call	l14a9		; Enable get character
+l088d:
+	push	bc
+	call	l0fe6		; Move cursor left
+	pop	bc
+	jr	nc,l0898	; Start of text reached
+	jr	nz,l088d	; No end of line found
+	djnz	l0883
+l0898:
+	call	l084f
+	ret
+;
+;
+;
+l089c:
+	ld	hl,(l1b10)	; Get current text pointer
+l089f:
+	ld	a,cr
+	cp	(hl)
+	jr	z,l08a7
+	inc	hl
+	jr	l089f
+l08a7:
+	inc	hl
+	ld	(l1b0c),hl	; Save bottom pointer
+	push	af
+	push	bc
+	push	hl
+	ld	a,(l0250)	; Get lines on screen
+	ld	b,0
+l08b3:
+	dec	a
+	inc	b
+	cp	b
+	jr	nz,l08b3
+	dec	a
+	dec	a
+	ld	e,a
+	pop	hl
+	pop	bc
+	pop	af
+l08be:
+	call	l08cb
+	jr	c,l08c8
+	dec	e
+	jr	z,l08c8
+	jr	l08be
+l08c8:
+	call	l07d1
+;
+;
+;
+l08cb:
+	ld	hl,(l1b0c)	; Get bottom pointer
+	ld	bc,(l1b0e)	; Get start of text
+	or	a
+	push	hl
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	ld	a,b
+	or	c
+	pop	hl
+	scf
+	ret	z
+	ld	hl,(l05a7)	; Get start window line
+	dec	hl		; Get previous
+	ld	(l05a7),hl
+	ld	hl,(l1b0c)	; Get bottom pointer
+	dec	hl
+	dec	hl
+	ld	a,cr
+	cpdr
+	jr	z,l08f7
+	ld	hl,(l1b0e)	; Get start of text
+	ld	(l1b0c),hl	; For bottom pointer
+	or	a
+	ret
+l08f7:
+	inc	hl
+	inc	hl
+	ld	(l1b0c),hl	; Save bottom pointer
+	or	a
+	ret
+;
+; Command ^QA : Find and replace
+;
+l08fe::
+	ld	a,TRUE
+	ld	(l1a5b),a	; Set ^QA flag
+	call	l091c		; Get string to find
+	call	l092d		; Get string to replace
+	call	l0948		; Ask for search options
+	jp	l09c1		; Repeats last ^QF or ^QA
+;
+; Command ^QF : Search a string in the text
+;
+l090f::
+	xor	a
+	ld	(l1a5b),a	; Set ^QF flag
+	call	l091c		; Get string to find
+	call	l0948		; Ask for search options
+	jp	l09c1		; Repeats last ^QF or ^QA
+;
+; Get string to find
+;
+l091c:
+	call	l0d24
+	db	'Find: ',null
+	ld	hl,l1c11
+	call	l0645		; Read line
+	ret
+;
+; Get string to replace
+;
+l092d:
+	call	l0d24
+	db	cr,tab,'Replace with: ',null
+	ld	hl,l1c91
+	call	l0645		; Read line
+	ret
+;
+; Ask for search options
+;
+l0948:
+	call	l0d24
+	db	cr,tab,'Ignore U/L case? ',null
+	call	l02d4		; Input character
+l0962:
+	and	CHRMASK
+	cp	'Y'-'@'		; Test ignore
+	jr	z,l0970
+	cp	'N'-'@'
+	jr	z,l0988		; Test no ignore
+	ld	a,'Y'
+	jr	l0962
+l0970:
+	ld	a,'Y'
+	call	l104e		; Echo character
+	ld	a,TRUE
+	ld	(l1a59),a	; Set ignore flag
+	ld	hl,l1c11	; Point to search string
+l097d:
+	ld	a,(hl)
+	or	a		; Test end of string
+	jr	z,l0991
+	call	l0a5b		; Convert to upper case
+	ld	(hl),a
+	inc	hl
+	jr	l097d
+l0988:
+	ld	a,'N'
+	call	l104e		; Echo character
+	xor	a
+	ld	(l1a59),a	; Set upper/lower case
+l0991:
+	call	l0d24
+	db	cr,tab,'Backwards? ',null
+	call	l02d4		; Input character
+	and	CHRMASK
+	cp	'Y'-'@'		; Test backwards
+	jr	z,l09b6
+	ld	a,'N'
+	call	l104e		; Echo character
+	ld	a,FALSE
+	ld	(l1a5a),a	; Reset backwards flag
+	ret
+l09b6:
+	ld	a,'Y'
+	call	l104e		; Echo character
+	ld	a,TRUE
+	ld	(l1a5a),a	; Set backwards flag
+	ret
+;
+; Command ^L : Repeats last ^QF or ^QA
+;
+l09c1:
+	ld	a,(l1a5b)	; Get ^QA/F flag
+	or	a
+	jr	z,l09fa		; ^QF
+	call	l09fa
+	ld	a,(l1a58)
+	or	a		; Test error
+	ret	nz		; Yeap
+	ld	de,(l1b12)	; Get top pointer
+	ld	hl,l1c11	; Point to search string
+	ld	a,0
+l09d8:
+	cp	(hl)
+	jr	z,l09df
+	inc	hl
+	inc	de
+	jr	l09d8
+l09df:
+	ld	(l1b12),de	; Set new top
+	ld	de,(l1b10)	; Get current text pointer
+	inc	de
+	ld	hl,l1c91	; Point to replace string
+l09eb:
+	ld	a,(hl)
+	or	a
+	jr	z,l09f4
+	ld	(de),a
+	inc	de
+	inc	hl
+	jr	l09eb
+l09f4:
+	dec	de
+	ld	(l1b10),de	; Set current text pointer
+	ret
+;
+;
+;
+l09fa:
+	call	l14a9		; Enable get character
+	ld	a,(l1a59)	; Get case flag (0FFh is ignore)
+	ld	b,a
+	ld	a,(l1a5a)	; Get backwards flag (0FFh is backwards)
+	or	a
+	ld	de,l1c11	; Point to search string
+	jr	z,l0a22		; Selected forewards
+	ld	hl,(l1b10)	; Get current text pointer
+	dec	hl
+l0a0e:
+	call	l0a47		; Find string
+	jr	z,l0a1b		; Got it
+	dec	hl
+	call	l0714
+	jr	c,l0a3b
+	jr	l0a0e
+l0a1b:
+	call	l06d9
+	call	l089c
+	ret
+l0a22:
+	ld	hl,(l1b12)	; Get top pointer
+	inc	hl
+l0a26:
+	call	l0a47		; Find string
+	jr	z,l0a33		; Got it
+	inc	hl
+	call	l06f0
+	jr	nc,l0a26
+	jr	l0a3b
+l0a33:
+	dec	hl
+	call	l06c2
+	call	l089c
+	ret
+l0a3b:
+	ld	a,4
+	ld	(l1a58),a	; Set string not found
+	ret
+l0axx::
+	ld	a,2
+	ld	(l1a58),a	; Set invalid key
+	ret
+;
+; Find string ^DE in text ^HL
+; Z set says match
+;
+l0a47:
+	ld	a,(de)		; Get search character
+	or	a		; Test end of string
+	ret	z		; Yeap
+	ld	c,a		; Save it
+	ld	a,(hl)		; Get from text
+	rlc	b		; Test case ignore state
+	call	c,l0a5b		; Convert to upper case if case ignore
+	cp	c		; Compare
+	ret	nz		; No match
+	inc	hl		; Advance pointer
+	inc	de
+	call	l0a47		; Recursive call
+	dec	de		; Final fix
+	dec	hl
+	ret
+;
+; Convert character to UPPER case
+;
+l0a5b:
+	cp	'a'		; Test range
+	ret	c
+	cp	'z'+1
+	ret	nc
+	and	UPPMASK
+	ret
+;
+; Command ^P : Enter a printer code
+;
+l0a64::
+	call	l02d4		; Input character
+	jp	l0ee2		; Insert it
+;
+; Command ^V : Toggle Insert mode on or off
+;
+l0a6a::
+	ld	a,(l1a5c)	; Get insert mode
+	xor	MSB		; Toggle it
+	ld	(l1a5c),a
+;
+; Tell toggle on/off
+;
+l0a72:
+	ld	a,$INSERT
+	ld	(l1a4e),a	; Set column
+	xor	a
+	ld	(l1a4d),a	; Clear row
+	call	l0164		; Position cursor
+	ld	a,(l1a5c)	; Get insert mode
+	or	a
+	jr	z,l0a89
+	ld	hl,l1a5d	; Tell on
+	jr	l0a8c
+l0a89:
+	ld	hl,l1a60	; Tell off
+l0a8c:
+	ld	b,Oxlen		; Set length
+l0a8e:
+	ld	a,(hl)
+	call	l013b		; Put to console
+	inc	hl
+	dec	b		; **** DJNZ ****
+	jr	nz,l0a8e
+	ret
+;
+; Command ^G : Delete character right at cursor
+;
+l0a97:
+	call	l072b
+	ret	c
+	call	l06ae		; Clear block marker
+	ld	hl,(l1b12)	; Get top pointer
+	ld	a,(hl)		; Get character
+	inc	hl
+	ld	(l1b12),hl
+	cp	cr		; Test new line
+	jr	nz,l0ab5	; Nope
+	call	l0e90
+	ld	a,(l1a64)	; Get column
+	ld	c,a
+	call	l0f6e
+	ret
+l0ab5:
+	call	l014c		; Delete to end of line
+	call	l0d41
+	ld	a,(l1a64)	; Get column
+	ld	c,a
+	call	l0f6e
+	ret
+;
+; Command ^T : Delete one word to the right
+;
+l0ac3::
+	call	l0a97		; Delete character right at cursor
+	call	l0d41
+	ld	hl,(l1b12)	; Get top pointer
+l0acc:
+	ld	a,(hl)
+	inc	hl
+	call	l080a		; Test character a control character
+	jr	z,l0acc		; Nope
+l0ad3:
+	cp	cr		; Test end of line
+	jr	z,l0ae4
+	cp	tab		; Test tab
+	jr	z,l0ae4
+	call	l080a		; Test character a control character
+	jr	z,l0ae4		; Nope
+	ld	a,(hl)		; Get character
+	inc	hl
+	jr	l0ad3
+l0ae4:
+	dec	hl		; Fix pointer
+	ld	(l1b12),hl	; Set top pointer
+	ld	a,(l1a64)	; Get column
+	ld	c,a
+	call	l0f6e
+	call	l014c		; Delete to end of line
+	ret
+;
+; Command ^Y : Delete entire line
+;
+l0af3:
+	call	l06ae		; Clear block marker
+	call	l0fe6		; Move cursor left
+	jr	nc,l0b00	; Start of text reached
+	jr	nz,l0af3	; No end of line found
+	call	l0fbe		; Move cursor right
+l0b00:
+	ld	hl,(l1b10)	; Get current text pointer
+	push	hl
+l0b04:
+	call	l0fbe		; Move cursor right
+	jr	nc,l0b0b	; End of text
+	jr	nz,l0b04	; Not end of line
+l0b0b:
+	pop	hl
+	ld	(l1b10),hl	; Set current text pointer
+	call	l01e2		; Delete a line
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	(l1a4d),a	; Set for row
+	call	l0164		; Position cursor
+	call	l0e3d
+	call	l0e5e
+	ret
+;
+; Command ^KB : Set block start marker
+;
+l0b27::
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	(l1a53),hl	; Save address
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	call	z,l14af		; Disable get character if so
+	ret
+;
+; Command ^KK : Set block end marker
+;
+l0b36::
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	(l1a55),hl	; Save address
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	call	z,l14af		; Disable get character if so
+	ret
+;
+; Test block selected
+;
+l0b45:
+	ld	hl,(l1a55)	; Get block end marker
+	ld	a,h
+	or	l
+	jr	z,l0b58		; Not selected, error
+	ex	de,hl
+	ld	hl,(l1a53)	; Get block start marker
+	ld	a,h
+	or	l
+	jr	z,l0b58		; Not selected, error
+	sbc	hl,de		; Verify START < END
+	jr	c,l0b5e		; Ok
+l0b58:
+	ld	a,6
+	ld	(l1a58),a	; Set block not marked
+	ret
+l0b5e:
+	scf
+	ret
+;
+;
+;
+l0b60:
+	push	hl
+	ex	de,hl
+	ld	hl,(l1b10)	; Get current text pointer
+	or	a
+	sbc	hl,de
+	pop	hl
+	ret	z
+	jr	c,l0b71
+	inc	hl
+	call	l06d9
+	ret
+l0b71:
+	ld	de,(l1b10)	; Get current text pointer
+	or	a
+	sbc	hl,de
+	ld	de,(l1b12)	; Get top pointer
+	add	hl,de
+	dec	hl
+	call	l06c2
+	ret
+;
+; Command ^QB : Places the cursor at the beginning of the block
+;
+l0b82::
+	ld	hl,(l1a53)	; Get block start marker
+	jr	l0b8a
+;
+; Command ^QK : Places the cursor at the end of the block
+;
+l0b87:
+	ld	hl,(l1a55)	; Get block end marker
+l0b8a:
+	ld	a,h		; Test marker selected
+	or	l
+	jr	nz,l0b94	; Yeap
+	ld	a,6
+	ld	(l1a58),a	; Set block not marked
+	ret
+l0b94:
+	call	l0b60
+	call	l089c
+	call	l07d1
+	ret
+;
+; Command ^KC : Copy marked block to the cursor position
+;
+l0b9e:
+	call	l0b45		; Test block selected
+	ret	nc		; Nope
+	call	l0fae
+	ld	hl,(l1a55)	; Get block end marker
+	ld	de,(l1a53)	; Get block start marker
+	or	a
+	sbc	hl,de
+	sbc	hl,bc
+	jr	c,l0bb9
+	ld	a,8
+	ld	(l1a58),a	; Set block too big
+	ret
+l0bb9:
+	ld	hl,(l1b10)	; Get current text pointer
+	push	hl
+	ld	de,(l1a53)	; Get block start marker
+	or	a
+	sbc	hl,de
+	jr	c,l0bd9
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	de,(l1a55)	; Get block end marker
+	or	a
+	sbc	hl,de
+	jr	nc,l0c18
+	ld	a,7
+	ld	(l1a58),a	; Set block staddles cursor
+	pop	hl
+	ret
+l0bd9:
+	ld	hl,(l1a53)	; Get block start marker
+	ld	de,(l1b10)	; Get current text pointer
+	or	a
+	sbc	hl,de
+	ld	de,(l1b12)	; Get top pointer
+	add	hl,de
+	push	hl
+	ld	hl,(l1a55)	; Get block end marker
+	ld	de,(l1a53)	; Get block start marker
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	ld	hl,(l1a53)	; Get block start marker
+	add	hl,bc
+	ld	(l1a53),hl	; Set block start marker
+	ld	hl,(l1a55)	; Get block end marker
+	add	hl,bc
+	ld	(l1a55),hl	; Set block end marker
+	pop	hl
+	ld	de,(l1b10)	; Get current text pointer
+	inc	de
+	ldir
+	dec	de
+	ld	(l1b10),de	; Set current text pointer
+	pop	hl
+	call	l0b60
+	call	l089c
+	ret
+l0c18:
+	ld	de,(l1a53)	; Get block start marker
+	ld	hl,(l1a55)	; Get block end marker
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	ex	de,hl
+	ld	de,(l1b10)	; Get current text pointer
+	inc	de
+	inc	hl
+	ldir
+	dec	de
+	ld	(l1b10),de	; Set current text pointer
+	pop	hl
+	call	l0b60
+	call	l07d1
+	call	l089c
+	ret
+;
+; Command ^KV : Move marked block to the cursor position
+;
+l0c3d::
+	ld	hl,(l1b10)	; Get current text pointer
+	push	hl
+	call	l0b9e		; Copy marked block
+	pop	hl
+	ld	a,(l1a58)
+	or	a		; Test error
+	ret	nz		; Yesp
+	push	hl
+	ld	de,(l1a53)	; Get block start marker
+	or	a
+	sbc	hl,de
+	jr	c,l0c5f
+	ld	hl,(l1a55)	; Get block end marker
+	sbc	hl,de
+	ex	de,hl
+	pop	hl
+	or	a
+	sbc	hl,de
+	push	hl
+l0c5f:
+	call	l0c6d		; Delete marked block
+	pop	hl
+	call	l0b60
+	call	l089c
+	call	l07d1
+	ret
+;
+; Command ^KY : Delete marked block
+;
+l0c6d:
+	call	l0b45		; Test block selected
+	ret	nc		; Nope
+	ld	hl,(l1a55)	; Get block end marker
+	call	l0b60
+	ld	hl,(l1a53)	; Get block start marker
+	ld	(l1b10),hl	; Set current text pointer
+	call	l089c
+	call	l07d1
+	call	l06ae		; Clear block marker
+	ret
+;
+; Command ^KZ : Zaps (erases) current file from memory
+;
+l0c87::
+	call	l14d1		; Clear status line on lowes help level
+	call	l0d24
+	db	tab,'Erase all (Y/N)',null
+	call	l02d4		; Input character
+	and	UPPMASK
+	cp	'Y'
+	ret	nz
+	ld	hl,(l1b0e)	; Get start of text
+	dec	hl
+	ld	(l1b10),hl	; Set current text pointer
+	ld	hl,(l1b14)	; Get end address
+	inc	hl
+	ld	(l1b12),hl	; Set top pointer
+	call	l06ae		; Clear block marker
+	xor	a
+	ld	(FCB),a
+	ld	b,.nam+.ext
+	ld	hl,FCB+.drv
+l0cc0::
+	ld	(hl),' '
+	inc	hl
+	dec	b
+	jr	nz,l0cc0
+	call	l05a9		; Print filename
+	ret
+;
+; Put string ^HL to console
+;
+l0cca:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	ret	z		; Yeap
+	push	af
+	ld	a,(l0250)	; Get lines on screen
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	cp	b		; Test screen filled
+	jr	nz,l0cde	; Nope
+	push	hl
+	call	l0ce4		; Wait for key pressed
+	pop	hl
+l0cde:
+	pop	af
+	call	l104e		; Echo character
+	jr	l0cca
+;
+; Wait for key pressed
+;
+l0ce4:
+	ld	de,l0cf5
+	ld	c,.string
+	call	BDOS		; Tell what we're awaiting for
+	ld	c,.conin
+	call	BDOS		; Dummy read
+	call	l01b4		; Put cursor to start of screen
+	ret
+;
+l0cf5:
+	db	'                     [Hit any key to continue]',eot
+;
+; Put immediate string to console
+;
+l0d24:
+	call	l14a9		; Enable get character
+	pop	hl		; Get string pointer
+	call	l0cca		; Put to console
+	jp	(hl)
+;
+; Insert a character into text
+;
+l0d2c:
+	cp	' '		; Tset normal character
+	jr	nc,l0d3e	; Yeap
+	cp	cr		; Filter some valid controls
+	jr	z,l0d3e
+	cp	tab
+	jr	z,l0d3e
+	ld	a,2
+	ld	(l1a58),a	; Invalid key
+	ret
+l0d3e:
+	jp	l0ee2		; Insert it
+;
+;
+;
+l0d41:
+	ld	de,(l1b0c)	; Get bottom pointer
+	ld	hl,(l1b10)	; Get current text pointer
+	push	hl
+	inc	hl
+	or	a
+	sbc	hl,de
+	pop	hl
+	jr	nc,l0d55
+	call	l0df4
+	jr	l0d41
+l0d55:
+	ex	de,hl
+	xor	a
+	ld	b,a		; Clear character count
+	ld	c,a		; Clear column position
+	ld	(l1a63),a	; Clear line within text window
+l0d5c:
+	call	l06fc
+	jr	c,l0d78
+	ld	a,(hl)
+	inc	hl
+	cp	cr
+	jr	nz,l0d73
+	ld	a,(l1a63)	; Get line within text window
+	inc	a		; Advance it
+	ld	(l1a63),a
+	ld	bc,0		; Clear counts again
+	jr	l0d5c
+l0d73:
+	call	l0e79		; Fix character/column count
+	jr	l0d5c
+l0d78:
+	ld	a,(l1a63)	; Get line within text window
+	inc	a		; Advance it
+	push	bc
+	push	af
+	ld	a,(l0250)	; Get lines on screen
+	ld	b,a
+	pop	af
+	cp	b
+	pop	bc
+	jr	c,l0d8c
+	call	l0e17
+	jr	l0d41
+l0d8c:
+	ld	(l1a4d),a	; Set row
+	ld	a,c
+	ld	(l1a64),a	; Save column
+	ld	a,b
+l0d95	equ	$+1
+	cp	SCRCOL
+	jr	c,l0d9c
+	call	l0da6
+	ret
+l0d9c:
+	call	l0f81
+	ld	(l1a4e),a	; Set column
+	call	l0164		; Position cursor
+	ret
+;
+;
+;
+l0da6:
+	ld	a,b
+l0da8	equ	$+1
+	sub	SCRCOL-3
+	ld	d,a
+	ld	a,TRUE
+	ld	(l1a65),a
+	call	l0720
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	a,cr
+	cpdr
+	inc	hl
+	ld	bc,0		; Clear character/column count
+l0dbd:
+	ld	a,(hl)
+	inc	hl
+	call	l0e79		; Fix character/column count
+	ld	a,b
+	cp	d
+	jr	c,l0dbd
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	b,a
+	push	bc
+	push	hl
+	call	l0164		; Position cursor
+	pop	hl
+	pop	bc
+l0dd2:
+	call	l06fc
+	jr	c,l0dde
+	ld	a,(hl)
+	inc	hl
+	call	l104e		; Echo character
+	jr	l0dd2
+l0dde:
+	ld	a,(l1a4e)	; Get column
+	push	af
+	call	l0f6e
+	call	l014c		; Delete to end of line
+	ld	hl,l1a4d	; Get row pointer
+	dec	(hl)		; Count down
+	pop	af
+	ld	(l1a4e),a	; Set column
+	call	l0164		; Position cursor
+	ret
+l0df4:
+	call	l08cb
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	inc	a
+	ld	(l1a4d),a	; Init row
+	call	l0164		; Position cursor
+	call	l01cb		; Insert a line
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	inc	a
+	ld	(l1a4d),a	; Init row
+	call	l0164		; Position cursor
+	ld	hl,(l1b0c)	; Get bottom pointer
+	call	l0e5e
+	ret
+l0e17:
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	inc	a
+	ld	(l1a4d),a	; Init row
+	call	l0164		; Position cursor
+	call	l01e2		; Delete a line
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	(l1a4d),a	; Set for row
+	call	l0164		; Position cursor
+	call	l0f5a
+	call	l0e3d
+	call	l0e5e
+	ret
+l0e3d:
+	ld	hl,(l1b0c)	; Get bottom pointer
+	ld	e,0
+l0e42:
+	call	l06fc
+	jr	nc,l0e4a
+	ld	hl,(l1b12)	; Get top pointer
+l0e4a:
+	call	l06f0
+	ret	c
+	ld	a,(hl)
+	inc	hl
+	cp	cr
+	jr	nz,l0e42
+	inc	e
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	dec	a
+	cp	e
+	jr	nz,l0e42
+	ret
+l0e5e:
+	ld	bc,0
+l0e61:
+	call	l06fc
+	jr	nc,l0e69
+	ld	hl,(l1b12)	; Get top pointer
+l0e69:
+	call	l06f0
+	ret	c
+	ld	a,(hl)
+	inc	hl
+	cp	cr
+	ret	z
+	push	hl
+	call	l104e		; Echo character
+	pop	hl
+	jr	l0e61
+;
+; Fix counts for a character
+;
+l0e79:
+	cp	tab		; Test tabulator
+	jr	z,l0e84		; Yeap, fix columns
+	cp	' '		; Test control
+	jr	c,l0e8d		; Yeap
+	inc	b		; Update character count
+	inc	c		; Update column count
+	ret
+l0e84:
+	inc	b		; Update character count
+	inc	c		; Update column count
+	ld	a,(l1ba8)	; Get tab stop
+	and	c		; Test any reached
+	jr	nz,l0e84	; Nope
+	ret
+l0e8d:
+	inc	b		; Update character count
+	inc	b		; Twice
+	ret
+;
+;
+;
+l0e90:
+	push	bc
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	cp	b
+	pop	bc
+	ret	z
+	push	de
+	push	bc
+	push	af
+	inc	a
+	ld	(l1a4d),a	; Fix row
+	ld	a,(l1a4e)	; Get column
+	push	af
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	call	l0164		; Position cursor
+	call	l01e2		; Delete a line
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	(l1a4d),a	; Set for row
+	call	l0164		; Position cursor
+	call	l0e3d
+	call	l0e5e
+	pop	af
+	ld	(l1a4e),a	; Reset column
+	pop	af
+	ld	(l1a4d),a	; Reset row
+	call	l0164		; Position cursor
+	pop	bc
+	pop	de
+	ret
+;
+; Command ^N : Insetr a new line
+;
+l0ed3::
+	call	l0f81
+	ld	a,cr
+	ld	(l1a57),a	; Set new line to be stored
+	call	l0f03
+	call	l0fe6		; Move cursor left
+	ret
+;
+; Insert character
+;
+l0ee2:
+	ld	(l1a57),a	; Save character to be stored
+	cp	cr		; Test new line
+	push	af
+	call	z,l0f81
+	pop	af
+	ld	a,(l1a5c)	; Get insert mode
+	or	a
+	jr	nz,l0f03	; Insert it
+	call	l0fbe		; Move cursor right
+	jr	nc,l0f03	; End of text
+	jr	nz,l0efe	; Not end of line
+	call	l0fe6		; Move cursor left
+	jr	l0f03
+l0efe:
+	ld	hl,(l1b10)	; Get current text pointer
+	jr	l0f0f
+;
+;
+;
+l0f03:
+	call	l0fae
+	jr	z,l0f18
+	call	l06ae		; Clear block marker
+	ld	hl,(l1b10)	; Get current text pointer
+	inc	hl
+l0f0f:
+	ld	(l1b10),hl	; Set current text pointer
+	ld	a,(l1a57)	; Get character
+	ld	(hl),a		; Store into text
+	jr	l0f20
+l0f18:
+	ld	a,1
+	ld	(l1a58),a	; Set file too big
+	jp	l19f2
+l0f20:
+	cp	cr		; Test new line
+	jr	z,l0f31
+	push	af
+	ld	a,(l1a64)	; Get column
+	ld	c,a
+	pop	af
+	call	l104e		; Echo character
+	call	l0f6e
+	ret
+l0f31:
+	ld	a,(l1a4d)	; Get row		**** WHY ****
+	push	bc
+	ld	a,(l0250)	; Get lines on screen
+	dec	a
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	cp	b
+	pop	bc
+	jr	nz,l0f4b
+	call	l014c		; Delete to end of line
+	call	l0e17
+	call	l0d41
+	ret
+l0f4b:
+	ld	a,cr
+	call	l104e		; Echo character
+	call	l01cb		; Insert a line
+	call	l0d41
+	call	l0f6e
+	ret
+;
+;
+;
+l0f5a:
+	ld	hl,(l05a7)	; Get start window line
+	inc	hl		; Get next
+	ld	(l05a7),hl
+	ld	hl,(l1b0c)	; Get bottom pointer
+l0f64:
+	ld	a,(hl)
+	cp	cr
+	inc	hl
+	jr	nz,l0f64
+	ld	(l1b0c),hl	; Save bottom pointer
+	ret
+;
+;
+;
+l0f6e:
+	ld	hl,(l1b12)	; Get top pointer
+	call	l06f0
+	ret	c
+l0f75:
+	ld	a,(hl)
+	inc	hl
+	cp	cr
+	ret	z
+	push	hl
+	call	l104e		; Echo character
+	pop	hl
+	jr	l0f75
+;
+;
+;
+l0f81:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	a,(l1a65)
+	or	a
+	jr	z,l0fa9
+	xor	a
+	ld	(l1a65),a
+	ld	(l1a4e),a	; Clear column
+	call	l0720
+	ld	hl,(l1b10)	; Get current text pointer
+	ld	a,cr
+	cpdr
+	jp	po,l0fa0
+	inc	hl
+l0fa0:
+	inc	hl
+	push	hl
+	call	l0164		; Position cursor
+	pop	hl
+	call	l0e5e
+l0fa9:
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l0fae:
+	ld	hl,(l1b12)	; Get top pointer
+	ld	de,(l1b10)	; Get current text pointer
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	dec	hl
+	ld	a,h
+	or	l
+	ret
+;
+; Command ^D : Move cursor a character to the right
+;
+; NC - End of text reached
+;  Z - End of line
+;
+l0fbe:
+	ld	hl,(l1b12)	; Get top pointer
+	ld	de,(l1b14)	; Get end address
+	inc	de
+	or	a
+	push	hl
+	sbc	hl,de		; Test end of text
+	pop	hl
+	ret	nc		; Yeap
+	ld	de,(l1b10)	; Get current text pointer
+	inc	de
+	ld	a,(hl)
+	cp	cr
+	push	af
+	call	z,l0f81
+	pop	af
+	ld	(de),a
+	inc	hl
+	ld	(l1b12),hl	; Set top pointer
+	ld	(l1b10),de	; Set current text pointer
+	cp	cr
+	scf
+	ret
+;
+; Command ^S : Move cursor a character to the left
+;
+; NC - Start of text reached
+;  Z - End of line
+;
+l0fe6:
+	ld	hl,(l1b0e)	; Get start of text
+	ld	de,(l1b10)	; Get current text pointer
+	dec	hl
+	or	a
+	sbc	hl,de
+	ret	nc
+	ld	hl,(l1b12)	; Get top pointer
+	ld	a,(de)
+	cp	cr
+	push	af
+	call	z,l0f81
+	pop	af
+	dec	hl
+	ld	(hl),a
+	dec	de
+	ld	(l1b12),hl	; Set top pointer
+	ld	(l1b10),de	; Set current text pointer
+	cp	cr
+	scf
+	ret
+;
+; Get character
+; Z set on end of line
+;
+l100b:
+	ld	a,(hl)		; Get character
+	inc	hl		; Advance pointer
+	cp	cr		; Test new line
+	ret
+;
+; Get character if enabled
+;
+l1010:
+	ld	a,(l1a66)	; Test get character enabled
+	or	a
+	ret	z		; Nope
+	jp	l0109		; Get character from keyboard
+;
+; #### NEVER CALLED #### 
+;
+	call	l14af		; Disable get character
+	ret
+;
+;
+;
+l101c:
+	call	l04e7		; Put status line on screen
+	xor	a
+	ld	c,a
+	ld	(l1a4e),a	; Clear column
+	inc	a
+	ld	(l1a4d),a	; Init row
+	call	l0164		; Position cursor
+	ld	hl,(l1b0c)	; Get bottom pointer
+l102e:
+	call	l06fc
+	jr	nc,l1036
+	ld	hl,(l1b12)	; Get top pointer
+l1036:
+	call	l06f0
+	ret	c
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	call	l104e		; Echo character
+	pop	hl
+	push	bc
+	ld	a,(l0250)	; Get lines on screen
+	ld	b,a
+	ld	a,(l1a4d)	; Get row
+	sub	b
+	pop	bc
+	ret	z
+	jr	l102e
+;
+; Echo character
+;
+l104e:
+	cp	cr		; Test new line
+	jr	nz,l105a	; Nope
+	xor	a
+	ld	c,a		; Clear column
+	push	bc
+	call	l014c		; Delete to end of line
+	pop	bc
+	ret
+l105a:
+	cp	tab		; Test tabulator
+	jr	z,l1066		; Yeap
+	cp	' '		; Test control
+	jr	c,l1072		; Yeap
+	call	l1081
+	ret
+l1066:
+	ld	a,' '		; Map tab to blanks
+	call	l1081
+	ld	a,(l1ba8)	; Get tab stop
+	and	c		; Test column reached
+	jr	nz,l1066	; Nope, go on
+	ret
+l1072:
+	push	af
+	ld	a,'^'
+	call	l1081		; Give control
+	pop	af
+	add	a,'@'
+	call	l1081
+	dec	c		; Fix column
+	dec	c
+	ret
+;
+; Put character on screen if in column range
+;
+l1081:
+	inc	c
+	push	bc
+	ld	b,a
+	ld	a,(l1a4e)	; Get column
+	push	bc
+	push	af
+	ld	a,(l0251)	; Get columns on screen
+	ld	b,a
+	pop	af
+	sub	b		; Test against current
+	pop	bc
+	ld	a,b
+	pop	bc
+	ret	nc		; Out of bounds
+	call	l013b		; Put to console
+	call	l02b2		; Get character from keyboard
+	ret
+;
+; Command ^KX : End of Edit
+;
+l109a::
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	call	z,l01b4		; Put cursor to start of screen if so
+	call	l111a
+	ld	a,(l1a58)
+	or	a		; Test error
+	ret	nz		; Yeap
+	jr	l10d2
+;
+; Command ^KQ : Abandon file
+;
+l10ac:
+	call	l14d1		; Clear status line on lowes help level
+	call	l0d24
+	db	tab,'Abandon changes? (Y/N)',null
+	call	l02d4		; Input character
+	and	UPPMASK
+	cp	'Y'
+	ret	nz
+l10d2:
+	pop	hl
+	pop	hl
+	ret
+;
+; Command ^KR : Reads a disk file
+;
+l10d5::
+	call	l14d1		; Clear status line on lowes help level
+	call	l117f		; Parse file
+	ld	a,(l1a58)
+	or	a		; Test error
+	jr	nz,l10e4	; Yeap
+	call	l10ee		; Load file into memory
+l10e4:
+	call	l1170		; Print filename
+	call	l14a9		; Enable get character
+	call	l06ae		; Clear block marker
+	ret
+;
+; Load file into memory
+;
+l10ee:
+	call	l0738		; Get free space
+	jr	c,l10fb		; Not enough memory
+	ld	hl,(l1b10)	; Get current text pointer
+	call	l03ee		; Load file
+	jr	nz,l1101	; Ok
+l10fb:
+	ld	a,1
+	ld	(l1a58),a	; File too big
+	ret
+l1101:
+	jr	nc,l1109	; Skip on normal end of file
+	ld	a,3
+	ld	(l1a58),a	; Set input/output failure
+	ret
+l1109:
+	ex	de,hl
+	ld	hl,(l1b10)	; Get current text pointer
+	ex	de,hl
+	ld	(l1b10),hl	; Set current text pointer
+	ex	de,hl
+	inc	hl
+	call	l06d9
+	call	l06ae		; Clear block marker
+	ret
+;
+; Command ^KS : Save and continue
+;
+l111a:
+	ld	a,(FCB+.drv)
+	cp	' '
+	jr	nz,l112c
+	call	l14d1		; Clear status line on lowes help level
+	call	l118a
+	ld	a,(l1a58)
+	or	a		; Test error
+	ret	nz		; Yeap
+l112c:
+	ld	hl,(l1b12)	; Get top pointer
+	dec	hl
+	push	hl
+	ld	hl,(l1b0e)	; Get start of text
+	call	l06d9
+	call	l072b
+	jr	c,l1142
+	ld	hl,(l1b12)	; Get top pointer
+	call	l044f		; Write text to disk
+l1142:
+	pop	hl
+	jp	l06c2
+;
+; Command ^KW : Writes the marked block into a file
+;
+l1146::
+	call	l14d1		; Clear status line on lowes help level
+	call	l0b87
+	call	l117f		; Parse file
+	ld	a,(l1a58)
+	or	a		; Test error
+	jr	nz,l116c	; Yeap
+	ld	hl,(l1a53)	; Get block start marker
+	inc	hl
+	call	l0723		; Get length of block
+	ld	hl,(l1a53)	; Get block start marker
+	inc	hl
+	jr	c,l1167
+	call	l044f		; Write text to disk
+	jr	l116c
+l1167:
+	ld	a,2
+	ld	(l1a58),a	; Set invalid key
+l116c:
+	call	l1170		; Print filename
+	ret
+;
+; Unpack and print filename
+;
+l1170:
+	ld	bc,.drv+.nam+.ext
+	ld	de,FCB
+	ld	hl,l1bd1
+	ldir			; Unpack filename
+	call	l05a9		; Print filename
+	ret
+;
+; Parse file
+;
+l117f:
+	ld	bc,.drv+.nam+.ext
+	ld	de,l1bd1
+	ld	hl,FCB
+	ldir			; Inpack filename
+l118a:
+	call	l0d24
+	db	'Filename: ',null
+	ld	hl,CCP
+	call	l0645		; Read line
+	ld	hl,CCP
+	ld	a,(hl)
+	or	a		; Test any read
+	jr	z,l1207		; Nope, error
+	ld	de,sFCB+.drv
+	ld	b,.nam+.ext
+	ld	a,' '
+l11ac:
+	ld	(de),a		; Blank filename
+	inc	de
+	djnz	l11ac
+	ld	a,(CCP+1)
+	cp	':'		; Test drive possible
+	jr	nz,l11c4	; Nope
+	ld	a,(hl)
+	call	l0a5b		; Convert to upper case
+	sub	'A'-1		; Make binary
+	ld	(sFCB),a	; Save drive
+	inc	hl
+	inc	hl
+	jr	l11c8
+l11c4:
+	xor	a
+	ld	(sFCB),a	; Set default drive
+l11c8:
+	ld	b,.nam
+	ld	de,sFCB+.drv
+l11cd:
+	ld	a,(hl)		; Get character
+	call	l0a5b		; Convert to upper case
+	cp	'.'		; Test extension
+	jr	z,l11e1
+	or	a		; Test end
+	jr	z,l11fb
+	cp	' '		; Verify no blank
+	jr	z,l1207
+	ld	(de),a		; Unpack into FCB
+	inc	hl
+	inc	de
+	djnz	l11cd
+l11e1:
+	ld	a,(hl)		; Get character
+	or	a		; Test end
+	jr	z,l11fb
+	cp	'.'		; Find extension
+	inc	hl
+	jr	nz,l11e1
+	ld	b,.ext
+	ld	de,sFCB+.drv+.nam
+l11ef:
+	ld	a,(hl)
+	or	a		; Test end
+	jr	z,l11fb
+	call	l0a5b		; Convert to upper case
+	ld	(de),a		; Unpack into FCB
+	inc	hl
+	inc	de
+	djnz	l11ef
+l11fb:
+	ld	hl,sFCB
+	ld	de,FCB
+	ld	bc,.drv+.nam+.ext
+	ldir			; Copy into FCB
+	ret
+l1207:
+	ld	a,2
+	ld	(l1a58),a	; Set invalid key
+	ret
+;
+; Command ^KP : Print the file
+;
+l120d::
+	call	l14d1		; Clear status line on lowes help level
+	call	l0d24
+	db	tab,'Printer Setup codes: ',null
+	ld	hl,CCP
+	call	l0645		; Read line
+	ld	hl,CCP
+l1233:
+	ld	a,(hl)
+	or	a		; Test end
+	jr	z,l123d		; Yeap
+	call	l03d4		; Put to printer
+	inc	hl
+	jr	l1233
+l123d:
+	call	l072b
+	ret	c
+	ld	d,0		; Init column
+	ld	hl,(l1b12)	; Get top pointer
+l1246:
+	call	l100b		; Get character
+	cp	tab		; Test tab
+	jr	nz,l125b
+l124d:
+	ld	a,' '
+	call	l03d4		; Put to printer
+	inc	d
+	ld	a,(l1ba8)	; Get tab stop
+	and	d		; Test column reached
+	jr	nz,l124d	; Nop go on mapping
+	jr	l126a
+l125b:
+	call	l03d4		; Put to printer
+	inc	d
+	cp	cr
+	jr	nz,l126a
+	ld	a,lf
+	call	l03d4		; Put new line to printer
+	ld	d,0		; Clear column
+l126a:
+	dec	bc		; Count down
+	ld	a,b
+	or	c		; Test end
+	jr	nz,l1246	; Nope
+	ret
+;
+; Command ^KL : Change logged drive
+;
+l1270::
+	call	l01b4		; Put cursor to start of screen
+	call	l0d24
+	db	cr,' Currently logged drive is ',null
+	ld	a,(l1b1b)	; Get logged drive
+	add	a,'A'
+	call	l1081		; Put to screen
+	call	l0d24
+	db	':',cr,cr
+	db	'  Set drive to: ',null
+l12b2:
+	call	l02d4		; Input character
+	call	l0a5b		; Convert to upper case
+	cp	'A'
+	jr	c,l12b2
+	cp	'P'+1
+	jr	nc,l12b2
+	push	af
+	call	l1081		; Put to screen
+	pop	af
+	sub	'A'
+	ld	(l1b1b),a	; Change logged drive
+	ld	c,.resdsk
+	call	BDOS
+	ld	a,(l1b1b)	; Get logged drive
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS
+	ret
+;
+; Command ^KF : Displays a directory
+;
+l12d9::
+	call	l01b4		; Put cursor to start of screen
+	call	l0d24
+	db	cr,tab,'Disk directory for ',null
+	ld	a,(l1b1b)	; Get logged drive
+	add	a,'A'
+	call	l1081		; Put to screen
+	ld	e,_get
+	ld	c,.usrcod
+	call	BDOS
+	cp	9+1		; Test 0..9
+	jr	c,l1311		; Yeap
+	push	af
+	ld	a,'1'
+	call	l1081		; Put to screen
+	pop	af
+	sub	10		; Strip off tens
+l1311:
+	add	a,'0'
+	call	l1081		; Put to screen
+	call	l0d24
+	db	':',cr,null
+	ld	a,(l1b1b)	; Get logged drive
+	inc	a
+	ld	hl,l1ba9
+	ld	(hl),a
+	ld	hl,l1ba9+_EX
+	ld	(hl),0		; Clear extent
+	ld	hl,l1ba9+_EX+2
+	ld	(hl),0
+	ld	d,10000000b	; Set mask
+	ld	e,3		; Set count
+	push	de
+	ld	de,l1ba9
+	ld	c,.srcfrs
+	call	BDOS
+	cp	OSerr
+	ld	b,a		; Get directory code
+	ld	a,0		; Init pointer
+	jr	nz,l1346
+	pop	de
+	jp	l13b3
+l1346:
+	push	af
+	ld	a,b
+	cp	0		; Test zero reached
+	jr	z,l1353
+	dec	a
+	ld	b,a
+	pop	af
+	add	a,_DIRlen	; Find pointer
+	jr	l1346
+l1353:
+	pop	af		; Get back pointer
+	ld	l,a
+	ld	h,0
+	ld	de,DMA
+	add	hl,de		; Position to file found
+	ld	(l1bcf),hl	; Save address
+	pop	de
+	push	de
+	and	d
+	jr	z,l1367
+	call	l0d24		;		**** WHY ****
+	db	null
+l1367:
+	pop	de
+	inc	e		; Advance pointer
+	push	de
+	ld	a,e
+	cp	4		; Test line filled
+	jr	nz,l137a
+	call	l0d24
+	db	cr,null
+	pop	de
+	ld	e,0		; Reset count
+	push	de
+	jr	l1381
+l137a::
+	call	l0d24
+	db	' | ',null
+l1381:
+	ld	de,1		; Init index
+	ld	b,.nam+.ext
+l1386:
+	call	l13be		; Get character from file found
+	and	NoMSB
+	push	de
+	push	bc
+	call	l1081		; Put to screen
+	pop	bc
+	pop	de
+	inc	de
+	dec	b
+	ld	a,b
+	cp	0		; Test end of display
+	jr	z,l13a4
+	cp	.ext		; Test at extension
+	jr	nz,l1386
+	ld	a,'.'
+	call	l1081		; Put to screen
+	jr	l1386
+l13a4:
+	ld	c,.srcnxt
+	ld	de,l1ba9	;		**** WHY ****
+	call	BDOS		; Find next entry
+	cp	OSerr		; Test success
+	ld	b,a
+	ld	a,0
+	jr	nz,l1346
+l13b3:
+	pop	de		;		**** WHY ****
+	call	l0d24
+	db	cr,cr,null
+	call	l0ce4		; Wait for key pressed
+	ret
+;
+; Get character from file found
+;
+l13be:
+	push	hl
+	ld	hl,(l1bcf)	; Get address of file found
+	add	hl,de		; Position in FCB
+	ld	a,(hl)		; Fetch character
+	pop	hl
+	ret
+;
+; #### NEVER CALLED #### 
+;
+	call	l0ce4		; Wait for key pressed
+	ret
+;
+; Command ^JH : Set help level
+;
+l13ca::
+	call	l01b4		; Put cursor to start of screen
+	call	l0d24
+	db	cr
+	db	'  Available help levels are:'
+	db	cr,cr
+	db	tab,'1  Expert | 2  Normal | 3  Novice'
+	db	cr,cr
+	db	'  Help level is currently set at '
+	db	null
+	ld	a,(l1b17)	; Get help level
+	add	a,'0'
+	call	l1081		; Put to screen
+	call	l0d24
+	db	cr,cr
+	db	'  Set help level to: '
+	db	null
+l1458:
+	call	l02d4		; Input character
+	cp	'1'
+	jr	c,l1458
+	cp	'3'+1
+	jr	nc,l1458
+	sub	'0'
+	ld	(l1b17),a	; Set help level
+	ret
+;
+; Command ^JQ : Display Quick Command menu
+;
+l1469::
+	call	l01b4		; Put cursor to start of screen
+	call	l1761		; Display quick command list
+	ld	a,(l1b17)	; Get help level
+	cp	3		; Test novice
+	call	z,l164e		; Display basic editing functions if so
+	call	l0ce4		; Wait for key pressed
+	ret
+;
+; Command ^JK : Display Block Command menu
+;
+l147b::
+	call	l01b4		; Put cursor to start of screen
+	call	l1809		; Display block command list
+	ld	a,(l1b17)	; Get help level
+	cp	3		; Test novice
+	call	z,l164e		; Display basic editing functions if so
+	call	l0ce4		; Wait for key pressed
+	ret
+;
+; Command ^JM : Display basic cursor control menu
+;
+l148d::
+	call	l01b4		; Put cursor to start of screen
+	call	l164e		; Display basic editing functions
+	call	l0ce4		; Wait for key pressed
+	ret
+;
+; Command ^JJ : Display help function menu
+;
+l1497::
+	call	l01b4		; Put cursor to start of screen
+	call	l1914		; Display help command list
+	ld	a,(l1b17)	; Get help level
+	cp	3		; Test novice
+	call	z,l164e		; Display basic editing functions if so
+	call	l0ce4		; Wait for key pressed
+	ret
+;
+; Enable get character
+;
+l14a9:
+	ld	a,TRUE
+	ld	(l1a66),a	; Set enable
+	ret
+;
+; Disable get character
+;
+l14af:
+	xor	a
+	ld	(l1a66),a	; Reset enable
+	ret
+;
+; Tell selection
+;
+l14b4:
+	call	l0d24
+	db	tab,'Selection: ',null
+	ret
+;
+; Put control prefix into status line
+;
+l14c5::
+	call	l14ec		; Save cursor
+	call	l14e1		; Home cursor
+	ld	a,'^'
+	call	l013b		; Put to console
+	ret
+;
+; Clear status line on lowes help level
+;
+l14d1:
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	ret	nz		; Nope
+	call	l14e1		; Home cursor
+	call	l014c		; Delete to end of line
+	call	l14e1		; Home cursor
+	ret
+;
+; Home cursor
+;
+l14e1:
+	xor	a
+	ld	(l1a4e),a	; Clear column
+	ld	(l1a4d),a	; And row
+	call	l0164		; Position cursor
+	ret
+;
+; Save cursor
+;
+l14ec:
+	ld	a,(l1a4e)	; Get column
+	ld	(l1b19),a
+	ld	a,(l1a4d)	; Same for row
+	ld	(l1b18),a
+	ret
+;
+; Restore cursor
+;
+l14f9:
+	ld	a,(l1b19)
+	ld	(l1a4e),a	; Set column
+	ld	a,(l1b18)
+	ld	(l1a4d),a	; Same for row
+	ret
+;
+; Input character
+;
+l1506:
+	call	l14a9		; Enable get character
+	call	l02d4		; Input character
+	push	af
+	call	l1630		; Echo character
+	pop	af
+	and	CHRMASK
+	ret
+;
+; Execute thru immediate table
+;
+; Byte  0 : Item count
+; Byte 1,2: Error address (in case of no match)
+; Byte  3 : Match 1
+; Byte 4,5: Address 1 (in case of match 1)
+;  ...
+;
+l1514:
+	pop	hl		; Get pointer to table
+	ld	b,(hl)		; Get length of table
+	inc	hl
+	ld	e,(hl)		; Get error adress
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+l151b:
+	cp	(hl)		; Compare
+	inc	hl
+	jr	nz,l1524	; No match
+	ld	e,(hl)		; Get corresponding address
+	inc	hl
+	ld	d,(hl)
+	jr	l1525
+l1524:
+	inc	hl
+l1525:
+	inc	hl
+	dec	b		; Find end of table
+	jr	nz,l151b
+	ex	de,hl
+	push	de		; Save for return
+	jp	(hl)		; Execute thru table
+;
+; Command ^K : Block Commands
+;
+l152c::
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	jp	z,l1547		; Yeap
+	call	l01b4		; Put cursor to start of screen
+	call	l1809		; Display block command list
+	ld	a,(l1b17)	; Get help level
+	cp	3		; Test novice
+	call	z,l164e		; Display basic editing functions if so
+	call	l14b4		; Tell selection
+	jr	l154f
+l1547:
+	call	l14c5		; Put control prefix into status line
+	ld	a,'K'
+	call	l013b		; Put to console
+l154f:
+	call	l1506		; Input character
+	call	l1514		; Execute thru table
+	db	14
+	dw	l1585
+;
+	db	'R'-'@'
+	dw	l10d5
+	db	'S'-'@'
+	dw	l111a
+	db	'W'-'@'
+	dw	l1146
+	db	'P'-'@'
+	dw	l120d
+	db	'B'-'@'
+	dw	l0b27
+	db	'K'-'@'
+	dw	l0b36
+	db	'C'-'@'
+	dw	l0b9e
+	db	'V'-'@'
+	dw	l0c3d
+	db	'Y'-'@'
+	dw	l0c6d
+	db	'Q'-'@'
+	dw	l10ac
+	db	'X'-'@'
+	dw	l109a
+	db	'Z'-'@'
+	dw	l0c87
+	db	'L'-'@'
+	dw	l1270
+	db	'F'-'@'
+	dw	l12d9
+	jp	l158f
+;
+; Dis-/Enable get character if no command match
+;
+l1585:
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	ret	nz
+	call	l14af		; Disable get character if so
+	ret
+;
+; Clear character input on prefixed commands
+;
+l158f::
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	ret	nz		; Nope
+	call	l14e1		; Home cursor
+	call	l0164		; Position cursor
+	ld	a,' '
+	call	l013b		; Blank three characters
+	ld	a,' '
+	call	l013b
+	ld	a,' '
+	call	l013b
+	call	l14f9		; Restore cursor
+	ret
+;
+; Command ^Q : Quick Commands
+;
+l15ae:
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	jp	z,l15c9		; Yeap
+	call	l01b4		; Put cursor to start of screen
+	call	l1761		; Display quick command list
+	ld	a,(l1b17)	; Get help level
+	cp	3		; Test novice
+	call	z,l164e		; Display basic editing functions if so
+	call	l14b4		; Tell selection
+	jr	l15d1
+l15c9:
+	call	l14c5		; Put control prefix into status line
+	ld	a,'Q'
+	call	l013b		; Put to console
+l15d1:
+	call	l1506		; Input character
+	call	l1514		; Execute thru table
+	db	7
+	dw	l1585
+;
+	db	'C'-'@'
+	dw	l07a8
+	db	'R'-'@'
+	dw	l0792
+	db	'F'-'@'
+	dw	l090f
+	db	'A'-'@'
+	dw	l08fe
+	db	'B'-'@'
+	dw	l0b82
+	db	'K'-'@'
+	dw	l0b87
+	db	'T'-'@'
+	dw	l0373
+	jp	l158f
+;
+; Command ^J : Help commands
+;
+l15f2::
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	jp	z,l160d		; Yeap
+	call	l01b4		; Put cursor to start of screen
+	call	l1914		; Display help command list
+	ld	a,(l1b17)	; Get help level
+	cp	3		; Test novice
+	call	z,l164e		; Display basic editing functions if so
+	call	l14b4		; Tell selection
+	jr	l1615
+l160d:
+	call	l14c5		; Put control prefix into status line
+	ld	a,'J'
+	call	l013b		; Put to console
+l1615:
+	call	l1506		; Input character
+	call	l1514		; Execute thru table
+	db	5
+	dw	l1585
+;
+	db	'H'-'@'
+	dw	l13ca
+	db	'K'-'@'
+	dw	l147b
+	db	'Q'-'@'
+	dw	l1469
+	db	'J'-'@'
+	dw	l1497
+	db	'M'-'@'
+	dw	l148d
+	jp	l158f
+;
+; Echo character
+;
+l1630:
+	cp	' '		; Test control
+	jr	nc,l163d	; Nope
+	push	af
+	ld	a,'^'
+	call	l104e		; Echo character
+	pop	af
+	add	a,'@'
+l163d:
+	call	l104e		; Echo character
+	ld	a,(l1b17)	; Get help level
+	cp	1		; Test expert
+	jr	z,l164d		; Yeap
+	call	l0d24
+	db	cr,tab,null
+l164d:
+	ret
+;
+; Display basic editing functions
+;
+l164e:
+	call	l0d24
+	db	cr,tab,'- Basic editing functions -'
+	db	cr
+	db	tab,'^A  Word left',tab,tab,'^F  Word right'
+	db	cr
+	db	tab,'^G  Delete char',tab,tab,'^Y  Delete line'
+	db	cr
+	db	tab,'^T  Delete word',tab,tab,'DEL Destruct/BS'
+	db	cr
+	db	tab,'^C  Page down',tab,tab,'^R  Page up'
+	db	cr
+	db	tab,'^V  Toggle insert',tab,'^L  Repeat find'
+	db	cr
+	db	tab,'^P  Enter printer code',tab,'^N  Insert C/R'
+	db	cr
+	db	tab,'^K  Block cmd menu',tab,'^Q  Quick cmd menu'
+	db	cr,null
+	ret
+;
+; Display quick command list
+;
+l1761:
+	call	l0d24
+	db	cr
+	db	' ^Q Commands',tab,tab,tab,'[Quick Menu]'
+	db	cr,cr
+	db	tab,'R  Top of file',tab,tab,'C  Bottom of file'
+	db	cr
+	db	tab,'F  Find a string',tab,'A  Find and replace'
+	db	cr
+	db	tab,'B  Find block start',tab,'K  Find block end'
+	db	cr
+	db	tab,'T  Change tab stop'
+	db	cr,cr,null
+	ret
+;
+; Display block command list
+;
+l1809:
+	call	l0d24
+	db	cr
+	db	' ^K Commands'
+	db	tab,tab,tab,'[Block Menu]'
+	db	cr,cr
+	db	tab,'S  Save/continue',tab,'X  Save/exit'
+	db	cr
+	db	tab,'Q  Abandon',tab,tab,'Z  Zap file'
+	db	cr
+	db	tab,'B  Mark block start',tab,'K  Mark block end'
+	db	cr
+	db	tab,'C  Copy block',tab,tab,'V  Move block'
+	db	cr
+	db	tab,'Y  Delete block',tab,tab,'W  Write block'
+	db	cr
+	db	tab,'R  Read file',tab,tab,'P  Print file'
+	db	cr
+	db	tab,'L  Set logged drive',tab,'F  Show disk directory'
+	db	cr,cr,null
+	ret
+;
+; Display help command list
+;
+l1914:
+	call	l0d24
+	db	cr
+	db	' ^J Commands'
+	db	tab,tab,tab,'[Help Menu]'
+	db	cr,cr
+	db	tab,'H  Adjust Help level',tab,'K  Block menu'
+	db	cr
+	db	tab,'Q  Quick menu',tab,tab,'J  Help menu'
+	db	cr
+	db	tab,'M  Basic editing menu'
+	db	cr,cr,null
+	ret
+;
+; #####################
+; ## Execute editing ##
+; #####################
+;
+l198f:
+	call	l04e7		; Put status line on screen
+	call	l0697		; Initialize memory
+	ld	a,(FCB+.drv)
+	cp	' '		; Test name of file
+	jr	z,l19a1		; Nope
+	call	l10ee		; Load file into memory
+	jr	l19f2		; Go test success
+l19a1:
+	call	l1010		; Get character
+	call	l0d41
+	call	l053b		; Give statistic
+	call	l02d4		; Input character
+	call	l1514		; Execute thru table
+	db	21
+	dw	l0d2c
+;
+	db	'L'-'@'
+	dw	l09c1
+	db	DEL
+	dw	l0827
+	db	'D'-'@'
+	dw	l0fbe
+	db	'A'-'@'
+	dw	l07f5
+	db	'F'-'@'
+	dw	l0812
+	db	'S'-'@'
+	dw	l0fe6
+	db	'X'-'@'
+	dw	l0767
+	db	'E'-'@'
+	dw	l0745
+	db	'C'-'@'
+	dw	l0832
+	db	'R'-'@'
+	dw	l087d
+	db	'I'-'@'
+	dw	l0d2c
+	db	'M'-'@'
+	dw	l0d2c
+	db	'N'-'@'
+	dw	l0ed3
+	db	'G'-'@'
+	dw	l0a97
+	db	'Y'-'@'
+	dw	l0af3
+	db	'T'-'@'
+	dw	l0ac3
+	db	'V'-'@'
+	dw	l0a6a
+	db	'P'-'@'
+	dw	l0a64
+	db	'K'-'@'
+	dw	l152c
+	db	'Q'-'@'
+	dw	l15ae
+	db	'J'-'@'
+	dw	l15f2
+l19f2:
+	ld	a,(l1a58)	; Get error number
+	or	a		; Test error
+	jr	z,l19a1		; Nop, get next
+	call	l01b4		; Put cursor to start of screen
+	call	l0d24
+	db	cr,cr,cr
+	db	tab,'Error:  '
+	db	null
+	ld	a,(l1a58)	; Get error number
+	add	a,a		; * 2 for table index
+	ld	l,a
+	ld	h,0
+	ld	de,l1a69
+	add	hl,de		; Point to table
+	ld	a,(hl)		; Get address
+	ld	e,a
+	inc	hl
+	ld	a,(hl)
+	ld	d,a
+	ex	de,hl
+	call	l0cca		; Put message to console
+	call	l0d24
+	db	cr,cr
+	db	tab,'Press ESCAPE to continue'
+	db	null
+	xor	a
+	ld	(l1a58),a	; Clear error
+l1a42:
+	call	l02d4		; Input character
+	cp	esc		; Wait for ESCape
+	jr	nz,l1a42
+	jr	l19f2
+;
+	db	0
+	db	0
+l1a4d:
+	db	0		; Cursor row
+l1a4e:
+	db	0		; Cursor column
+;
+	db	0
+l1a50:
+	db	'BAK'
+l1a53:
+	dw	0		; Block start marker
+l1a55:
+	dw	0		; Block end marker
+l1a57:
+	db	0		; Character to be stored into text
+l1a58:
+	db	0		; Error number
+l1a59:
+	db	TRUE		; Case ignore flag (0FFh is ignore)
+l1a5a:
+	db	FALSE		; Backwards flag (0FFh is backwards)
+l1a5b:
+	db	FALSE		; ^QF
+l1a5c:
+	db	MSB		; Insert mode (80h ist ON)
+l1a5d:
+	db	'On '
+Oxlen	equ	$-l1a5d
+l1a60:
+	db	'Off'
+l1a63:
+	db	0		; Line within text window
+l1a64:
+	db	0		; Column in text line
+l1a65:
+	db	0
+l1a66:
+	db	TRUE		; Get character flag (0FFh get)
+l1a67:
+	dw	0fa03h		; Warm start address
+;
+; Error table
+;
+l1a69:
+	dw	0
+	dw	l1a7d		; 1: File too big
+	dw	l1a8a		; 2: Invalid key
+	dw	l1a96		; 3: Input/Output Failure
+	dw	l1aab		; 4: String not found
+	dw	l1abc		; 5: Disk full
+	dw	l1ac6		; 6: Block not marked
+	dw	l1ad7		; 7: Block staddles cursor
+	dw	l1aed		; 8: Block too big
+	dw	l1afb		; 9: Illegal tab stop
+l1a7d:
+	db	'File too big',null
+l1a8a:
+	db	'Invalid key',null
+l1a96:
+	db	'Input/Output Failure',null
+l1aab:
+	db	'String not found',null
+l1abc:
+	db	'Disk full',null
+l1ac6:
+	db	'Block not marked',null
+l1ad7:
+	db	'Block staddles cursor',null
+l1aed:
+	db	'Block too big',null
+l1afb:
+	db	'Illegal tab stop',null
+l1b0c:
+	dw	l1d51+1		; Bottom pointer
+l1b0e:
+	dw	l1d51+1		; Start of text
+l1b10:
+	dw	l1d51		; Current text pointer
+l1b12:
+	dw	SYSTOP+1	; Top text pointer
+l1b14:
+	dw	SYSTOP
+l1b16:
+	db	SCRLIN-3
+l1b17:
+	db	1		; Help level (1 expert ... 3 novice)
+l1b18:
+	db	1		; Saved row
+l1b19:
+	db	0		; Saved column
+l1b1a:
+	db	0		; User disk
+l1b1b:
+	db	0		; Logged drive
+l1b1c:
+	dw	0		; +0,1  : Input characters
+	dw	QUELEN		; +2,3  : Output characters
+;
+	dw	l1b28		; +4,5  : First pointer address
+	dw	l1b28+QUELEN	; +6,7  : Last pointer address
+;
+	dw	l1b28		; +8,9  : Output queue pointer
+	dw	l1b28		; 10,11 : Input queue pointer
+;
+; Init environment
+;
+; WILL BE OVERWRITTEN
+;
+l1b28:
+ll1b28	equ	$
+	ld	hl,(OS+1)	; Get warm start address
+	ld	(l1a67),hl	; Save it
+	ld	hl,l03c6
+	ld	(OS+1),hl	; Redirect warmstart
+	ld	c,.retdsk
+	call	BDOS		; Get logged disk
+	ld	(l1b1a),a	; Save
+	ld	(l1b1b),a	; Twice
+	ld	a,(l0250)	; Get lines on screen
+	dec	a		; Let some space
+	dec	a
+	dec	a
+	ld	(l1b16),a	; Save
+	ld	a,(l0251)	; Get columns on screen
+	ld	(l029f),a	; Save
+	ld	(l0d95),a
+	dec	a		; Let soame space
+	dec	a
+	dec	a
+	ld	(l0da8),a	; Save
+	ret
+INICOD	equ	$-ll1b28
+;
+	ds	QUELEN-INICOD
+l1ba8:
+	db	7		; Tab stop
+l1ba9:
+	db	'A'-'@','???????????'
+	ds	26
+l1bcf:
+	dw	sFCB
+l1bd1:
+	db	0,0,0,0,0,0,0,0,0,0,0,0
+;
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,',',2,',',2,'`',2,0b0h
+	db	1,',',2,0bch,2,1eh,18h,82h
+l1c00::
+; Stack ^^^^^^
+ll1c11	equ	1c11h
+;
+l1c11	equ	1c11h		; Search string
+l1c91	equ	l1c11+STRLEN
+l1d11	equ	l1c91+STRLEN
+l1d51	equ	1d51h
+
+	end
+

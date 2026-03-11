@@ -1,0 +1,803 @@
+	title	DASM 8080 Disassembler
+	name	('DASM8080')
+
+	maclib	dasm
+
+	entry	dasm,prntde,pdertn,prID,MType,tpasm
+
+	ext	hsym,symsch,bldsym,cout,dcrlf,phex,pstg,pstrng
+	ext	pc,biased,build,xcsw,fget
+	ext	pashex,prnt,semi,.tab,prH,AddA
+
+;
+; #############################################
+; ### Machine dependent routines for kernel ###
+; #############################################
+;
+MType:
+	db	0		;0 for 8080
+tpasm:
+	db	'ASM'		;Mac file type
+prID:
+	call	pstrng		;Print initial info
+	db	cr,lf
+	db	'DASM for ASM/(R)MAC Assembler 8080 Mnemonics '
+	db	'++ Derived from ZZSOURCE/RESOURCE ++',null
+	ret
+;
+; ++++++++++++++++++++++++++++
+; +++ THE DISASSEMBLE TASK +++
+; ++++++++++++++++++++++++++++
+;
+dasm:
+	ld	hl,(pc)		; Get current program counter
+	call	fget		; Get code - Just for validity test
+	push	af
+	call	hsym		; Write a symbol if it exists
+	xor	a
+	ld	(.indx),a	; Clear index register
+	ld	hl,(pc)		; Get current program counter
+	ld	(biased),hl	; .. save
+	inc	hl		; Bump PC
+	ld	(pc),hl
+	pop	af
+	ld	b,a		; Get code from real address
+	ld	hl,opct-opcl+1	; Init table
+;
+; Print code from table in HL
+;
+gtcd:
+	ld	de,opcl-1
+nxtcd:
+	add	hl,de		; Point to current instruction
+	ld	a,(hl)		; Get mask byte
+	or	a		; .. test zero
+	jp	z,prdb		; .. yeap
+	and	b		; .. mask
+	ld	c,a		; Save
+	inc	hl
+	ld	a,(hl)		; Get resulting mask
+	cp	c
+	jp	nz,nxtcd
+	inc	hl
+	ld	a,(hl)		; Fetch type
+	ld	(intyp),a
+	ld	b,$opcl		; Get mnemonic length
+prolp:
+	inc	hl
+	ld	a,(hl)		; Get character
+	cp	1		; Test index indicator
+	jp	nz,prd2		; .. nope
+	ld	a,(.indx)	; Get index
+	or	a
+	jp	prd1
+prd2:
+	cp	'.'		; Verify real code - dot isn't
+prd1:
+	call	nz,cout		; .. print
+	dec	b
+	jp	nz,prolp	; .. loop
+	ld	hl,(pc)		; Fetch current pc
+	ld	a,(intyp)	;.. and type
+	and	00111111b	; Mask bits
+	cp	4		; Test type
+	jp	c,oldpc
+	cp	9
+	jp	nc,oldpc
+	inc	hl		; .. fix for special code
+	cp	6
+	jp	c,newpc
+	inc	hl		; .. again
+newpc:
+	ld	(pc),hl		; .. set new pc
+oldpc:
+	ld	e,a		; Expand index
+	ld	d,0
+	ld	hl,jmptbl
+	add	hl,de		; Add *3
+	add	hl,de
+	add	hl,de
+	push	hl		; .. save jump vector
+	ld	hl,(biased)	; Get 'real' address
+	ret
+;
+;
+;
+incpc:
+	push	hl
+	ld	hl,(pc)
+	inc	hl
+	ld	(pc),hl
+	pop	hl
+	ret
+;
+; Jump table - execute decoding via jump
+;
+jmptbl::
+	jp	T0
+	jp	T1
+	jp	T2
+	jp	T3
+	jp	T4
+	jp	T5
+	jp	T6
+	jp	type7
+	jp	type8
+	jp	type9
+	jp	typ10
+	jp	typ11
+	jp	typ12
+	jp	typ13
+	jp	typ14
+	jp	typ15
+	jp	typ16
+	jp	typ17
+	jp	typ18
+	jp	typ19
+	jp	typ20
+	jp	typ21
+	jp	typ22
+	jp	typ23
+	jp	typ24
+;
+; One byte instructions, simple
+;
+T0:
+	jp	dcrlf		; .. close
+;
+; Index regsiter arithmetic & logical, 8 bit, register
+;
+typ22:
+	call	incpc
+;
+; Arithmetic & logical, 8 bit, register
+;
+T1:
+	call	.tab		; Give a tab
+t1b:
+	call	psreg		; Print source register
+	jp	dcrlf
+;
+; DCR and INR index register instructions
+;
+typ23:
+	call	incpc
+;
+; DCR and INR instructions
+;
+T2:
+	call	.tab		; Give a tab
+	call	pdreg		; Print destination register
+	jp	dcrlf
+;
+; Double register single byte
+;
+T3:
+	call	.tab		; Give tab
+	call	pxsreg		; Print pair
+	jp	dcrlf
+;
+; 8 bit immediate load, index register
+;
+typ24:
+	call	incpc
+	call	incpc
+;
+; 8 bit immediate load
+;
+T4:
+	call	.tab		; Print tab
+	call	pdreg		; .. destination register
+	call	comma		; .. give comma
+	jp	.T5		; .. print byte
+;
+; Arithmetic & logical immediates
+;
+T5:
+	call	.tab		; Give tab
+.T5:
+	ld	hl,(biased)	; Get address
+	inc	hl		; .. fix
+	ld	a,(.indx)	; Get index
+	or	a		; .. test set
+	jp	z,..T5		; .. nope
+	inc	hl		; Fix counter
+..T5:
+	ld	(biased),hl	; .. save
+l1036:
+	ld	hl,(biased)	; Get pointer to byte
+	call	fget		; .. get byte
+	cp	' '		; Test ASCII
+	jp	c,notasc
+	cp	'z'+1
+	jp	nc,notasc
+	ld	a,(intyp)	; Get type
+	cp	4		; Test range
+	jp	c,notasc
+	cp	6
+	jp	nc,notasc
+	call	fget
+	call	pascii		; Print ASCII
+	ld	a,''''		; Close it
+	call	cout
+	call	.tab		; Give tab
+	call	semi		; .. and comment delimiter
+notasc:
+	call	fget		; Get code
+	call	pashex		; print hex
+	call	prH		; .. indicate 'H'ex
+	jp	dcrlf
+;
+; 16 bit loads
+;
+T6:
+	call	.tab		; Give tab
+	ld	hl,(biased)	; Get address
+	call	fget		; .. and code
+	call	pxsreg		; Print pair
+	call	comma		; .. give comma
+;
+; Print the next two bytes as a symbol if possible
+;
+prnn:
+	ld	hl,(biased)	; Get address
+	inc	hl
+	call	fget
+	ld	e,a		; .. fetch word
+	inc	hl
+	call	fget
+	ld	d,a
+prntde:
+	push	de
+	call	symsch		; Test symbol here
+	jp	nc,pdertn	; .. yeap
+	ld	a,(build)	; Do we build a symbol ?
+	or	a
+	jp	z,nobld		; Just print the hex value
+	pop	de
+	push	de
+	call	bldsym		; Print symbol
+	jp	nobld
+pdertn:
+	call	prnt
+	ld	a,(xcsw)	; Test print address
+	or	a
+	jp	nz,trmbl2	; .. yeap
+	pop	de
+	jp	dcrlf
+trmbl2:
+	call	.tab
+	call	semi
+nobld:
+	pop	de
+	ld	a,d
+	or	e		; Test zero
+	ld	a,'0'
+	jp	z,nobld1	; .. yeap
+	ld	a,d
+	or	a		; Test HI not zero
+	jp	z,nobld2
+	call	pashex		; Print HI
+	ld	a,e
+	call	phex		; .. and LO
+nobld0:
+	ld	a,'H'
+nobld1:
+	call	cout		; .. print
+	jp	dcrlf
+nobld2:
+	ld	a,e
+	cp	10		; Test range
+	jp	c,nobld3
+	call	pashex
+	jp	nobld0		; .. indicate hex
+nobld3:
+	add	a,'0'		; Make ASCII
+	jp	nobld1		; .. print
+;
+; 16 bit load direct
+;
+type7:
+	call	.tab
+	jp	prnn
+;
+; Conditinal calls
+;
+type8:
+	call	getcc
+	jp	type7
+;
+; Conditinal returns
+;
+type9:
+	call	getcc
+	jp	dcrlf
+;
+; The RST instructions
+;
+typ10:
+	call	.tab
+	ld	hl,(biased)
+	call	fget
+	rra
+	rra
+	rra
+	and	7
+	or	'0'
+	call	cout
+	jp	dcrlf
+;
+; Index register to register load
+;
+typ21:
+	call	incpc
+;
+; Register to register load
+;
+typ11:
+	call	.tab
+	call	pdreg
+cmreg:
+	call	comma
+	jp	t1b
+	ld	c,l
+	ld	a,h
+	jp	prnn
+;
+; The 'ED' series leads in
+;
+typ13:
+	inc	hl
+	ld	(biased),hl
+	call	fget
+	ld	b,a
+	ld	hl,edtbl-opcl+1	; Set table
+	call	incpc
+	jp	gtcd		; .. print code
+;
+; The 'DD' series leads in
+;
+typ14:
+	ld	a,'X'
+	jp	l1133
+;
+; The 'FD' series leads in
+;
+typ15:
+	ld	a,'Y'
+l1133:
+	ld	(.indx),a
+	call	incpc
+	inc	hl
+	call	fget
+	cp	0cbh
+	jp	nz,ixiyt
+	inc	hl
+	call	fget
+	ld	(displ),a
+;
+; The 'CB' series leads in
+;
+typ12:
+	inc	hl
+	call	fget
+	ld	b,a
+	ld	(biased),hl
+	call	incpc
+	ld	hl,cbtbl-opcl+1	; Set table
+	jp	gtcd		; .. print code
+ixiyt:
+	push	af
+	ld	(biased),hl
+	inc	hl
+	call	fget
+	ld	(displ),a
+	pop	af
+	ld	b,a
+	ld	hl,ddtbl-opcl+1	; Set table
+	jp	gtcd		; .. print code
+;
+; ????????????????????????????
+;
+typ16:
+	call	.tab
+	inc	hl
+	call	fget
+	call	incpc
+	ld	hl,(pc)
+	ld	e,a
+	ld	d,0
+	cp	d
+	jp	p,ntneg
+	dec	d
+ntneg:
+	add	hl,de
+	ex	de,hl
+	jp	prntde
+;
+; ????????????????????????????
+;
+typ17:
+	call	fget
+	rra
+	rra
+	and	6
+	push	hl
+	call	pcc
+	pop	hl
+	jp	typ16
+;
+; Bit instructions - SET, RES, BIT
+;
+typ18:
+	call	.tab
+	call	fget
+	rra
+	rra
+	rra
+	and	7
+	or	'0'
+	call	cout
+	jp	cmreg
+;
+; Index register instruction
+;
+typ19:
+	call	.tab
+	ld	a,(.indx)
+	call	cout
+	jp	dcrlf
+;
+; Index register immediate load
+;
+typ20:
+	ld	(biased),hl
+	call	.tab
+	ld	a,(.indx)
+	call	cout
+	call	comma
+	call	incpc
+	call	incpc
+	jp	prnn
+;
+; Give special index on request - defaults to M
+;
+xadsp:
+	ld	a,(.indx)
+	or	a
+	ld	a,'M'
+	jp	z,cout
+	inc	hl
+	push	hl
+	ld	a,(displ)
+	ld	h,a
+	or	a
+	jp	p,posit
+	ld	a,'-'
+	call	cout
+	ld	a,h
+	cpl
+	inc	a
+posit:
+	cp	100
+	jp	c,lt100
+	sbc	a,100
+	ld	h,a
+	ld	a,'1'
+	call	cout
+	ld	a,h
+lt100:
+	ld	l,0
+tenlp:
+	sub	10
+	jp	m,tenok
+	inc	l
+	jp	tenlp
+tenok:
+	add	a,10
+	ld	h,a
+	ld	a,'0'
+	add	a,l
+	call	cout
+	ld	a,h
+	add	a,'0'
+	pop	hl
+	call	cout
+	ld	hl,indx
+	ld	b,indxl
+	jp	prnt
+comma:
+	ld	a,','
+	jp	cout
+;
+; Got no valid opcode - print DB
+;
+prdb:
+	call	pstg
+	db	'DB',tab,null
+	ld	a,(.indx)
+	or	a
+	jp	z,db1pr
+	ld	hl,(biased)
+	dec	hl
+	call	fget
+	call	pashex
+	call	prH
+	call	comma
+db1pr:
+	ld	a,4
+	ld	(intyp),a
+	jp	l1036
+getcc:
+	ld	hl,(biased)
+	call	fget
+	rra
+	rra
+	and	0eh
+pcc:
+	ld	hl,cctab
+	call	AddA
+	ld	a,(hl)
+	call	cout
+	inc	hl
+	ld	a,(hl)
+	cp	'.'
+	call	nz,cout
+	ret
+;
+; Print a leading quote and then the ASCII
+; .. (Print '' for ')
+;
+pascii:
+	push	af
+	ld	a,''''
+	call	cout		; Give quote
+	pop	af
+	cp	''''		; Test quote
+	jp	nz,cout		; .. nope
+	push	af
+	call	cout		; .. print twice
+	pop	af
+	jp	cout		; .. print again
+;
+; Print a double register pair
+;
+pxsreg:
+	ld	hl,(biased)	; Get address
+	call	fget		; .. fetch code
+	rra			; Extract xxRRxxxx
+	rra
+	rra
+	and	00000110b	; .. mask pair
+	cp	00000110b	; Test special
+	jp	nz,preg		; .. print if not
+	call	fget
+	and	11001111b	; Get code only
+	cp	11000001b	; Test POP PSW
+	jp	z,psx.psw
+	cp	11000101b	; .. or PUSH PSW
+	jp	z,psx.psw
+	ld	a,'S'		; Give SP otherwise
+	call	cout
+	ld	a,'P'
+	jp	cout
+psx.psw:
+	call	pstg
+	db	'PSW',null
+	ret
+;
+; Print the destination register
+;
+pdreg:
+	ld	hl,(biased)	; Get current address
+	call	fget		; Fetch code
+	rra			; Extract xxRRRxxx
+	rra
+	rra
+	jp	preg		; .. print reg
+;
+; Print the source register for a byte
+;
+psreg:
+	ld	hl,(biased)	; Get current address
+	call	fget		; .. fetch code
+preg:
+	ld	hl,regtab
+	and	00000111b	; Mask register part
+	call	AddA		; .. get address
+	ld	a,(hl)		; Fetch register
+	cp	'M'
+	jp	z,xadsp
+	jp	cout
+;
+; >>> Data area <<<
+;
+indx:
+	db	'('
+.indx:
+	db	0,')'
+indxl	equ	$-indx
+;
+intyp:
+	db	0
+displ:
+	db	0
+cctab:
+	db	'NZZ.NCC.POPEP.M.'
+regtab:
+	db	'BCDEHLMA'
+;
+; Opcode and mnemonic tables
+;
+; Coding:
+;
+; +--------+--------+--------+----...----+
+; |  Mask  | ANDMsk |  Type  | Mnemonic  |
+; +--------+--------+--------+----...----+
+;
+; Mask		Opcode will be ANDed with
+; ANDMsk	Resulting AND
+; Type		Opcode function type
+; Mnemonic	String of code	- '.' denotes end
+;				- 01h denotes insert index
+;
+opct::
+	db	0ffh,0cbh,0ch
+$opct:
+	db	'.....'
+$opcl	equ	$-$opct
+opcl	equ	$-opct
+	db	0ffh,0edh,0dh,'.....'
+	db	0ffh,0ddh,0eh,'.....'
+	db	0ffh,0fdh,0fh,'.....'
+	db	0ffh,0ceh,5,'ACI..'
+	db	0f8h,088h,1,'ADC..'
+	db	0f8h,080h,1,'ADD..'
+	db	0ffh,0c6h,5,'ADI..'
+	db	0f8h,0a0h,1,'ANA..'
+	db	0ffh,0e6h,5,'ANI..'
+	db	0c7h,0c4h,08h,'C....'
+	db	0ffh,0cdh,07h,'CALL.'
+	db	0ffh,02fh,0,'CMA..'
+	db	0ffh,03fh,0,'CMC..'
+	db	0f8h,0b8h,1,'CMP..'
+	db	0ffh,0feh,5,'CPI..'
+	db	0ffh,027h,0,'DAA..'
+	db	0cfh,009h,3,'DAD..'
+	db	0c7h,005h,2,'DCR..'
+	db	0cfh,00bh,3,'DCX..'
+	db	0ffh,0f3h,0,'DI...'
+	db	0ffh,010h,0,'?Z80?'
+	db	0ffh,0fbh,0,'EI...'
+	db	0ffh,008h,0,'?Z80?'
+	db	0ffh,0d9h,0,'?Z80?'
+	db	0ffh,076h,0,'HLT..'
+	db	0ffh,0dbh,5,'IN...'
+	db	0c7h,004h,2,'INR..'
+	db	0cfh,003h,3,'INX..'
+	db	0c7h,0c2h,08h,'J....'
+	db	0ffh,0c3h,07h,'JMP..'
+	db	0ffh,018h,0,'?Z80?'
+	db	0e7h,020h,0,'?Z80?'
+	db	0ffh,03ah,07h,'LDA..'
+	db	0efh,00ah,3,'LDAX.'
+	db	0ffh,02ah,07h,'LHLD.'
+	db	0cfh,001h,6,'LXI..'
+	db	0c0h,040h,0bh,'MOV..'
+	db	0c7h,006h,4,'MVI..'
+	db	0ffh,000h,0,'NOP..'
+	db	0f8h,0b0h,1,'ORA..'
+	db	0ffh,0f6h,5,'ORI..'
+	db	0ffh,0d3h,5,'OUT..'
+	db	0ffh,0e9h,0,'PCHL.'
+	db	0cfh,0c1h,3,'POP..'
+	db	0cfh,0c5h,3,'PUSH.'
+	db	0c7h,0c0h,09h,'R....'
+	db	0ffh,017h,0,'RAL..'
+	db	0ffh,01fh,0,'RAR..'
+	db	0ffh,0c9h,0,'RET..'
+	db	0ffh,00fh,0,'RRC..'
+	db	0ffh,007h,0,'RLC..'
+	db	0c7h,0c7h,0ah,'RST..'
+	db	0f8h,098h,1,'SBB..'
+	db	0ffh,0deh,5,'SBI..'
+	db	0ffh,022h,07h,'SHLD.'
+	db	0ffh,0f9h,0,'SPHL.'
+	db	0ffh,032h,07h,'STA..'
+	db	0efh,002h,3,'STAX.'
+	db	0ffh,037h,0,'STC..'
+	db	0f8h,090h,1,'SUB..'
+	db	0ffh,0d6h,5,'SUI..'
+	db	0ffh,0ebh,0,'XCHG.'
+	db	0f8h,0a8h,1,'XRA..'
+	db	0ffh,0eeh,5,'XRI..'
+	db	0ffh,0e3h,0,'XTHL.'
+	db	null
+cbtbl:
+	db	000h,040h,12h,'BIT..'
+	db	0c0h,080h,12h,'RES..'
+	db	0c0h,0c0h,12h,'SET..'
+	db	0f8h,000h,1,'RLCR.'
+	db	0f8h,008h,1,'RRCR.'
+	db	0f8h,010h,1,'RALR.'
+	db	0f8h,018h,1,'RARR.'
+	db	0f8h,020h,1,'SLAR.'
+	db	0f8h,028h,1,'SRAR.'
+	db	0f8h,038h,1,'SRLR.'
+	db	null
+edtbl:
+	db	000h,043h,07h,'SBCD.'
+	db	0ffh,053h,07h,'SDED.'
+	db	0ffh,073h,07h,'SSPD.'
+	db	0ffh,04bh,07h,'LBCD.'
+	db	0ffh,05bh,07h,'LDED.'
+	db	0ffh,04fh,0,'STAR.'
+	db	0ffh,05fh,0,'LDAR.'
+	db	0ffh,047h,0,'STAI.'
+	db	0ffh,057h,0,'LDAI.'
+	db	0ffh,07bh,07h,'LSPD.'
+	db	0ffh,044h,0,'NEG..'
+	db	0ffh,045h,0,'RETN.'
+	db	0ffh,04dh,0,'RETI.'
+	db	0ffh,046h,0,'IM0..'
+	db	0ffh,056h,0,'IM1..'
+	db	0ffh,05eh,0,'IM2..'
+	db	0ffh,0a0h,0,'LDI..'
+	db	0ffh,0b0h,0,'LDIR.'
+	db	0ffh,0a8h,0,'LDD..'
+	db	0ffh,0b8h,0,'LDDR.'
+	db	0ffh,0a1h,0,'CCI..'
+	db	0ffh,0b1h,0,'CCIR.'
+	db	0ffh,0a9h,0,'CCD..'
+	db	0ffh,0b9h,0,'CCDR.'
+	db	0ffh,0a2h,0,'INI..'
+	db	0ffh,0b2h,0,'INIR.'
+	db	0ffh,0aah,0,'IND..'
+	db	0ffh,0bah,0,'INDR.'
+	db	0ffh,0a3h,0,'OUTI.'
+	db	0ffh,0b3h,0,'OUTIR'
+	db	0ffh,0abh,0,'OUTD.'
+	db	0ffh,0bbh,0,'OUTDR'
+	db	0cfh,042h,3,'DSBC.'
+	db	0cfh,04ah,3,'DADC.'
+	db	0ffh,067h,0,'RRD..'
+	db	0ffh,06fh,0,'RLD..'
+	db	0c7h,040h,2,'INP..'
+	db	0c7h,041h,2,'OUTP.'
+	db	0cfh,042h,3,'DSBC.'
+	db	0cfh,04ah,3,'DADC.'
+	db	null
+ddtbl:
+	db	000h,029h,13h,'DAD',1,'.'
+	db	0cfh,009h,3,'DAD',1,'.'
+	db	0ffh,0e1h,13h,'POP..'
+	db	0ffh,0e5h,13h,'PUSH.'
+	db	0ffh,022h,07h,'SI',1,'D.'
+	db	0ffh,02ah,07h,'LI',1,'D.'
+	db	0ffh,023h,13h,'INX..'
+	db	0ffh,02bh,13h,'DCX..'
+	db	0c7h,046h,15h,'MOV..'
+	db	0f8h,070h,15h,'MOV..'
+	db	0ffh,086h,16h,'ADD..'
+	db	0ffh,08eh,16h,'ADC..'
+	db	0ffh,096h,16h,'SUB..'
+	db	0ffh,09eh,16h,'SBB..'
+	db	0ffh,0a6h,16h,'ANA..'
+	db	0ffh,0aeh,16h,'XRA..'
+	db	0ffh,0b6h,16h,'ORA..'
+	db	0ffh,0beh,16h,'CMP..'
+	db	0ffh,034h,17h,'INR..'
+	db	0ffh,035h,17h,'DCR..'
+	db	0ffh,036h,18h,'MVI..'
+	db	0ffh,021h,14h,'LXI..'
+	db	0ffh,0f9h,0,'SPI',1,'.'
+	db	0ffh,0e3h,0,'XTI',1,'.'
+	db	0ffh,0e9h,0,'PCI',1,'.'
+	db	null
+;
+; +++++++++++++++++++++++++++++++
+; +++ END OF DISASSEMBLE TASK +++
+; +++++++++++++++++++++++++++++++
+;
+	end
+

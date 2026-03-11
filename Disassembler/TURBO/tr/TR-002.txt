@@ -1,0 +1,1314 @@
+;
+; Special recursion routine
+; This routine fixes a bug on calling recursive routines
+; delivering VAR or value parameters
+;
+RecExt:
+	push	hl
+	ld	de,(RecStrt)	; Get start address
+	or	a
+	sbc	hl,de
+	ex	de,hl
+	pop	hl
+	ret	c		; VAR less start
+	ld	bc,(RecEnd)	; Get end address
+	sbc	hl,bc
+	add	hl,bc
+	ret	nc		; .. VAR >= end
+	ld	hl,(RecurPtr)	; Get current pointer
+	add	hl,de		; Add gap
+	ret
+RecStrt:
+	dw	0
+RecEnd:
+	dw	0
+;
+; Start of recursive procedure or function
+; ENTRY	Reg BC holds bytes to be preserved
+;	Reg HL holds address of save area
+;
+RecOn:
+	ld	(RecStrt),hl	;; Save entry address
+	push	hl
+	ld	hl,(RecurPtr)	; Get current pointer
+	or	a
+	sbc	hl,bc
+	ld	(RecurPtr),hl	; .. set new one
+	ld	de,(HeapPtr)	; Test against heap
+	or	a
+	sbc	hl,de
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	jp	c,HeapError	; .. overlapping
+	ldir			; Save code
+	ld	(RecEnd),hl	;; Save end address
+	ret
+;
+; End of recursive procedure or function
+; ENTRY	Reg BC holds bytes to be preserved
+;	Reg DE holds address of save area
+;
+RecOff:
+	ld	hl,(RecurPtr)	; Get current pointer
+	ldir			; Reload code
+	ld	(RecurPtr),hl	; .. update pointer
+	exx
+	ret
+;
+; Load real into registers
+; ENTRY	Reg HL points to real variable
+; EXIT	Regs HL,DE,BC hold number
+;
+GetReal:
+	ld	e,(hl)		; Get exponent
+	inc	hl
+	ld	d,(hl)		; .. LSB
+	inc	hl
+	push	de
+	ld	e,(hl)		; Get 4th mantissa byte
+	inc	hl
+	ld	d,(hl)		; .. 3rd
+	inc	hl
+	ld	c,(hl)		; .. 2nd
+	inc	hl
+	ld	b,(hl)		; .. MSB
+	pop	hl
+	ret
+;
+; Move string to stack
+; ENTRY	Reg HL points to string
+;
+AssAnyString:
+	pop	ix		; Get caller
+	ex	de,hl
+	ld	a,(de)		; Get length of string
+	ld	c,a
+	ld	b,0
+	cpl			; Negate
+	ld	l,a
+	ld	h,-1
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ex	de,hl
+	inc	bc
+	ldir			; Move to stack
+	jp	(ix)		; .. exit
+;
+; Move immediate string to stack
+; ENTRY	String started with length after caller
+;
+StrToStack:
+	pop	de		; Get string pointer
+	ld	a,(de)		; .. get length
+	ld	c,a		; .. as 16 bit
+	ld	b,0
+	cpl
+	ld	l,a		; Negate
+	ld	h,-1
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ex	de,hl
+	inc	bc
+	ldir			; Move to stack
+	jp	(hl)		; .. exit
+;
+; Push set onto stack
+; ENTRY	Reg HL points to set variable
+;	Reg C holds set length in bits
+;	Reg B holds set to be cleared
+;
+SetToStack:
+	pop	ix		; Get caller
+	ex	de,hl
+	ld	hl,-set.len
+	add	hl,sp		; Adjust stack for max set
+	ld	sp,hl
+	ex	de,hl
+	push	bc
+	inc	b		; Test bits to clear
+	dec	b
+	jr	z,SET.no.init
+	xor	a
+SET.init:
+	ld	(de),a		; Clear a part
+	inc	de
+	djnz	SET.init
+SET.no.init:
+	ldir			; Save set on stack
+	pop	bc
+	ld	a,set.len
+	sub	b
+	sub	c		; Test remaining bits to clear
+	jr	z,SET.exit
+	ld	b,a
+	xor	a
+SET.rem.ini:
+	ld	(de),a		; Clear remainder
+	inc	de
+	djnz	SET.rem.ini
+SET.exit:
+	jp	(ix)
+;
+; Initialize a set on stack
+;
+SetInit:
+	pop	ix		; Get caller
+	ld	hl,-set.len
+	add	hl,sp		; Fix stack
+	ld	sp,hl
+	ld	b,set.len	; Set count
+	xor	a
+SET.i.init:
+	ld	(hl),a		; .. clear
+	inc	hl
+	djnz	SET.i.init
+	jp	(ix)
+;
+; Init one set element
+; ENTRY	Reg HL holds set value to be set
+;
+SetElement:
+	pop	ix
+	ld	b,l		; Get value
+	call	SET.acc.bit	; .. get bit
+SET..elem:
+	or	(hl)		; Insert it
+	ld	(hl),a
+SET..exit:
+	jp	(ix)
+;
+; Init a contigous set value
+; ENTRY	Reg HL holds upper limit
+;	On stack pushed lower limit
+;
+SetContigous:
+	pop	ix
+	pop	de		; Get lower limit
+	ld	a,l
+	sub	e
+	jr	c,SET..exit	; .. out of range
+	inc	a
+	ld	c,a
+	ld	b,e		; Get low value
+	call	SET.acc.bit	; .. get bit
+	ld	e,a
+	ld	b,c		; Copy loop value
+	xor	a
+SET.cont.loop:
+	or	e
+	sla	e		; Shift bit
+	jr	nc,SET.cont.no.bit
+	or	(hl)		; .. insert
+	ld	(hl),a
+	inc	hl		; Point to next
+	xor	a
+	ld	e,1		; Init low bit for next
+SET.cont.no.bit:
+	djnz	SET.cont.loop
+	jr	SET..elem	; .. set last one
+;
+; Access one set bit
+; ENTRY	Reg B holds numeric value of set element
+; EXIT	Accu holds bit
+;	Reg HL points to set loacation
+;
+SET.acc.bit:
+	ld	a,b		; Get value
+	and	11111000b	; Mask it
+	rrca			; .. divide by eight
+	rrca
+	rrca
+	add	a,2		; Fix position for stack
+	ld	l,a
+	ld	h,0
+	add	hl,sp		; Get position
+	ld	a,b
+	and	00000111b	; Mask bit
+	inc	a
+	ld	b,a
+	xor	a
+	scf			; Set carry
+SET.acc..loop:
+	rla			; Shift bit
+	djnz	SET.acc..loop
+	ret
+;
+; Save real number
+; ENTRY	Reg HL points to real variable
+; 	Alternative regs HL,DE,BC hold number
+;
+PutReal:
+	push	hl		; Save pointer
+	exx			; Get number
+	ex	de,hl
+	ex	(sp),hl		; Get back pointer
+	ld	(hl),e		; Save exponent
+	inc	hl
+	ld	(hl),d		; .. LSB
+	inc	hl
+	pop	de
+	ld	(hl),e		; .. 4th mantissa byte
+	inc	hl
+	ld	(hl),d		; .. 3rd
+	inc	hl
+	ld	(hl),c		; .. 2nd
+	inc	hl
+	ld	(hl),b		; .. MSB
+	ret
+;
+; Assign string from stack
+; ENTRY	Reg HL points to string to be assigned
+;	Reg B holds max length of this string
+;
+AsStr:
+	pop	ix		; Get caller
+	ld	a,b		; Get max
+	ex	de,hl		; Swap pointer
+	ld	hl,0
+	ld	b,h
+	add	hl,sp		; Fix stack for start of string
+	ld	c,(hl)		; Get this length
+	push	hl
+	add	hl,bc		; Get new stack
+AS.Get:
+	inc	hl
+	ex	(sp),hl
+	cp	c		; Test length
+	jr	c,AS.Trunc
+	ld	a,c		; .. get less one
+AS.Trunc:
+	ld	(de),a		; Unpack length
+	inc	de
+	inc	hl
+	or	a
+	jr	z,AS.Skip	; .. test any character
+	ld	c,a
+	ldir			; Unpack if so
+AS.Skip:
+	pop	hl		; Get back stack
+	ld	sp,hl
+	jp	(ix)		; .. exit
+;
+; Assign string from stack
+; ENTRY	Reg B holds max length of string
+;
+AsStrg:
+	pop	ix		; Get caller
+	ld	a,b		; Get max
+	ld	hl,0
+	ld	b,h
+	add	hl,sp		; Fix stack for start of string
+	ld	c,(hl)		; Get this length
+	push	hl
+	add	hl,bc		; Get new stack
+	inc	hl
+	ld	e,(hl)		; Fetch address of string
+	inc	hl
+	ld	d,(hl)
+	jr	AS.Get		; Unpack it
+;
+; Assign set variable
+; ENTRY	Reg HL points to variable
+;	Reg BC holds length of set
+;
+SetAssign:
+	pop	ix		; Get caller
+	ex	de,hl
+	ld	l,b		; Copy length
+	ld	h,0
+	ld	b,h
+	add	hl,sp		; Point to start location
+	ldir			; .. move
+	ld	hl,set.len
+SA.FixSP:
+	add	hl,sp		; Adjust stack
+	ld	sp,hl
+	jp	(ix)
+;
+; Assign set variable
+; ENTRY	Reg BC holds length of set
+;
+SetAsg:
+	pop	ix		; Get caller
+	ld	hl,set.len
+	add	hl,sp		; Point to destination
+	ld	e,(hl)		; .. fetch address
+	inc	hl
+	ld	d,(hl)
+	ld	l,b		; Copy length
+	ld	h,0
+	ld	b,h
+	add	hl,sp		; Point to start location
+	ldir			; .. move
+	ld	hl,set.len+2	; Remember address
+	jr	SA.FixSP	; .. adjust stack
+;
+; Set set to stack
+; ENTRY	Reg HL holds address of set
+;	Reg B  holds length of set
+;
+SetSet:
+	pop	ix		; Get caller
+	ex	de,hl		; Swap source
+	ld	a,b
+	cpl
+	ld	l,a
+	ld	h,-1		; Get -length
+	add	hl,sp		; .. fix stack
+	ld	sp,hl		; .. set new
+	ld	(hl),b		; Set length
+	inc	hl
+	ld	c,b		; Expand length
+	ld	b,0
+	ex	de,hl		; Get back source
+	ldir			; .. move to stack
+	jp	(ix)
+;
+; Index check on compiler directive {$R+}
+; ENTRY	Reg HL holds current index
+;	Reg DE holds max index
+;
+IndexCheck:
+	or	a
+	sbc	hl,de
+	add	hl,de		; Verify limit ok
+	ret	c
+	ld	a,_IndxErr
+	jp	SetRTerror	; .. error
+;
+; Range check on compiler directive {$R+}
+; ENTRY	Reg HL holds actual value
+;	Reg DE holds low limit
+;	Reg BC holds range of value
+;
+RangeCheck:
+	or	a
+	sbc	hl,de		; Test max
+	or	a
+	sbc	hl,bc
+	jr	nc,RC.RngErr	; .. error
+	add	hl,bc		; .. restore value
+	add	hl,de
+	ret
+RC.RngErr:
+	ld	a,_RngErr
+	jp	SetRTerror	; .. error
+;
+; Set up FOR .. TO loop
+; ENTRY	Reg DE holds start value
+;	Reg HL holds end value
+; EXIT	Reg DE holds loops
+;
+TOset:
+	or	a
+	sbc	hl,de		; Get difference
+	ex	de,hl		; .. into DE
+Chk..TO:
+	inc	de		; Fix loop count
+	jp	pe,TOchk	; Check any loop
+	ret	p
+	jr	TO0
+TOchk:
+	ret	m
+TO0:
+	ld	de,0		; Set no loop
+	ret
+;
+; Set up FOR .. DOWNTO loop
+; ENTRY	Reg DE holds start value
+;	Reg HL holds end value
+; EXIT	Reg DE holds loops
+;
+DOWNTOset:
+	push	de
+	ex	de,hl
+	or	a
+	sbc	hl,de		; Get difference
+	ex	de,hl
+	pop	hl
+	jr	Chk..TO
+;
+; ################## The comparison package ###################
+; # TRUE set (=1 on TURBO) if relation matches                #
+; #                                                           #
+; # On all relational functions the assignment is as follows: #
+; #                                                           #
+; # INTEGER : DE:HL                                           #
+; # REAL    : (Regs):(Regs)'                                  #
+; # STRING  : (Stack):(next_stack)                            #
+; #                                                           #
+; #############################################################
+;
+; ********************************
+; ********** Relation = **********
+; ********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+EQinteger:
+	or	a
+	sbc	hl,de		; Get difference
+ChkEQ:
+	ld	hl,.TRUE	; Init TRUE
+	ret	z		; .. ok if equal
+	dec	hl		; .. make FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+EQreal:
+	call	CmpReal		; Compare
+	jr	ChkEQ		; .. set result
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+EQstring:
+	call	CmpString	; Compare
+	jr	ChkEQ		; .. set result
+;
+; *********************************
+; ********** Relation <> **********
+; *********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+NEinteger:
+	or	a
+	sbc	hl,de		; Get difference
+ChkNE:
+	ld	hl,.TRUE	; Init TRUE
+	ret	nz		; .. ok if .NE.
+	dec	hl		; .. else fix FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+NEreal:
+	call	CmpReal
+	jr	ChkNE
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+NEstring:
+	call	CmpString
+	jr	ChkNE
+;
+; *********************************
+; ********** Relation >= **********
+; *********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+GTEinteger:
+	call	ChkOperand	; Compare
+ChkGTE:
+	ld	hl,.TRUE	; Init TRUE
+	ret	nc		; .. ok if .GTE.
+	dec	hl		; .. else fix FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+GTEreal:
+	call	CmpReal
+	jr	ChkGTE
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+GTEstring:
+	call	CmpString
+	jr	ChkGTE
+;
+; *********************************
+; ********** Relation <= **********
+; *********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+LTEinteger:
+	call	ChkOperand	; Compare
+ChkLTE:
+	ld	hl,.TRUE	; Init TRUE
+	ret	z		; .. ok on .EQ.
+	ret	c		; .. or on .LT.
+	dec	hl		; .. fix for FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+LTEreal:
+	call	CmpReal
+	jr	ChkLTE
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+LTEstring:
+	call	CmpString
+	jr	ChkLTE
+;
+; ********************************
+; ********** Relation > **********
+; ********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+GTinteger:
+	call	ChkOperand	; Get difference
+ChkGT:
+	ld	hl,FALSE	; Init FALSE
+	ret	z		; .. ok on .EQ.
+	ret	c		; .. or on .LT.
+	inc	hl		; .. fix for TRUE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+GTreal:
+	call	CmpReal
+	jr	ChkGT
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+GTstring:
+	call	CmpString
+	jr	ChkGT
+;
+; ********************************
+; ********** Relation < **********
+; ********************************
+;
+; %%%%%%%%%%%%%
+; %% INTEGER %%
+; %%%%%%%%%%%%%
+;
+LTinteger:
+	call	ChkOperand	; Get difference
+ChkLT:
+	ld	hl,.TRUE	; Init TRUE
+	ret	c		; .. ok on .LT.
+	dec	hl		; .. fix FALSE
+	ret
+;
+; %%%%%%%%%%
+; %% REAL %%
+; %%%%%%%%%%
+;
+LTreal:
+	call	CmpReal
+	jr	ChkLT
+;
+; %%%%%%%%%%%%
+; %% STRING %%
+; %%%%%%%%%%%%
+;
+LTstring:
+	call	CmpString
+	jr	ChkLT
+;
+; ################# End of comparison package #################
+;
+; Function SQR(integer):integer;
+; ENTRY	Reg HL holds number
+; EXIT	Reg HL holds power
+;
+SQRint:
+	ld	d,h		; .. copy number
+	ld	e,l
+;
+; Operator *
+; Multiply signed integers
+; ENTRY	Reg DE holds multiplicand
+;	Reg HL holds multiplier
+; EXIT	Reg HL holds product
+;
+MULTint:
+	ld	c,e		; Copy multiplicand
+	ld	b,d
+	ex	de,hl
+	ld	hl,0		; Init product
+	ld	a,d		; Test HI part set
+	or	a
+	ld	a,16
+	jr	nz,MUL16	; .. yes, so loop is 16 bit
+	ld	d,e		; Unpack byte
+	ld	a,8		; .. set byte loop
+MUL16:
+	add	hl,hl		; Double product
+	ex	de,hl
+	add	hl,hl		; .. and multiplier
+	ex	de,hl
+	jr	nc,MULtskp	; .. test bit
+	add	hl,bc		; .. adjust if set
+MULtskp:
+	dec	a		; .. loop
+	jr	nz,MUL16
+	ret
+;
+; Operator DIV
+; Divide signed integers
+; ENTRY	Reg DE holds dividend
+;	Reg HL holds divisor
+; EXIT	Reg HL holds quotient
+; 	Reg DE holds remainder
+;
+DIVint:
+	ld	a,h		; Test zero divisor
+	or	l
+	jp	z,NullDivide	; .. error if so
+	ld	a,h
+	xor	d
+	push	af		; Save resulting sign
+	call	ABSint		; Make both parts > 0
+	ex	de,hl
+	call	ABSint
+	ex	de,hl
+	ld	b,h		; Copy divisor
+	ld	c,l
+	xor	a
+	ld	h,a		; Clear result
+	ld	l,a
+	ld	a,17		; Set loop count
+DIVlop:
+	adc	hl,hl		; Double divisor
+	sbc	hl,bc
+	jr	nc,DIVskp	; .. test bit
+	add	hl,bc
+	scf			; Force bit reset (!)
+DIVskp:
+	ccf
+	rl	e		; Shift right dividend
+	rl	d
+	dec	a		; Loop
+	jr	nz,DIVlop
+	ex	de,hl
+	pop	af		; Get sign
+	ret	p
+	jr	ComplINT	; .. negate result
+;
+; Function RANDOM(integer):integer
+; ENTRY	Reg HL holds integer limit
+; EXIT	Reg HL holds random
+;
+RndmOf:
+	push	hl
+	call	RandomGet	; Get random value
+	srl	h		; .. make > 0
+	rr	l
+	pop	de		; Get back limit
+	ex	de,hl		; Get (random MOD limit)
+;
+; Operator MOD
+; Get modulo of signed integers
+; ENTRY	Reg DE holds dividend
+;	Reg HL holds divisor
+; EXIT	Reg HL holds remainder
+;
+MODint:
+	push	de		; Save dividend
+	call	DIVint		; .. divide
+	pop	af		; Get back old HI
+	rla
+	ex	de,hl		; Swap remainder
+	ret	nc
+	jr	ComplINT	; Negate if necessary
+;
+; Operator SHL
+; Shift left number
+; ENTRY	Reg DE holds number to be shifted
+;	Reg HL holds shift count
+; EXIT	Reg HL holds result
+;
+SHLFT:
+	call	GetShfOp	; Get shift values
+	ret	z		; .. end on zero
+SHLloop:
+	add	hl,hl		; .. shift
+	djnz	SHLloop
+	ret
+;
+; Operator SHR
+; Shift right number
+; ENTRY	Reg DE holds number to be shifted
+;	Reg HL holds shift count
+; EXIT	Reg HL holds result
+;
+SHRGT:
+	call	GetShfOp	; Get shift values
+	ret	z		; .. end on zero
+SHRloop:
+	srl	h		; .. shift
+	rr	l
+	djnz	SHRloop
+	ret
+;
+; Set shift values
+; ENTRY	Reg HL holds number to be shifted
+;	Reg DE holds shift count
+; EXIT	Reg B holds shift count
+;	Zero flag set on nothing to be shifted
+;	Reg HL may be preset to zero
+;
+GetShfOp:
+	ex	de,hl		; Swap factor
+	ld	a,d		; .. test zero
+	or	a
+	jr	nz,SHFzero
+	ld	a,e
+	cp	16		; .. or > word length
+	jr	nc,SHFzero
+	ld	b,a		; Copy count
+	or	a		; .. look for zero
+	ret
+SHFzero:
+	xor	a		; Set zero flag
+	ld	h,a		; .. clear result
+	ld	l,a
+	ret
+;
+; Compare signed integers
+; ENTRY	Reg DE holds 1st number
+;	Reg HL holds 2nd number
+; EXIT	Zero  flag set if DE=HL
+;	Carry flag set if DE<HL
+;
+ChkOperand:
+	ex	de,hl
+	ld	a,h
+	xor	d		; Test same signs
+	ld	a,h
+	jp	m,ChkOp.min	; .. no, fix carry
+	cp	d		; Compare HI
+	ret	nz
+	ld	a,l		; .. and LO if not equal
+	cp	e
+	ret
+ChkOp.min:
+	rla			; Get sign of 1st number
+	ret
+;
+; Function ABS(integer):integer;
+; ENTRY	Reg HL holds signed integer
+; EXIR	: Reg HL holds positive integer
+;
+ABSint:
+	bit	_MB,h		; Test sign bit
+	ret	z		; .. already >0
+ComplINT:
+	ld	a,h		; .. one's complement
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl		; Fix for two's complement
+	ret
+;
+; Function ODD(integer):boolean
+;
+ODD:
+	ld	a,l		; Get LSB
+	and	LSB
+	ld	l,a
+	ld	h,0		; .. expand to 16 bit
+	ret
+;
+; Get random value
+; EXIT	Regs BC and HL hold byte 3 and 4 of resulting random
+;	Reg  DE holds middle part of real number
+;
+RandomGet:
+	ld	bc,(RandomVal+2); Load old values
+	ld	de,(RandomVal)
+	push	bc		; .. save
+	push	de
+	ld	a,b		; expand to 40 bits
+	ld	b,c
+	ld	c,d
+	ld	d,e
+	ld	e,0
+	rra			; .. shift 'em all
+	rr	b
+	rr	c
+	rr	d
+	rr	e
+	pop	hl
+	add	hl,de		; .. add old
+	ex	de,hl
+	pop	hl
+	adc	hl,bc
+	ld	b,h
+	ld	c,l
+	ld	hl,0110001011101001b
+	add	hl,de		; Add value 62E9H
+	ld	(RandomVal),hl	; .. save
+	ex	de,hl
+	ld	hl,0011011000011001b
+	adc	hl,bc		; .. add 3619H
+	ld	(RandomVal+2),hl
+	ld	b,h		; .. copy
+	ld	c,l
+	ret
+;
+; Convert positive integer to ASCII number
+; ENTRY	Reg IX points to ASCII buffer
+; 	Reg HL holds integer
+; EXIT	Buffer filled
+;
+INT.Cnv:
+	ld	b,0		; Init flag
+	ld	de,10000	; Start with 10000's
+	call	INT..Cnv
+	ld	de,1000		; .. 1000's
+	call	INT..Cnv
+	ld	de,100		; ..  100's
+	call	INT..Cnv
+	ld	e,10		; ..   10's
+	call	INT..Cnv
+	ld	a,l		; Get remainder
+	jr	IC.ASCII
+INT..Cnv:
+	xor	a		; Clear digit count
+IC.loop:
+	inc	a		; .. bump digit count
+	sbc	hl,de		; Compare
+	jr	nc,IC.loop	; Loop till < 0
+	add	hl,de		; Fix to last number
+	inc	b		; Access flag
+	dec	a
+	jr	nz,IC.ASCII	; .. test digit > 0
+	dec	b		; Test flag
+	ret	z		; .. no leading zeroes
+IC.ASCII:
+	add	a,'0'		; Make ASCII
+	ld	(ix),a
+	inc	ix		; .. bump buffer
+	ret
+;
+; Convert ASCII number to integer
+; ENTRY	Reg IX points to ASCII number
+; EXIT	Reg HL holds integer
+;	Carry set on overflow
+;
+Cnv.INT:
+	ld	a,(ix)
+	sub	'$'		; Test hex indicator
+	ld	c,a		; .. as flag
+	ld	hl,0		; Init integer
+	jr	nz,CI.no.hex
+CI.loop:
+	inc	ix		; .. skip indicator
+CI.no.hex:
+	ld	a,(ix)
+	call	doupcase	; Get UPPER case
+	sub	'0'		; .. strip off offset
+	jr	c,CI.exit	; Test out of range
+	cp	10
+	jr	c,CI.decimal	; Test 0..9
+	inc	c
+	dec	c
+	jr	nz,CI.exit	; Test hex allowed
+	sub	'A'-'9'-1	; .. fix hex
+	cp	10
+	jr	c,CI.exit	; Test range
+	cp	16
+	jr	nc,CI.exit
+CI.decimal:
+	ld	d,h		; Copy number
+	ld	e,l
+	add	hl,hl		; * 2
+	ret	c		; .. overflow
+	add	hl,hl		; * 4
+	ret	c
+	inc	c		; Test hex
+	dec	c
+	jr	nz,CI.dec
+	ld	d,h		; Copy * 4
+	ld	e,l
+CI.dec:
+	add	hl,de		; * 5 / * 8
+	ret	c
+	add	hl,hl		; * 10 / * 16
+	ret	c
+	ld	e,a		; Get digit
+	ld	d,0
+	add	hl,de		; .. into result
+	ret	c
+	jr	CI.loop
+CI.exit:
+	ld	a,c
+	or	a		; Test hex
+	ret	z
+	ld	a,h
+	add	a,a		; Adjust carry on decimal
+	ret
+;
+; Add two strings
+; ENTRY	Stack holds strings
+; EXIT	Stack holds combined string
+;
+AddStr:
+	pop	ix
+	pop	hl
+	push	hl
+	ld	a,l		; Get length of 1st
+	ld	h,0
+	inc	hl
+	add	hl,sp		; Point to 2nd
+	ld	c,(hl)
+	add	a,c		; Add lengthes
+	jr	c,StringErr	; .. oops > 255
+	ld	(hl),a		; .. set new length
+	ex	de,hl
+	ld	hl,0
+	ld	b,h
+	sbc	hl,bc		; Prepare moving string
+	add	hl,sp
+	ld	sp,hl
+	ex	de,hl
+	push	hl
+	inc	bc
+	ldir			; .. move into right place
+	ex	de,hl
+	pop	hl
+	dec	hl
+	dec	de
+	ld	c,a
+	inc	bc
+	lddr
+	ex	de,hl
+	inc	hl
+	ld	sp,hl
+	jp	(ix)
+StringErr:
+	ld	a,_StrLenErr	; Set error
+	jp	SetRT.Err	; .. abort
+;
+; Function COPY(string,start,length):string
+; ENTRY	Start on stack, followed by string
+;	Reg HL holds length
+; EXIT	Substring on stack
+;
+Copy:
+	pop	ix		; Get caller
+	call	VALget		; Get length as byte
+	ld	d,a
+	pop	hl		; Fetch start
+	call	VALcheck	; .. verify 1..255
+	ld	e,a
+	pop	hl		; Get length (and 1st char)
+	push	hl
+	ld	a,l
+	sub	e		; Test against start
+	jr	c,Copy.no	; .. out of bounds
+	inc	d
+	dec	d
+	jr	z,Copy.no	; Test zero length
+	cp	d		; Compare against length
+	jr	c,Copy.set	; .. nothing to move
+	ld	c,d
+	ld	b,0		; Fix a bit
+	ld	h,b
+	add	hl,sp
+	ld	a,e
+	add	a,d
+	ld	d,h
+	ld	e,l
+	dec	a
+	ld	l,a
+	ld	h,b
+	add	hl,sp
+	ld	a,c
+	lddr			; .. and move down
+	ex	de,hl
+	jr	Copy.exit
+Copy.no:
+	xor	a		; Set zero result
+	jr	Copy..fix
+Copy.set:
+	inc	a		; Fix lengh
+	ld	l,e		; .. and position
+	dec	l
+Copy..fix:
+	ld	h,0
+	add	hl,sp		; Copy position
+Copy.exit:
+	ld	(hl),a		; Set length
+	ld	sp,hl		; .. and stack
+	jp	(ix)		; .. bye
+;
+; Function LENGTH(string):integer
+; ENTRY	String on stack
+; EXIT	Reg HL holds length
+;
+Length:
+	pop	ix		; Get caller
+	pop	hl		; Get length (and 1st char)
+	push	hl
+	ld	a,l		; Save length
+	ld	h,0
+	inc	hl
+	add	hl,sp		; Adjust stack
+	ld	sp,hl
+	ld	l,a		; Expand length to 16 bit
+	ld	h,0
+	jp	(ix)		; .. exit
+;
+; Function POS(substring,string):integer
+; ENTRY	String on stack, followed by substring
+; EXIT	Reg HL holds position, 0 is not found
+;
+Pos:
+	pop	ix		; Get caller
+	ld	hl,0
+	ld	d,h
+	add	hl,sp		; Copy stack
+	ld	e,(hl)		; Get length of main_string
+	ld	c,e
+	inc	hl
+	push	hl
+	add	hl,de		; Point to substring
+	ld	e,(hl)		; Get length of sub_string
+	ld	b,e
+	inc	hl
+	push	hl
+	add	hl,de		; Point to end of both strings
+	push	hl
+	pop	iy		; .. copy address
+	pop	de		; Get sub_string
+	pop	hl		; .. main_string
+	ld	a,c
+	sub	b
+	jr	c,Pos.not.fnd	; .. sub_ > main_
+	inc	a		; Fix search count
+	ld	c,a
+Pos.next:
+	push	bc
+	push	de
+	push	hl
+Pos.loop:
+	ld	a,(de)		; Compare
+	cp	(hl)
+	jr	z,Pos.???	; .. maybe success
+	pop	hl
+	pop	de
+	pop	bc
+	inc	hl
+	dec	c		; Test more to search
+	jr	nz,Pos.next	; .. ok, try
+Pos.not.fnd:
+	ld	hl,0		; Set zero result
+	jr	Pos.exit
+Pos.???:
+	inc	hl		; Fix for loop
+	inc	de
+	djnz	Pos.loop
+	pop	de
+	pop	hl
+	pop	bc
+	ld	hl,0
+	add	hl,sp		; Get pointers
+	ex	de,hl
+	sbc	hl,de		; .. for resulting position
+Pos.exit:
+	ld	sp,iy		; Set stack
+	jp	(ix)
+;
+; Procedure DELETE(string,start,length)
+; ENTRY	Start on stack, followed by string
+; 	Reg HL holds length
+;
+Delete:
+	pop	ix		; Get caller
+	call	VALget		; Fetch length byte
+	ld	c,a
+	pop	hl
+	call	VALcheck	; Verify start
+	ld	e,a
+	pop	hl		; Get length (and 1st char)
+	ld	a,(hl)
+	sub	e		; Test start>length
+	jr	c,Delete.exit	; .. exit if so
+	inc	c
+	dec	c		; Test any length
+	jr	z,Delete.exit	; .. no, exit
+	sub	c		; Test remaining count
+	jr	c,Delete.done	; .. ok
+	push	af
+	ld	a,(hl)
+	sub	c
+	ld	(hl),a
+	ld	b,0
+	ld	d,b
+	add	hl,de		; Point to destination
+	ld	d,h
+	ld	e,l
+	add	hl,bc		; .. and source
+	pop	af
+	inc	a
+	ld	c,a
+	ldir			; Unpack
+	jr	Delete.exit
+Delete.done:
+	dec	e		; Adjust length
+	ld	(hl),e		; .. save it
+Delete.exit:
+	jp	(ix)		; .. exit
+;
+; Procedure INSERT(string,substring,start)
+; ENTRY	Pointer of substring on stack, followed by string
+; 	Reg HL holds start
+;	Reg B holds max length of string
+;
+Insert:
+	pop	ix		; Get caller
+	call	VALcheck	; Get start byte
+	ld	c,a
+	pop	de		; Get substring pointer
+	ld	(FilIniMode),de
+	ld	hl,0
+	add	hl,sp		; Get string pointer
+	ld	a,(de)
+	push	af
+	add	a,(hl)		; Calculate combined length
+	jr	c,Insert.max	; .. set max on overflow
+	cp	b		; Compare against max
+	jr	c,Insert.go	; .. ok if less
+Insert.max:
+	ld	a,b		; Set max default
+Insert.go:
+	ld	(de),a		; Set new length
+	pop	af		; Get substring length
+	ld	d,a
+	ld	e,(hl)
+	sub	c		; Get remainder
+	jr	c,Insert.skp	; .. skip
+	inc	a
+	ld	l,a
+	ld	a,d
+	add	a,e
+	jr	c,Insert.fix
+	cp	b
+	ld	a,l
+	jr	c,Insert.test
+Insert.fix:
+	ld	a,b
+	sub	e
+	jr	c,Insert.ins.it
+	sub	c
+	jr	c,Insert.ins.it
+	inc	a
+Insert.test:
+	or	a
+	jr	z,Insert.ins.it
+	push	bc
+	push	de
+	ld	hl,(FilIniMode)	; Get substring pointer
+	ld	e,a
+	dec	e
+	ld	d,0
+	ld	b,d
+	add	hl,de
+	add	hl,bc
+	pop	de
+	push	de
+	push	hl
+	ld	d,b
+	add	hl,de
+	ex	de,hl
+	pop	hl
+	ld	c,a
+	lddr			; Move down
+	pop	de
+	pop	bc
+	jr	Insert.ins.it
+Insert.skp:
+	ld	a,d
+	inc	a
+	jr	z,Insert.exit
+	ld	c,a
+Insert.ins.it:
+	ld	a,b
+	sub	c
+	inc	a
+	cp	e
+	jr	c,Insert.ins
+	ld	a,e
+Insert.ins:
+	or	a
+	jr	z,Insert.exit
+	ld	hl,(FilIniMode)	; Get substring pointer
+	ld	b,0
+	add	hl,bc
+	ex	de,hl
+	ld	hl,1
+	add	hl,sp
+	ld	c,a
+	ldir			; Move
+Insert.exit:
+	ld	hl,0
+	ld	d,h
+	add	hl,sp		; Fix stack
+	ld	e,(hl)
+	inc	de
+	add	hl,de
+	ld	sp,hl		; .. and set
+	jp	(ix)
+;
+; Check assignment of string to character
+; EXIT	Reg L holds character
+;
+AssChr:
+	pop	ix		; Get caller
+	pop	hl		; Get length and 1st character
+	dec	l
+	jp	nz,StringErr	; Should be length 1
+	ld	l,h		; Get character
+	ld	h,0
+	jp	(ix)
+;
+; Set character into string
+;
+ChrAss:
+	ld	hl,2
+	ld	d,h
+	add	hl,sp		; Copy to string
+	ld	e,(hl)		; Get length
+	inc	de
+	add	hl,de		; Copy to top
+	ld	a,(hl)		; Get character
+	ld	(hl),1		; .. set length
+	inc	hl
+	ld	(hl),a		; .. set character
+	ret
+

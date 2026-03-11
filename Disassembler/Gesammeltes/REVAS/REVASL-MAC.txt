@@ -1,0 +1,2911 @@
+	title	REVAS Disassenbler
+	name	('REVAS')
+
+	.z80
+	aseg
+	org	0100h
+
+; DASMed version of REVAS.LOD
+; the REVAS V2 Z80/8080 Disassenbler
+;
+; DASMed by W.Cirsovius
+;
+; This tool is written to confuse the russians :-)
+
+; From document CPMAN by A. E. Hawley:
+; REVAS.LOD, contains the actual REVAS program embedded
+; in a relocating loader. It is loaded into memory and executed
+; by REVAS.COM, which contains a reference by filename.ext to REVAS.LOD
+
+; Any file FN.COM will be loaded first. After successfull loading
+; REVAS.LOD will be loaded at next record/page boundary
+
+ld.hl	macro
+	db	21h
+	endm
+
+jp.nz	macro
+	db	0c2h
+	endm
+
+jp.c	macro
+	db	0dah
+	endm
+
+jr.nc	macro
+	db	30h
+	endm
+
+confil	equ	00h
+concnt	equ	0
+
+prnfil	equ	00h
+prcnt	equ	0
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_EX	equ	12
+FCBlen	equ	33
+
+null	equ	00h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+
+MSB	equ	10000000b
+NOMSB	equ	01111111b
+LOMASK	equ	00001111b
+
+HEADER	equ	 5		; Printer head lines
+PRPAGE	equ	56		; Total printer page length
+FOOTER	equ	 5		; Printer foot lines
+
+l0000	equ	00h
+l0004	equ	04h
+l0005	equ	05h
+l0006	equ	06h
+l0008	equ	08h
+l0011	equ	11h
+
+l005c	equ	5ch
+l0080	equ	80h
+
+l0100:
+	ld	iy,$-$		; Filled by loader [BBCB]
+	di
+	ld	de,(l0100)	; Save code
+	ld	hl,256*0e9h+0e1h; Set 'pop hl' [E5H] and 'jp (hl)' [E1H]
+	ld	(l0100),hl
+	call	l0100		; Pop address l0112 and jump to it
+l0112:
+	ld	(l0100),de	; Reset code
+	xor	a
+	ld	de,l0112
+	sbc	hl,de		; Build offset - depends on load address
+	ld	b,h		; Copy it
+	ld	c,l
+	ld	hl,l11dc
+	add	hl,bc		; Build execution address
+	jp	(hl)		; Execute it - it is l11dc+offset
+;
+; Code moved after .COM file [NOT to top of memory]
+; [This address-1 is the highest available address in memory]
+;
+; --->>> MAIN COMMAND LOOP <<<---
+;
+; Set to record/Page boundary [0200]
+;
+l0123:
+	ld	sp,l11d1	; Reset stack		[12AE : Offset 00DD]
+	jp	l05f4		; Enter command mode
+;
+l0129:
+	dw	l1137		; Pointer to parameter
+l012b:
+	dw	l113b+1
+l012d:
+	dw	l1148
+l012f:
+	dw	l1150
+l0131:
+	dw	l1156
+l0133:
+	dw	l116b
+	dw	l1170
+l0137:
+	db	20h,22h
+l0139:
+	db	'df'
+;
+; ############## Status area ##############
+;
+; The byte at IY-2 ??????:
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+; | ... | ... | ... | ... | ... | ... | ... | ... |
+; | ... | ... | ... | ... | ... | ... | ... | ... |
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+;
+l013b:
+	db	68h
+	db	0aah
+;
+; IY+0
+;
+l013d:
+	dw	0
+l013f:
+	dw	l0123		; Current top of memory
+;
+; The status byte at IY+4 controls the output:
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+; | BYT | TAB | ??? | LOG | FCB | LST | CON | MEM |
+; | ... | ... | ... | CON | ... | ... | CON | ... |
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+;
+l0141:
+	db	00000010b	; Console output
+;
+; The status byte at IY+5 ??????:
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+; | HLT | ??? | ... | ... | ... | ... | ID  | ??? |
+; | ... | ... | ... | ... | ... | ... | ... | ... |
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+;
+l0142:
+	db	00000000b
+l0143:
+	dw	0		; Memory pointer
+;
+; The status byte at IY+8 ??????:
+;
+;    7     6     5     4     3     2     1     0
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+; | ??? | ??? | ... | ... | ... | ... | ... | IDX |
+; | ... | ... | ... | ... | ... | ... | ... | ... |
+; +-----+-----+-----+-----#-----+-----+-----+-----+
+;
+l0145:
+	db	0
+l0146:
+	dw	0
+;
+; The byte at IY+11 current printer page length:
+;
+l0148:
+	db	PRPAGE
+;
+; The byte at IY+12 printer footer lines:
+;
+l0149:
+	db	FOOTER
+;
+; The byte at IY+13 printer header lines:
+;
+l014a:
+	db	HEADER
+;
+; The byte at IY+14 printer page length:
+;
+l014b:
+	db	PRPAGE
+;
+; #########################################
+;
+l014c:
+	dw	0
+l014e:
+	dw	0
+l0150:
+	dw	0
+l0152:
+	dw	0
+l0154:
+	dw	0
+l0156:
+	dw	l0100		; Current disassemble address
+l0158:
+	jp	l0000
+;
+; Do OS call preserving index registers
+; ENTRY	Reg C holds function
+;	Reg (D)E holds possible parameter
+; EXIT	Accu holds result
+;
+l015b:
+	push	ix
+	push	iy
+	call	l0005		; Call it
+	pop	iy
+	pop	ix
+	ret
+;
+; Read character from keyboard
+; EXIT	Accu holds character
+;
+l0167:
+	xor	a
+	inc	a		; Map to function 1
+	jp.c			; Never done
+;
+; Get state of keyboard
+; EXIT	Accu holds 0 if no chracter available
+;
+l016a:
+	ld	a,0bh		; Set function
+;
+	push	bc
+	push	de
+	push	hl
+	ld	c,a
+	call	l015b		; Get state of keyboard
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Put character to file
+; ENTRY	Reg C holds character
+;
+l0177:
+	push	hl
+	push	bc
+	ld	hl,l0080+l0080-1
+	ld	a,(hl)		; Get record pointer
+	inc	(hl)		; Point to next
+	ld	l,a
+	ld	(hl),c		; Store character
+	call	z,l0188		; Write record to file if filled
+	pop	bc
+	pop	hl
+	ld	a,c
+	or	a
+	ret
+;
+; Write record to file
+;
+l0188:
+	ld	hl,l0080
+	call	l06f8		; Write record to file
+;
+; Init record pointer
+;
+l018e:
+	ld	a,l0080
+	ld	(l0080+l0080-1),a; Init record pointer
+	ret
+;
+; Put character to printer
+; ENTRY	Reg C holds character
+;
+l0194:
+	ld	a,5
+	res	7,c
+	jr	l019c
+;
+; Put character to console
+; ENTRY	Reg C holds character
+;
+l019a:
+	ld	a,2
+l019c:
+	push	bc
+	push	de
+	push	hl
+	ld	e,c
+	ld	d,0
+	ld	c,a
+	call	l015b		; Put to console or printer
+	pop	hl
+	pop	de
+	pop	bc
+	ld	a,c
+	ret
+;
+; Put word to console formatted as [0]xxxxH
+; ENTRY	Reg HL holds word
+;
+l01ab:
+	call	l0273		; Print possible prefix '0'
+	call	l027d		; Put word to console
+	jr	l01b9		; Print 'H' on device
+;
+; Put byte to console formatted as [0]xxH
+; ENTRY	Reg HL holds word
+;
+l01b3:
+	call	l0274		; Print possible prefix '0'
+	call	l0282		; Put byte to console
+;
+; Print 'H' on device
+;
+l01b9:
+	ld	c,'H'
+;
+; Put character to device
+; ENTRY	Reg C holds character
+;
+l01bb:
+	push	af
+	res	7,c		; No hi bit
+	bit	0,(iy+4)	; Test to memory
+	jp	nz,l01f0	; Store character to memory if so
+	push	bc
+	ld	a,tab
+	cp	c		; Test tabulator
+	jr	nz,l01cd	; Nope
+	ld	c,' '		; Map to blank
+l01cd:
+	ld	a,(iy+4)
+	and	00010010b	; Test console
+	jr	z,l01dd
+	call	l019a		; Put character to console if so
+	bit	4,(iy+4)	; Test console only
+	jr	nz,l01ed	; Yeap, no printer or file
+l01dd:
+	bit	2,(iy+4)	; Test printer
+	call	nz,l01fc	; Put character to printer if so
+	pop	bc
+	push	bc
+	bit	3,(iy+4)	; Test file
+	call	nz,l0241	; Put character to file if so
+l01ed:
+	pop	bc
+	pop	af
+	ret
+;
+; Store character to memory
+; ENTRY	Reg C holds character
+;
+l01f0:
+	push	hl
+	ld	hl,(l0143)	; Get memory pointer
+	ld	(hl),c		; Store character
+	inc	hl		; Update pointer
+	ld	(l0143),hl
+	pop	hl
+	pop	af
+	ret
+;
+; Printer output
+; ENTRY	Reg C holds character
+;
+l01fc:
+	bit	6,(iy+5)
+	jr	nz,l0214
+	set	6,(iy+5)
+	push	bc
+	ld	b,(iy+12)	; Get printer footer lines
+	call	l0238		; Advance lines
+	ld	a,(iy+14)	; Get printer page length
+	ld	(iy+11),a	; Init current printer page length
+	pop	bc
+l0214:
+	ld	a,c
+	sub	cr		; Test end of line
+	jr	z,l021d
+	call	nc,l0194	; Put character to printer if not
+	ret
+l021d:
+	call	l033a		; Give new line on printer
+	dec	(iy+11)		; Count down current printer page length
+	ret	nz		; Still more lines
+	push	bc
+	ld	b,(iy+13)	; Get printer header lines
+	call	l0238		; Advance lines
+	res	6,(iy+5)
+	bit	7,(iy+5)	; Test halt at top of each page
+	call	nz,l02dc	; Read character and check immediate command
+	pop	bc
+	ret
+;
+; Put new lines to printer
+; ENTRY	Reg B holds line count
+;
+l0238:
+	xor	a
+	cp	b		; Test zero
+	ret	z		; Ignore if so
+l023b:
+	call	l033a		; Give new line on printer
+	djnz	l023b
+	ret
+;
+; Put character to file
+; ENTRY	Reg C holds character
+;
+l0241:
+	ld	a,c		; Get character
+	cp	cr		; Test end of line
+	jr	z,l026c		; Yeap, put it
+	cp	lf
+	jr	z,l026c
+	bit	6,(ix+0)	; Test suppressing print
+	ret	z
+	cp	':'		; Test delimiter
+	jr	nz,l0259
+	call	l0177		; Put character to file
+	ld	a,tab
+	ld	c,a		; Set tab after delimiter
+l0259:
+	cp	tab		; Test tab
+	jr	z,l0266		; Set active
+	cp	' '		; Test blank
+	jr	nz,l026c	; Reset active tab
+	bit	6,(iy+4)	; Test active tabulator
+	ret	nz		; Yeap
+l0266:
+	set	6,(iy+4)	; Set active tabulator
+	jr	l0270
+l026c:
+	res	6,(iy+4)	; Reset active tabulator
+l0270:
+	jp	l0177		; Put character to file
+;
+; Print prefix '0' if byte range A0..FF
+; ENTRY	Reg H holds byte
+;
+l0273:
+	ld	a,h		; Get byte
+;
+; Print prefix '0' if byte range A0..FF
+; ENTRY	Accu holds byte
+;
+l0274:
+	cp	16*(9+1)	; Test range
+	ret	c		; No prefix necessary
+	ld	c,'0'
+	call	l01bb		; Put prefix to device
+	ret
+;
+; Put word to console
+; ENTRY	Reg HL holds word
+;
+l027d:
+	ld	a,h		; Get hi byte
+	call	l0282		; Put to console
+	ld	a,l		; Then lo byte
+;
+; Put byte to console
+; ENTRY	Accu holds byte
+;
+l0282:
+	push	af		; Save byte
+	rrca			; Extract upper bits
+	rrca
+	rrca
+	rrca
+	call	l028b		; Put hi nybble to console
+	pop	af		; Get back byte for low nybble
+;
+; Put nybble to console
+; ENTRY	Accu holds nybble
+;
+l028b:
+	call	l0291		; Convert nybble to ASCII digit
+	jp	l01bb		; Put it to device
+;
+; Convert nybble to ASCII digit
+; ENTRY	Accu holds bybble
+; EXIT	Reg C holds digit
+;
+l0291:
+	and	LOMASK		; Mask nybble
+	add	a,90h		; Convert to ASCII
+	daa
+	adc	a,40h
+	daa
+	ld	c,a		; Unpack result
+	ret
+;
+; Get two addresses
+; EXIT	Reg HL holds 1st address
+;	Reg DE holds 2nd address
+;	Addresses stored into l013d and l013f
+;
+l029b:
+	call	l02e4		; Load two parameters
+	pop	de		; Get results
+	pop	hl
+	jr	l02ab
+;
+; Get address range
+; EXIT	Reg HL holds 1st address
+;	Reg DE holds 2nd address
+;
+l02a2:
+	ld	hl,l111d
+	call	l0379		; Tell address range
+	call	l0334		; Load two parameters
+l02ab:
+	ld	(l013d),hl	; Parameter 1 for ????
+	ld	(l013f),de	; Parameter 2 for top of memory
+	ret
+;
+; Position behind string
+; ENTRY	Reg HL points to string
+;	Reg B holds number of elements to skip
+; EXIT	Reg HL positioned
+;
+l02b3:
+	xor	a
+	cp	b		; Test nothing to skip
+	ret	z		; Yeap
+l02b6:
+	bit	7,(hl)		; Test hi bit set
+	inc	hl
+	jr	z,l02b6		; Nope
+	djnz	l02b6		; Test done
+	ret
+;
+; Compare
+; ENTRY	Reg IX holds subtrahend
+; EXIT	Reg DE holds top of memory
+;	Flags set accordingly
+;
+l02be:
+	ld	de,(l013f)	; Get top of memory
+;
+; Compare
+; ENTRY	Reg DE holds number
+;	Reg IX holds subtrahend
+; EXIT	Flags set accordingly
+;
+l02c2:
+	push	ix
+	pop	hl
+	push	de
+	push	hl
+	ex	de,hl
+	xor	a
+	sbc	hl,de		; Compare DE:IX
+	pop	hl
+	pop	de
+	ret
+;
+; Read character from keyboard and check immediate command
+;
+l02ce:
+	call	l016a		; Get state of keyboard
+	or	a		; Test key present
+	ret	z		; Nope
+	call	l05c8		; Read character from keyboard
+	call	l05df		; Execute immediate command if found
+	cp	'S'		; Test suspend from execution
+	ret	nz		; Nope
+;
+; Read character and check immediate command
+;
+l02dc:
+	call	l05c8		; Read character from keyboard
+	call	l05df		; Execute immediate command if found
+	jr	l0360		; Give new line
+;
+; Load two parameters
+; ENTRY	Accu holds digit
+; EXIT	Parameters on stack
+;
+l02e4:
+	ld	c,2		; Set count
+	or	MSB		; Set hi bit for skipping first read
+	jr	l02f0
+;
+; Load two parameters
+; EXIT	Parameters on stack
+;
+l02ea:
+	ld	c,2		; Set parameter count
+	ld.hl
+;
+; Load one parameter
+; EXIT	Parameter on stack
+;
+l02ed:
+	ld	c,1		; Set parameter count
+;
+; The loop
+;
+l02ef:
+	xor	a		; Reset hi bit for complete reading
+;
+; Convert to number
+; ENTRY	Accu holds 00H and MSB reset for complete reading the number
+; ENTRY	Accu holds digit and MSB set for bypassing reading the first digit
+;
+l02f0:
+	push	af		; Save entry
+	ld	hl,l1137	; Point to parameter
+	xor	a
+	ld	(hl),a		; Clear result
+	inc	hl
+	ld	(hl),a
+	dec	hl
+	pop	af		; Get back entry
+	push	bc
+	jp	m,l0309		; Skip first reading
+l02fe:
+	call	l05b6		; Get character from keyboard
+	jr	z,l02fe		; Wait for no delimiter
+	jr	l0309
+l0305:
+	push	bc
+	call	l05b6		; Get character from keyboard
+l0309:
+	res	7,a		; Clear hi bit
+	pop	bc
+	jr	c,l032b		; End of input
+	jr	z,l032b		; Got delimiter
+	sub	'0'		; Strip off offset
+	jp	c,l0123
+	cp	9+1		; Verify valid range
+	jr	c,l0323
+	sub	'A'-'0'-10	; Fix for hex
+	jp	c,l0123
+	cp	15+1
+	jp	nc,l0123
+l0323:
+	rld			; Shift nybbles inserting new digit
+	inc	hl
+	rld
+	dec	hl
+	jr	l0305
+l032b:
+	ld	hl,(l1137)	; Get result
+	ex	(sp),hl		; Put current result onto stack
+	push	hl		; Save caller
+	dec	c		; Test all parameters processed
+	jr	nz,l02ef	; Nop, get next
+	ret
+;
+; Load two parameters
+; EXIT	Reg HL holds 1st parameter
+;	Reg DE holds 2nd parameter
+;
+l0334:
+	call	l02ea		; Load two parameters
+	pop	de		; Get them
+	pop	hl
+	ret
+;
+; Give new line on printer and delay if defined
+;
+l033a:
+	push	hl
+	push	bc
+	ld	hl,l111b
+	call	l0353		; Put new line to printer
+	ld	bc,256*prnfil+prcnt; Load filler and length
+	xor	a
+	cp	b
+	call	nz,l034d	; Print characters
+	pop	bc
+	pop	hl
+	ret
+;
+; Put characters to printer
+; ENTRY	Reg C holds character
+;	Reg B holds length
+;
+l034d:
+	call	l0194		; Put character to printer
+	djnz	l034d
+	ret
+;
+; Put string to printer
+; ENTRY	Reg HL points to string
+;
+l0353:
+	ld	c,(hl)
+	call	l0194		; Put character to printer
+	bit	7,(hl)		; Test end of string
+	inc	hl
+	jr	z,l0353		; Nope
+	ret
+;
+; Print string on device and close line
+; ENTRY	Reg HL points to string
+;
+l035d:
+	call	l0379		; Print message
+;
+; Give new line on device and delay if defined
+;
+l0360:
+	push	hl
+	push	bc
+	ld	hl,l111b
+	call	l0379		; Put new line to console
+	ld	bc,256*confil+concnt; Load filler and length
+	xor	a
+	cp	b
+	call	nz,l0373	; Print characters
+	pop	bc
+	pop	hl
+	ret
+;
+; Put characters to console
+; ENTRY	Reg C holds character
+;	Reg B holds length
+;
+l0373:
+	call	l01bb		; Put character to device
+	djnz	l0373
+	ret
+;
+; Put string to device
+; ENTRY	Reg HL points to string
+;
+l0379:
+	ld	c,(hl)
+	call	l01bb		; Put character to device
+	bit	7,(hl)		; Test end of string
+	inc	hl
+	jr	z,l0379		; Nope
+	ret
+;
+; Put string to device
+; ENTRY	Reg HL points to string
+;	Reg B holds length of string
+;
+l0383:
+	ld	c,(hl)
+	call	l01bb		; Put character to device
+	inc	hl
+	djnz	l0383
+	ret
+;
+; Load byte from program
+; ENTRY	Reg IX holds program counter
+; EXIT	Accu holds byte
+;	Reg IX incremented by one
+;
+l038b:
+	ld	a,(ix+0)	; Load byte
+	inc	ix		; Update PC
+	ret
+;
+;
+;
+l0391::
+	call	l0d1e		; Print opcode
+l0394:
+	call	l040d		; Extract destination bits
+;
+; Print register
+; ENTRY	Accu holds register bits in range 0..7
+;	Original	Fixed
+;	0: B		A
+;	1: C		B
+;	2: D		C
+;	3: E		D
+;	4: H		E
+;	5: L		H		+ 2 ->  7
+;	6: M		L + 3 ->  9	+ 2 -> 11
+;	7: A		M + 3 -> 10	+ 2 -> 12
+;
+l0397:
+	inc	a		; Fix bits
+	and	00000111b	; Mask bits
+	cp	6		; Test A..H
+	jr	c,l03a0		; Yeap
+	add	a,3		; Map it
+l03a0:
+	cp	5		; Test A..E
+	jr	c,l03a6		; Yeap
+	add	a,2		; Map it
+l03a6:
+	add	a,'A'		; Build register character
+	ld	c,a
+	cp	'M'		; Test memory reference
+	jp	nz,l01bb	; Put character to device if not
+	ld	a,e		; Test index register ????
+l03af::
+	and	11011111b
+	cp	11011101b
+	jp	nz,l01bb	; Put character to device
+	call	l038b		; Load byte from program
+	call	l03dc
+	ld	a,(ix-1-1)	; Get previous byte
+	cp	11001011b	; Test bit reference
+	jr	nz,l03c5	; Nope
+	inc	ix		; Update PC
+l03c5:
+	ld	c,'('
+	call	l01bb		; Put character to device
+	call	l03d1		; Put index register
+	ld	c,')'
+	jr	l03d9
+;
+; Put index register
+;
+l03d1:
+	ld	c,'X'		; Init register
+	ld	a,e
+	cp	11011101b	; Test state
+	jr	z,l03d9
+	inc	c		; Fix for IY
+l03d9:
+	jp	l01bb		; Put character to device
+;
+;
+;
+l03dc:
+	push	bc
+	bit	7,a		; Test sign of offset
+	jr	z,l03ea		; Skip if positive
+	neg			; Negateit
+	ld	c,'-'
+	call	l01bb		; Put character to device
+	jr	z,l03af		; Skip if zero offset
+l03ea:
+	ld	bc,256*100+' '
+	call	l03fe		; Divide by 100
+	ld	bc,256*10+' '
+	call	l03fe		; Divide by 10
+	or	'0'		; Make ASCII digit
+	ld	c,a
+	call	l01bb		; Put character to device
+	pop	bc
+	ret
+;
+; Divide numbers
+; ENTRY	Accu holds number
+;	Reg B holds divisor
+;	Reg C holds blank on entry
+;
+l03fe:
+	cp	b		; Test in range
+	jr	c,l0407		; Nope
+	sub	b		; Subtract
+	inc	c		; Update quotient
+	set	4,c		; Force digit
+	jr	l03fe
+l0407:
+	bit	4,c		; Test resulting digit
+	ret	z		; Nope
+	jp	l01bb		; Put digit to device
+;
+; Extract destination bits
+; ENTRY	Reg D holds byte
+; EXIT	Accu holds bits right justifued
+;	xxDDDxxx -> 00000DDD
+;
+l040d:
+	ld	a,d		; Get byte
+	and	00111000b	; Extract bits
+	rrca			; Position them
+	rrca
+	rrca
+	ret
+;
+; Print condition code
+; ENTRY	Reg D holds byte
+;
+l0414:
+	call	l040d		; Extract condition bits
+	ld	hl,l105b	; Set base pointer
+	jp	l0d19		; Print CC
+;
+; Print register pair
+; ENTRY	Reg D holds byte
+;
+l041d:
+	call	l040d		; Extract destination bits
+	and	00000110b	; Mask pair bits
+	cp	00000110b	; Test stack pointer
+	jp	nz,l0397	; Nope
+	ld	c,'S'
+	call	l01bb		; Put 'SP' to device
+	ld	c,'P'
+	jp	l01bb
+;
+;
+;
+l0431::
+	ld	hl,l043a
+	call	l035d		; Tell out of memory
+	jp	l0123
+;
+l043a:
+	dc	'OUT OF MEMORY'
+;
+;
+;
+l0447::
+	push	hl
+	push	de
+	push	bc
+	xor	a
+	ld	hl,(l0005+1)
+	ld	de,l0006
+	sbc	hl,de
+	ld	de,(l11d6)
+	push	de
+	sbc	hl,de
+	ld	de,(l11da)
+	sbc	hl,de
+	jr	c,l0431
+	pop	hl
+	ld	bc,l0004
+	add	hl,bc
+	ld	(l11d6),hl
+	ld	a,e
+	or	d
+	jr	z,l047c
+	inc	de
+	add	hl,de
+	push	hl
+	add	hl,bc
+	push	hl
+	ex	de,hl
+	add	hl,bc
+	inc	hl
+	push	hl
+	pop	bc
+	pop	de
+	pop	hl
+	lddr
+l047c:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0480:
+	ld	a,' '
+	ld	b,l1173-l1137
+	ld	hl,l1137	; Pointer to ????
+l0487:
+	ld	(hl),a
+	inc	hl
+	djnz	l0487
+	set	0,(iy+5)
+	set	6,(iy+4)	; Set active tabulator
+	ld	a,tab
+	ld	(l1148),a	; Store tab
+	ret
+;
+;
+;
+l0499:
+	call	l0480
+	ld	b,6
+l049e:
+	call	l05b6		; Get character from keyboard
+	jr	z,l04a9		; Skip delimiter
+	push	af
+	djnz	l049e
+	call	l05b0		; Get character from keyboard
+l04a9:
+	ld	a,6
+	sub	b
+	jp	z,l0123
+	ld	b,a
+	ld	hl,l113b+1
+l04b3:
+	pop	af
+	ld	(hl),a
+	dec	hl
+	djnz	l04b3
+	ret
+;
+;
+;
+l04b9:
+	call	l054b
+	ex	de,hl
+	inc	hl
+	inc	hl
+	jr	c,l04c5
+	inc	hl
+	bit	5,(hl)
+	dec	hl
+l04c5:
+	ex	de,hl
+	ret
+l04c7:
+	push	ix
+	ld	ix,(l11d4)
+	push	ix
+	ex	de,hl
+	ld	a,(l11d1)
+	bit	0,a
+	jr	nz,l04f6
+	set	0,a
+	ld	(l11d1),a
+	pop	hl
+l04dd:
+	ld	(ix+0),e
+	ld	(ix+1),d
+	xor	a
+	ld	(ix+2),a
+	ld	a,(iy+4)
+	and	10000000b	; Extract ???
+	ld	(ix+3),a
+l04ef:
+	push	ix
+	pop	hl
+	pop	ix
+	ex	de,hl
+	ret
+l04f6:
+	ld	bc,l0004
+l04f9:
+	ld	l,(ix+0)
+	ld	h,(ix+1)
+	xor	a
+	sbc	hl,de
+	pop	hl
+	jr	z,l04ef
+	push	hl
+	jr	c,l0521
+	inc	bc
+	inc	bc
+	inc	bc
+	inc	bc
+	dec	ix
+	dec	ix
+	dec	ix
+	dec	ix
+	exx
+	ld	de,(l11d2)
+	call	l02c2		; Compare DE:IX
+	exx
+	jr	c,l04f9
+	jr	z,l04f9
+l0521:
+	pop	hl
+	inc	ix
+	inc	ix
+	inc	ix
+	inc	ix
+	inc	hl
+	inc	hl
+	inc	hl
+	push	de
+	ld	d,h
+	ld	e,l
+	inc	de
+	ld	(l11d4),de
+	push	de
+	push	hl
+	ld	hl,(l11d6)
+	ex	de,hl
+	xor	a
+	sbc	hl,de
+	pop	hl
+	pop	de
+	call	nc,l0447
+	inc	de
+	inc	de
+	inc	de
+	lddr
+	pop	de
+	jr	l04dd
+l054b:
+	ld	a,(l11d1)
+	bit	0,a
+	jr	z,l05ae
+	push	hl
+	ld	hl,(l11d2)
+	ld	(l014c),hl
+	ld	hl,(l11d4)
+	ld	(l0150),hl
+	ld	(l014e),hl
+	ld	a,l
+	and	3
+	ld	c,a
+l0566:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	push	hl
+	sbc	hl,de
+	jr	z,l05a6
+	ex	af,af'
+	ld	hl,(l014c)
+	ld	de,(l014e)
+	xor	a
+	sbc	hl,de
+	jr	z,l05ac
+	ex	af,af'
+	ld	hl,(l014e)
+	jr	c,l0587
+	ld	(l014c),hl
+	jr	l058a
+l0587:
+	ld	(l0150),hl
+l058a:
+	ld	hl,(l014c)
+	ld	de,(l0150)
+	xor	a
+	adc	hl,de
+	rr	h
+	rr	l
+l0598:
+	ld	a,l
+	and	3
+	cp	c
+	jr	z,l05a1
+	dec	hl
+	jr	l0598
+l05a1:
+	ld	(l014e),hl
+	jr	l0566
+l05a6:
+	pop	hl
+	ld	de,(l014e)
+	ret
+l05ac:
+	ex	af,af'
+	pop	hl
+l05ae:
+	scf
+	ret
+;
+; Get character from keyboard
+; EXIT	Accu holds character as upper case
+;	Carry flag set on end of line
+;
+l05b0:
+	call	l05b6		; Get character from keyboard
+	jr	nz,l05b0	; Ignore delimiter
+	ret
+;
+; Get character from keyboard
+; EXIT	Accu holds character as upper case
+;	Carry flag set on end of line
+;	Zero flag set on delimiter
+;
+l05b6:
+	call	l05c8		; Read character from keyboard
+	push	af
+	exx
+	call	c,l0360		; Process end of line
+	exx
+	cp	'a'		; Test lower case
+	jr	c,l05c5
+	res	5,c		; Convert to upper case
+l05c5:
+	pop	af
+	ld	a,c
+	ret
+;
+; Read character from keyboard
+; EXIT	Accu and reg C hold character
+;	Carry flag set on end of line
+;	Zero flag set on delimiter
+;
+l05c8:
+	call	l0167		; Read character from keyboard
+	and	NOMSB
+	ld	c,a
+	cp	'C'-'@'		; Test abort
+	call	z,l0158		; Exit if so
+	cp	cr		; Test end of input
+	scf
+	ret	z
+	cp	' '		; Filter delimiter
+	ret	z
+	cp	','
+	ret	z
+	or	a		; Mark normal character
+	ret
+;
+; Execute immediate command if found
+;
+l05df:
+	cp	'R'		; Test return to command mode
+	jp	z,l0123
+	cp	'C'		; Test comment field control
+	jp	z,l07c2
+	cp	'H'		; Test halt at top of each page
+	jp	z,l08ca
+	cp	'H'-'@'		; Test cancel halt at top of each page
+	jp	z,l08cf
+	ret
+;
+; Command mode
+;
+l05f4:
+	ld	iy,l013d	; Point to status area
+	bit	1,(iy+5)	; Test ID already told
+	jr	nz,l0608	; Yeap, so skip telling
+	ld	hl,l0f34
+	call	l035d		; Tell our ID
+	set	1,(iy+5)	; Set no more telling it
+l0608:
+	ld	c,'#'
+	call	l019a		; Put character to console
+	call	l05b6		; Get character from keyboard
+	ld	hl,l05f4
+	push	hl		; Set RET to command mode
+	ld	hl,l0633+ll0633-1
+	ld	bc,ll0633
+	cpdr			; Find command in list
+	ret	nz		; Nope, so reenter command mode
+	ld	hl,l0647
+	add	hl,bc		; Position in command list
+	add	hl,bc
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	set	4,(iy+4)	; Force console log
+	res	0,(iy+4)	; Disable write to memory
+	xor	a
+	ld	(l0145),a	; Init ??? status
+	jp	(hl)		; Execute command
+;
+; Command table
+;
+l0633::
+	db	'TBL'		; -> Also used for file type
+	db	'FEADO'
+	db	'WCSGKPXH'
+	db	0ch,08h,'MN'
+ll0633	equ	$-l0633
+l0647:
+	dw	l095f		; T - Create data label
+	dw	l0a6f		; B - Build index table
+	dw	l0962		; L - Create label
+;
+	dw	l067e		; F - Find statements
+	dw	l06a1		; E - End command
+	dw	l0676		; A - Assign start of symbol table
+	dw	l0a73		; D - Display as mnemonic
+	dw	l08d4		; O - Output device definition
+	dw	l0736		; W - Write table to file
+	dw	l07c2		; C - Comment field control
+	dw	l0961		; S - Create instruction label
+	dw	l066f		; G - Go to routine
+	dw	l09ec		; K - Kill symbol table entry
+	dw	l07ce		; P - Print symbol table
+	dw	l0908		; X - Search through address range
+	dw	l08ca		; H - Halt at top of each page
+	dw	l08aa		; ^L - Go to top of next page
+	dw	l08cf		; ^H - Cancel halt at top of each page
+	dw	l0a50		; M - Set address mode
+	dw	l08bf		; N - ???
+;
+; G - Go to routine
+;
+l066f:
+	call	l05b0		; Get character from keyboard
+	call	l02ed		; Load address parameter
+	ret			; Execute it at address
+;
+; A - Assign start of symbol table
+;
+l0676:
+	bit	0,(iy+5)
+	jp	z,l113b
+	ret
+;
+; F - Find statements
+;
+l067e:
+	call	l05b0		; Get character from keyboard
+	res	4,(iy+4)	; Disable log to console
+	set	7,(iy+8)
+	call	l02ed		; Load one parameter
+	pop	hl		; Get parameter
+	call	l04c7
+	ex	de,hl
+	ld	(l0152),hl
+	ld	(l0154),hl
+	call	l02a2		; Get address range
+	ld	ix,(l013d)
+	jp	l0b53
+;
+; E - End command
+;
+l06a1:
+	res	4,(iy+4)	; Disable log to console
+	ld	ix,l0139
+	ld	hl,l1117
+	call	l035d		; Put .END
+	bit	3,(iy+4)	; Test file write enabled
+	ret	z		; Nope
+	ld	c,eof
+	call	l0177		; Put character to file
+	ld	hl,l0080
+	call	l06f8		; Write record to file
+	set	4,(iy+4)	; Enable log to console
+	bit	3,(iy+4)	; Test file write enabled
+	ret	z		; Nope
+	res	3,(iy+4)	; Disable file write
+	exx
+	call	l0764
+l06d0:
+	ld	hl,l0633
+	ld	de,l005c+.drv+.nam
+	ld	bc,.ext
+	ldir			; Set .TBL
+	exx
+	ret
+;
+;
+;
+l06dd:
+	bit	3,(iy+4)	; Test file write enabled
+	ret	nz		; Yeap
+	exx
+	ld	hl,l07a3
+	ld	de,l005c+.drv+.nam
+	ld	bc,.ext
+	ldir			; Set .ASM
+	call	l0716		; Open file
+	jr	z,l06d0		; Not found
+	call	l018e		; Init record pointer
+	exx
+	ret
+;
+; Write record to file
+; ENTRY	Reg HL points to disk buffer
+;
+l06f8:
+	push	hl
+	push	de
+	push	bc
+	ex	de,hl
+	call	l0797		; Set disk buffer
+	ld	de,l005c
+	ld	c,15h
+	call	l015b		; Write record to file
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Write data to file
+; ENTRY	Reg HL points to initial disk buffer address
+;	Reg DE points to final disk buffer address
+;	Reg BC holds increment
+;
+l070b:
+	call	l06f8		; Write record to file
+	ld	a,e
+	sub	l		; Test all written
+	ld	a,d
+	sbc	a,h
+	ret	c		; Yeap
+	add	hl,bc		; Advance buffer
+	jr	l070b		; Write next record
+;
+; Open file
+; EXIT	Zero flag set if not found
+;
+l0716:
+	xor	a
+	ld	hl,l005c+_EX
+	ld	b,FCBlen-_EX
+l071c:
+	ld	(hl),a		; Clear remainder of file
+	inc	hl
+	djnz	l071c
+;
+	call	l0794		; Set default disk buffer
+	ld	de,l005c
+	ld	c,0fh
+	call	l015b		; Open file
+	ld	hl,l07bb
+	inc	a		; Test file on disk
+	jr	nz,l0772	; Yeap, tell it
+	ld	hl,l07ab
+	jr	l0772		; Tell not found
+;
+; W - Write table to file
+;
+l0736:
+	ld	hl,l0633	; Point to .TBL
+	ld	de,l005c+.drv+.nam
+	ld	bc,.ext
+	call	l0880		; Find extension
+	jr	z,l074a		; Got it
+	ld	hl,l079c
+	jp	l035d		; Tell close
+l074a:
+	call	l0716		; Open file
+	ret	z		; Not found
+	ld	bc,l0011
+	ld	de,(l11da)
+	ld	hl,(l11d6)
+	add	hl,bc
+	add	hl,de
+	ld	de,l11d1
+	ex	de,hl
+	ld	bc,l0080
+	call	l070b		; Write data to file
+l0764:
+	call	l0794		; Set default disk buffer
+	ld	de,l005c
+	ld	c,10h
+	call	l015b		; Close file
+	ld	hl,l07b5	; Tell saved
+l0772:
+	push	af
+	push	hl
+	ld	hl,l005c
+	ld	b,.nam
+l0779:
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	ld	c,a
+	call	nz,l01bb	; Put character to device
+	djnz	l0779
+	ld	c,'.'
+	call	l01bb		; Put character to device
+	ld	b,.ext
+	inc	hl
+	call	l0383		; Print type
+	pop	hl
+	call	l035d		; Give message
+	pop	af
+	ret
+;
+; Set default disk buffer
+;
+l0794:
+	ld	de,l0080
+;
+; Set disk buffer
+; ENTRY	Reg DE points to disk buffer
+;
+l0797:
+	ld	c,1ah
+	jp	l015b		; Set disk buffer
+;
+l079c:
+	db	'CLOSE .'
+l07a3:
+	db	'ASM'		; -> Also used for file type
+	dc	' FILE'
+l07ab:
+	dc	' NOT FOUND'
+l07b5:
+	dc	' SAVED'
+l07bb:
+	dc	' OPENED'
+;
+; C - Comment field control
+;
+l07c2:
+	push	af
+	rl	(iy-2)
+	ccf
+	rr	(iy-2)
+	pop	af
+	ret
+;
+; P - Print symbol table
+;
+l07ce:
+	res	4,(iy+4)	; Disable console log
+	ex	af,af'
+	ld	a,0ffh
+	ex	af,af'
+	ld	hl,(l11d4)
+	ld	(l013f),hl	; Set top of memory
+	ld	bc,l0004
+	ld	ix,(l11d2)
+l07e3:
+	call	l02be		; Compare TOP:IX
+	jr	c,l07f0
+	res	4,(ix+3)
+	add	ix,bc
+	jr	l07e3
+l07f0:
+	call	l0360		; Give new line on device
+l07f3:
+	call	l02ce		; Read character from keyboard
+	ld	ix,(l11d2)
+	ld	a,0ffh
+	ld	(l1137),a
+l07ff:
+	call	l02be		; Compare TOP:IX
+	jr	c,l084d
+	bit	5,(ix+3)
+	jr	z,l0846
+	bit	4,(ix+3)
+	jr	nz,l0846
+	ld	l,(ix+2)
+	ld	a,(ix+3)
+	and	0fh
+	ld	h,a
+	ld	de,(l11d6)
+	add	hl,de
+	ld	de,l113b+4
+	ld	bc,l0006
+	call	l0891
+	ld	l,(ix+0)
+	ld	h,(ix+1)
+	ld	(l1145),hl
+	ld	hl,l1137
+	call	l0880
+	jp	po,l0846
+	jr	nc,l0846
+	ld	bc,l0008
+	ex	de,hl
+	call	l0891
+	ld	(l1147),ix
+l0846:
+	ld	bc,l0004
+	add	ix,bc
+	jr	l07ff
+l084d:
+	ld	a,(l1137)
+	inc	a
+	jp	z,l0360		; Give new line on device
+	ex	af,af'
+	inc	a
+	and	3
+	call	z,l0360		; Give new line on device
+	ex	af,af'
+	ld	hl,l1137
+	ld	b,6
+	call	l0383		; Print value
+	ld	c,'='
+	call	l01bb		; Put character to device
+	ld	hl,(l113b+2)
+	call	l027d		; Put word to console
+	ld	bc,256*4+' '
+	call	l0373		; Give blanks
+	ld	ix,(l1147)
+	set	4,(ix+3)
+	jp	l07f3
+;
+;
+;
+l0880:
+	push	bc
+	push	hl
+	push	de
+l0883:
+	ld	a,(de)
+	cp	(hl)
+	cpi
+	jp	po,l088d
+	inc	de
+	jr	z,l0883
+l088d:
+	pop	de
+	pop	hl
+	pop	bc
+	ret
+;
+;
+;
+l0891:
+	push	hl
+	push	bc
+	push	de
+	push	de
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+l0898:
+	ld	a,(hl)
+	cp	' '
+	jr	nz,l08a3
+	dec	bc
+	dec	de
+	inc	hl
+	ld	(de),a
+	jr	l0898
+l08a3:
+	pop	de
+	ldir
+	pop	de
+	pop	bc
+	pop	hl
+	ret
+;
+; ^L - Go to top of next page
+;
+l08aa:
+	bit	6,(iy+5)
+	jr	nz,l08b3
+	add	a,(iy+12)	; Add printer footer lines
+l08b3:
+	add	a,(iy+13)	; Add printer header lines
+	add	a,(iy+11)	; Add current printer page length
+	ld	b,a		; Save length
+l08ba:
+	call	l033a		; Give new line on printer
+	djnz	l08ba		; Advance to next page
+;
+; N - ???
+;
+l08bf::
+	res	6,(iy+5)
+	ld	a,(iy+14)	; Get printer page length
+	ld	(iy+11),a	; Init current printer page length
+	ret
+;
+; H - Halt at top of each page
+;
+l08ca:
+	set	7,(iy+5)	; Set halt
+	ret
+;
+; ^H - Cancel halt at top of each page
+;
+l08cf:
+	res	7,(iy+5)	; Reset halt
+	ret
+;
+; O - Output device definition
+;
+l08d4:
+	ld	a,(iy+4)	; Get flag
+	and	11111000b	; Mask devices
+	ld	d,a
+l08da:
+	call	l05b6		; Get character from keyboard
+	jr	c,l08ff		; End of input
+	cp	'C'		; Test console
+	jr	z,l08ed
+	cp	'L'		; Test printer
+	jr	z,l08f0
+	cp	'A'		; Test file
+	jr	z,l08f4
+	jr	l08da
+l08ed:
+	set	1,d		; Enable console
+	jp.nz
+l08f0:
+	set	2,d		; Enable printer
+	jr	l08f6
+l08f4:
+	set	3,d		; Enable file
+l08f6:
+	call	l05b6		; Get character from keyboard
+	jr	c,l08ff		; End of input
+	jr	nz,l08f6
+	jr	l08da
+l08ff:
+	bit	3,d		; Test file enabled
+	call	nz,l06dd	; Yeap
+	ld	(iy+4),d	; Set device
+	ret
+;
+; X - Search through address range
+;
+l0908:
+	set	7,(iy+8)
+	res	4,(iy+4)	; Disable console log
+	ld	hl,l1129
+	call	l0379		; Tell symbol value range
+	call	l0334		; Load two parameters
+	push	de		; Save parameter 2
+	call	l054b
+	ld	(l0152),de
+	exx
+	pop	hl
+	call	l054b
+	ld	(l0154),de
+	call	l02a2		; Get address range
+	exx
+	jr	l0938
+l0930:
+	ld	de,(l0152)
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+l0938:
+	ld	hl,(l0154)
+	xor	a
+	sbc	hl,de
+	ret	c
+	ld	(l0152),de
+	ld	ix,(l013d)
+	jp	l0b53
+l094a:
+	ld	hl,l0953
+	call	l035d		; Tell symbol table full
+	jp	l0123
+;
+l0953:
+	dc	'SYM TBL FULL'
+;
+; T - Create data label
+;
+l095f:
+	scf
+l0960:
+	jr.nc
+;
+; S - Create instruction label
+;
+l0961:
+	inc	a
+;
+; L - Create label
+;
+l0962:
+	push	af
+	ld	hl,0ff9h	;; l0ff9
+	ld	de,(l11d8)
+	xor	a
+	sbc	hl,de
+	jr	c,l094a
+	call	l02ed		; Load one parameter
+	ld	c,'='
+	call	l019a		; Put character to console
+	call	l0499
+	pop	hl		; Get parameter
+	call	l04b9
+	inc	de
+	jr	c,l0991
+	ex	de,hl
+	jr	nz,l0998
+	bit	5,(hl)
+	jr	z,l0998
+	ld	a,(hl)
+	dec	hl
+	ld	l,(hl)
+	and	0fh
+	ld	h,a
+	pop	af
+	jr	l09af
+l0991:
+	call	l04c7
+	inc	de
+	inc	de
+	inc	de
+	ex	de,hl
+l0998:
+	ld	de,(l11d8)
+	ld	a,80h
+	and	(hl)
+	or	' '
+	or	d
+	ld	(hl),a
+	pop	af
+	jr	nc,l09a8
+	set	7,(hl)
+l09a8:
+	jr	z,l09ac
+	res	7,(hl)
+l09ac:
+	dec	hl
+	ld	(hl),e
+	ex	de,hl
+l09af:
+	ld	bc,(l11d6)
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	dec	hl
+	push	bc
+	ld	de,l1137
+	ex	de,hl
+	ld	bc,l0006
+	ldir
+	pop	bc
+	ld	hl,(l11d8)
+	ld	de,(l11da)
+	xor	a
+	sbc	hl,de
+	jr	z,l09d6
+	ld	l,c
+	ld	a,b
+	and	0fh
+	ld	h,a
+	jr	l09e8
+l09d6:
+	ld	bc,l0006
+	add	hl,bc
+	add	hl,de
+	ld	(l11da),hl
+	ld	de,(l11d6)
+	ex	de,hl
+	add	hl,de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ex	de,hl
+l09e8:
+	ld	(l11d8),hl
+	ret
+;
+; K - Kill symbol table entry
+;
+l09ec:
+	call	l02ed		; Load one parameter
+	pop	hl		; Get parameter
+	push	af
+	call	l04b9
+	jr	c,l0a4c
+	push	de
+	jr	z,l0a11
+	ex	de,hl
+	ld	c,(hl)
+	inc	hl
+	ld	a,(hl)
+	and	0fh
+	ld	b,a
+	ld	hl,(l11d6)
+	add	hl,bc
+	ld	de,(l11d8)
+	ld	(l11d8),bc
+	ld	(hl),e
+	set	7,d
+	inc	hl
+	ld	(hl),d
+l0a11:
+	ld	hl,(l11d4)
+	ld	de,(l014e)
+	xor	a
+	sbc	hl,de
+	push	hl
+	pop	bc
+	pop	hl
+	jr	z,l0a24
+	inc	hl
+	inc	hl
+	ldir
+l0a24:
+	ld	hl,(l11d2)
+	sbc	hl,de
+	jr	c,l0a42
+	ld	(l11d8),hl
+	ld	(l11da),hl
+	ld	(l11d4),de
+	ld	hl,l0004
+	add	hl,de
+	ld	(l11d6),hl
+	xor	a
+	ld	(l11d1),a
+	jr	l0a4c
+l0a42:
+	ld	hl,(l11d4)
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	(l11d4),hl
+l0a4c:
+	pop	af
+	ret	c
+	jr	l09ec
+;
+; M - Set address mode
+;
+l0a50:
+	call	l0334		; Load two parameters
+	push	de		; Save parameter 2
+	call	l04b9
+	jr	c,l0a64
+	inc	de
+	ex	de,hl
+l0a5b:
+	pop	bc
+	ld	a,c
+	or	a
+	set	7,(hl)
+	ret	nz
+	res	7,(hl)
+	ret
+l0a64:
+	call	l04c7
+	ex	de,hl
+	inc	hl
+	inc	hl
+	inc	hl
+	set	6,(hl)
+	jr	l0a5b
+;
+; B - Build index table
+;
+l0a6f:
+	set	0,(iy+8)	; Indicate it
+;
+; D - Display as mnemonic
+;
+l0a73:
+	res	7,(iy+4)	; Reset byte dump
+l0a77:
+	call	l05b6		; Get character from keyboard
+	jr	c,l0a88		; End of input
+	jr	z,l0a92		; Skip delimiter
+	cp	'T'		; Test byte dump
+	jr	nz,l0a8d	; Nope
+	set	7,(iy+4)	; Set byte dump
+	jr	l0a77
+l0a88:
+	ld	hl,(l0156)	; Load current disassemble address
+	jr	l0a95
+l0a8d:
+	call	l029b		; Get two addresses
+	jr	l0a95
+l0a92:
+	call	l02a2		; Get address range
+l0a95:
+	push	hl		; Put address
+	pop	ix		; Get start address
+	pop	hl
+	res	4,(iy+4)	; Disable console log
+	jp	l0b53
+;
+; Disassemble loop
+;
+l0aa0:
+	bit	7,(iy+8)
+	jr	z,l0ac4
+	bit	6,(iy+8)
+	jp	z,l0abd
+	ld	hl,(l0152)
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	de,(l0146)
+	xor	a
+	sbc	hl,de
+	jr	z,l0ac4
+l0abd:
+	pop	hl
+	call	l02ce		; Read character from keyboard
+	jp	l0b53
+l0ac4:
+	ld	hl,(l012b)
+	ld	(l0143),hl	; Init memory pointer
+	push	ix
+	pop	hl
+	ld	(l0156),hl	; Update current disassemble address
+	pop	de
+	push	de
+	xor	a
+	sbc	hl,de
+	ld	b,l
+	push	bc
+	ex	de,hl
+l0ad8:
+	ld	a,(hl)
+	call	l0282		; Put byte to console
+	inc	hl
+	ld	a,b
+	cp	3
+	jr	nz,l0ae7
+	ld	c,' '
+	call	l01bb		; Put character to device
+l0ae7:
+	djnz	l0ad8
+	pop	bc
+	ld	hl,(l0133)
+	ld	(l0143),hl	; Init memory pointer
+	pop	hl
+	ld	c,';'
+	call	l01bb		; Put character to device
+l0af6:
+	ld	a,(hl)
+	and	NOMSB
+	cp	' '
+	jr	nc,l0aff
+l0afd:
+	ld	a,'.'
+l0aff:
+	cp	'{'+1
+	jr	nc,l0afd
+	ld	c,a
+	call	l01bb		; Put character to device
+	inc	hl
+	djnz	l0af6
+	res	0,(iy+4)	; Disable write to memory
+	push	ix
+	ld	ix,l0137
+l0b14:
+	ld	a,(ix+0)
+	and	0fh
+	ld	c,a
+	ld	b,0
+	ld	hl,l0129
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	push	de
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,b
+	dec	hl
+	set	7,(hl)
+	bit	7,(ix+0)
+	jr	z,l0b3c
+	ld	a,0a0h
+l0b34:
+	cp	(hl)
+	jr	nz,l0b3c
+	dec	hl
+	set	7,(hl)
+	jr	l0b34
+l0b3c:
+	pop	hl		; Get back message
+	call	l0379		; Print it
+	bit	7,(ix+0)
+	jr	nz,l0b4a
+	inc	ix
+	jr	l0b14
+l0b4a:
+	pop	ix
+	inc	e
+	call	l0360		; Give new line on device
+	call	l02ce		; Read character from keyboard
+;
+; ENTRY	Reg IX holds program counter
+;
+l0b53:
+	set	0,(iy+4)	; Enable write to memory
+	res	6,(iy+8)
+	call	l02be		; Compare TOP:IX
+	push	hl
+	jr	nc,l0b6c
+	pop	hl
+	bit	7,(iy+8)
+	jp	nz,l0930
+	jp	l05f4
+l0b6c:
+	exx
+	ld	hl,l0aa0
+	push	hl		; Set loop address
+	call	l0480
+	ld	hl,(l0129)
+	ld	(l0143),hl	; Init memory pointer
+	exx
+	call	l027d		; Put word to console
+	call	l04b9
+	jr	c,l0bc2
+	ex	af,af'
+	inc	de
+	ex	de,hl
+	bit	0,(iy+8)	; Test build index table
+	jr	z,l0b98		; Nope
+	res	7,(hl)
+	bit	7,(iy+4)	; Test byte dump
+	jr	z,l0ba4		; Nope
+	set	7,(hl)
+	jr	l0ba4
+l0b98:
+	res	7,(iy+4)	; Reset byte dump
+	bit	7,(hl)
+	jr	z,l0ba4
+	set	7,(iy+4)	; Set byte dump
+l0ba4:
+	bit	6,(hl)
+	jr	nz,l0bc2
+	res	5,(iy+4)
+	ld	bc,(l012d)
+	ld	(l0143),bc	; Init memory pointer
+	ex	af,af'
+	push	af
+	call	z,l0d77
+	pop	af
+	call	nz,l0d92
+	ld	c,':'
+	call	l01bb		; Put character to device
+l0bc2:
+	ld	hl,(l012f)
+	ld	(l0143),hl	; Init memory pointer
+	bit	7,(iy+4)	; Test byte dump
+	jr	z,l0bee		; Nope
+	ld	hl,l1112
+	call	l0d1e		; Print opcode
+	ld	b,4
+	jr	l0bdd
+l0bd8:
+	ld	c,','
+	call	l01bb		; Put character to device
+l0bdd:
+	call	l038b		; Load byte from program
+	call	l01b3		; Put formatted byte to console
+	call	l02be		; Compare TOP:IX
+	ret	c
+	call	l04b9
+	ret	nc
+	djnz	l0bd8
+	ret
+l0bee:
+	xor	a
+	ld	e,a
+	call	l038b		; Load byte from program
+	ld	d,a		; Save it
+	ld	hl,l1067
+	ld	bc,ll1067
+	cpir			; Find relative jump and bit reference
+	jp	z,l0d28
+	ld	c,ll106e
+	cpir			; Find extension prefix 0DDH,0EDH,0FDH
+	jp	z,l0db1
+	ld	hl,l0f8c
+	ld	c,ll0f8c
+	cpir			; Find single opcode
+	jp	z,l0d0f
+	ld	c,ll0f9f
+	cpir			; Find opcode with byte operand
+	jp	z,l0d03
+	ld	c,ll0fa9
+	cpir			; Find address reference
+	jp	z,l0cf3
+l0c1e::
+	and	11000000b	; Mask bits
+	cp	01000000b	; Test MOV r,r
+	jp	z,l0ce2
+	cp	10000000b	; Test ALU
+	jp	z,l0cd7
+	ld	a,d		; Get back opcode
+	and	11000111b
+	sub	4
+	jp	z,l0cd1
+	dec	a
+	jp	z,l0ccc
+	dec	a
+	jp	z,l0cbf
+	ld	a,d		; Get back opcode again
+	and	11000000b
+	jr	z,l0c9d
+	ld	a,d		; Get back opcode once more
+	and	11000111b
+	sub	0c0h
+	jr	z,l0c95
+	sub	2
+	jr	z,l0c8a
+	sub	2
+	jr	z,l0c86
+	sub	3
+	jr	z,l0c69
+	ld	a,d		; Get back opcode last time
+	and	7
+	ld	hl,l0f74
+	call	l0d15
+	call	l040d		; Extract destination bits
+	cp	00000110b
+	jp	nz,l0cf0
+	ld	hl,l1058
+	jp	l0d1e		; Print opcode
+l0c69:
+	ld	hl,l1055
+	call	l0d1e		; Print opcode
+	call	l040d		; Extract destination bits
+	call	l0282		; Put byte to console
+	bit	0,(iy+8)	; Test build index table
+	ret	z		; Nope
+	ld	a,d
+	and	00111000b
+	ld	l,a
+	ld	h,0
+	ld	(l0146),hl
+	jp	l04c7
+l0c86:
+	ld	c,'C'
+	jr	l0c8c
+l0c8a:
+	ld	c,'J'
+l0c8c:
+	call	l01bb		; Put character to device
+	call	l0414		; Print condition code
+	jp	l0cf9
+l0c95:
+	ld	c,'R'
+	call	l01bb		; Put character to device
+	jp	l0414		; Print condition code
+l0c9d:
+	ld	hl,l1041
+	ld	a,d
+	and	0fh
+	dec	a
+	jr	z,l0cb2
+	cp	4
+	jr	c,l0cac
+	sub	5
+l0cac:
+	call	l0d19
+	jp	l041d
+l0cb2:
+	call	l0d1e		; Print opcode
+	call	l041d
+l0cb8:
+	ld	c,','
+	call	l01bb		; Put character to device
+	jr	l0cf9
+l0cbf:
+	ld	hl,l103e
+	call	l0391
+	ld	c,','
+	call	l01bb		; Put character to device
+	jr	l0d09
+l0ccc:
+	ld	hl,l103b
+	jr	l0cd4
+l0cd1:
+	ld	hl,l1038
+l0cd4:
+	jp	l0391
+;
+; Found ALU
+;
+l0cd7::
+	call	l040d		; Extract destination bits
+	ld	hl,l1020
+	call	l0d19
+	jr	l0ced
+;
+; Found MOV r,r
+;
+l0ce2::
+	ld	hl,l101d
+	call	l0391
+l0ce8:
+	ld	c,','
+	call	l01bb		; Put character to device
+l0ced:
+	ld	a,d		; Get back opcode
+	and	00000111b	; Extract source register
+l0cf0:
+	jp	l0397
+;
+; Found address reference
+;
+l0cf3::
+	ld	hl,l1008
+	call	l0d1a
+l0cf9:
+	call	l038b		; Load byte from program
+	ld	l,a
+	call	l038b		; Load byte from program
+	ld	h,a
+	jr	l0d43
+;
+; Found opcode with byte operand
+;
+l0d03::
+	ld	hl,l0feb
+	call	l0d1a
+l0d09:
+	call	l038b		; Load byte from program
+	jp	l01b3		; Put formatted byte to console
+;
+; Found single opcode
+;
+l0d0f::
+	ld	hl,l0faf
+	jr	l0d1a
+l0d14:
+	ld	a,c
+l0d15:
+	srl	a
+	srl	a
+l0d19:
+	ld	c,a
+l0d1a:
+	ld	b,c
+	call	l02b3		; Position behind string
+l0d1e:
+	call	l0379		; Print message ^HL
+l0d21:
+	ld	hl,(l0131)
+	ld	(l0143),hl	; Init memory pointer
+	ret
+;
+; Found relative jump and bit reference
+;
+l0d28::
+	cp	0cbh		; Test bit reference
+	jp	z,l0e7e
+	ld	hl,l1071
+	call	l0d1a
+	call	l038b		; Load byte from program
+	push	ix
+	pop	hl
+	ld	d,0
+	ld	e,a
+	bit	7,e
+	jr	z,l0d42
+	ld	d,0ffh
+l0d42:
+	add	hl,de
+l0d43:
+	ld	(l0146),hl
+	set	6,(iy+8)
+	call	l04b9
+	jr	c,l0d65
+	inc	de
+	ex	de,hl
+	set	5,(iy+4)
+	bit	5,(hl)
+	jr	nz,l0d92
+	bit	0,(iy+8)	; Test build index table
+	jr	nz,l0d6c	; Yeap
+	bit	6,(hl)
+	jr	nz,l0d73
+	jr	l0d77
+l0d65:
+	bit	0,(iy+8)	; Test build index table
+	jr	z,l0d74		; Nope
+	ex	de,hl
+l0d6c:
+	ex	de,hl
+	call	l04c7
+	xor	a
+	jr	l0d7a
+l0d73:
+	ex	de,hl
+l0d74:
+	jp	l01ab		; Put formatted word to console
+l0d77:
+	bit	7,(hl)
+	ex	de,hl
+l0d7a:
+	push	af
+	bit	5,(iy+4)
+	jr	nz,l0d86
+	ld	c,' '
+	call	l01bb		; Put character to device
+l0d86:
+	pop	af
+	ld	c,'S'
+	jr	z,l0d8c
+	inc	c
+l0d8c:
+	call	l01bb		; Put character to device
+	jp	l027d		; Put word to console
+l0d92:
+	ld	a,0fh
+	and	(hl)
+	ld	b,a
+	dec	hl
+	ld	c,(hl)
+	ld	hl,(l11d6)
+	add	hl,bc
+	ld	b,6
+	bit	5,(iy+4)
+	jr	z,l0dac
+l0da4:
+	ld	a,(hl)
+	cp	' '
+	jr	nz,l0dac
+	inc	hl
+	djnz	l0da4
+l0dac:
+	call	l0383		; Print message
+	ex	de,hl
+	ret
+;
+; Found extension prefix 0DDH,0EDH,0FDH
+;
+l0db1::
+	cp	0edh
+	ld	e,d
+	jp	nz,l0ddd
+	ld	a,(ix+0)
+	and	01000111b
+	cp	01000011b
+	jp	nz,l0ea7
+	call	l038b		; Load byte from program
+	ld	d,a
+	call	l040d		; Extract destination bits
+	and	00000110b
+	rlca
+	ld	b,0
+	bit	3,d
+	jr	z,l0dd3
+	add	a,16
+l0dd3:
+	ld	c,a
+	ld	hl,l1087
+	call	l0d14
+	jp	l0cf9
+l0ddd:
+	ld	hl,l0f62
+	call	l038b		; Load byte from program
+	ld	d,a
+	ld	c,ll0f62
+	cpir
+	jr	z,l0e3c
+	ld	c,ll0f67
+	cpir
+	jr	z,l0e27
+	cp	023h
+	jr	nz,l0df9
+	ld	hl,l1048
+	jr	l0e00
+l0df9:
+	cp	02bh
+	jr	nz,l0e06
+	ld	hl,l1052
+l0e00:
+	call	l0d1e		; Print opcode
+	jp	l03d1		; Put index register
+l0e06:
+	and	0cfh
+	cp	9
+	ld	a,d
+	jp	nz,l0c1e
+	ld	hl,l104b
+	call	l0379		; Print DAD
+	call	l03d1		; Put index register
+	call	l0d21
+	ld	a,00110000b
+	and	d
+	cp	00100000b
+	push	af
+	call	z,l03d1		; Put index register
+	pop	af
+	jp	nz,l041d
+l0e27:
+	ld	hl,l0f74
+	ld	b,c
+	call	l02b3		; Position behind string
+	ld	a,c
+	cp	2
+	push	af
+	call	nc,l0379	; Print message ^HL
+	pop	af
+	call	c,l0d1e		; Print opcode
+	jp	l03d1		; Put index register
+l0e3c:
+	cp	0cbh
+	jr	nz,l0e46
+	ld	a,(ix+1)
+	jp	l0e81
+l0e46:
+	cp	021h
+	jr	nz,l0e56
+	ld	hl,l1041
+	call	l0d1e		; Print opcode
+	call	l03d1		; Put index register
+	jp	l0cb8
+l0e56:
+	cp	'6'
+	jp	z,l0cbf
+	cp	'"'
+	jr	nz,l0e66
+	ld	c,'S'
+	call	l01bb		; Put character to device
+	jr	l0e6b
+l0e66:
+	ld	c,'L'
+	call	l01bb		; Put character to device
+l0e6b:
+	ld	c,'I'
+	call	l01bb		; Put character to device
+	call	l03d1		; Put index register
+	ld	c,'D'
+	call	l01bb		; Put character to device
+	call	l0d21
+	jp	l0cf9
+l0e7e:
+	call	l038b		; Load byte from program
+l0e81:
+	ld	d,a
+	rlca
+	rlca
+	and	3
+	jr	z,l0e9b
+	dec	a
+	ld	hl,l10a7
+	call	l0d19
+	call	l040d		; Extract destination bits
+	add	a,'0'
+	ld	c,a
+	call	l01bb		; Put character to device
+	jp	l0ce8
+l0e9b:
+	call	l040d		; Extract destination bits
+	ld	hl,l10b0
+	call	l0d19
+	jp	l0ced
+l0ea7:
+	call	l038b		; Load byte from program
+	ld	d,a
+	and	11100000b
+	cp	10100000b
+	jp	nz,l0ece
+	ld	hl,l10d1
+	ld	a,d
+	and	00000011b
+	ld	b,a
+	call	l02b3		; Position behind string
+	call	l0379		; Print message ^HL
+	ld	hl,l10da
+	call	l040d		; Extract destination bits
+	and	00000011b
+	ld	b,a
+	call	l02b3		; Position behind string
+	jp	l0379		; Print message ^HL
+l0ece:
+	ld	a,d
+	ld	bc,ll0f6c
+	ld	hl,l0f6c
+	cpir
+	jr	nz,l0ee5
+	ld	hl,l0f84
+	and	8
+	rrca
+	call	l0d15
+	jp	l041d
+l0ee5:
+	ld	c,4
+	ld	hl,l10e0
+	cpir
+	jr	nz,l0f05
+	ld	hl,l100f
+	srl	c
+	ld	b,c
+	call	l02b3		; Position behind string
+	call	l0379		; Print message ^HL
+	ld	c,'I'
+	bit	3,d
+	jr	z,l0f02
+	ld	c,'R'
+l0f02:
+	jp	l01bb		; Put character to device
+l0f05:
+	ld	c,8
+	cpir
+	jr	nz,l0f11
+	ld	hl,l10ec
+	jp	l0d1a
+l0f11:
+	and	0c6h
+	cp	'@'
+	jr	nz,l0f2a
+	ld	a,d
+	and	0feh
+	cp	70h
+	jr	z,l0f2a
+	ld	a,1
+	and	d
+	ld	hl,l1106
+	call	l0d19
+	jp	l0394
+l0f2a:
+	ld	hl,l110d
+	call	l0d1e		; Print opcode
+	ex	de,hl
+	jp	l027d		; Put word to console
+;
+l0f34:
+	db	'REVAS/CPM V 2.5'
+	db	cr,lf
+	dc	'Copyright 1981 by A.E. Hawley'
+l0f62:
+	db	0cbh,021h,022h,02ah,036h
+ll0f62	equ	$-l0f62
+l0f67:
+	db	0e9h,0e3h,0f9h,0e5h,0e1h
+ll0f67	equ	$-l0f67
+l0f6c:
+	db	4ah,5ah,6ah,7ah,42h,52h,62h,72h
+ll0f6c	equ	$-l0f6c
+l0f74:
+	dc	'POP','PUSH','SPI','XTI','PCI'
+l0f84:
+	dc	'DSBC','DADC'
+l0f8c:
+	db	0d9h,008h,000h,007h,00fh,017h,01fh,027h,02fh,037h
+	db	03fh,076h,0c9h,0e3h,0e9h,0ebh,0f3h,0f9h,0fbh
+ll0f8c	equ	$-l0f8c
+l0f9f:
+	db	0c6h,0ceh,0d3h,0d6h,0dbh,0deh,0e6h,0eeh,0f6h,0feh
+ll0f9f	equ	$-l0f9f
+l0fa9:
+	db	22h,2ah,32h,3ah,0c3h,0cdh
+ll0fa9	equ	$-l0fa9
+l0faf:
+	dc	'EI','SPHL','DI','XCHG','PCHL','XTHL','RET'
+	dc	'HLT','CMC','STC','CMA','DAA','RAR','RAL'
+	dc	'RRC','RLC','NOP','EXAF','EXX'
+l0feb:
+	dc	'CPI','ORI','XRI','ANI','SBI'
+	dc	'IN','SUI','OUT','ACI','ADI'
+l1008:
+	dc	'CALL','JMP'
+l100f:
+	dc	'LDA','STA','LHLD','SHLD'
+l101d:
+	dc	'MOV'
+l1020:
+	dc	'ADD','ADC','SUB','SBB'
+	dc	'ANA','XRA','ORA','CMP'
+l1038:
+	dc	'INR'
+l103b:
+	dc	'DCR'
+l103e:
+	dc	'MVI'
+l1041:
+	dc	'LXI','STAX'
+l1048:
+	dc	'INX'
+l104b:
+	dc	'DAD','LDAX'
+l1052:
+	dc	'DCX'
+l1055:
+	dc	'RST'
+l1058:
+	dc	'PSW'
+l105b:
+	dc	'NZ','Z','NC','C','PO','PE','P','M'
+l1067:
+	db	0cbh,010h,018h,020h,028h,030h,038h
+ll1067	equ	$-l1067
+l106e:
+	db	0ddh,0edh,0fdh
+ll106e	equ	$-l106e
+l1071:
+	dc	'JRC','JRNC','JRZ','JRNZ','JMPR','DJNZ'
+l1087:
+	dc	'SBCD','SDED','DATA','SSPD'
+	dc	'LBCD','LDED','DATA','LSPD'
+l10a7:
+	dc	'BIT','RES','SET'
+l10b0:
+	dc	'RLCR','RRCR','RALR','RARR'
+	dc	'SLAR','SRAR','.WORD','SRLR'
+l10d1:
+	dc	'LD','CC','IN','OUT'
+l10da::
+	db	0c9h,0c4h,'I',0d2h,'D',0d2h
+l10e0:
+	db	'OG_WDEMFV^og'
+l10ec:
+	dc	'RRD','RLD','IM2','IM1'
+	dc	'IM0','RETI','RETN','NEG'
+l1106:
+	dc	'INP','OUTP'
+l110d:
+	dc	'.WORD'
+l1112:
+	dc	'.BYTE'
+l1117:
+	dc	'.END'
+l111b:
+	db	cr,lf+MSB
+l111d:
+	dc	' ADDR RANGE='
+l1129:
+	dc	'SYM VAL RANGE='
+;
+l1137:
+	dw	0,0
+l113b::
+	ld	a,(l0100)
+	cp	0fdh
+	jp	nz,l0480
+	db	0cdh,0edh
+l1145:
+	db	2,0c1h
+l1147:
+	db	6		; LD B,0
+l1148:
+	db	0
+	ld	hl,l117f
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+l1150:
+	db	'V',0ebh,11h,'#',1,19h
+l1156:
+	db	0afh,11h
+	db	'#',1,0edh,'Ry',0feh,6,0e5h,'0'
+	db	7,0cdh,0edh,2,0c1h,0e1h,'q',0c9h
+	db	0e1h,6
+l116b:
+	db	1,1fh,0feh,5,' '
+l1170:
+	db	1,'G',0cdh
+l1173:
+	db	0c8h
+	db	5,'(',4,'w#',10h,0f7h,'+',0cbh
+	db	0feh,0c9h
+l117f:
+;;	dw	l0344
+	db	'D',3,'j',3,'I',1,'J'
+	db	1,'K',1,0abh,0bh,0dah,2,0e0h,5
+	db	0beh,0bh,0f2h,0ah,12h,11h,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0
+l11af:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0
+l11d1:
+	db	0
+l11d2:
+	dw	l11dc
+l11d4:
+	dw	l11dc
+l11d6:
+	dw	l11e0
+l11d8:
+	db	0,0
+l11da:
+	db	0,0
+;
+; Relocate data with offset in reg BC - offset depends on load address
+;
+l11dc:
+	ld	hl,l1238	; Get pointer to bit map
+	add	hl,bc
+l11e0:
+	push	hl
+	pop	ix		; Copy it
+	ld	hl,l11dc
+	ld	de,l0123	; Point to top of memory
+	push	de
+	sbc	hl,de		; Calculate length of code
+	ex	(sp),hl		; -> 10B9H
+	add	hl,bc
+	push	hl		; -> 0223H-0100H
+	ld	hl,l0100
+	add	hl,bc
+	push	hl		; -> 0200H-0100H
+	exx
+	pop	de		; <- 0200H-0100H
+	pop	hl		; <- 0223H-0100H
+	pop	bc		; <-> 10B9H
+	push	bc
+	ldir			; Copy from 0123 to 0100 10B9 bytes
+	pop	bc		; Get back length
+	ld	d,b		; Copy it
+	ld	e,c
+	exx
+	push	iy		; [BBCB]
+	pop	bc
+	xor	a
+	cp	b		; Test 0000H
+	jr	nz,l120c	; Nope
+	cp	c
+	jr	nz,l120c
+	push	hl
+	pop	iy
+l120c:
+	ld	sp,hl		; Get back start of code
+	ld	bc,l0123	; Point to top of memory
+	xor	a
+	sbc	hl,bc		; Calculate relocation offset
+	ex	de,hl		; Copy it
+;
+; Relocation loop
+;
+l1214:
+	ld	a,(ix+0)	; Get byte from bit map
+	ld	b,8		; Set length of byte
+l1219:
+	rlca			; Test bit
+	exx
+	dec	bc		; Count down length
+	exx
+	jr	c,l1222		; Got relocation bit
+	inc	sp		; Skip byte if not
+	jr	l1229
+l1222:
+	pop	hl
+	add	hl,de		; Relocate
+	push	hl
+	pop	hl
+	exx
+	dec	bc		; Count down length
+	exx
+l1229:
+	djnz	l1219		; Loop thru byte
+;
+	exx
+	ld	h,d		; Reload length
+	ld	l,e
+	xor	a
+	sbc	hl,bc		; Test still in range
+	exx
+	inc	ix		; Point to next byte in bitmap
+	jr	nc,l1214
+	jp	(iy)		; [BBCB]
+;
+; Bit map
+;
+l1238:
+	db	01011111b,11100000b,00010000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00001000b,00000000b,00010000b,00000100b,00000000b,00000000b
+	db	00001000b,00010100b,01010000b,00000010b,00000000b,00000001b,00000000b
+	db	00010000b,00010000b,01000100b,00000000b,00000000b,10000000b,00000010b
+	db	01000000b,00010000b,00000100b,00001000b,00000000b,00000000b,00010000b
+	db	00000000b,00000000b,00000001b,00000001b,00010000b,00010010b,10000000b
+	db	00001000b,00101010b,10010000b,00000000b,00100000b,00000000b,10001010b
+	db	00010100b,00000000b,00000010b,00000001b,01000000b,10000000b,00010000b
+	db	00010001b,00000000b,01000000b,01000000b,10100000b,01000010b,00001000b
+	db	00001000b,10100000b,01000010b,00001000b,00000100b,00000000b,01010000b
+	db	00000000b,00000000b,01000000b,10101000b,00000000b,01010000b,00000000b
+	db	01000000b,00001000b,00010000b,10000100b,00000000b,00000100b,00000010b
+	db	10101000b,00100010b,00101010b,10000000b,00000000b,00000000b,00001000b
+	db	00100000b,00000100b,00000000b,00000000b,00000000b,01000000b,00000000b
+	db	01001000b,10000001b,00001001b,00000001b,00000000b,00000001b,00001000b
+	db	00001000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,10100000b,00000000b,00000000b,00100010b,00000010b,00000000b
+	db	10000001b,01010101b,00000000b,00000001b,00100000b,00100010b,00101001b
+	db	00000000b,00000000b,01000001b,00000010b,00010001b,00000000b,00010000b
+	db	00100000b,00000000b,00100010b,00100010b,00100000b,00101000b,00001010b
+	db	10010000b,00010000b,00000000b,00001000b,00000000b,00000000b,00111111b
+	db	11111111b,11111101b,01000000b,10010000b,00000100b,10010101b,00101000b
+	db	00010101b,00000000b,10000100b,00000000b,00000101b,00000000b,00000000b
+	db	01000000b,00010001b,00000001b,00000010b,00001000b,00000000b,00000000b
+	db	10000001b,01000010b,00100000b,00100010b,10100000b,01010001b,00000101b
+	db	00000010b,10000000b,00000010b,00001000b,01001000b,00000100b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,01010000b
+	db	01010000b,00000001b,01001000b,10100000b,00000000b,00000000b,00001001b
+	db	00001000b,00001010b,10100000b,00100100b,00000010b,01000001b,00100010b
+	db	00101010b,00010010b,00001000b,00000100b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000001b,00000000b,00000000b,00000000b,00000010b
+	db	00000000b,00000000b,00000000b,01000000b,00010000b,00000000b,01010100b
+	db	10010001b,00101000b,00100000b,10000001b,00101010b,10100000b,00000000b
+	db	00000000b,10000001b,00010100b,10000000b,00000000b,00000100b,00001000b
+	db	00000000b,00000000b,00100000b,00100000b,00010010b,00000000b,00000000b
+	db	01001000b,00001001b,00010000b,00000000b,01000100b,10000001b,00100000b
+	db	00000000b,10000010b,10010000b,01001000b,10000010b,00001001b,00000000b
+	db	00000010b,00000000b,00000000b,10000000b,00000000b,10001000b,10000000b
+	db	00100000b,00000010b,10000001b,00000001b,01010100b,00100000b,00000100b
+	db	00000001b,00001010b,00010000b,00000000b,00010000b,00000001b,00000000b
+	db	01000000b,00000000b,00000000b,00000000b,01000000b,00000000b,10100000b
+	db	00001000b,00000010b,10010010b,10100101b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000100b,10001001b,00010101b,00000001b,01000000b
+	db	01010101b,00100000b,00100100b,00001000b,00101000b,00100000b,10000010b
+	db	00001000b,10000001b,00100100b,00000000b,00000000b,00000000b,00101010b
+	db	00101010b,10101010b,00000000b,00010100b,00000101b,01000101b,01000000b
+	db	00000001b,01010100b,01000101b,00010001b,00010101b,01010001b,01000100b
+	db	00101010b,10010000b,10101010b,10000000b,00010101b,01000010b,10101000b
+	db	00000000b,00010000b,01000000b,00000000b,00000000b,00000000b,00010000b
+	db	01000000b,00000001b,00000001b,01000000b,01000000b,00000000b,00001000b
+	db	00010000b,00001010b,01000000b,00000001b,01010101b,00000000b,00000000b
+	db	00100000b,00101010b,00000101b,01010100b,00000100b,10100100b,00010010b
+	db	10000000b,01000001b,01010100b,01000000b,01000001b,00010100b,01010101b
+	db	00000000b,01010100b,00101010b,10101010b,00000101b,00000101b,01010000b
+	db	10100000b,10000010b,00010100b,01000001b,00001010b,00000000b,10000000b
+	db	10100000b,00000000b,00001010b,10101001b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000101b
+	db	00001000b,00000000b,01000000b,00010000b,00000000b,00100000b,00000111b
+	db	11111111b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000111b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b
+l1480::
+	end
+

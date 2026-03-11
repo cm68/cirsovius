@@ -1,0 +1,614 @@
+	title	TURBO OVERLAY
+	name	('TURBOVR')
+;
+; TURBO.COM overlay handler TURBO.OVR
+;
+; In fact it's simply a loader loading any program
+; into TPA from executing statement EXECUTE(FilVar)
+;
+; Original file DASMed by	Werner Cirsovius
+;				Hohe Weide 44
+;				D-2000 Hamburg 20
+;				Phone +49 40 4223247
+;
+;				DASMed October 1991
+
+	maclib	turbo
+
+StkLev	equ	100
+
+	.phase	@OVLADR
+
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&
+; &&& ENTRY OF OVERLAY &&&
+; &&&&&&&&&&&&&&&&&&&&&&&&
+;
+	jp	..OVERLAY
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!!           CODE TO BE RELOCATED            !!!
+; !!! THIS CODE WILL BE MOVED BEYOND DATA SAVED !!!
+; !!!      AND ENTERED AFTER RELOCATION         !!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+;
+; This is zero relative referring to relocation table
+;
+CS:
+	ld	hl,NewBDOS-CS
+	ld	(BDOS+1),hl	; Set new vector
+	ld	hl,(OS+1)
+_R1:
+	ld	de,BIOSvec-CS
+	ld	bc,VecLen
+	ldir			; Save Warm Boot, CONST, CONIN
+	ld	hl,(OS+1)
+_R2:
+	ld	de,BIOSwarm-CS
+	inc	hl
+	ld	(hl),e		; Change Warm Entry
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+_R3:
+	ld	de,CONIN-CS
+	inc	hl
+	ld	(hl),e		; .. and CONIN
+	inc	hl
+	ld	(hl),d
+_R4:
+	call	RdFile-CS	; Read the file
+_R5:
+	ld	hl,FCB.TURBO-CS
+_R6:
+	ld	de,FCB.OVR-CS
+	ld	bc,FCBlen-3
+	ldir			; Save TURBO.COM
+	ld	hl,(BDOS+1)
+	ld	de,-StkLev
+	add	hl,de		; Let some stack space
+	ld	sp,hl
+	ld	hl,OS
+	push	hl		; Set return
+	jp	TPA		; .. and go
+;
+; %%%%%%%%%%%%%%%%%%%%%%
+; %%% New BDOS entry %%%
+; %%%%%%%%%%%%%%%%%%%%%%
+;
+NewBDOS:
+	ld	a,c
+	cp	.ConSta+1	; Test character I/O
+	jr	nc,.BDOS	; .. nope
+_R7:
+	ld	hl,FuncTab-CS	; Get table
+	ld	b,0
+	add	hl,bc
+	add	hl,bc
+	ld	a,(hl)		; Get low address
+	inc	hl
+	ld	h,(hl)		; .. and high
+	ld	l,a
+	add	a,h
+	jr	z,.BDOS		; .. ignore functions 3..8
+_R8:
+	ld	a,(BDOSflag-CS)
+	or	a		; Test flag
+	jr	nz,.BDOS	; .. not 1st access
+	inc	a		; Set flag
+_R9:
+	ld	(BDOSflag-CS),a
+	push	hl
+_R10:
+	ld	hl,ResFlag-CS
+	ex	(sp),hl		; Set return address
+	jp	(hl)		; .. exececute
+;
+; Reset BDOS access flag
+;
+ResFlag:
+	push	hl
+_R11:
+	ld	hl,BDOSflag-CS
+	ld	(hl),false	; Reset BDOS access flag
+	pop	hl
+	ret
+;
+; BDOS interface
+;
+.BDOS:
+	jp	$-$		; <<== Redirected
+;
+; ////////////////////////////////////////////////
+; /// Filter for BDOS functions 1, 2, 9 and 11 ///
+; ////////////////////////////////////////////////
+;
+Func1:
+	ld	hl,Dummy-CS	; Set dummy call
+SetFunc:
+	ld	(ExC+1-CS),hl	; Set address
+	ld	a,1
+_R12:
+	ld	(ChrAcc-CS),a	; Set access flag
+	call	BDOS		; .. then do BDOS call
+	ld	b,a		; Save result
+_R13:
+	ld	a,(ChrRes-CS)	; Test result
+	or	a
+_R14:
+	ld	(ChrAcc-CS),a	; Save it
+	ld	a,b
+	ret	z		; .. ok
+ExC:
+	call	$-$		; Do special call
+	jp	OS
+;
+; ///////////////////////////////////
+; /// Filter for BDOS function 10 ///
+; ///////////////////////////////////
+;
+Func2:
+	ld	hl,CtrlMess-CS
+	jr	SetFunc		; Set special
+;
+; Give interrupt message
+;
+CtrlMess:
+	ld	de,$CtrlC-CS
+	ld	c,.String
+	call	BDOS		; .. tell it
+	ret
+;
+$CtrlC:
+	db	lf,'^C',eotx
+;
+; BDOS code table for functions 0..11
+;
+FuncTab:
+	dw	BIOSwarm-CS	;  0 - Warm Boot
+_R32:
+	dw	Func1-CS	;  1 - Conin
+_R33:
+	dw	Func1-CS	;  2 - Conout
+;
+	dw	$-$		;  3 - Auxin
+;
+	dw	$-$		;  4 - Auxout
+;
+	dw	$-$		;  5 - Listout
+;
+	dw	$-$		;  6 - Dircon
+;
+	dw	$-$		;  7 - Auxist
+;
+	dw	$-$		;  8 - Auxost
+_R34:
+	dw	Func1-CS	;  9 - String
+_R35:
+	dw	Func2-CS	; 10 - Conbuf
+_R36:
+	dw	Func1-CS	; 11 - Consta
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% Redirected Warm Entry %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+BIOSwarm:
+	ld	sp,TPA		; Reset stack
+RetryWarm:
+	ld	c,.SelDsk
+_R15:
+	ld	a,(LogDsk-CS)	; Get original disk
+	ld	(DU),a
+	ld	e,a
+	call	BDOS		; Log disk
+	ld	c,.UsrCod
+_R16:
+	ld	a,(LogUsr-CS)
+	ld	e,a
+	call	BDOS		; .. and user
+_R17:
+	ld	de,FCB.OVR-CS
+_R18:
+	ld	a,(OvrDsk-CS)	; Get disk
+	sub	'A'-1
+	ld	(de),a		; .. into FCB
+_R19:
+	call	OpnFile-CS	; Open file
+	jr	nz,GotFile	; .. got it
+	ld	(de),a		; Set default disk
+_R20:
+	call	OpnFile-CS	; Try this one
+	jr	nz,GotFile	; .. got it
+	inc	a
+	ld	(de),a		; Set drive A:
+_R21:
+	call	OpnFile-CS	; .. try it
+	jr	nz,GotFile	; .. got it
+_R22:
+	ld	de,$NotFnd-CS
+	ld	c,.String
+	call	BDOS		; Give error message
+WtQuit:
+	ld	c,.ConDir
+	ld	e,_Get
+	call	BDOS		; Get character
+	cp	CtrlC
+	jr	z,..OS		; .. break
+	cp	cr
+	jr	nz,WtQuit	; Wait for return
+	ld	c,.ResDsk
+	call	BDOS		; Reset disk
+	jr	RetryWarm	; Try again
+..OS:
+	ld	hl,(.OS-CS)	; Get vector
+	jp	(hl)
+;
+; Load back base file
+;
+GotFile:
+	call	RdFile-CS	; Read the file
+_R23:
+	ld	hl,(.OS-CS)
+	ld	(OS+1),hl	; Reset boot vector
+	ex	de,hl
+_R24:
+	ld	hl,BIOSvec-CS
+	ld	bc,VecLen
+	ldir			; Restore BIOS vectors
+_R25:
+	ld	hl,(.BDOS+1-CS)
+	ld	(BDOS+1),hl	; .. and BDOS entry
+_R26:
+	ld	hl,SavBase-CS
+_R30:
+	ld	de,(AreaStrt-CS)
+_R31:
+	ld	bc,(MemFree-CS)
+	ldir			; Restore data
+OVRet:
+	jp	$-$
+;
+; Open file for reading
+; ENTRY	Reg DE points to FCB
+; EXIT	Accu holds error code - 0 is error
+;	Zero flag set indicates error
+;
+OpnFile:
+	push	de
+	ld	c,.Open
+	call	BDOS		; Open file
+	inc	a
+	pop	de
+Dummy:
+	ret
+;
+; Read file
+;
+RdFile:
+	ld	de,TPA-RecLng
+RdF.loop:
+	ld	hl,RecLng
+	add	hl,de		; Calculate address
+	ex	de,hl
+	push	de
+	ld	c,.SetDMA
+	call	BDOS		; .. as disk buffer
+_R27:
+	ld	de,FCB.OVR-CS
+	ld	c,.RdSeq
+	call	BDOS		; Read record
+	pop	de
+	or	a		; Test more
+	jr	z,RdF.loop	; .. yeap
+	ld	c,.ConDir
+	ld	e,lf
+	call	BDOS		; Close line
+	ld	c,.ConDir
+	ld	e,cr
+	call	BDOS
+	ld	de,CCPbuf
+	ld	c,.SetDMA
+	jp	BDOS		; Reset disk buffer
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% Redirected BIOS CONIN Vector %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+CONIN:
+	call	Cin-CS		; Get the character
+	cp	CtrlC		; Test interrupt
+	ret	nz		; .. nope
+_R28:
+	ld	a,(ChrAcc-CS)	; Test flag
+	or	a
+	ld	a,CtrlC
+	ret	z		; Return break
+	ld	a,cr
+_R29:
+	ld	(ChrRes-CS),a	; .. set flag and get CR
+	ret
+;
+BDOSflag:
+	db	0
+ChrAcc:
+	db	0
+ChrRes:
+	db	0
+FCB.TURBO:
+	db	0
+$$FN:	_PRGNAME
+F.len	equ	$-$$FN
+	ds	(8-F.len),' '
+	db	'COM'
+	ds	21
+$NotFnd:
+	db	cr,lf
+	_PRGNAME
+IF	@@GERMAN
+	'.COM nicht gefunden. '
+	db	'Andere Diskette einlegen in Laufwerk '
+OvrDsk:
+	db	'X: und RETURN dr}cken',eotx
+ELSE
+	'.COM not found. '
+	db	'Re-insert disk in drive '
+OvrDsk:
+	db	'X: and hit RETURN',eotx
+ENDIF	;@@GERMAN
+LogUsr:
+	db	0
+LogDsk:
+	db	0
+.OS:
+	dw	0
+BIOSvec:
+	jp	$-$		; Warm Boot
+	jp	$-$		; Console State
+Cin:
+	jp	$-$		; Console Input
+VecLen	equ	$-BIOSvec
+AreaStrt:
+	dw	0
+MemFree:
+	dw	0
+FCB.OVR:
+	ds	FCBlen-3
+RELlen	equ	$-CS
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!! END OF CODE TO BE RELOCATED !!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+SavBase:
+FCBparse:
+	jp	$-$
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&
+; &&& WARM STAR OF OVERLAY &&&
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&
+;
+..OVERLAY:
+	pop	hl
+	ld	(OVRet+1),hl	; Save return address
+	pop	hl
+	ld	(AreaStrt),hl	; .. area start
+	pop	hl
+	ld	(MemFree),hl	; .. number of bytes available
+	pop	hl
+	ld	(FCBparse+1),hl	; .. address of FCB parser
+	pop	af
+	add	a,'A'-1
+	ld	(OvrDsk),a	; .. save disk
+	pop	hl		; Get FCB
+	ld	de,FCB.OVR
+	ld	bc,FCBlen-3
+	ldir
+	pop	de		; Get pointer to arguments
+	ld	sp,TPA		; Get stack
+	call	BuildCCP	; Build command line
+	ld	c,.RetDsk
+	call	BDOS		; Get disk
+	ld	(LogDsk),a
+	ld	c,.UsrCod
+	ld	e,_Get
+	call	BDOS		; Get user
+	ld	(LogUsr),a
+	ld	hl,(OS+1)
+	ld	(.OS),hl	; Save BIOS vector
+	ld	hl,(BDOS+1)
+	ld	(.BDOS+1),hl	; .. as well as BDOS vector
+	ld	bc,(MemFree)	; Get available memory
+	or	a
+	sbc	hl,bc		; Point to top
+	push	hl
+	ex	de,hl
+	ld	hl,(AreaStrt)	; Get start of area
+	ldir			; Save data
+	pop	hl
+	ld	de,-RELlen
+	add	hl,de		; Point to code area
+	ld	(BDOS+1),hl
+	ld	sp,hl
+	ex	de,hl
+	ld	hl,CS		; Get address of code
+	ld	bc,RELlen
+	ldir			; Unpack code
+	call	Relocate	; Relocate code
+;
+	dw	CS-CS
+	dw	_R1-CS
+	dw	_R2-CS
+	dw	_R3-CS
+	dw	_R4-CS
+	dw	_R5-CS
+	dw	_R6-CS
+	dw	_R7-CS
+	dw	_R8-CS
+	dw	_R9-CS
+	dw	_R10-CS
+	dw	_R11-CS
+	dw	Func1-CS
+	dw	SetFunc-CS
+	dw	_R12-CS
+	dw	_R13-CS
+	dw	_R14-CS
+	dw	Func2-CS
+	dw	CtrlMess-CS
+	dw	_R15-CS
+	dw	_R16-CS
+	dw	_R17-CS
+	dw	_R18-CS
+	dw	_R19-CS
+	dw	_R20-CS
+	dw	_R21-CS
+	dw	_R22-CS
+	dw	..OS-CS
+	dw	GotFile-CS
+	dw	_R23-CS
+	dw	_R24-CS
+	dw	_R25-CS
+	dw	_R26-CS
+	dw	_R27-CS
+	dw	CONIN-CS
+	dw	_R28-CS
+	dw	_R29-CS
+	dw	_R30+1-CS
+	dw	_R31+1-CS
+	dw	FuncTab-1-CS
+	dw	_R32-1-CS
+	dw	_R33-1-CS
+	dw	_R34-1-CS
+	dw	_R35-1-CS
+	dw	_R36-1-CS
+	dw	-1		; End of table
+;
+	jp	BDOS		; .. enter high part
+;
+; Relocate code
+; ENTRY	<SP> points to relocation table close by -1
+;
+Relocate:
+	pop	hl		; Get table
+	ld	e,(hl)		; Fetch offset
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	inc	de		; Test end
+	ld	a,e
+	or	d
+	ret	z		; .. start
+	ld	hl,(BDOS+1)	; Get base
+	ex	de,hl
+	add	hl,de		; Make absolute
+	ld	c,(hl)		; Fetch content
+	inc	hl
+	ld	b,(hl)
+	ex	de,hl
+	add	hl,bc		; Relocate word
+	ex	de,hl
+	ld	(hl),d		; .. bring it back
+	dec	hl
+	ld	(hl),e
+	jr	Relocate	; .. next word
+;
+; Build CCP command line
+; ENTRY	Reg DE holds argument pointer from calling TURBO
+;
+BuildCCP:
+	push	de
+	ld	hl,CCPbuf
+	ld	(hl),0		; Clear length
+	inc	hl
+	ld	(hl),0		; .. and next
+	call	SkpBlnk		; Skip blanks
+	jr	z,NoCCP		; .. line empty
+	ld	(hl),' '	; Set blank
+	inc	hl
+	ld	b,1		; Init length
+UnpCCP:
+	ld	a,(de)		; Get line
+	cp	eof		; Test end
+	jr	z,EndLine	; .. yeap
+	call	UPPER		; Get UPPER case
+	ld	(hl),a		; .. unpack
+	inc	de
+	inc	hl
+	inc	b		; Count characters
+	jr	UnpCCP
+EndLine:
+	ld	(hl),0		; Clear last one
+	ld	a,b
+	ld	(CCPbuf),a	; Store length
+NoCCP:
+	pop	de		; Get back pointer
+	call	SkpBlnk		; Skip blanks
+	jr	z,EndCCP	; .. empty line
+	call	FCBparse	; Parse 1st file
+	push	de
+	ld	de,FCB1
+	ld	hl,FCB
+	ld	bc,FCB1len
+	ldir			; Unpack it
+	pop	de
+	call	SkpBlnk		; Skip blanks
+	jr	z,EndCCP	; .. only one argument
+	call	FCBparse	; Parse 2nd file
+	ld	de,FCB2
+	ld	hl,FCB
+	ld	bc,FCB1len
+	ldir			; Unpack it
+EndCCP:
+	ld	de,FCB
+	ld	hl,FCB1
+	ld	bc,FCB2len
+	ldir			; Bring back both
+	ret
+;
+; Temporary FCBs
+;
+FCB1:
+	db	0
+	db	'           '
+	ds	4
+FCB1len	equ	$-FCB1
+;
+FCB2:
+	db	0
+	db	'           '
+	ds	4
+FCB2len	equ	$-FCB1
+;
+; Skip blanks
+; ENTRY	Reg DE points to command line
+; EXIT	Reg DE updated to 1st non-blank character
+;	Zero flag set indicates end of line
+;
+SkpBlnk:
+	ld	a,(de)		; Get character
+	cp	eof		; Test end of line
+	ret	z		; .. exit
+	cp	' '		; Test blank
+	ret	nz		; .. nope, got it
+	inc	de		; Skip blank
+	jr	SkpBlnk
+;
+; Convert character to UPPER case
+; ENTRY	Accu holds character in either case
+; EXIT	Accu holds character in  UPPER case
+;
+UPPER:
+	cp	'a'		; Test a..z
+	ret	c
+	cp	'z'+1
+	ret	nc
+	sub	'a'-'A'		; Map to A..Z
+	ret
+
+	end
+

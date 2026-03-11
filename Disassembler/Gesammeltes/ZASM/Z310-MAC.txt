@@ -1,0 +1,325 @@
+	title	Cromenco Macro Assembler
+	name	('Z310')
+
+; DASMed version of ZASM extension
+; By W.Cirsovius
+
+; This extension will be moved to top of memory after calling ZASM.
+; The extension implemets new BDOS functions:
+
+; 128,134,137,138,141,143,144,145,146
+
+; The main program calls the extension by some of of the new BDOS functions:
+
+; 134	Parse file
+; 137	Multiply numbers
+; 138	Divide numbers
+; 141	Get extended OS version
+; 144	Get date
+; 146	Get time
+
+	.phase	0bc00h
+
+l0000	equ	00h
+l0005	equ	05h
+l0009	equ	09h
+l0063	equ	63h
+l0072	equ	72h
+l008a	equ	8ah
+l00b0	equ	0b0h
+l00b5	equ	0b5h
+l00ba	equ	0bah
+l00bb	equ	0bbh
+l00c0	equ	0c0h
+l00c1	equ	0c1h
+l030f	equ	030fh
+l1e15	equ	1e15h
+lbe00	equ	0be00h
+
+;
+; BDOS redirected entry
+;
+lbc00:
+	jp	lbc09
+;
+	jp	lbc0b
+;
+	jp	lbc0d
+lbc09:
+	jr	lbc0f
+lbc0b:
+	jr	lbc0f
+lbc0d:
+	jr	lbc0f
+;
+; BDOS redirection
+;
+lbc0f:
+	push	hl
+	push	de
+	push	bc
+	ld	a,c		; Get BDOS function
+	ld	hl,lbc32
+	ld	bc,lbc3b-lbc32	;;l0009
+	cpir			; Test extended function
+	jr	z,lbc4d		; Yeap
+	pop	bc
+	pop	de
+	pop	hl
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	call	lbe00		; Do BDOS call
+	pop	iy
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+lbc32:
+	db	128,134,137,138,141,143,144,145,146
+lbc3b:
+	dw	lbc63-lbc00	;;l0063		; 128
+	dw	lbcc1-lbc00	;;l00c1		; 134
+	dw	lbc72-lbc00	;;l0072		; 137
+	dw	lbc8a-lbc00	;;l008a		; 138
+	dw	lbcb0-lbc00	;;l00b0		; 141
+	dw	lbcba-lbc00	;;l00ba		; 143
+	dw	lbcb5-lbc00	;;l00b5		; 144
+	dw	lbcc0-lbc00	;;l00c0		; 145
+	dw	lbcbb-lbc00	;;l00bb		; 146
+;
+;
+;
+lbc4d:
+	ld	a,lbc3b-lbc32-1	; Build index
+	sub	c
+	rlca			; Double it
+	ld	hl,lbc3b
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; Point to function address
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ld	hl,lbc00
+	add	hl,de		; Add offset
+	pop	bc		; Get back parameters
+	pop	de
+	ex	(sp),hl		; Save address
+	ret			; Execute it
+;
+; Extended BDOS function 128
+;
+lbc63::
+	push	bc
+	push	de
+	ld	c,6
+	ld	e,0ffh
+lbc69:
+	call	l0005
+	or	a
+	jr	z,lbc69
+	pop	de
+	pop	bc
+	ret
+;
+; Extended BDOS function 137
+; Multiply
+; ENTRY	Reg HL holds number
+;	Reg DE holds multiplier
+; EXIT	Reg DE holds product
+;
+lbc72::
+	push	bc
+	push	hl
+	ld	b,d
+	ld	c,e
+	ld	de,l0000
+lbc79:
+	srl	b
+	rr	c
+	jr	nc,lbc82
+	ex	de,hl
+	add	hl,de
+	ex	de,hl
+lbc82:
+	add	hl,hl
+	ld	a,b
+	or	c
+	jr	nz,lbc79
+	pop	hl
+	pop	bc
+	ret
+;
+; Extended BDOS function 138
+; Divide
+; ENTRY	Reg HL holds number
+;	Reg DE holds divisor
+; EXIT	Reg HL holds quotient
+;	Reg DE holds remainder (modulo)
+;
+lbc8a::
+	ld	a,e
+	or	d
+	ret	z
+	push	bc
+	xor	a
+	ex	de,hl
+lbc90:
+	inc	a
+	add	hl,hl
+	jr	nc,lbc90
+	ex	de,hl
+	ld	c,e
+	ld	b,d
+	ld	de,l0000
+lbc9a:
+	rr	b
+	rr	c
+	scf
+	rl	e
+	rl	d
+	sbc	hl,bc
+	jr	nc,lbcaa
+	add	hl,bc
+	dec	e
+	or	a
+lbcaa:
+	dec	a
+	jr	nz,lbc9a
+	ex	de,hl
+	pop	bc
+	ret
+;
+; Extended BDOS function 141
+; Get version of extended BDOS
+; EXIT	Reg C holds version
+;	Reg B holds ???
+;
+lbcb0::
+	ld	b,1		; Set ???
+	ld	c,026h		; Set version
+	ret
+;
+; Extended BDOS function 144
+; Get date
+;
+lbcb5::
+	ld	a,0fh
+	ld	bc,l030f
+;
+; Extended BDOS function 143
+;
+lbcba::
+	ret
+;
+; Extended BDOS function 146
+; Get tiime
+;
+lbcbb::
+	ld	a,0fh
+	ld	bc,l1e15
+;
+; Extended BDOS function 145
+;
+lbcc0::
+	ret
+;
+; Extended BDOS function 134
+; Parse file
+; ENTRY	Reg DE points to FCB
+;	Reg HL points to string
+;
+lbcc1::
+	push	bc
+	push	de
+	ex	de,hl
+	push	hl
+	ld	b,0ch
+lbcc7:
+	ld	(hl),' '
+	inc	hl
+	djnz	lbcc7
+	ld	b,15h
+	xor	a
+lbccf:
+	ld	(hl),a
+	inc	hl
+	djnz	lbccf
+	pop	hl
+	ld	(hl),a
+	ex	de,hl
+	inc	hl
+	ld	a,(hl)
+	cp	':'
+	dec	hl
+	jr	nz,lbced
+	ld	a,(hl)
+	cp	'a'
+	jr	c,lbce8
+	cp	'z'+1
+	jr	nc,lbce8
+	and	5fh
+lbce8:
+	sub	'@'
+	ld	(de),a
+	inc	hl
+	inc	hl
+lbced:
+	inc	de
+	ld	b,8
+	call	lbd01
+	ld	a,(hl)
+	cp	'.'
+	jr	nz,lbcfe
+	inc	hl
+	ld	b,3
+	call	lbd01
+lbcfe:
+	pop	de
+	pop	bc
+	ret
+lbd01:
+	ld	a,(hl)
+	cp	'a'
+	jr	c,lbd0c
+	cp	'z'+1
+	jr	nc,lbd0c
+	and	5fh
+lbd0c:
+	cp	'*'
+	ld	c,'?'
+	jr	z,lbd2a
+	cp	'.'
+	ld	c,' '
+	jr	z,lbd2b
+	cp	','
+	ret	z
+	cp	'='
+	ret	z
+	cp	'/'
+	ret	z
+	cp	'!'
+	ret	c
+	ld	(de),a
+	inc	hl
+	inc	de
+	djnz	lbd01
+	ret
+lbd2a:
+	inc	hl
+lbd2b:
+	ld	a,c
+lbd2c:
+	ld	(de),a
+	inc	de
+	djnz	lbd2c
+	ret
+
+	.dephase
+
+	end
+

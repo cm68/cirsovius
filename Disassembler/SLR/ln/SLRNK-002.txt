@@ -1,0 +1,3043 @@
+;
+; MS token 5 : Define COMMON size
+;
+MS.COMSIZ:
+	call	FndCOMM		; Find COMMON
+	jr	z,NewCOMM	; .. new one
+	ex	de,hl
+	ld	hl,COMsize
+	add	hl,de		; Point to length
+	ld	c,(hl)		; .. fetch it
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(MSval)	; Get new value
+	scf
+	sbc	hl,bc		; .. compare
+	ex	de,hl
+	ret	c		; .. ok
+	ld	hl,$COMM.BIG
+	jp	QuitIll		; .. error if bigger than old
+$COMM.BIG:
+	db	13,'Common Bigger'
+NewCOMM:
+	ex	de,hl		; Save address
+	ld	a,(BField)	; Get length
+	add	a,COMhead+1	; .. add max
+	ld	c,a
+	ld	b,0
+	call	_d.alloc	; Allocate memory
+	ex	de,hl
+	ld	(hl),d		; .. save address
+	dec	hl
+	ld	(hl),e
+	push	de
+	xor	a
+	ld	(de),a		; Clear new chain
+	inc	de
+	ld	(de),a
+	inc	de
+	push	de
+	inc	de		; .. skip
+	inc	de
+	ld	hl,MSval	; Point to value
+	ldi			; .. unpack
+	ldi
+	ld	hl,BField
+	ld	c,(hl)		; Get length
+	inc	c
+	inc	hl		; .. fix
+	ldir			; Unpack symbol
+	ld	bc,(MSval)	; Get value
+	ld	a,(AdrBas)	; Get base
+	and	1 SHL _code	; Test CODE
+	ld	hl,@CODE	; Get CODE base
+	jr	nz,..COMMset
+	ld	hl,@ABS		; Point to ABSOLUTE address
+..COMMset:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	push	hl
+	call	l1462
+	pop	de
+	pop	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	ret
+;
+; MS token 6 : Chain External
+;
+MS.EXTRN::
+	ld	hl,(MSval)	; Get value
+	ld	a,h		; Test empty
+	or	l
+	jr	nz,l1356	; .. nope
+	ld	a,($KEEP$)	; Test keep empty ext chain
+	or	a
+	ret	z		; .. nope
+l1356:
+	call	l178e
+	ld	de,(MSval)	; Get value
+	ld	a,d
+	or	e
+	ret	z		; .. end if zero
+	bit	7,(hl)
+	jr	z,l136b
+	inc	hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	jp	l13f3
+l136b:
+	inc	hl
+	ld	c,(hl)
+	ld	(hl),e
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),d
+	ld	a,c
+	or	b
+	ret	z
+	push	bc
+	ex	de,hl
+	ld	bc,(AdrPos)	; Get position
+l137a:
+	add	hl,bc
+	ex	de,hl
+	ld	hl,(l21a2)
+	scf
+	sbc	hl,de
+	jr	nc,l13b1
+	ld	hl,(l219c)
+	sbc	hl,de
+	jr	c,l13b1
+	ex	de,hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,h
+	or	l
+	jr	nz,l137a
+	ex	de,hl
+	pop	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ret
+l139a:
+	ld	hl,l13a0
+	jp	l18c0
+l13a0:
+	db	16,'Duplicate Symbol'
+l13b1:
+	ld	hl,l13b7
+	jp	QuitIll		; Quit illegal
+l13b7:
+	db	9,'Bad Chain'
+;
+; MS token 7 : Define Entry Point
+;
+MS.DEFENT::
+	call	l178e
+l13c4:
+	bit	7,(hl)
+	jr	nz,l139a
+l13c8:
+	set	7,(hl)
+	ld	bc,(MSval)	; Get address
+	inc	hl
+	ex	de,hl
+	ld	hl,(l21b3)
+	dec	hl
+	ld	(l21b3),hl
+	jr	l13ed
+l13d9:
+	ld	hl,(AdrPos)	; Get position
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l21a2)
+	scf
+	sbc	hl,de
+	jr	nc,l13b1
+l13e6:
+	ld	hl,(l219c)
+	sbc	hl,de
+	jr	c,l13b1
+l13ed:
+	ex	de,hl
+	ld	e,(hl)
+	ld	(hl),c
+	inc	hl
+	ld	d,(hl)
+	ld	(hl),b
+l13f3:
+	ld	a,d
+	or	e
+	jr	nz,l13d9
+	ret
+;
+; MS token 8 : External - Offset
+;
+MS.EXTOFF_:
+	ld	hl,0
+	ld	de,(MSval)	; Get offset
+	or	a
+	sbc	hl,de		; .. negate
+	jr	l1407
+;
+; MS token 9 : External + Offset
+;
+MS.EXTOFF::
+	ld	hl,(MSval)	; Get offset
+l1407:
+	ex	de,hl
+	ld	hl,l21a6
+	dec	(hl)
+	call	z,l142b
+	ld	hl,(l21a4)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ex	de,hl
+	call	l149e
+	exx
+	push	de
+	exx
+	ld	hl,(l2229)
+	pop	bc
+	add	hl,bc
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(l21a4),hl
+	ret
+;
+;
+;
+l142b:
+	ld	(hl),' '
+	push	de
+	ld	bc,l0084
+	call	_d.alloc	; Allocate memory
+	ld	de,(l21a4)
+	ld	(l21a4),hl	; .. exchange address
+	ex	de,hl
+	xor	a
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	de
+	ret
+;
+; MS token 10 : Define Data Size
+;
+MS.DATA::
+	ld	bc,(MSval)	; Get size
+	ld	(Dsize),bc	; .. save
+	ld	a,(AdrBas)
+	and	1 SHL _data	; Test DATA
+	ld	hl,@DATA	; Get DATA base
+	jr	nz,l145b
+	ld	hl,@ABS		; Point to ABSOLUTE address
+l145b:
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(Daddr),hl	; .. as start of data
+l1462:
+	push	hl
+	add	hl,bc
+	ex	de,hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	a,b		; Test zero
+	or	c
+	call	nz,MaxEndAdr	; .. nope, set max end address
+	pop	de
+	ld	a,b
+	or	c
+	jp	nz,l175e
+	ret
+;
+; MS token 11 : Set Load Pointer
+;
+MS.LOAD::
+	ld	hl,(MSval)	; Get load address
+l1477:
+	ld	(LoadAdr),hl	; .. save
+	dec	h		; Test 01xx
+	jr	nz,l1492	; .. nope
+	ld	a,l
+	or	a
+	jr	z,l1489		; Test 0100H
+	sub	03h
+	jr	z,l1489		; .. 0103H
+	sub	05h
+	jr	nz,l1492	; .. 0105H
+l1489:
+	ld	de,(StrAdr)	; Get start address
+	or	a
+	sbc	hl,de
+	jr	c,l14ea
+l1492:
+	ld	hl,l14a9
+	ld	(fput+1),hl	; Install routine before put
+	ld	a,_CALL
+	ld	(fput),a
+	ret
+l149e:
+	push	af
+	ld	a,(fput)	; Test routine instaleld
+	cp	_CALL
+	jr	z,l14a8		; .. yeap
+	pop	af
+	ret
+l14a8:
+	pop	af
+l14a9:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	call	l14ea
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l14b5:
+	ld	hl,l0ed0
+	ld	(fput+1),hl	; De-install routine
+	ld	a,_JP
+	ld	(fput),a
+	ret
+l14c1:
+	ld.rp	hl,_PSH.DE,_EXX	; Enable routine
+	ld	(l14ea),hl
+	call	l14b5
+	exx
+	push	de
+	exx
+	pop	hl
+	ld	de,(LoadAdr)	; Get load address
+	or	a
+	sbc	hl,de		; .. subtract
+	ld	(AdrPos),hl	; .. save as position
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ld	(l2229),hl
+	ex	de,hl
+	ld	(StrAdr),hl	; .. set start address
+	ld	(BegAdr),hl	; .. and beginning
+	ret
+l14ea:
+	jr	l14c1		; Enable sequence: exx, push de ?????
+	push	hl
+	call	l14b5
+	pop	hl
+	exx
+	pop	de
+	ld	hl,(l2229)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(BegAdr)	; Get beginning address
+	or	a
+	sbc	hl,de
+	jr	nc,l1504
+	ld	(BegAdr),de	; .. set new one
+l1504:
+	ld	de,(LoadAdr)	; Get load address
+	ld	hl,(StrAdr)	; .. and start address
+	or	a
+	sbc	hl,de		; .. subtract
+	jr	c,l1561
+	jr	z,l1561
+	ld	b,h
+	ld	c,l
+	ld	hl,(l219c)
+	add	hl,bc
+	ld	(l219c),hl
+	ld	hl,(l226d)
+	add	hl,bc
+	ld	(l226d),hl
+	ld	hl,(l21e9)
+	add	hl,bc
+	ld	(l21e9),hl
+	call	_u.alloc	; Allocate memory
+	dec	hl		; .. fix address
+	ld	d,h		; .. copy
+	ld	e,l
+	add	hl,bc		; Set top
+	ex	de,hl
+	push	hl
+	ld	bc,(l21a2)
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	inc	bc
+	jr	z,l1541
+	lddr
+l1541:
+	ld	hl,(l21a2)
+	call	l0fc0
+	ld	hl,(LoadAdr)	; Get load address
+	ld	(StrAdr),hl	; .. save into start
+	ex	de,hl
+	ld	hl,(l21a2)
+	or	a
+	sbc	hl,de
+	ld	(AdrPos),hl	; .. save as position
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	inc	hl
+	ld	(l2229),hl
+l1561:
+	ld	hl,(AdrPos)	; Get position
+	add	hl,de
+	push	hl
+	ld	hl,(StrAdr)	; Get start address
+	ld	de,(AdrPos)	; .. and position
+	add	hl,de
+	pop	de
+	scf
+	sbc	hl,de
+	jp	nc,MemOvl	; .. not enough memory
+	push	de
+	exx
+	pop	de
+	push	hl
+	jp	l0ed8
+;
+; Pop byte from expression stack - MS special
+;
+MS.pop:
+	call	RdMScode	; Read MS-REL item
+	ret	z		; .. constant
+	jp	l18ad		; .. otherwise is error
+;
+; MS token 12 : Chain Address
+;
+MS.CHAIN:
+	ret
+;
+; MS token 13 : Define Program Size
+;
+MS.CODE::
+	ld	bc,(MSval)	; Get program size
+	ld	(Csize),bc	; .. save
+	ld	a,(AdrBas)
+	and	1 SHL _prg	; Test PRG
+	ld	hl,@PRG		; Get PROGRAM base
+	jr	nz,l1599
+	ld	hl,@ABS		; Point to ABSOLUTE address
+l1599:
+	ld	e,(hl)		; Get code start
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(Caddr),hl	; .. save
+	call	l1462
+	ld	hl,(Caddr)	; Get code start
+	ld	(MSval),hl	; .. as value
+	jp	MS.LOAD		; .. for LOAD pointer
+;
+; MS token 14 : End Of Module
+;
+MS.ENDM::
+	call	l15e8
+	ld	a,0ffh
+	ld	(l224e),a
+	call	RdBound		; Fix for byte boundary
+	pop	hl
+	jp	ProcMS		; .. and get next module
+;
+$PRG.AREA:
+	db	12,'  PROG AREA '
+$DAT.AREA:
+	db	12,'  DATA AREA '
+;
+; Build string <start> - <end>
+; ENTRY	Reg HL holds start address
+;	Reg BC holds length of segment
+;	Reg DE points to ASCII buffer
+;
+$From_To:
+	call	CnvHtA		; Convert start to hex
+	ld	a,'-'
+	ld	(de),a		; Set delimiter
+	inc	de
+	add	hl,bc		; Get end
+	dec	hl		; .. fix
+	call	CnvHtA		; Convert
+l15e1:
+	ld	a,' '
+	ld	(de),a		; .. give delimiters
+	inc	de
+	ld	(de),a
+	inc	de
+	ret
+l15e8:
+	ld	de,ErrStrg	; Point to error
+	ld	a,($VERB$)	; Test verbose
+	or	a
+	jr	nz,l15fa	; .. yeap
+	ld	hl,l21be
+	ld	a,(hl)
+	or	a
+	jr	nz,l165a
+	jr	l166a
+l15fa:
+	ld	hl,PrgName
+	call	MovLStr		; Copy name
+	ld	a,(PrgName)
+	sub	11h
+	neg
+	ld	b,a
+	ld	a,' '
+l160a:
+	ld	(de),a
+	inc	de
+	djnz	l160a
+	call	l15e1
+	ld	a,(l21c1)
+	ld	c,'S'
+	or	a
+	jr	z,l161b
+	ld	c,'M'
+l161b:
+	ld	a,c
+	ld	(de),a
+	inc	de
+	ld	hl,(Csize)	; Get program size
+	ld	a,h		; Test zero
+	or	l
+	jr	z,l1635		; .. skip
+	ld	hl,$PRG.AREA
+	call	MovLStr		; Copy program info
+	ld	hl,(Caddr)	; Get code start
+	ld	bc,(Csize)	; .. and size
+	call	$From_To	; Give range
+l1635:
+	ld	hl,(Dsize)	; Get data size
+	ld	a,h		; Test zero
+	or	l
+	jr	z,l164c		; .. skip
+	ld	hl,$DAT.AREA
+	call	MovLStr		; Copy data info
+	ld	hl,(Daddr)	; Get start of data
+	ld	bc,(Dsize)	; .. and size
+	call	$From_To	; Give range
+l164c:
+	ld	hl,l21b9
+	ld	a,(hl)
+	ld	(hl),0
+	or	a
+	call	nz,l1b73
+	ld	hl,l21be
+	ld	a,(hl)
+l165a:
+	ld	(hl),0
+	or	a
+	ld	hl,l169a
+	call	nz,MovLStr	; Copy string
+	ld	(l2205),de
+	call	l2041
+l166a:
+	call	l1683
+	ld	hl,(MSval)	; Get value
+	ld	a,h		; Test zero
+	or	l
+	jr	z,l167c		; .. yeap
+	ld	a,_JP
+	ld	(@XFER),a	; Set JP
+	ld	(@XFER+1),hl	; .. to address
+l167c:
+	ld	a,(LRQST2)	; Get library request
+	ld	(LRQST1),a	; .. set it
+	ret
+l1683:
+	exx
+	push	de
+	exx
+	pop	de
+	ld	hl,(l2229)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(BegAdr)	; Get beginning address
+	or	a
+	sbc	hl,de
+	ret	nc
+	ld	(BegAdr),de	; .. set new one
+	ret
+;
+; MS token 15 : End Of File
+;
+MS.ENDF:
+	pop	hl
+	ret
+l169a:
+	db	6,'*ERR*',bell
+;
+; Read 8 bits from MS-stream
+; EXIT	Accu holds byte
+;
+Rd8bits::
+	exx
+	dec	l		; Count down
+	ld	a,l
+	jr	nz,l16ab	; .. still more
+	push	hl
+	call	RdREL		; Read records
+	pop	hl
+l16ab:
+	ex	af,af'		; Save count
+	ld	l,(ix+0)	; Get code
+	inc	ix
+	ld	a,BitLen
+	sub	b		; Get difference
+	jr	z,l16c8		; .. exact 8 bits
+	cp	5		; Test range
+	jr	nc,l16cf
+	ld	b,a		; Set count
+l16bb:
+	rr	h		; Shift old
+	djnz	l16bb		; .. till position
+	ld	b,a		; Restore count
+l16c0:
+	add	hl,hl		; .. shift back
+	djnz	l16c0		; .. till position found
+	sub	BitLen		; .. get difference
+	neg			; .. positive
+	ld	b,a		; .. as current count
+l16c8:
+	ld	a,h		; Get result
+	ld	h,l		; .. unpack byte
+	ex	af,af'
+	ld	l,a		; Restore pointer
+	ex	af,af'
+	exx
+	ret
+l16cf:
+	ld	a,b		; Save count
+l16d0:
+	rl	h		; Shift
+	djnz	l16d0		; .. till position
+	ld	b,a		; Get back count
+l16d5:
+	rr	l		; Shift
+	rr	h
+	djnz	l16d5		; .. till position
+	ld	b,a		; Get bit count
+	ld	a,l		; .. result
+	ex	af,af'
+	ld	l,a		; Bring back pointer
+	ex	af,af'
+	exx
+	ret
+;
+; Fix bit stream for byte boundary
+;
+RdBound:
+	exx
+	ld	a,b		; Get bit count
+	exx
+	cp	BitLen		; Test byte boundary
+	ret	z		; .. yeap
+;
+; Read bits from bit stream
+; ENTRY	Accu holds count
+; EXIT	Accu holds bit value
+;
+RdBits:
+	ld	b,a		; Get bit count
+	xor	a		; Init result
+l16ea:
+	exx
+	rl	h		; Get bit
+	rla			; .. into accu
+	djnz	l16fb		; Test reamining
+	dec	l
+	call	z,RdREL		; .. read records if not
+	ld	h,(ix+0)	; Get byte
+	inc	ix
+	ld	b,BitLen	; .. reset bit count
+l16fb:
+	exx
+	djnz	l16ea		; Test read
+	ret
+;
+; Read records from REL file
+;
+RdREL::
+	ld	hl,RecRes+1	; Point to hi
+	dec	(hl)		; Count down
+	ld	l,0
+	ret	nz		; .. any remaining
+	push	de
+	push	bc
+	push	af
+	call	RdIO		; Read from file
+	ld	ix,(DMAptr)	; Get buffer address
+	pop	af
+	pop	bc
+	pop	de
+	ld	l,0
+	ret
+;
+; Find end of MS-REL module or file
+;
+GetModEnd:
+	call	RdMScode	; Read REL item
+	jr	z,GetModEnd	; .. constant
+	ld	a,(AdrMode)	; Get address mode
+	or	a
+	jr	nz,GetModEnd	; .. address ref
+	ld	a,(MSitem)	; Get item
+	cp	_MODEND		; Test end of module
+	jr	c,GetModEnd	; .. nope
+	call	RdBound		; Fix for byte boundary
+	jp	ProcMS		; .. and get next module
+;
+; Get segment address
+; ENTRY	Accu holds address mode
+;	Reg HL holds offset within segment or absolute address
+; EXIT	Reg HL holds address
+;
+GetModAdr:
+	or	a		; Test absolute
+	ret	z		; .. return unchanged
+	ex	de,hl
+	ld	hl,(Caddr)	; Get code start
+	dec	a
+	jr	z,l1741		; .. ok
+	ld	hl,(Daddr)	; Get data start
+	dec	a
+	jr	z,l1741		; .. ok
+	ld	hl,(COMMsiz)	; Get COMMON start
+	xor	a
+l1741:
+	add	hl,de		; .. add offset
+	ret
+;
+; Initialize MS-REL file processing
+; EXIT	Reg IX points to buffer
+;	Reg  H' holds 1st byte
+;	Reg  L' initialized to zero
+;	Reg  B' initialized to bit count in byte
+;
+IniREL:
+	exx
+	ld	ix,(DMAptr)	; Get buffer address
+	inc	ix
+	ld	h,(ix-1)	; Get 1st byte
+	ld	l,0
+	ld	b,BitLen	; Set bit count
+	exx
+	ret
+;
+; Set max end address
+; ENTRY	Reg DE holds possible new top
+;
+MaxEndAdr:
+	ld	hl,(EndAdr)	; Get end address
+	sbc	hl,de		; .. compare
+	ret	nc		; .. end address >= DE
+	ld	(EndAdr),de	; .. else set new end
+	ret
+;
+;
+;
+l175e:
+	ld	hl,(StrAdr)	; Get start address
+	sbc	hl,de
+	ret	c
+	ld	a,(fput)
+	cp	_JP		; Test routine installed
+	jr	z,l1777		; .. nope
+	ld	hl,(LoadAdr)	; Get load address
+	push	hl
+	ex	de,hl
+l1770:
+	call	l1477
+	pop	hl
+	jp	l1477
+l1777:
+	ld	a,(l14ea)
+	cp	_JR		; Test enabled
+	ex	de,hl
+	jp	z,l1477		; .. nope
+	exx
+	push	de
+	exx
+	pop	de
+	push	hl
+	ld	hl,(l2229)
+	add	hl,de
+	ex	(sp),hl
+	jr	l1770
+l178c:
+	scf
+	ret
+;
+;
+;
+l178e::
+	call	l181d
+	jr	nc,l178c
+	push	hl
+	ex	de,hl
+	ld	hl,(l21b3)
+	inc	hl
+	ld	(l21b3),hl
+	ld	hl,(l219e)
+	inc	hl
+	inc	hl
+	ld	(l219e),hl
+	dec	hl
+	sbc	hl,de
+	jr	z,l17b5
+	ld	b,h
+	ld	c,l
+	ld	hl,(l219e)
+	dec	hl
+	ld	d,h
+	ld	e,l
+	dec	hl
+	dec	hl
+	lddr
+l17b5:
+	ld	a,(BField)	; Get length of symbol
+	add	a,4		; .. add a bit
+	ld	b,0
+	ld	c,a
+	call	_d.alloc	; Allocate memory
+	pop	de
+	push	hl
+	ex	de,hl
+	ld	(hl),e		; .. save address
+	inc	hl
+	ld	(hl),d
+	ld	hl,l1818
+	ldi
+	ldi
+	ldi
+	ld	hl,$BField	; Point to symbol
+	ldir			; .. unpack
+	ld	hl,l2199
+	dec	(hl)
+	pop	hl
+	ret	nz
+	push	hl
+	ld	bc,l0100
+	call	_u.alloc	; Allocate memory
+	dec	hl		; Fix address
+	ld	d,h		; .. copy
+	ld	e,l
+	add	hl,bc		; Point to top
+	ex	de,hl
+	push	hl
+	ld	bc,(l21a2)
+	or	a
+	sbc	hl,bc
+	ld	b,h
+	ld	c,l
+	pop	hl
+	inc	bc
+	jr	z,l17f6
+	lddr
+l17f6:
+	ld	a,80h
+	ld	(l2199),a
+	exx
+	inc	d
+	exx
+	ld	hl,l21a2+1
+	inc	(hl)
+	ld	hl,l224c
+	inc	(hl)
+	ld	hl,l222a
+	dec	(hl)
+	ld	hl,l219c+1
+	inc	(hl)
+	ld	hl,l226e
+	inc	(hl)
+	ld	hl,l21ea
+	inc	(hl)
+	pop	hl
+	ret
+l1818:
+	ds	5
+;
+;
+;
+l181d:
+	ld	bc,l24f6
+	ld	hl,(l219e)
+	ld	(l1828+1),hl
+	jr	l182c
+l1828:
+	ld	hl,$-$
+	inc	bc
+l182c:
+	scf
+	sbc	hl,bc
+	jr	z,l185e
+	srl	h
+	rr	l
+	set	0,l
+	add	hl,bc
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	hl,l0003
+	add	hl,de
+	ld	de,$BField	; Point to symbol
+l1843:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l1853
+	inc	de
+	inc	hl
+	inc	a
+	jr	nz,l1843
+	pop	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	or	a
+	ret
+l1853:
+	jr	nc,l185b
+	pop	hl
+	ld	(l1828+1),hl
+	jr	l182c
+l185b:
+	pop	bc
+	jr	l1828
+l185e:
+	or	0ffh
+	scf
+	ld	hl,(l1828+1)
+	ret
+;
+; Allocate memory moving top down
+; ENTRY	Reg BC holds amount to be allocated
+; EXIT	Reg HL holds new address
+;
+_d.alloc:
+	ld	hl,(dHeap)	; Get top
+	or	a
+	sbc	hl,bc		; .. subtract
+	ld	(dHeap),hl	; .. set new top
+	push	hl		; Save result
+	push	de
+	ld	de,(uHeap)	; Get top of 2nd heap
+	inc	d
+	sbc	hl,de		; .. test room
+	pop	de
+	pop	hl
+	ret	nc		; .. yeap
+	jr	MemOvl		; .. overflow
+;
+; Allocate memory moving bottom up
+; ENTRY	Reg BC holds amount to be allocated
+; EXIT	Reg HL holds current address
+;
+_u.alloc:
+	ld	hl,(uHeap)	; Get bottom
+	push	hl
+	add	hl,bc		; .. add amount
+	ld	(uHeap),hl	; .. set new bottom
+	push	de
+	ld	de,(dHeap)	; Get bottom of 2nd heap
+	dec	d
+	sbc	hl,de		; .. compare
+	pop	de
+	pop	hl
+	ret	c		; .. ok, get enough room
+MemOvl:
+	ld	hl,$MEM.OV	; Tell no more memory
+	jp	l18a5
+$MEM.OV:
+	db	15,'OUT OF MEMORY !'
+l18a5:
+	call	PrErrStr	; Print error string
+	jr	l18ad
+;
+; Give message and quit
+;
+QuitIll:
+	call	l18c0
+l18ad:
+	jp	$$Q$$		; Quit
+l18b0:				;;
+	call	PrErrStr	; Print error string
+	jr	l18b8
+l18b5:				;;
+	call	l18c0
+l18b8:
+	jp	LNK.go		; Restart
+;
+; Build complexe error string
+; ENTRY	Reg HL points to string
+;
+PrErrStr:
+	ld	a,.eot
+	ld	($BField),a	; Set empty
+l18c0:
+	ld	a,TRUE
+	ld	(LNKerr),a	; Set error
+	ld	de,ErrStrg	; Set base
+	push	hl		; Save string pointer
+	call	CopyFCB		; Copy FCB
+	ld	hl,l1915
+	call	MovLStr		; Copy string
+	ld	hl,l224e
+	ld	a,(hl)
+	inc	a
+	call	nz,MovStr	; Move if not empty
+	ld	a,(l224e)
+	inc	a
+	ld	hl,l1915
+	call	nz,MovLStr	; Copy string
+	ld	hl,$BField	; Point to name
+	ld	a,(hl)
+	inc	a
+	call	nz,MovStr	; Move if not empty
+	pop	hl		; Get back string pointer
+	call	MovLStr		; Copy string
+	ld	a,(FCB)		; Get drive
+	or	a
+	jr	z,l1906		; .. default
+	exx
+	push	de
+	exx
+	pop	bc
+	ld	hl,(l2229)
+	add	hl,bc
+	ld	a,' '
+	ld	(de),a
+	inc	de
+	dec	hl
+	call	CnvHtA		; Convert to ASCII
+l1906:
+	ex	de,hl
+	ld	(hl),cr		; Close line
+	inc	hl
+	ld	(hl),lf
+	inc	hl
+	ld	(hl),.eot	; .. set end
+	ld	hl,ErrStrg	; Get string
+	jp	PrStr		; Print
+l1915:
+	db	3,' - '
+;
+; Copy FCB as string
+; ENTRY	Reg DE points to buffer
+;
+CopyFCB::
+	ld	hl,FCB
+	ld	a,(hl)		; Get drive
+	or	a
+	jr	nz,l1927	; .. defined
+	ld	hl,(FCBptr)	; Get FCB
+	ld	a,h		; Test any
+	or	l
+	jr	z,l1958		; .. nope
+l1927:
+	inc	hl
+	ld	b,@nam
+l192a:
+	ld	a,(hl)
+	and	NoMSB
+	cp	' '		; No blanks
+	jr	z,l1936
+	ld	(de),a		; .. else unpack
+	inc	de
+	inc	hl
+	djnz	l192a
+l1936:
+	ld	c,b		; Get remainder
+	ld	b,0
+	add	hl,bc		; .. fix pointer
+	ld	a,(hl)
+	and	NoMSB
+	cp	' '
+	ret	z		; .. end if no extension
+	ld	a,'.'
+	ld	(de),a		; Set delimiter
+	inc	de
+	ld	b,@ext
+l1946:
+	ld	a,(hl)
+	and	NoMSB
+	ld	(de),a		; Unpack extension
+	inc	de
+	inc	hl
+	djnz	l1946
+	xor	a
+	ret	z
+
+	db	42h,53h,76h,02h,21h
+
+	ld	a,0b7h
+	ret
+l1958:
+	ld	hl,l196f	; Set CONSOLE
+;
+; Move string
+; ENTRY	Reg HL points to source starting with length
+;	Reg DE points to destination
+;
+MovLStr:
+	ld	c,(hl)		; Get length
+	inc	hl
+	ld	b,0
+	ldir			; .. move
+	ret
+;
+; Move string closed by -1
+; ENTRY	Reg HL points to source
+;	Reg DE points to destination
+;
+..MovStr:
+	ld	(de),a
+	inc	de
+MovStr:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	-1		; Test end
+	jr	nz,..MovStr
+	ld	a,' '		; Set delimiter
+	ld	(de),a
+	inc	de
+	ret
+;
+l196f:
+	db	7,'Console'
+l1977:
+	ld	hl,ErrStrg	; Get string
+	jp	PrStr		; Print
+IF	@MOD@
+$INVWild:
+	db	'Invalid wildcard in file name',.eot
+;
+; Execute BDOS call checking for wild cards
+;
+w.BDOS::
+	push	bc		; .. save regs
+	push	de
+	push	hl
+	ex	de,hl
+	ld	bc,@nam+@ext
+	inc	hl
+	ld	a,'?'
+	cpir			; Test wild card
+	pop	hl
+	pop	de
+	pop	bc
+	jr	nz,.BDOS	; .. ok, start over
+	ld	hl,$INVWild
+	call	PrStr		; Tell invalid wild card
+	jp	$$Q$$		; .. and quit
+ENDIF	;@MOD@
+;
+; Execute BDOS call preserving registers
+;
+.BDOS:
+	call	PushReg		; Push regs
+	inc	c		; Test warm start
+	dec	c
+	jp	z,OS		; .. yeap
+	call	BDOS		; .. execute call
+	call	PopReg		; Pop regs
+	ret
+;
+l198c:
+	db	eof,.eot
+;
+; Close file
+;
+fclose:
+	call	l19b8		; Test any to be written
+	jr	z,l19ab		; .. nope close
+	inc	l		; Test pending
+	dec	l
+	jr	z,l19a7		; .. nope
+	ld	hl,l198c
+	call	put$HEX		; Put record to file
+	call	l19b8		; Test more
+	jr	z,l19ab		; .. nope
+	inc	l
+	dec	l
+	jr	z,l19a7		; .. give default
+	inc	h		; .. fix
+l19a7:
+	ld	c,h		; Get records
+	call	WrIO		; .. write
+l19ab:
+	ld	de,FCB
+	ld	c,.close
+	call	.BDOS		; Close file
+	xor	a
+	ld	(FCB),a		; Set current drive
+	ret
+;
+;
+;
+l19b8:
+	ld.rp	hl,_Recs/2,0	; Load records
+$REC_3$	equ	$-1
+	ld	de,(RecRes)	; Get pages read
+	or	a
+	sbc	hl,de		; .. subtract
+	ret	z		; .. end
+	add	hl,hl		; .. bump again
+	ret
+;
+; Rewrite output file
+;
+Rewrite:
+	call	PushReg		; Push regs
+	ld	a,(FCB)
+	dec	a
+	call	SetDsk		; Log disk
+	ld	de,FCB
+	ld	c,.delete
+IF	@MOD@
+	call	w.BDOS		; Delete file
+ELSE
+	call	BDOS		; Delete file
+ENDIF	;@MOD@
+	xor	a
+	ld	(FCB+_EX),a	; Clear extent
+	ld	de,FCB
+	ld	c,.make
+	call	BDOS		; Delete file
+	inc	a
+	jr	z,l19fa		; .. error
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	hl,(DMAptr)	; Get buffer address
+	ld	(RecPtr),hl	; .. init pointer
+	ld.rp	hl,_Recs,0	; Load records
+$REC_1$	equ	$-1
+	ld	(RecRes),hl	; Set pages
+	call	PopReg		; Pop regs
+	ret
+l19fa:
+	ld	hl,l1a03
+	call	PrStr		; Tell directory full
+	jp	$$Q$$		; .. and quit
+l1a03:
+	db	'Dir Full',.eot
+;
+; Put record to file
+; ENTRY	Reg HL points to source
+;
+put$HEX:
+	ld	de,(RecPtr)	; .. get destination
+	ld	bc,(RecRes)	; .. and pages
+l1a14:
+	ld	a,.eot		; Init end marker
+l1a16:
+	cp	(hl)		; .. test end
+	jr	z,l1a2a		; .. yeap
+	ldi			; .. unpack code
+	jp	pe,l1a16	; .. still more
+	call	WrSecure	; Write code to file
+	ld	de,(DMAptr)	; Get buffer address
+	ld.rp	bc,_Recs,0	; Load records
+$REC_2$	equ	$-1
+	jr	l1a14		; .. re-enter loop
+l1a2a:
+	ld	(RecPtr),de	; .. set destination
+	ld	(RecRes),bc	; .. and pages
+	ret
+;
+; Write code to file on valid S/N
+;
+WrSecure::
+IF	NOT @MOD@
+	push	hl
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+; !!!!! SECURITY CODE - BREAK IF S/N NOT EXPECTED ONE !!!!!
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	hl,$SN$ / 2	; Get 'pointer' to S/N
+	ld	a,1
+	or	a
+	rra
+	adc	hl,hl		; .. calculate the crazy way
+	ld	b,SNlen
+l1a3f:
+	add	a,(hl)		; Build sum
+	inc	hl
+	djnz	l1a3f
+	ld	de,_SN_-$SN$-SNlen
+	add	hl,de		; Point to expected sum
+	cp	(hl)		; .. compare
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	pop	hl
+	ret	nz		; !!!! BREAK IF NO MATCH !!!!
+ENDIF	;NOT @MOD@
+	ld	c,_Recs*2	; .. varies
+$$WR$$	equ	$-1
+;
+; Write records to disk
+; ENTRY	Reg C holds record count
+;
+WrIO:
+	push	hl
+	ld	a,.wrseq
+	call	@WrIO		; Write records
+	pop	hl
+	ret
+;
+$WR.ERR:
+	db	'Disk Full!!',cr,lf,.eot
+	ret
+;
+; Print string closed by -1 to printer
+; ENTRY	Reg HL points to string
+;
+LstStr:
+	ld	a,(hl)		; Get character
+	or	a
+	ret	m		; .. end on -1
+	inc	hl
+	ld	e,a
+	ld	c,.lstout
+	push	hl
+	call	BDOS		; .. print
+	pop	hl
+	jr	LstStr
+	ret			; *** DUMMY
+;
+; Print string closed by -1 to console
+; ENTRY	Reg HL points to string
+;
+ConStr:
+	ld	a,(hl)		; Get character
+	or	a
+	ret	m		; .. end on -1
+	inc	hl
+	ld	e,a
+	ld	c,.conout
+	push	hl
+	call	BDOS		; .. type
+	pop	hl
+	jr	ConStr
+l1a80:				;;
+	db	6,'Abort!'
+;
+; Print string on console
+; ENTRY	Reg HL points to string
+;
+PrStr:
+	call	PushReg		; Push regs
+	call	ConStr		; Type string
+	call	PopReg		; Pop regs
+	ret
+;
+; Log new disk buffer
+; ENTRY	Reg DE points to buffer
+;
+SetDMA:
+	push	hl
+	ld	hl,(BufPtr)	; Get current disk buffer
+	or	a
+	sbc	hl,de		; .. compare
+	jr	z,SkpDMA	; .. same
+	ld	(BufPtr),de	; Set new buffer
+	push	de
+	push	bc
+	ld	c,.setdma
+	call	BDOS		; .. by OS, too
+	pop	bc
+	pop	de
+SkpDMA:
+	pop	hl
+	ret
+;
+; Log new disk
+; ENTRY	Accu holds new disk to be logged
+;
+SetDsk:
+	ld	hl,LogDsk	; Get pointer to current disk
+	ld	c,.setdsk	; Get code
+l1aae:
+	cp	(hl)		; Test alteday logged
+	ret	z		; .. yeap
+	ld	(hl),a		; Save it
+	push	de
+	ld	e,a
+	call	BDOS		; .. set it
+	pop	de
+	ret
+;
+; Log new user
+; ENTRY	Accu holds new user to be logged
+;
+SetUsr:
+	ld	hl,LogUsr	; Get pointer to current user
+	ld	c,.usrcod	; Get code
+	jr	l1aae		; .. log
+;
+; Read buffer
+;
+RdIO:
+	ld	c,_Recs*2	; Set count - varies
+$$RD$$	equ	$-1
+	ld	a,.rdseq	; Get read code
+;
+; Do I/O
+; ENTRY	Reg C holds record count
+;	Accu  holds OS code - read or write
+;
+@WrIO:
+	ld	($IO.CPM),a	; Set code
+	ld	($IO.SIM),a
+	call	PushReg		; Push regs
+	push	bc
+	ld	a,(FCB)
+	dec	a
+	call	SetDsk		; Log disk
+	pop	bc
+	ld	a,($MULS$)	; Test multi sectors
+	or	a
+	jr	nz,l1b02	; MP/M or CP/M+
+	ld	hl,(DMAptr)	; Get buffer
+	ld	b,c		; Get record count
+l1adf:
+	call	l1b3b		; Do the loop
+	jr	nz,l1aea	; .. error
+	ld	de,RecLng
+	add	hl,de
+	djnz	l1adf
+l1aea:
+	ld	a,c		; Get requested count
+	sub	b		; .. calculate real read
+l1aec:
+	ld	hl,0
+	ld	de,RecLng
+	jr	z,l1afb		; .. all read
+	ld	b,a
+l1af5:
+	add	hl,de		; Calculate bytes read
+	djnz	l1af5
+	add	hl,de		; .. fix
+	ld	l,0		; Set page boundary
+l1afb:
+	ld	(RecRes),hl	; .. save pages
+	call	PopReg		; Pop regs
+	ret
+l1b02:
+	ld	e,c		; Get record count
+	push	bc
+	ld	c,.mulsec
+	call	BDOS		; .. set it
+	ld	de,(DMAptr)	; Get buffer
+	call	SetDMA		; .. log it
+	ld	de,FCB
+	ld	c,.rdseq	; <<- Varies
+$IO.CPM	equ	$-1
+	call	BDOS		; Execute I/O
+	or	a
+	pop	bc
+	ld	a,c
+	jr	z,l1b2f		; .. success
+	ld	a,(OStype)	; Get OS type
+	dec	a
+	ld	a,h
+	jr	z,l1b28		; .. skip CP/M+
+	rra			; .. get HI bits on MP/M
+	rra
+	rra
+	rra
+l1b28:
+	and	LoMask		; Mask lower
+	push	af		; .. save processed records
+	call	l1b4d
+	pop	af		; .. get back
+l1b2f:
+	push	af
+	ld	e,1
+	ld	c,.mulsec
+	call	BDOS		; Reset sector count
+	pop	af
+	or	a
+	jr	l1aec
+;
+; Perform record I/O for CP/M 2
+;
+l1b3b:
+	push	hl
+	push	bc
+	ex	de,hl		; Get buffer
+	call	SetDMA		; .. log it
+	ld	de,FCB
+	ld	c,.rdseq	; <<- Varies
+$IO.SIM	equ	$-1
+	call	BDOS
+	pop	bc
+	pop	hl
+	or	a
+	ret	z
+;
+; Perform I/O error
+;
+l1b4d:
+	ld	a,($IO.SIM)	; Get code
+	cp	.wrseq		; Test write
+	ret	nz		; .. nope
+	ld	hl,$WR.ERR
+	call	PrStr		; Tell disk full
+	call	Close		; .. close file
+	jp	$$Q$$		; .. and quit
+;
+; Push alternate registers
+;
+PushReg:
+	exx			; Get regs
+	ex	(sp),hl		; Get caller
+	push	de		; Save regs
+	push	bc
+	push	ix
+	push	hl		; Reset caller
+	exx			; Get back regs
+@@EI@@:
+	ei			; Allow interrupts
+	ret
+;
+; Pop alternate registers
+;
+PopReg:
+@@DI@@:
+	di			; Disable interrupts
+	exx			; Get regs
+	pop	hl		; Get caller
+	pop	ix		; Pop regs
+	pop	bc
+	pop	de
+	ex	(sp),hl		; Save caller
+	exx			; Get back regs
+	ret
+;
+;
+;
+l1b73:
+	push	de
+	ld	hl,(l21ba)
+	dec	hl
+	ld	c,2		; Init year
+l1b7a:
+	ld	de,-365		; Init day count
+	ld	a,c
+	and	3		; Test leap year
+	jr	nz,l1b83
+	dec	de		; .. fix days
+l1b83:
+	inc	c
+	add	hl,de
+	jr	c,l1b7a
+	sbc	hl,de
+	push	hl
+	dec	c
+	ld	a,c
+	and	3
+	jr	nz,l1b95
+	ld	a,0e3h
+	ld	(l1bfa),a
+l1b95:
+	ld	a,c
+	add	a,78-2
+	ld	l,a
+	ld	h,0
+	ld	de,l2237
+	call	l1f50
+	ld	a,' '
+	ld	(de),a
+	pop	hl
+	ld	de,l1bf6	; Point to month
+	ld	b,-1
+l1baa:
+	ld	a,(de)
+	inc	de
+	ld	c,a
+	add	hl,bc
+	jr	nc,l1bb5
+	inc	de
+	inc	de
+	inc	de
+	jr	l1baa
+l1bb5:
+	sbc	hl,bc
+	push	hl
+	ex	de,hl
+	ld	de,l2232
+	ld	a,' '
+	ld	(de),a
+	inc	de
+	ldi
+	ldi
+	ldi
+	ld	(de),a
+	pop	hl
+	inc	hl
+	ld	de,l2230
+	ld	a,l
+	cp	lf
+	jr	nc,l1bd5
+	ld	a,' '
+	ld	(de),a
+	inc	de
+l1bd5:
+	call	l1f50
+	ld	de,l223a
+	ld	hl,l21bc
+	ld	a,2
+	call	l1efb
+	ld	a,':'
+	ld	(de),a
+	inc	de
+	ld	a,2
+	call	l1efb
+	ld	a,' '
+	ld	(de),a
+	ld	hl,l222f
+	pop	de
+	jp	MovLStr		; Copy string
+l1bf6:
+	db	-31,'Jan'
+l1bfa:
+	db	-28,'Feb'
+	db	-31,'Mar'
+	db	-30,'Apr'
+	db	-31,'May'
+	db	-30,'Jun'
+	db	-31,'Jul'
+	db	-31,'Aug'
+	db	-30,'Sep'
+	db	-31,'Oct'
+	db	-30,'Nov'
+	db	-31,'Dec'
+l1c26:
+	sub	0bah
+	jr	z,l1c36
+	dec	a
+	jr	z,l1c35
+	dec	a
+	jr	nz,l1c31
+	ld	l,h
+l1c31:
+	ld	h,0
+	jr	l1c7a
+l1c35:
+	dec	hl
+l1c36:
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld	l,a
+	jr	l1c7a
+l1c3e:
+	pop	hl
+	call	l1c7a
+l1c42:
+	pop	af
+	ld	hl,(l21a7)
+	ld	(hl),a
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	(l21a7),hl
+	ret
+;
+; Perform special MS code
+; ENTRY	Accu holds SLR mapping
+;
+MS.A.Code:
+	push	af
+	call	l1c8b
+	jr	c,l1c42
+	pop	af
+	cp	0bah
+	jr	c,l1c5d
+	cp	0beh
+	jr	c,l1c26
+l1c5d:
+	push	af
+	push	hl
+	call	l1c8b
+	jr	c,l1c3e
+	pop	de
+	pop	af
+	push	de
+	push	hl
+	sub	0b0h
+	ld	hl,l1c9f
+	add	a,a
+	ld	c,a
+	ld	b,0
+	add	hl,bc
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	pop	hl
+	pop	de
+	call	l1c89
+l1c7a:
+	ex	de,hl
+	ld	hl,(l21a7)
+	ld	(hl),90h
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(l21a7),hl
+	ret
+l1c89:
+	push	bc
+	ret
+l1c8b:
+	ld	hl,(l21a7)
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	a,(hl)
+	cp	9fh
+	ccf
+	ret	c
+	ld	(l21a7),hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+l1c9f:
+	dw	l1cec
+	dw	l1cee
+	dw	l1d07
+	dw	l1d4a
+	dw	l1d50
+	dw	l1cf9
+	dw	l1cf2
+	dw	l1d00
+	dw	l1d23
+	dw	l1d3a
+	dw	l1cd1
+	dw	l1cd1
+	dw	l1cd1
+	dw	l1cd1
+	dw	l1cd1
+	dw	l1cc9
+	dw	l1cd6
+	dw	l1cde
+	dw	l1ce4
+	dw	l1cdd
+	dw	l1ce5
+l1cc9:
+	xor	a
+	sbc	hl,de
+	jr	z,l1cd2
+l1cce:
+	ld	hl,0
+l1cd1:
+	ret
+l1cd2:
+	ld	hl,-1
+	ret
+l1cd6:
+	xor	a
+	sbc	hl,de
+	jr	z,l1cce
+	jr	l1cd2
+l1cdd:
+	ex	de,hl
+l1cde:
+	xor	a
+	sbc	hl,de
+	sbc	hl,hl
+	ret
+l1ce4:
+	ex	de,hl
+l1ce5:
+	sbc	hl,de
+	ccf
+	sbc	hl,hl
+	xor	a
+	ret
+l1cec:
+	add	hl,de
+	ret
+l1cee:
+	or	a
+	sbc	hl,de
+	ret
+l1cf2:
+	ld	a,h
+	or	d
+	ld	h,a
+	ld	a,l
+	or	e
+	ld	l,a
+	ret
+l1cf9:
+	ld	a,h
+	and	d
+	ld	h,a
+	ld	a,l
+	and	e
+	ld	l,a
+	ret
+l1d00:
+	ld	a,h
+	xor	d
+	ld	h,a
+	ld	a,l
+	xor	e
+	ld	l,a
+	ret
+l1d07:
+	push	hl
+	sbc	hl,de
+	pop	hl
+	jr	nc,l1d0e
+	ex	de,hl
+l1d0e:
+	ld	b,d
+	ld	c,e
+	ld	de,0
+l1d13:
+	srl	b
+	rr	c
+	jr	nc,l1d1c
+	ex	de,hl
+	add	hl,de
+	ex	de,hl
+l1d1c:
+	add	hl,hl
+	ld	a,b
+	or	c
+	jr	nz,l1d13
+	ex	de,hl
+	ret
+l1d23:
+	ld	a,d
+	or	a
+	jr	nz,l1d36
+	ld	a,e
+	cp	10h
+	jr	nc,l1d36
+	or	a
+	ret	z
+	ld	b,a
+l1d2f:
+	srl	h
+	rr	l
+	djnz	l1d2f
+	ret
+l1d36:
+	xor	a
+	ld	h,a
+	ld	l,a
+	ret
+l1d3a:
+	ld	a,d
+	or	a
+	jr	nz,l1d36
+	ld	a,e
+	cp	10h
+	jr	nc,l1d36
+	or	a
+	ret	z
+	ld	b,a
+l1d46:
+	add	hl,hl
+	djnz	l1d46
+	ret
+l1d4a:
+	call	l1d50
+	ld	h,b
+	ld	l,c
+	ret
+l1d50:
+	ld	a,h
+	ld	c,l
+	ld	hl,0
+	or	a
+	ld	b,10h
+	rl	c
+	rla
+l1d5b:
+	adc	hl,hl
+	sbc	hl,de
+	jr	nc,l1d62
+	add	hl,de
+l1d62:
+	ccf
+	rl	c
+	rla
+	djnz	l1d5b
+	ld	b,a
+	ret
+l1d6a:
+	call	l1e98
+	ld	e,0e2h
+	jr	nz,l1d93
+	ld	a,l
+	call	fput		; .. put to file
+	add	hl,hl
+	inc	h
+	jr	c,l1d7a
+	dec	h
+l1d7a:
+	ret	z
+	jr	l1d8b
+l1d7d:
+	call	l1e98
+	jr	nz,l1d91
+	ld	a,l
+	call	fput		; Put to file
+	ld	a,h
+	or	a
+	ret	z
+	inc	a
+	ret	z
+l1d8b:
+	ld	hl,l1da4
+	jp	PrErrStr	; Print error
+l1d91:
+	ld	e,0e1h
+l1d93:
+	cp	0fh
+	jr	nz,l1d9c
+	push	de
+	call	l1e8a
+	pop	de
+l1d9c:
+	ld	a,e
+	call	l1e38
+	xor	a
+	jp	fput		; .. put zero
+l1da4:
+	db	17,'Byte Out Of Range'
+;
+	dw	0
+l1db8:
+	ld	hl,l1da4
+	call	PrErrStr
+	xor	a
+	ld	l,a
+	ret
+;
+; Special MS code : A BIT
+;
+l1dc1:
+	push	af
+	call	l1e98
+	jr	nz,l1de5
+	inc	h
+	dec	h
+	jr	nz,l1dce
+	ld	a,l
+	cp	8
+l1dce:
+	call	nc,l1db8
+	add	a,a
+	add	a,a
+	add	a,a
+	pop	bc
+	ld	c,a
+	ld	a,(l21b2)
+	or	a
+	jr	z,l1de0
+	ld	a,(l1efa)
+	ld	b,a
+l1de0:
+	ld	a,c
+	or	b
+	jp	fput		; Put to file
+l1de5:
+	cp	0fh
+	call	z,l1e8a
+	ld	a,0e8h
+	call	l1e38
+	pop	af
+	jp	fput		; Put to file
+;
+; Special MS code : A IM
+;
+l1df3:
+	call	l1e98
+	ld	e,0eah
+l1df8:
+	jr	nz,l1d93
+	or	h
+	jr	nz,l1e00
+	ld	a,l
+	cp	3
+l1e00:
+	call	nc,l1db8
+	ld	c,'F'
+	or	a
+	jr	z,l1e0f
+	dec	a
+	ld	c,'V'
+	jr	z,l1e0f
+	ld	c,5eh
+l1e0f:
+	ld	a,c
+	jp	fput		; Put to file
+;
+; Special MS code : A RST
+;
+l1e13:
+	call	l1e98
+	ld	e,0e9h
+	jr	nz,l1df8
+	or	h
+	jr	nz,l1e20
+	ld	a,l
+	and	0c7h
+l1e20:
+	call	nz,l1db8
+	ld	a,l
+	or	0c7h
+	jp	fput		; .. put to file
+l1e29:
+	call	l1e98
+	jr	z,l1e6f
+	ld	a,0e0h
+	call	l1e38
+	ld	hl,0
+	jr	l1e6f
+l1e38:
+	push	af
+	ld	a,(l21b2)
+	or	a
+	jr	nz,l1e77
+	call	l1ed4
+	pop	af
+	cp	0bfh
+	jr	c,l1e5b
+	cp	0d0h
+	jr	nc,l1e5b
+	push	af
+	ld	bc,1
+	call	_u.alloc	; Allocate one byte
+	dec	hl		; .. fix address
+	dec	hl
+	dec	hl
+	pop	af
+	ld	(hl),0bfh
+	inc	hl
+	sub	0bfh
+l1e5b:
+	ld	(hl),a
+	ex	de,hl
+	call	l149e
+	exx
+	push	de
+	exx
+	pop	hl
+	ld	bc,(l2229)
+	add	hl,bc
+	ex	de,hl
+l1e6a:
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ret
+l1e6f:
+	ld	a,l
+	call	fput		; .. put to file
+	ld	a,h
+	jp	fput
+l1e77:
+	ld	hl,l1e7d
+	jp	l18a5
+l1e7d:
+	db	12,'Finish Error'
+l1e8a:
+	ld	a,(l21b2)
+	or	a
+	jr	nz,l1e77
+	ex	de,hl
+	call	l1ed4
+	ld	(hl),9fh
+	jr	l1e6a
+l1e98:
+	ld	a,(l21b2)
+	or	a
+	call	nz,l1ee3
+	ld	a,(l2276)
+	inc	a
+	jr	z,l1eda
+	ld	hl,l2273
+l1ea8:
+	ld	a,(hl)
+	ex	de,hl
+	cp	0a0h
+	jr	c,l1ecc
+	cp	0d0h
+	ret	nc
+	ld	bc,1
+	call	_u.alloc	; Allocate one byte
+	ld	a,(de)
+	cp	0bfh
+	jr	c,l1ec4
+	ld	(hl),0bfh	; Set code
+	call	_u.alloc	; .. one more
+	ld	a,(de)
+	sub	0bfh
+l1ec4:
+	ld	(hl),a		; Set code
+	inc	hl
+	ex	de,hl
+	inc	hl
+	inc	hl
+	inc	hl
+	jr	l1ea8
+l1ecc:
+	call	l1ed4		; Allocate memory
+	ex	de,hl
+	ldir			; .. save ????
+	jr	l1ea8
+l1ed4:
+	ld	bc,l0003
+	jp	_u.alloc	; Allocate memory
+l1eda:
+	ld	a,(l2273)
+	and	LoMask
+	ld	hl,(l2274)
+	ret
+l1ee3:
+	call	GetSLR		; Get lo
+	ld	e,a
+	call	GetSLR		; .. and hi
+	ld	d,a
+	ld	hl,(AdrPos)	; Get position
+	add	hl,de		; Fix buffer
+	push	hl
+	exx
+	pop	de		; .. get new buffer
+	ld	c,0
+	exx
+	ld	a,(hl)
+	ld	(l1efa),a
+	ret
+l1efa:
+	db	0
+l1efb:
+	ld	c,'0'
+	jr	l1f01
+	ld	c,' '
+l1f01:
+	ld	b,a
+	ld	a,'0'
+	inc	b
+	srl	b
+	jr	c,l1f0d
+	rld
+	jr	l1f10
+l1f0d:
+	call	l1f19
+l1f10:
+	call	l1f19
+	rld
+	inc	hl
+	djnz	l1f0d
+	ret
+l1f19:
+	rld
+	cp	'0'
+	jr	z,l1f24
+	ld	(de),a
+	inc	de
+	ld	c,'0'
+	ret
+l1f24:
+	ld	a,c
+	ld	(de),a
+	inc	de
+	ld	a,'0'
+	ret
+;
+; Convert HEX coded record to ASCII
+; ENTRY	Reg HL points to binary stream
+;	Reg DE points to ASCII  stream
+;	Accu holds length
+;
+HEX.$HEX:
+	ld	b,a		; Save length
+	ld	c,'0'		; .. init ASCII offset
+	inc	b		; Test nibble count
+	srl	b
+	jr	c,l1f36		; .. even
+	rld			; .. swap nibbles if odd
+	jr	l1f41
+l1f36:
+	ld	a,c		; Get offset
+	rld			; .. swap
+	cp	'9'+1		; Test range
+	jr	c,l1f3f
+	add	a,7		; .. add for A..F
+l1f3f:
+	ld	(de),a		; .. save
+	inc	de
+l1f41:
+	ld	a,c		; Get next
+	rld			; .. swap nibbles
+	cp	'9'+1		; Test range
+	jr	c,l1f4a
+	add	a,7		; .. add for A..F
+l1f4a:
+	ld	(de),a		; .. save
+	inc	de
+	inc	hl
+	djnz	l1f36
+	ret
+;
+;
+;
+l1f50:
+	ld	c,0
+	jr	l1f56
+	ld	c,'0'
+l1f56:
+	push	de
+	ld	de,-10000
+	call	l1f8e
+	jr	z,l1f63
+	pop	de
+	ld	(de),a
+	inc	de
+	push	de
+l1f63:
+	ld	de,-1000
+	call	l1f8e
+	jr	z,l1f6f
+	pop	de
+	ld	(de),a
+	inc	de
+	push	de
+l1f6f:
+	ld	de,-100
+	call	l1f8e
+	jr	z,l1f7b
+	pop	de
+	ld	(de),a
+	inc	de
+	push	de
+l1f7b:
+	ld	de,-10
+	call	l1f8e
+	jr	z,l1f87
+	pop	de
+	ld	(de),a
+	inc	de
+	push	de
+l1f87:
+	ld	a,l
+	add	a,'0'
+	pop	de
+	ld	(de),a
+	inc	de
+	ret
+l1f8e:
+	xor	a
+l1f8f:
+	add	hl,de
+	inc	a
+	jr	c,l1f8f
+	sbc	hl,de
+	dec	a
+	or	c
+	ret	z
+	ld	c,'0'
+	or	c
+	ret
+l1f9c:
+	call	PutStat		; Give statistic
+	ld	hl,(l21da)
+	ld	a,h
+	or	l
+	jr	z,l1fda
+	ld	hl,l2177
+	call	PrStr		; Print
+	ld	hl,(l21da)
+l1faf:
+	ld	de,ErrStrg	; Get error string
+	ld	a,(hl)
+	add	a,'A'-1
+	ld	(de),a		; Set drive
+	inc	de
+	ld	a,':'
+	ld	(de),a
+	inc	de
+	ld	bc,@nam
+	inc	hl
+	ldir			; Copy name
+	push	hl
+	ex	de,hl
+	ld	(hl),cr
+	inc	hl
+	ld	(hl),lf
+	inc	hl
+	ld	(hl),.eot
+	ld	hl,ErrStrg	; Get error string
+	call	PrStr		; Print
+	pop	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,h
+	or	l
+	jr	nz,l1faf
+l1fda:
+	ld	a,($$F.N)	; Get mark
+	or	a
+	jr	z,l200e		; .. not defined
+	ld	hl,$$F.N	; Load source
+	ld	de,FCB
+	ld	bc,@drv+@nam
+	ldir			; Copy file name
+	ld	hl,$SYM$
+	ld	c,@ext
+	ldir			; Set .SYM extension
+	xor	a
+	ld	(de),a		; .. clear extent
+	call	Rewrite		; Rewrite file
+	ld	hl,put$HEX	; Change output
+	ld	(l2052+1),hl
+	call	l200e
+	call	fclose		; Close file
+	ld	hl,PrStr	; Set vector
+	ld	(l2052+1),hl
+	xor	a
+	ld	($$F.N),a	; Mark unused
+	ret
+l200e:
+	ld	hl,ErrStrg	; Set pointer to error
+	ld	(l2205),hl
+	ld	hl,(l219e)
+	ld	de,l24f7
+	or	a
+	sbc	hl,de
+	ret	z
+	srl	h
+	rr	l
+	jr	z,l2025
+	inc	h
+l2025:
+	ld	c,h
+	ld	b,l
+	ld	hl,l24f7
+	ld	a,3
+l202c:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	call	l2085
+	dec	a
+	jr	nz,l2039
+	call	l2041
+l2039:
+	djnz	l202c
+	dec	c
+	jr	nz,l202c
+	cp	3
+	ret	nc
+l2041:
+	push	hl
+	push	de
+	push	bc
+	ld	hl,(l2205)
+	ld	(hl),cr
+	inc	hl
+	ld	(hl),lf
+	inc	hl
+	ld	(hl),.eot
+	ld	hl,ErrStrg	; Get error string
+l2052:
+	call	PrStr		; Print
+	ld	hl,ErrStrg
+	ld	(l2205),hl
+	ld	a,3
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+$LEFT:
+	db	' Left',cr,lf,.eot
+LeftLen	equ	$-$LEFT
+l2069:
+	ld	a,($UNDEF$)	; Test undefined
+	or	a
+	jr	nz,l2081	; .. yeap
+	push	hl
+	inc	hl
+	ld	e,(hl)		; Fetch value
+	inc	hl
+	ld	d,(hl)
+	ld	hl,(l2205)	; Get buffer
+	ex	de,hl
+	call	CnvHtA		; Convert to ASCII
+	ld	a,' '
+	ld	(de),a
+	inc	de
+	jr	l209a
+l2081:
+	pop	af
+	inc	a
+	jr	l20ca
+l2085:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ex	de,hl
+	ld	a,(hl)
+	or	a
+	jp	m,l2069
+	push	hl
+	ld	hl,l20db
+	ld	de,(l2205)
+	call	MovLStr		; Copy string
+l209a:
+	pop	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	a,($TAB$)	; Test using tabs
+	ld.rp	bc,17,17
+	or	a
+	jr	z,l20a8		; .. nope
+	dec	b
+l20a8:
+	ld	a,0ffh
+	jr	l20ae
+l20ac:
+	ldi
+l20ae:
+	cp	(hl)
+	jr	z,l20b3
+	djnz	l20ac
+l20b3:
+	pop	af
+	push	af
+	dec	a
+	jr	z,l20c5
+	ld	a,($TAB$)	; Test using tabs
+	or	a
+	jr	nz,l20ce	; .. yeap
+	ld	b,c
+	ld	a,' '
+l20c1:
+	ld	(de),a
+	inc	de
+	djnz	l20c1
+l20c5:
+	ld	(l2205),de
+	pop	af
+l20ca:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+l20ce:
+	inc	c
+l20cf:
+	ld	a,9
+	ld	(de),a
+	inc	de
+	ld	a,c
+	sub	8
+	ld	c,a
+	jr	nc,l20cf
+	jr	l20c5
+l20db:
+	db	5,' **  '
+;
+; Convert hex word to ASCII
+; ENTRY	Reg HL holds word
+;	Reg DE points to buffer
+;
+CnvHtA::
+	ld	a,h		; Convert hi
+	call	l20e6
+	ld	a,l		; .. and lo
+l20e6:
+	push	af
+	rra			; Get upper bits
+	rra
+	rra
+	rra
+	call	l20ef		; .. convert
+	pop	af		; .. get back lo
+l20ef:
+	and	LoMask		; Mask lower bits
+	or	'0'		; Add offset
+	cp	'9'+1		; Test range
+	jr	c,l20f9
+	add	a,'A'-'9'-1	; .. add hex
+l20f9:
+	ld	(de),a		; Save character
+	inc	de
+	ret
+;
+;
+;
+l20fc::
+	ld	hl,(l219e)
+	ld	de,l24f7
+	ld	(l211c+1),de
+	or	a
+	sbc	hl,de
+	srl	h
+	rr	l
+	inc	hl
+	ld	(l2129),hl
+	ret
+;
+;
+;
+l2112:
+	ld	hl,(l2129)
+	dec	hl
+	ld	(l2129),hl
+	ld	a,h
+	or	l
+	ret	z
+l211c:
+	ld	hl,$-$
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	(l211c+1),hl
+	ex	de,hl
+	ld	a,(hl)
+	ret
+l2129:
+	dw	0
+;
+; Give statistic about linking
+;
+PutStat:
+	ld	hl,(StrAdr)	; Get start address
+	ld	de,ErrStrg	; .. string address
+	call	CnvHtA		; .. convert value
+	ld	a,'-'
+	ld	(de),a		; Set delimiter
+	inc	de
+	ld	hl,(EndAdr)	; Get end address
+	dec	hl
+	call	CnvHtA		; .. convert
+	ex	de,hl
+	ld	(hl),' '
+	inc	hl
+	ld	(hl),'('
+	inc	hl
+	ex	de,hl
+	ld	hl,(BegAdr)	; Get beginning address
+	ld	bc,(StrAdr)	; .. start address
+	or	a
+	sbc	hl,bc		; Get difference
+	call	CnvHtA		; .. convert
+	ex	de,hl
+	ld	(hl),')'
+	inc	hl
+	ld	(hl),tab
+	inc	hl
+	ex	de,hl
+	ld	hl,(dHeap)	; Get top heap
+	ld	bc,(uHeap)	; .. and bottom heap
+	or	a
+	sbc	hl,bc		; Get difference
+	call	CnvHtA		; .. convert
+	ld	hl,$LEFT
+	ld	bc,LeftLen
+	ldir			; .. close message
+	ld	hl,ErrStrg	; Get string
+	jp	PrStr		; .. print
+;
+l2177:
+	db	'Libraries Requested:',cr,lf,.eot
+OStype:
+	db	_SIM
+MAIN:
+IF	NOT @MOD@
+;
+; Next code will be overwritten
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	hl,.l2195+1
+	ld	de,@ZERR	; Get error buffer
+.l2195:
+	call	.l21a3
+	ld	hl,l2299
+	ld	de,MAIN_
+	call	.l21a3
+	jr	MAIN_
+;
+;
+;
+.l21a3:
+	or	a
+	sbc	hl,de
+	srl	h
+	rr	l
+	ld	b,l
+	ld	c,h
+	inc	c
+	ex	de,hl
+l21ae:
+	rrc	(hl)
+	inc	hl
+	rlc	(hl)
+	inc	hl
+	djnz	l21ae
+	dec	c
+	jr	nz,l21ae
+	ret
+ENDIF	;NOT @MOD@
+;
+; Move code into dynamic memory and execute
+;
+MAIN_:
+IF	@MOD@
+	call	MapCCP		; Unpack CCP
+ENDIF	;@MOD@
+	ld	hl,l21c8
+	ld	de,l25f9
+	ld	bc,CodLen
+	ldir			; Move code
+	jp	l25f9		; .. and go init
+;
+; Following code will be moved to high memory
+; ->> These locations used for dynamic data <<-
+;
+; ##### MOVED CODE #####
+;
+l21c8:
+	ld	sp,(BDOS+1)
+	ld	hl,(ZENV)	; Get ZCPR environment
+	ld	a,h
+	or	l
+	jr	z,NoZCPR	; .. nope
+	ld	de,_MBP
+	add	hl,de		; Get message pointer
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	or	h
+	jr	z,NoZCPR	; .. none
+	ld	e,_MEP
+	add	hl,de		; .. fix for error
+	ld	(@ZERR),hl	; .. save
+	ld	(hl),.eot	; .. set none
+NoZCPR:
+	ld	hl,0		; *** DUMMY
+	ld	c,.vers
+	call	BDOS		; Get version
+	dec	h		; Test MP/M
+	jr	z,GotMPM	; .. yeap
+	ld	a,l
+	cp	CPM3		; Test CP/M+
+	jr	nc,GotCPM3	; .. yeap
+	xor	a
+	ld	($MULS$),a	; Set no multi sector
+	jr	SetOStype
+GotMPM:
+	ld	hl,MPM.Rec*RecLng
+	ld	de,MPM.Rec	; Init environment
+	ld	a,_MPM
+	jr	SetOSenv
+GotCPM3:
+	ld	de,.reterr
+	ld	c,.prgerr
+	call	BDOS		; Set error return
+	ld	hl,CPM.Rec*RecLng
+	ld	de,CPM.Rec
+	ld	a,_CPM
+SetOSenv:
+	ld	c,a
+	ld	a,($MULS$)	; Test no multi sectors
+	or	a
+	jr	z,SkpBufSet	; .. yeap
+	ld	($BUF$+1),hl	; Change I/O buffers
+	ld	($SEC$+1),de
+SkpBufSet:
+	ld	a,c		; Get type
+SetOStype:
+	ld	(OStype),a	; .. set it
+	ld	a,($MULS$)	; Test multi sectors
+	or	a
+	jr	nz,LetOS	; .. yeap
+	ld	h,a
+	ld	l,a
+	ld	($OS.MUL$),hl	; Write NOPs in call
+	ld	($OS.MUL$+2),a
+LetOS:
+	ld	de,WrkBuf
+	ld	(BufPtr),de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	c,.curdsk
+	call	BDOS		; Get current disk
+	ld	(LogDsk),a
+	inc	a
+	ld	(LogDsk.),a
+	ld	c,a
+	ld	a,($ALT.DRV$)	; Get alternate drive
+	or	a
+	jr	nz,SkpChgAlt	; .. any set
+	ld	a,c
+	ld	($ALT.DRV$),a	; .. overwrite default
+SkpChgAlt:
+	ld	c,.usrcod
+	ld	e,_get
+	call	BDOS		; Get current user
+	ld	(LogUsr.),a
+	ld	(LogUsr),a
+	ld	a,($BUFF$)	; Get buffer
+	or	a
+	ld	a,_Recs / 2	; Get default 1k
+	jr	z,DefRecs	; .. none
+	add	a,a		; .. double it for 2k
+DefRecs::
+	ld	($REC_1$),a	; Set record counts
+	ld	($REC_2$),a
+	ld	($REC_3$),a
+	add	a,a		; .. double twice
+	ld	($$WR$$),a
+	ld	($$RD$$),a
+	ld	a,($DI$)	; Test interrupts enabled
+	or	a
+	jr	nz,LetINT	; .. yeap
+	ld	(@@EI@@),a	; NOP EI
+	ld	(@@DI@@),a	; .. and DI
+LetINT:
+	ld	hl,$HEAD
+	call	PrStr		; Give header
+	jp	LNK.MAIN
+;
+CodLen	equ	$-l21c8
+;
+; ##### END OF MOVED CODE #####
+;
+l2294::
+IF	@MOD@
+;
+; Map CCP to make semi LINK compatible
+;
+MapCCP::
+	ld	hl,CCP
+	ld	a,(hl)		; Test any length
+	or	a
+	ret	z		; .. nope
+	ld	c,a
+	ld	b,0
+	ld	(CCPlen),bc	; .. save
+	ld	de,(BDOS+1)
+	dec	d
+	ld	(CCP.cpy),de
+	inc	hl
+	ldir			; .. unpack code
+	ld	(hl),b
+	ex	de,hl
+	ld	(hl),b		; .. mark end
+	ld	hl,(CCP.cpy)
+	ld	bc,(CCPlen)
+	ld	a,'='
+	cpir			; .. find assignment
+	ld	de,$FN+1
+	push	af
+	call	z,AssFN		; .. get it
+	pop	af
+	call	nz,SavFN
+	ld	de,CCP+1	; .. init a bit
+	ld	c,0
+NxtCmd:
+	ld	a,(hl)
+	or	a		; Test end of command
+	jr	z,EndCCP
+	cp	'/'		; Test command
+	call	z,Is.NorE	; .. no /N or /E
+	jr	z,NxtCmd
+	ld	(de),a		; .. unpack
+	inc	de
+	inc	hl
+	inc	c
+	jr	NxtCmd
+EndCCP:
+	call	UnpFN		; Unpack file name
+	ld	a,EndLen-1
+	add	a,c		; .. get final length
+	ld	(CCP),a		; .. save
+	ld	hl,$END
+	ld	bc,EndLen
+	ldir			; .. unpack last entry
+	ret
+;
+; Test option /N or /E
+; EXIT	Zero set if either
+;
+Is.NorE:
+	inc	hl
+	ld	a,(hl)		; Test N or E
+	inc	hl
+	cp	'E'
+	ret	z
+	cp	'N'
+	ret	z
+	dec	hl
+	dec	hl
+	ret
+;
+; Unpack file name after '=' found
+; ENTRY	Reg DE points to file name buffer
+; EXIT	Reg HL points behind '='
+;
+AssFN:
+	push	hl
+	call	IniPtr
+Ass..:
+	ld	a,(hl)
+	ldi			; .. unpack
+	cp	'='		; .. test end
+	jr	nz,Ass..
+	dec	de
+	xor	a
+	ld	(de),a		; .. close
+	pop	hl
+	ret
+;
+; Unpack file name
+; ENTRY	Reg DE points to file name buffer
+; EXIT	Reg HL points to command line
+;
+SavFN:
+	call	IniPtr
+Sav..:
+	ld	a,(hl)
+	ldi			; .. unpack
+	cp	'0'		; .. test end
+	jr	nc,Sav..
+	dec	de
+	xor	a
+	ld	(de),a		; .. close
+	ld	hl,(CCP.cpy)
+	ret
+;
+; Unpack destination file
+; ENTRY	Reg DE points to buffer
+;
+UnpFN:
+	ld	hl,$FN
+Unp..:
+	ld	a,(hl)		; Test end
+	or	a
+	ret	z		; .. yeap
+	ld	(de),a		; .. unpack
+	inc	hl
+	inc	de
+	inc	c
+	jr	Unp..
+;
+; Init CCP pointer for non blank
+;
+IniPtr:
+	ld	hl,CCP+1
+..inip:
+	ld	a,(hl)
+	inc	hl
+	cp	' '		; .. no blanks
+	jr	z,..inip
+	cp	tab
+	jr	z,..inip
+	dec	hl
+	ret
+
+$END:
+	db	'/N/E',0
+EndLen	equ	$-$END
+CCPlen:
+	ds	2
+CCP.cpy:
+	ds	2
+$FN:
+	db	','
+	ds	16
+ENDIF	;@MOD@
+
+;
+; >>>>>>>>>> NEXT AREA WILL BE INITIALIZED <<<<<<<<<<
+;
+@BDOS	equ	MAIN		;	ld	hl,(BDOS+1)
+				;	dec	hl
+				;	ld	sp,hl
+@XFER	equ	@BDOS+5		;	nop
+				;	nop
+				;	nop
+StrAdr	equ	@XFER+3		;	dw	0ffffh
+l2199	equ	StrAdr+2	;	db	80h
+uHeap	equ	l2199+1		;	dw	l26fb
+l219c	equ	uHeap+2		;	dw	l26fb
+l219e	equ	l219c+2		;	dw	l24f7
+@ABS	equ	l219e+2		;	dw	TPA+3
+l21a2	equ	@ABS+2		;	dw	l25fb
+l21a4	equ	l21a2+2		;	dw	l2207
+l21a6	equ	l21a4+2		;	db	1
+l21a7	equ	l21a6+1		;	dw	l2273
+;
+; >>>>>>>>>> NEXT AREA WILL BE CLEARED <<<<<<<<<<
+;
+BegAdr	equ	l21a7+2
+EndAdr	equ	BegAdr+2
+COMMbas	equ	EndAdr+2
+LNKerr	equ	COMMbas+2
+OutType	equ	LNKerr+1	; Output file type
+				; 0 non standard
+				; 1 standard binary
+				; 2 HEX file
+LIBflg	equ	OutType+1	; Library file flag
+l21b2	equ	LIBflg+1
+l21b3	equ	l21b2+1
+FCBptr	equ	l21b3+2
+BufPtr	equ	FCBptr+2
+l21b9	equ	BufPtr+2
+l21ba	equ	l21b9+1
+l21bc	equ	l21ba+2
+l21be	equ	l21bc+2
+l21bf	equ	l21be+1
+l21c1	equ	l21bf+2
+AdrBas	equ	l21c1+1
+$VERB$	equ	AdrBas+1
+
+$$F.N	equ	$VERB$+1
+$$FCB	equ	$$F.N+@drv+@nam
+l21d1	equ	$$FCB+4
+l21da	equ	l21d1+9
+l21dc	equ	l21da+2
+$$F.N.Y	equ	l21dc+2
+
+$UNDEF$	equ	$$F.N.Y+@drv+@nam+1
+;
+; >>>>>>>>>> END OF CLEARED AREA <<<<<<<<<<
+;
+l21e9	equ	$UNDEF$+1
+l21ea	equ	l21e9+1
+l21eb	equ	l21ea+1
+l21ed	equ	l21eb+2
+l2205	equ	l21ed+24
+l2207	equ	l2205+2
+@PRG	equ	l2207+4
+@DATA	equ	@PRG+2
+@CODE	equ	@DATA+2
+AdrMode	equ	@CODE+2
+ModAdr	equ	AdrMode+1
+MSitem	equ	ModAdr+2
+MSval	equ	MSitem+1
+BField	equ	MSval+2
+$BField	equ	BField+1	; \
+l221e	equ	$BField+6	; /
+l221f	equ	l221e+1
+l2229	equ	l221f+10
+l222a	equ	l2229+1
+LRQST1	equ	l222a+1
+LRQST2	equ	LRQST1+1
+LoadAdr	equ	LRQST2+1
+l222f	equ	LoadAdr+2
+l2230	equ	l222f+1
+l2232	equ	l2230+2
+l2237	equ	l2232+5
+l223a	equ	l2237+3
+dHeap	equ	l223a+6
+LogDsk	equ	dHeap+2
+LogDsk.	equ	LogDsk+1
+LogUsr.	equ	LogDsk.+1
+LogUsr	equ	LogUsr.+1
+SavUsr	equ	LogUsr+1
+RecRes	equ	SavUsr+1
+RecPtr	equ	RecRes+2
+AdrPos	equ	RecPtr+2
+l224c	equ	AdrPos+1
+PrgName	equ	l224c+1
+l224e	equ	PrgName+1
+Csize	equ	l224e+16
+Dsize	equ	Csize+2
+Caddr	equ	Dsize+2
+Daddr	equ	Caddr+2
+COMMsiz	equ	Daddr+2
+CmdPtr	equ	COMMsiz+2
+IndLen	equ	CmdPtr+2
+IndPtr	equ	IndLen+1
+l226c	equ	IndPtr+1
+l226d	equ	l226c+1
+l226e	equ	l226d+1
+SavStk	equ	l226e+1
+DMAptr	equ	SavStk+2
+l2273	equ	DMAptr+2
+l2274	equ	l2273+1
+l2276	equ	l2274+2
+l2299	equ	l2276+35
+l22f3	equ	l2299+90
+HEXrec	equ	l22f3+2
+$HEXrec	equ	HEXrec+64
+l234e	equ	$HEXrec+25
+ErrStrg	equ	l234e+104
+l2424	equ	ErrStrg+110
+l24f6	equ	l2424+210
+l24f7	equ	l24f6+1
+;
+; >>>>>>>>>> NEXT AREA WILL BE SET TO FILLER BYTE <<<<<<<<<<
+;
+l25f9	equ	l24f7+2+256
+l25fb	equ	l25f9+2
+l26fb	equ	l25fb+256
+l2726	equ	l26fb+43
+WrkBuf	equ	l25f9+512
+
+	end
+

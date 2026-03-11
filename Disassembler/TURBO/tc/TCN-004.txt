@@ -1,0 +1,1968 @@
+;
+; Process simple expression
+;
+SimpExpr:
+	call	Term		; Get term
+..SimpExpr:
+	push	bc		; Save type
+	call	FndTabStr	; Find + or -
+	db	_Byte
+	dw	$INC.DEC
+	pop	bc		; Get back type
+	ret	nz		; .. nope
+	ld	a,b
+	cp	_Ptr		; Test pointer
+	call	ErrZ		; .. invalid
+	db	_IllOpers
+	ld	a,(hl)		; Get operator
+	push	af
+	push	bc
+	call	ExprPush	; Push regs
+	call	Term		; Get term
+	pop	de
+	pop	af
+	push	af		; Get operator
+	or	a
+	jr	nz,l5fc9
+	ld	a,b
+	cp	_Char		; Test character
+	jr	nz,l5fc9
+	call	StImm		; .. set code
+	db	@L29
+$I29:
+	LD	H,L
+	LD	L,1
+	PUSH	HL
+@L29	equ	$-$I29
+	ld	b,_String	; Change to string
+l5fc9:
+	call	ExprConv	; Convert expression
+	pop	af		; Get operator
+	cp	2
+	jr	nc,l601b	; .. other than + or -
+	push	af
+	ld	a,b
+	ld	hl,set.add
+	ld	de,set.sub
+	cp	_Set		; Test set
+	jr	z,Expr.Set	; .. yeap
+	ld	hl,addreal
+	ld	de,subreal
+	cp	_Real		; .. or real
+	jr	z,Expr.Set	; .. yeap
+	cp	_String		; .. or string
+	jr	z,Expr.Str	; .. yeap
+	cp	_Integ
+	call	ErrNZ		; Must be integer
+	db	_IllOpers
+	pop	af		; Get operator
+	dec	a
+	jr	z,l5ffc
+	call	StImm		; Set add
+	db	@L30
+$I30:
+	ADD	HL,DE
+@L30	equ	$-$I30
+	jr	..SimpExpr	; .. loop on
+l5ffc:
+	call	StImm		; Set subtract
+	db	@L31
+$I31:
+	EX	DE,HL
+	OR	A
+	SBC	HL,DE
+@L31	equ	$-$I31
+	jr	..SimpExpr	; .. loop on
+Expr.Set:
+	pop	af		; Get oprator
+	dec	a
+	jr	nz,l600b
+	ex	de,hl		; .. swap for subtract
+l600b:
+	call	StCALL@		; Set add or subtract
+	jr	..SimpExpr	; .. loop on
+Expr.Str:
+	pop	af
+	dec	a
+	call	ErrZ		; Invalid oprand if subtract
+	db	_IllOpers
+	ld	hl,addstr	; Set add strings
+	jr	l600b
+l601b:
+	ld	a,b
+	jr	nz,l6039	; .. not or
+	cp	_Bool		; Test boolean
+	jr	z,l602f
+	cp	_Integ
+	call	ErrNZ		; Must be integer
+	db	_IllOpers
+	call	StImm		; Set OR
+	db	@L32
+$I32:
+	LD	A,H
+	OR	D
+	LD	H,A
+@L32	equ	$-$I32
+l602f:
+	call	StImm
+	db	@L33
+$I33:
+	LD	A,L
+	OR	E
+	LD	L,A
+@L33	equ	$-$I33
+	jp	..SimpExpr	; .. loop on
+l6039:
+	cp	_Bool		; Test boolean
+	jr	z,l604a
+	cp	_Integ
+	call	ErrNZ		; Must be integer
+	db	_IllOpers
+	call	StImm
+	db	@L34
+$I34:
+	LD	A,H		; Set XOR
+	XOR	D
+	LD	H,A
+@L34	equ	$-$I34
+l604a:
+	call	StImm
+	db	@L35
+$I35:
+	LD	A,L
+	XOR	E
+	LD	L,A
+@L35	equ	$-$I35
+	jp	..SimpExpr	; .. loopp on
+;
+; Process term
+;
+Term:
+	call	CompFact	; Get complemented factor
+..Term:
+	push	bc
+	call	FndTabStr	; Find math operators
+	db	_Byte
+	dw	$MATH
+	pop	bc
+	ret	nz		; .. nope
+	ld	a,b
+	cp	_Ptr
+	call	ErrZ		; Invalid operand
+	db	_IllOpers
+	ld	a,(hl)
+	push	af
+	push	bc
+	call	ExprPush	; Push regs
+	call	CompFact	; Get factor
+	pop	de
+	pop	af
+	push	af
+	dec	a		; Test operator
+	jr	nz,Term.noDiv	; .. not /
+	ld	a,b
+	cp	_Integ		; Test integer
+	jr	nz,Term.noDiv
+	ld	hl,IntFlt	; Set convert
+	call	StCALL@
+	ld	b,_Real		; .. force real
+Term.noDiv:
+	call	ExprConv	; Convert expression
+	pop	af		; Get operator
+	ld	e,a
+	ld	a,b
+	inc	e
+	dec	e		; Test *
+	jr	nz,Term.noMul	; .. nope
+	ld	hl,SetINT
+	cp	_Set		; Test set
+	jr	z,Term.Call
+	ld	hl,MultInt
+	cp	_Integ		; .. or integer
+	jr	z,Term.Call
+	ld	hl,MultReal
+Term.RCall:
+	cp	_Real
+	call	ErrNZ		; Must be real
+	db	_IllOpers
+Term.Call:
+	call	StCALL@
+	jr	..Term		; .. loop on
+Term.noMul:
+	ld	hl,DivReal
+	dec	e
+	jr	z,Term.RCall	; .. /
+	dec	e
+	jr	nz,l60cc	; .. not AND
+	cp	_Bool		; Must be either boolean
+	jr	z,l60c3
+	cp	_Integ
+	call	ErrNZ		; .. or integer
+	db	_IllOpers
+	call	StImm		; Set AND
+	db	@L36
+$I36:
+	LD	A,H
+	AND	D
+	LD	H,A
+@L36	equ	$-$I36
+l60c3:
+	call	StImm
+	db	@L37
+$I37:
+	LD	A,L
+	AND	E
+	LD	L,A
+@L37	equ	$-$I37
+	jr	..Term		; .. loop on
+l60cc:
+	cp	_Integ		; Must be integer
+	call	ErrNZ
+	db	_IllOpers
+	ld	hl,DivInt
+	dec	e		; .. test DIV
+	jr	z,Term.Call
+	ld	hl,ModInt
+	dec	e		; .. MOD
+	jr	z,Term.Call
+	ld	hl,shlft
+	dec	e		; .. SHL
+	jr	z,Term.Call
+	ld	hl,shrgt
+	jr	Term.Call	; .. SHR
+;
+; Process complemented factor
+;
+CompFact:
+	call	FindStr		; Test NOT
+	dw	$NOT
+	jr	nz,SgnFactor	; .. nope
+	call	SgnFactor	; Get signed factor
+	ld	a,b
+	cp	_Integ		; Must be integer
+	jr	z,l6107
+	cp	_Bool
+	call	ErrNZ		; .. or boolean
+	db	_IllOpers
+	call	StImm		; Set toggle bit
+	db	@L38
+$I38:
+	LD	A,L
+	XOR	.TRUE
+	LD	L,A
+@L38	equ	$-$I38
+	ret
+l6107:
+	call	StImm		; Set negate integer
+	db	@L39
+$I39:
+	LD	A,L
+	CPL
+	LD	L,A
+	LD	A,H
+	CPL
+	LD	H,A
+@L39	equ	$-$I39
+	ret
+;
+; Process signed factor
+;
+SgnFactor:
+	ld	a,(FacSgn)	; Save entry sign
+	push	af
+	call	GetSign		; Get sign
+	ld	a,e		; .. save it
+	ld	(FacSgn),a
+	call	Factor		; Get factor
+	ld	a,(FacSgn)
+	ld	e,a		; Get back the sign
+	call	ChkNumSign	; Test it
+	jr	z,SFac.res	; .. no sign
+	ld	a,b
+	cp	_Integ		; Test intgeer
+	jr	nz,SFac.Real	; .. nope, real
+
+	call	l6107		; Set one's complement
+	ld	a,.INC.HL
+	call	StByte		; .. make two's
+
+;;	call	StImm		; Get intger two's complement
+;;	db	@L40
+;;$I40:
+;;	LD	A,L
+;;	CPL
+;;	LD	L,A
+;;	LD	A,H
+;;	CPL
+;;	LD	H,A
+;;	INC	HL
+;;@L40	equ	$-$I40
+
+	jr	SFac.res
+SFac.Real:
+	call	StImm		; Get real complement
+	db	@L41
+$I41:
+	LD	A,B
+	XOR	MSB
+	LD	B,A
+@L41	equ	$-$I41
+SFac.res:
+	pop	af
+	ld	(FacSgn),a	; Restore sign
+	ret
+;
+; Set 'Push Registers' depending on type
+; ENTRY	Reg B holds type
+;
+ExprPush:
+	ld	a,b
+	cp	_Integ		; Test ordinal
+	jr	nc,ExprPush.HL	; .. push simple reg pair
+	cp	_Ptr
+	jr	z,ExprPush.HL	; .. same on pointer
+	cp	_String
+	ret	z		; Skip string
+	cp	_Set
+	ret	z		; .. and set
+	call	StImm		; .. must be real, push more
+	db	@L42
+$I42:
+	PUSH	BC
+	PUSH	DE
+@L42	equ	$-$I42
+ExprPush.HL:
+	jp	StPUSH		; Set PUSH HL
+;
+; Convert expression if necessary
+; ENTRY	Reg B holds type to be converted to
+;	Reg D holds type to be converted from
+;
+ExprConv:
+	ld	a,d
+	cp	_Real		; Test from real
+	jr	nz,ECO.fromStr?
+	ld	a,b
+	cp	_Integ		; Test to integer
+	jr	nz,ECO.toReal?
+	ld	hl,IntFlt
+	call	StCALL@		; .. set convert
+	ld	b,_Real		; .. set new type
+	jr	ECO.toReal?
+ECO.fromStr?:
+	cp	_String		; Test from string
+	jr	nz,ECO.toReal?
+	ld	a,b
+	cp	_Char		; Test to character
+	jr	nz,ECO.toReal?
+	call	StImm		; Set 1st character
+	db	@L43
+$I43:
+	LD	H,L
+	LD	L,1
+	PUSH	HL
+@L43	equ	$-$I43
+	ld	b,_String	; Set new type
+ECO.toReal?:
+	ld	a,b
+	cp	_Real		; Test to real
+	jr	nz,ECO.toStr?
+	call	StImm		; Set new environment
+	db	@L44
+$I44:
+	EXX
+@L44	equ	$-$I44
+	jr	ECO.fromInt?
+ECO.toStr?:
+	cp	_String		; Test to string
+	jr	nz,ECO.fromInt?
+	ld	a,d
+	cp	_Char		; Test from character
+	jr	nz,ECO.fromInt?
+	ld	hl,ChrAss
+	call	StCALL@		; Set assign string
+	ld	d,_String
+ECO.fromInt?:
+	ld	a,d
+	cp	_Integ		; Test from integer
+	jr	z,ECO.fromInt
+	jr	nc,ECO.pop
+	cp	_Ptr		; Test pointer
+	jr	z,ECO.pop
+	cp	_REal
+	jr	c,ECO.chk
+	call	StImm		; Set POP regs
+	db	@L45
+$I45:
+	POP	HL
+	POP	DE
+	POP	BC
+@L45	equ	$-$I45
+	jr	ECO.chk
+ECO.fromInt:
+	ld	a,b
+	cp	_Real		; Test to real
+	jr	nz,ECO.pop
+	call	StPOP		; Set POP HL
+	ld	hl,IntFlt
+	call	StCALL@
+	ld	d,_Real		; Change from to real
+	jr	ECO.chk
+ECO.pop:
+	call	StImm		; Simple POP DE
+	db	@L46
+$I46:
+	POP	DE
+@L46	equ	$-$I46
+ECO.chk:
+	ld	a,b		; Verify same resulting types
+	cp	d
+	call	ErrNZ		; Invalid types
+	db	_InvType
+	cp	_Set		; Test set
+	jr	nz,ECO.noSET
+	ld	a,e		; Test length
+	cp	c
+	ret	z
+	or	a
+	ret	z
+	ld	a,c
+	ld	c,e
+	or	a
+	ret	z
+
+	jp	l58c1
+
+;;	call	ERROR		; Invalid types
+;;	db	_InvType
+ECO.noSET:
+	cp	_Ptr		; Test pointer
+	ret	nz		; .. nope, skip
+	ld	hl,(l7b8b)	; Test none
+	ld	a,h
+	or	l
+	ret	z
+	ld	de,(l7b8d)
+	ld	a,d
+	or	e
+	ret	z
+	sbc	hl,de		; Verify same
+	ret	z
+
+	jp	l58c1
+
+;;	call	ERROR		; Invalid types
+;;	db	_InvType
+;
+;
+;
+l6201:
+	ld	de,..Expression	; Set addresses
+	push	de
+	ld	de,..SimpExpr
+	push	de
+	ld	de,..Term
+	push	de
+	jr	l622d
+;
+;
+;
+l620f:
+	ld	de,..Expression	; .. set addresses
+	push	de
+	ld	de,..SimpExpr
+	push	de
+	ld	de,..Term
+	push	de
+	jr	l6276
+;
+; Process factor
+;
+Factor:
+	call	GetLabType	; Get type of label
+	jr	nz,l6257	; .. no constant
+	ld	a,(FacSgn)
+	ld	e,a		; Get sign
+	call	NegateNum	; Make number positive
+	xor	a
+	ld	(FacSgn),a	; Set *NO* sign
+l622d:
+	ld	a,b
+	cp	_Real		; Test real
+	jr	nz,l6249	; .. nope
+	exx
+	push	bc		; .. save it
+	push	de
+	push	hl
+	_BC	3,.LD.HL+16
+l6239:
+	ld	a,c		; Get code
+	sub	16		; .. fix for LD HL,DE and BC
+	ld	c,a
+	call	StByte		; .. store opcode
+	pop	hl		; Get back real
+	call	StWrd		; .. store
+	djnz	l6239
+	ld	b,_Real		; Force real
+	ret
+l6249:
+	cp	_String		; Test string
+	jp	nz,StLD.HL	; .. nope, set LD HL,val16
+	ld	hl,strtostack
+	call	StCALL@
+	jp	StLen		; Save string
+l6257:
+	_BC	6,0
+	call	FndLABEL	; Find label
+	jr	nz,l6271	; .. nope
+	call	l573d
+	ex	de,hl
+	call	Get$TYPE	; Get name
+	ld	hl,(Low.Rng)	; Get pointer
+	ld	(l7b8b),hl	; .. save
+	ld	a,(Type)	; Get type
+	ld	b,a
+	ret
+l6271:
+	call	l67b2
+	jr	nz,l62d2
+l6276:
+	ld	a,(Type)	; Get type
+	cp	_String		; Test range
+	jr	nc,l6285
+	cp	_Set		; Test set
+	jr	z,l6285
+	cp	_Ptr		; .. or pointer
+	jr	nz,l629d
+l6285:
+	call	l66da
+	ld	hl,(Low.Rng)	; Get pointer
+	ld	(l7b8b),hl	; .. save
+	ld	a,(Type)
+	ld	b,a
+	cp	_Set
+	ret	nz
+	call	Get$TYPE	; Get name
+	ld	a,(Type)
+	ld	c,a
+	ret
+l629d:
+	cp	_Array		; Should be array
+	call	ErrNZ		; Structured variables invalid
+	db	_StructErr
+	call	l678b
+	ld	hl,(Low.Rng)	; Get pointer
+	ld	a,(hl)		; .. get type
+	cp	_Char
+	call	ErrNZ		; Structured variables invalid
+	db	_StructErr
+	ld	hl,(High.Rng)	; Get pointer
+	ld	a,(hl)		; .. get type
+	cp	_Integ
+	call	ErrNZ		; Structured variables invalid
+	db	_StructErr
+	ld	hl,(TypLen)	; Get length
+	ld	a,h
+	or	a
+	call	ErrNZ		; Structured variables invalid
+	db	_StructErr
+
+	call	LD.B.		; Set length
+
+;;	ld	h,l
+;;	ld	l,.LD.B
+;;	call	StWrd
+
+	ld	hl,SetSet
+	call	StCALL@		; Set call
+	ld	b,_String	; Force string
+	ret
+l62d2:
+	call	IsOpen		; Test [
+	jr	nz,l631c	; .. nope
+	ld	hl,SetInit
+	call	StCALL@		; Set CALL set_init
+	call	IsClose		; Test ]
+	_BC	3,0
+	ret	z		; .. yeap
+l62e4:
+	push	bc
+	call	ActParam	; Get expression
+	ld	a,b
+	pop	bc
+	inc	c
+	dec	c
+	jr	nz,l62ef
+	ld	c,a
+l62ef:
+	cp	c
+	call	ErrNZ		; Invalid typs
+	db	_InvType
+	push	bc
+	call	FindStr		; Test '..'
+	dw	$..
+	ld	hl,SetElement
+	jr	nz,l6310	; .. nope
+	call	StPUSH		; Set PUSH HL
+	call	ActParam	; Get expression
+	ld	a,b
+	pop	bc
+	push	bc
+	cp	c
+	call	ErrNZ
+	db	_InvType	; Invalid types
+	ld	hl,SetContigous
+l6310:
+	call	StCALL@		; Set CALL routine
+	pop	bc
+	call	IsComma		; Test ,
+	jr	z,l62e4		; .. yeap
+	jp	MustClose	; Verify ]
+l631c:
+	call	IsLeftParen	; Test (
+	jr	nz,l6327	; .. nope
+	call	Expression	; Get expression
+	jp	MustRightParen	; Verify )
+l6327:
+	call	FndTabStr	; Find standard function
+	db	_Addr
+	dw	$FUNC
+	jr	nz,l6335	; .. nope
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	xor	a
+	jp	(hl)		; .. go
+l6335:
+	call	FindStr		; Check NIL
+	dw	$NIL
+	jr	nz,l6345	; .. nope
+	ld	hl,0
+	call	StLD.HL		; Set LD HL,0
+;;	jp	l642e
+	jr	l642e
+;
+; PTR(var)
+;
+.PTR:
+	call	@@IntExpr	; Get ()
+l642e:
+	ld	hl,0
+	ld	(l7b8b),hl	; Set zero pointer
+	ld	b,_Ptr
+	ret
+;
+;
+;
+l6345:
+	_BC	_simple,0
+	call	FndLABEL	; Find label
+	call	ErrNZ		; Syntax error
+	db	_Undef
+	ld	d,(hl)		; Get address
+	dec	hl
+	ld	e,(hl)
+	ld	a,(de)		; .. get type
+	cp	_Integ
+	call	ErrCY		; Simple type expected
+	db	_SimpTexp
+	push	af
+	call	@ActParam	; Get ()
+	pop	af
+	ld	b,a		; Get back type
+	ret
+;
+; SQR(expr)
+;
+.SQR:
+	call	@NumExpr	; Get ()
+	ld	hl,SqrInt
+	ld	a,b
+	cp	_Integ		; Test number type
+	jr	z,SQR.call
+	ld	hl,Sqr
+SQR.call:
+	jp	StCALL@
+;
+; ABS(expr)
+;
+.ABS:
+	call	@NumExpr	; Get ()
+	ld	a,b
+	cp	_Integ		; Test number mode
+	jr	z,Abs.Int
+	call	StImm		; Simple no MSB if real
+	db	@L47
+$I47:
+	RES	_MB,B
+@L47	equ	$-$I47
+	ret
+Abs.Int:
+	ld	hl,AbsInt	; .. get integer
+	jr	IntResult
+;
+; SQRT(expr)
+;
+.SQRT:
+	ld	hl,Sqrt		; .. execute real function
+	jr	RealFunc
+;
+; SIN(expr)
+;
+.SIN:
+	ld	hl,Sin
+	jr	RealFunc
+;
+; COS(expr)
+;
+.COS:
+	ld	hl,Cos
+	jr	RealFunc
+;
+; ARCTAN(expr)
+;
+.ARCTAN:
+	ld	hl,ArcTan
+	jr	RealFunc
+;
+; LN(expr)
+;
+.LN:
+	ld	hl,Ln
+	jr	RealFunc
+;
+; EXP(expr)
+;
+.EXP:
+	ld	hl,Exp
+	jr	RealFunc
+;
+; INT(expr)
+;
+.INT:
+	ld	hl,Int
+	jr	RealFunc
+;
+; FRAC
+;
+.FRAC:
+	ld	hl,Frac
+RealFunc:
+	push	hl
+	call	@NumExpr	; Get ()
+	ld	hl,IntFlt
+	ld	a,b
+	cp	_Integ
+	call	z,StCALL@	; Convert to real
+	pop	hl
+	ld	b,_Real		; Force real
+	jp	StCALL@		; .. set call
+;
+; TRUNC(expr)
+;
+.TRUNC:
+	ld	hl,Trunc
+	jr	IntFunc		; Get intgeer
+;
+; ROUND(expr)
+;
+.ROUND:
+	ld	hl,Round
+IntFunc:
+	push	hl
+	call	@NumExpr	; Get ()
+	pop	hl
+	ld	a,b
+	cp	_Integ		; Test integer
+	ret	z		; .. ignore
+IntResult:
+	ld	b,_Integ	; Force integer
+	jp	StCALL@		; .. set call
+;
+; SUCC(var)
+;
+.SUCC:
+	ld	a,.INC.HL	; Set INC
+	db	.LD.DE
+;
+; PRED(var)
+;
+.PRED:
+	ld	a,.DEC.HL	; Set DEC
+	push	af
+	call	@ActParam	; Get ()
+	pop	af
+	jp	StByte		; Set INC or DEC HL
+;
+; INC(var{,inc})
+;
+.INC::
+	ld	a,.INC.HL	; Set INC
+	db	.LD.DE
+;
+; DEC(var{,inc})
+;
+.DEC::
+	ld	a,.DEC.HL	; Set DEC
+	push	af
+	call	MustLeftParen	; Verify (
+;;##	call	ptell		; Save source environment
+;;##	_BC	6,0
+;;##	call	FndLABEL	; Find label
+	PushSRC
+	call	l67b2		; Find variable
+	call	ErrNZ		; .. should be known
+	db	_UndefLab
+	ld	a,(Type)	; Get type
+	cp	_Integ		; .. verify integer only
+	call	ErrNZ
+	db	_SimpIexp
+	call	ll57ea		; Get variable
+	PopSRC
+	call	.Expression	; Get expression
+;;	call	ErrNZ		; Verify known
+;;	db	_LABELerr
+;;##	call	ll591f		; Get address
+;;##	call	pseek		; Restore source environment
+;;##	call	l593a		; Get value
+;;##	pop	bc
+;;##	ld	a,(TypLen)	; .. and length
+;;##	push	af
+;;##	push	bc
+;;	ld	b,a
+;;	ld	a,(AdrMode)	; .. and mode
+;;	ld	c,a
+;;	pop	af
+;;	push	bc
+;;	push	af
+	call	isComma		; Test comma follows
+	jr	z,.itsINC
+	call	MustRightParen	; Verify )
+	pop	af
+	call	StByte		; Set INC or DEC HL
+	jp	l661b		; .. set result
+.itsINC:
+;;111	call	StPUSH		; Set PUSH HL
+;;	call	ActParam	; Get expression
+	call	.GetConst	; Get value
+;;++	call	Expression	; Get expression
+	ld	a,b		; Get type
+	cp	_Integ		; .. verify integer only
+	call	ErrNZ
+	db	_IntCexp
+	call	StLD.DE		; Set LD DE,val16
+	call	MustRightParen	; Verify )
+	pop	af
+	cp	.INC.HL		; Test INC
+	jr	z,INCset
+	call	StImm
+$$I79:
+	db	@L79
+$I79:
+;;111	POP	DE
+;;111	EX	DE,HL
+	OR	A
+	SBC	HL,DE
+@L79	equ	$-$I79
+	jr	.SavInc
+INCset:
+	call	StImm
+$$I80:
+	db	@L80
+$I80:
+;;111	POP	DE
+	ADD	HL,DE
+@L80	equ	$-$I80
+.SavINC:
+	jp	l661b		; .. assign right part
+.comment			|
+	ld	a,1
+	ld	(ArrMod),a	; Set INC/DEC in progress
+	call	ll6271		; Get expression
+	xor	a
+	ld	(ArrMod),a	; Reset INC/DEC in progress
+	pop	af
+	push	hl		; .. save address
+	push	bc		; .. and type, mode
+	push	af
+	call	IsComma		; Test ,
+
+	jr	nz,.NoINC	; .. nope
+	call	StPUSH		; Set PUSH HL
+	call	ActParam	; Get expression
+	call	MustRightParen	; Verify )
+	call	StImm
+	db	@L78
+$I78:
+	EX	DE,HL
+	POP	HL
+@L78	equ	$-$I78
+	pop	af
+	cp	.INC.HL		; Test INC
+	jr	z,INCset
+	call	StImm
+$$I79:
+	db	@L79
+$I79:
+	OR	A
+	SBC	HL,DE
+@L79	equ	$-$I79
+	jr	.SavInc
+INCset:
+	call	StImm
+$$I80:
+	db	@L80
+$I80:
+	ADD	HL,DE
+@L80	equ	$-$I80
+	jr	.SavInc
+.NoINC:
+	call	MustRightParen	; Verify )
+	pop	af
+	call	StByte		; Set INC or DEC HL
+.SavINC:
+	pop	bc		; Get length
+	dec	b		; .. test byte
+	jr	nz,.Sav16	; .. nope, get word
+	call	StImm
+$$I81:
+	db	@L81
+$I81:
+	LD	A,L
+	POP	HL
+	LD	(HL),A
+@L81	equ	$-$I81
+	ret
+.Sav16:
+	call	StImm
+	db	@L82.1
+$I82.1:
+	EX	DE,HL
+	POP	HL
+	LD	(HL),E
+	INC	HL
+	LD	(HL),D
+@L82.1	equ	$-$I82.1
+	ret
+				|
+	.comment		|
+;;;
+
+	pop	hl		; Get mode and length
+	inc	l
+	dec	l
+	jr	nz,.SavIn..	; .. get indirect
+	dec	h		; Test length
+	jr	nz,.Sav16
+	call	StImm
+$$I81:
+	db	@L81
+$I81:
+	LD	A,L
+@L81	equ	$-$I81
+	ld	a,.ST@A
+	db	.LD.DE
+.Sav16:
+	ld	a,.ST@HL
+	call	StByte		; Set LD (),HL
+	pop	hl
+	call	StWrd		; .. address
+	ret
+.SavIn..:
+	push	hl
+	dec	l		; Test array
+	dec	l
+	dec	l
+	pop	hl
+	ex	(sp),hl		; Swap type against address
+	jr	nz,.SavNoArr..
+	call	StImm
+	db	@L82.1
+$I82.1:
+	EX	DE,HL
+	POP	HL
+@L82.1	equ	$-$I82.1
+	jr	.SavArr..
+.SavNoArr..:
+	push	hl		; Save var address
+	call	StImm
+	db	@L82
+$I82:
+	EX	DE,HL
+	db	.LD@HL
+@L82	equ	$-$I82
+	pop	hl
+	call	StWrd		; .. get bcak address
+.SavArr..:
+	call	StImm
+	db	@L83
+$I83:
+	LD	(HL),E
+@L83	equ	$-$I83
+	pop	bc		; Get length
+	dec	b
+	ret	z		; .. end on byte
+	call	StImm
+	db	@L84
+$I84:
+	INC	HL
+	LD	(HL),D
+@L84	equ	$-$I84
+	ret
+				|
+;
+; LO(var)
+;
+.LO:
+	call	@@IntExpr	; Get ()
+	call	StImm		; Set hi to zero
+	db	@L48
+$I48:
+	LD	H,0
+@L48	equ	$-$I48
+	ret
+;
+; HI(var)
+;
+.HI:
+	call	@@IntExpr	; Get ()
+	call	StImm		; Get low from hi
+	db	@L49
+$I49:
+	LD	L,H
+	LD	H,0
+@L49	equ	$-$I49
+	ret
+;
+; SWAP(var)
+;
+.SWAP:
+	call	@@IntExpr	; Get ()
+	call	StImm		; Set swap hi and lo
+	db	@L50
+$I50:
+	LD	A,L
+	LD	L,H
+	LD	H,A
+@L50	equ	$-$I50
+	ret
+;
+; ODD(var)
+;
+.ODD:
+	call	@@IntExpr	; Get ()
+	ld	hl,Odd		; Set address
+l6407:
+	ld	b,_Bool		; Force boolean
+l6409:
+	jp	StCALL@
+;
+; KEYPRESSED
+;
+.KEYPRESSED:
+	ld	hl,XConstat	; Simple call
+	jr	l6407
+;
+; ORD(var)
+;
+.ORD:
+	call	MustLeftParen	; Verify (
+	call	Expression	; Get expression
+	call	MustRightParen	; Verify )
+	ld	a,b
+	cp	_Ptr
+;;	jr	z,l6422
+;;	call	.ActParam	; Verify expression
+	call	nz,.ActParam	; Verify expression
+;;l6422:
+	ld	b,_Integ	; Force integer
+	ret
+;
+; CHR(var)
+;
+.CHR:
+	call	@@IntExpr	; Get ()
+	ld	b,_Char
+	ret
+;
+; PTR(var)
+;
+;;.PTR:
+;;	call	@@IntExpr	; Get ()
+;;l642e:
+;;	ld	hl,0
+;;	ld	(l7b8b),hl	; Set zero pointer
+;;	ld	b,_Ptr
+;;	ret
+;
+; UPCASE(var)
+;
+.UPCASE:
+	call	@ActParam	; Get ()
+	ld	b,_Char		; Force character
+	ld	hl,UPCASE
+	jr	l6409		; .. set routine
+;
+; LENGTH(string)
+;
+.LENGTH:
+	call	MustLeftParen	; Verify (
+	ld	hl,Length
+l6447:
+	push	hl
+	call	StrExpr		; Get string
+	call	MustRightParen	; Verify )
+	pop	hl
+	jp	IntResult	; Set result
+;
+; POS(object,target)
+;
+.POS:
+	call	MustLeftParen	; Verify (
+	call	StrExpr		; Get string
+	call	MustComma	; Verify ,
+	ld	hl,Pos
+	jr	l6447
+;
+; COPY(string,pos,number)
+;
+.COPY:
+	call	MustLeftParen	; Verify (
+	call	StrExpr		; Get string
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer pos
+	call	MustComma	; Verify ,
+	call	StPUSH		; Set PUSH HL
+	call	IntExpr		; Get integer number
+	call	MustRightParen	; Verify )
+	ld	hl,Copy
+ll647e:
+	call	StCALL@		; Set call
+l647e:
+	ld	b,_String	; Force string
+	ret
+;
+; CONCAT(string1,string2{,...,stringn})
+;
+.CONCAT:
+	call	MustLeftParen	; Verify (
+	call	StrExpr		; Get 1st string
+l6487:
+	call	IsComma		; Test ,
+	jr	nz,l6497	; .. nope
+	call	StrExpr		; Get next string
+	ld	hl,AddStr
+	call	StCALL@		; Set CALL add_string
+	jr	l6487
+l6497:
+	call	MustRightParen	; Verify )
+	jr	l647e
+;
+; PARAMCOUNT
+;
+.PARAMCOUNT:
+	ld	hl,ParamCount	; Simple setting
+	jr	RetInt
+;
+; PARAMSTR(n)
+;
+.PARAMSTR:
+	call	@@IntExpr	; Get ()
+	ld	hl,ParamStr
+	ld	b,_String
+	jp	StCALL@
+;
+; RANDOM{(val)}
+;
+.RANDOM:
+	call	IsLeftParen	; Test (
+	ld	hl,Random
+	ld	b,_Real
+	jr	nz,l64c1	; .. nope
+	call	IntExpr		; Get integer val
+	call	MustRightParen	; Verify )
+	ld	hl,RndmOf
+RetInt:
+	ld	b,_Integ	; Force integer
+l64c1:
+	jp	StCALL@		; .. set call
+;
+; IORESULT
+;
+.IORESULT:
+	ld	hl,IORget	; Simple set
+	jr	RetInt
+;
+; EOF(filvar)
+;
+.EOF:
+	call	@FilVar		; Get ()
+	ld	hl,EOFTab
+	call	DoFileRel	; Put for file type
+l64d2:
+	ld	b,_Bool		; Force boolean
+	ret
+;
+; SEEKEOF(filvar)
+;
+.SEEKEOF:
+	ld	hl,SeekEOF	; Simple file setting
+	jr	FileProc
+;
+; SEEKEOLN(filvar)
+;
+.SEEKEOLN:
+	ld	hl,SeekLn
+	jr	FileProc
+;
+; EOLN(filvar)
+;
+.EOLN:
+	ld	hl,EolnFile
+FileProc:
+	push	hl
+	call	@FilVar		; Get ()
+	cp	_TxtF
+	call	ErrNZ		; Textfile expected
+	db	_TextFilExp
+	pop	hl
+	call	StCALL@
+	jr	l64d2		; Return boolean
+;
+; FILEPOS(filvar)
+;
+.FILEPOS:
+	ld	hl,FilePos	; Init call
+	ld	de,FilePos
+	jr	File.Proc
+;
+; FILESIZE(filvar)
+;
+.FILESIZE:
+	ld	hl,FileSize
+	ld	de,FileSize
+File.Proc:
+	push	hl
+	push	de
+	call	@FilVar		; Get ()
+	pop	de
+	pop	hl
+	cp	_TxtF
+	call	ErrZ		; Textfile not allowed here
+	db	_NoTxtErr
+	cp	_RecF
+	jr	z,RetInt	; .. return integer
+	ex	de,hl
+	jr	RetInt
+;
+; MEMAVAIL
+;
+.MEMAVAIL:
+	ld	hl,memavail	; Simple function call
+	jr	RetInt
+;
+; MAXAVAIL
+;
+.MAXAVAIL:
+	ld	hl,maxavail
+	jr	RetInt
+;
+; WHEREX
+;
+.WHEREX:
+	ld	hl,WhereX
+	jr	RetInt
+;
+; WHEREY
+;
+.WHEREY:
+	ld	hl,WhereY
+	jr	RetInt
+;
+; GETMAXX
+;
+.GETMAXX:
+	ld	hl,MaxX
+	jr	RetInt
+;
+; GETMAXY
+;
+.GETMAXY:
+	ld	hl,MaxY
+	jr	RetInt
+;
+; WINDOW(LeftX,UpperY,RightX,LowerY)
+;
+.WINDOW:
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer leftx
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer uppery
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer rightx
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	IntExpr		; Get integer lowery
+	ld	hl,window
+	jp	l5c81		; Verify )
+;
+; Procedure BIOS(func{,param})
+; Function  BIOSHL(func{,param})
+;
+.BIOS:
+	db	.LD.A
+;
+; Function BIOS(func{,param})
+;
+.BIOS.:
+	xor	a
+	push	af
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer func
+	call	StPUSH		; Set PUSH HL
+l652a:
+	call	IsComma		; Test ,
+	jr	nz,l6538	; .. nope
+	call	IntExpr		; Get integer param
+	call	StImm		; Unpack operand
+	db	@L51
+$I51:
+	LD	B,H
+	LD	C,L
+@L51	equ	$-$I51
+l6538:
+	call	StImm		; Get back reg
+	db	@L52
+$I52:
+	POP	DE
+@L52	equ	$-$I52
+	ld	hl,bios
+l6540:
+	call	MustRightParen	; Verify )
+	call	StCALL@
+	pop	af
+	ld	b,_Integ	; Get integer
+	or	a
+	ret	nz
+	call	StImm		; Set function
+	db	@L53
+$I53:
+	LD	L,A
+	LD	H,0
+@L53	equ	$-$I53
+	ret
+;
+; Procedure BDOS(func{,param})
+; Function  BDOSHL(func{,param})
+;
+..BDOS:
+	db	.LD.A
+;
+; Function BDOS(func{,param})
+;
+.BDOS.:
+	xor	a
+	push	af
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer func
+	call	StPUSH		; Set PUSH HL
+	call	IsComma		; Test comma
+	jr	nz,l656c	; .. nope
+	call	IntExpr		; Get integer param
+	call	StImm		; Set change regs
+	db	@L54
+$I54:
+	EX	DE,HL
+@L54	equ	$-$I54
+l656c:
+	call	StImm		; Get back function
+	db	@L55
+$I55:
+	POP	BC
+@L55	equ	$-$I55
+	ld	hl,BDOS
+	jr	l6540
+;
+; ADDR(name)
+;
+.ADDR:
+	call	MustLeftParen	; Verify (
+	_BC	5,0
+	call	FndLABEL	; Find label
+	jr	z,l6589		; .. yeap
+	_BC	6,0
+	call	FndLABEL
+	jr	nz,l6594	; .. nope
+l6589:
+	dec	hl
+	dec	hl
+	ld	d,(hl)		; Get address
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+l658f:
+	call	StLD.HL		; Set LD HL,val16
+	jr	l6597
+l6594:
+	call	l677f
+l6597:
+	call	MustRightParen	; Verify )
+	ld	b,_Integ
+	ret
+;
+; SIZEOF(name)
+;
+.SIZEOF:
+	call	MustLeftParen	; Verify (
+	_BC	_simple,0
+	call	FndLABEL	; Find label
+	jr	nz,l65b1	; .. nope
+	ld	d,(hl)		; Get address
+	dec	hl
+	ld	e,(hl)
+	ex	de,hl
+	call	Get$TYPE	; Get name
+	jr	l65ba
+l65b1:
+	PushPC
+	call	l677f
+	pop	hl
+	call	ChkChn		; Check chaining
+l65ba:
+	ld	hl,(TypLen)	; Get length
+	jr	l658f
+;
+; Function:
+; PORT
+;
+.PORT.:
+	call	@IntExpr	; Get [] ()
+	call	StImm		; Get from port
+	db	@L56
+$I56:
+	LD	C,L
+	IN	L,(C)
+@L56	equ	$-$I56
+	ret
+;
+; Function:
+; STACKPTR
+;
+.STACKPTR.:
+	call	StImm		; Set copy stack
+	db	@L57
+$I57:
+	LD	HL,0
+	ADD	HL,SP
+@L57	equ	$-$I57
+	ld	b,_Integ
+	ret
+;
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+; && Parenteheses embedded expressions &&
+; &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+;
+; Find [Integer] or (Integer)
+;
+@IntExpr:
+	call	MustOpen	; Verify [
+	call	IntExpr		; Get integer
+	jp	MustClose	; Verify ]
+;
+; Find (Integer)
+;
+@@IntExpr:
+	call	MustLeftParen	; Verify (
+	call	IntExpr		; Get integer
+l65e4:
+	jp	MustRightParen	; Verify )
+;
+; Find (Number)
+;
+@Numexpr:
+	call	MustLeftParen	; Verify (
+	call	NumExpr		; Get number
+	jr	l65e4
+;
+; Find (Simple)
+;
+@ActParam:
+	call	MustLeftParen	; Verify (
+	call	ActParam	; Get simple expression
+	jr	l65e4
+;
+; Find (FileVar)
+;
+@FilVar:
+	call	IsLeftParen	; Test (
+	jr	z,l6608		; .. yeap
+	ld	hl,stdiodev
+	call	StLD.HL		; Set LD HL,STDIODEV
+	ld	a,_TxtF
+	ld	(Type),a	; Set type
+	ret
+l6608:
+	call	FilVar		; Get file variable
+	call	ErrNZ		; File variable expected
+	db	_FilVarExp
+	push	af
+	call	MustRightParen	; Verify )
+	pop	af
+	ret
+EOFTab:
+	dw	eofunt
+	dw	eoffile
+	dw	eofunt
+l661b:
+	ld	a,(l7b57)	; Get mode
+	ld	c,a
+	ld	hl,(TypVal)	; Get value
+	ld	a,(Type)	; Get type
+	cp	_Set		; Test set
+	jr	nz,l6634
+	call	l6734
+	ld	hl,SetAsg
+	ld	de,SetAssign
+	jr	l6648
+l6634:
+	cp	_String		; Test string
+	jr	nz,l665e
+
+	call	LD.B.LEN	; Set length
+
+;;	ld	a,(TypLen)	; Get length
+;;	dec	a		; .. fix it
+;;	ld	h,a
+;;	ld	l,.LD.B
+;;	call	StWrd		; Put to table
+
+	ld	hl,AsStrg
+	ld	de,asstr
+l6648:
+	dec	c		; Test mode
+	jr	z,l665b
+	ex	de,hl		; .. swap addresses
+l664c:
+	ld	a,.LD.HL	; LD HL,val16
+	inc	c
+	jr	z,l6653
+	ld	a,.LD@HL	; LD HL,(addr16)
+l6653:
+	push	hl
+	ld	hl,(TypVal)	; Get address
+	call	StCode
+	pop	hl
+l665b:
+	jp	StCALL@
+l665e:
+	cp	_Real		; Test real
+	jr	nz,l6672
+	call	StImm
+	db	@L58
+$I58:
+	EXX
+@L58	equ	$-$I58
+	ld	hl,putreal
+	dec	c
+	jr	nz,l664c
+	call	StPOP		; Set POP HL
+	jr	l665b
+l6672:
+	cp	_Ptr		; Test pointer
+	jr	z,l669d
+	ld	a,(LocOpt)
+	bit	.Ropt,a		; Test index checking
+	jr	z,l669d		; .. nope
+	ld	hl,(Low.Rng)	; Get lower limit
+	ld	de,(High.Rng)	; .. higher
+	inc	de
+	or	a
+	sbc	hl,de		; .. compare
+	add	hl,de
+	jr	z,l669d
+	dec	de
+	call	StLD.DE		; Set LD DE,val16
+	ex	de,hl
+	or	a
+	sbc	hl,de
+	inc	hl
+	call	StLD.BC		; Set LD BC,val16
+	ld	hl,rangechk
+	call	StCALL@		; Set CALL range_check
+l669d:
+	dec	c		; Test mode
+	jr	nz,l66b7
+	call	StImm
+	db	@L59
+$I59:
+	EX	DE,HL
+	POP	HL
+@L59	equ	$-$I59
+l66a6:
+	call	StImm		; Set store
+	db	@L60
+$I60:
+	LD	(HL),E
+@L60	equ	$-$I60
+	ld	a,(TypLen)	; Get length
+	dec	a
+	ret	z		; .. end on byte
+	call	StImm
+	db	@L61
+$I61:
+	INC	HL		; .. store hi, too
+	LD	(HL),D
+@L61	equ	$-$I61
+	ret
+l66b7:
+	ld	hl,(TypVal)	; Get address
+	inc	c
+	jr	nz,l66cf
+	ld	a,(TypLen)	; Get length
+	dec	a
+	ld	a,.ST@HL	; LD (addr16),HL
+	jr	nz,l66cc	; .. set word
+	call	StImm
+	db	@L62
+$I62:
+	LD	A,L		; Get byte
+@L62	equ	$-$I62
+	ld	a,.ST@A		; LD (addr16),A
+l66cc:
+	jp	StCode
+l66cf:
+	call	StImm
+	db	@L63
+$I63:
+	EX	DE,HL
+	db	.LD@HL		; LD HL,(addr16)
+@L63	equ	$-$I63
+	call	StWrd		; Store word address
+	jr	l66a6
+;
+;
+;
+l66da:
+	ld	a,(Type)	; Get type
+	cp	_Integ		; Test integer
+	jr	nc,l6701	; .. yeap
+	cp	_Ptr		; .. or pointer
+	jr	z,l6701
+	push	af
+	call	l678b
+	pop	af
+	ld	hl,getreal
+	cp	_Real		; Test real
+	jr	z,l66fe		; .. yeap
+	ld	hl,assanystring
+	cp	_String		; .. or string
+	jr	z,l66fe		; .. yeap
+	call	l6734		; Must be set
+	ld	hl,settostack
+l66fe:
+	jp	StCALL@		; Set CALL routine
+l6701:
+	ld	a,(AdrMode)	; Get address mode
+	or	a
+	jr	nz,l671b
+	ld	a,.LD@HL	; LD HL,(addr16)
+	ld	hl,(VarAdr)
+	call	StCode
+	ld	a,(TypLen)	; Get length
+	dec	a
+	ret	nz		; .. end on not byte
+l6714:
+	call	StImm
+	db	@L64
+$I64:
+	LD	H,0
+@L64	equ	$-$I64
+	ret
+l671b:
+	call	l678b
+	ld	a,(TypLen)	; Get length
+	dec	a
+	jr	nz,l672b	; .. integer
+	call	StImm		; Load byte
+	db	@L65
+$I65:
+	LD	L,(HL)
+@L65	equ	$-$I65
+	jr	l6714
+l672b:
+	call	StImm		; Load integer
+	db	@L66
+$I66:
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)
+	EX	DE,HL
+@L66	equ	$-$I66
+	ret
+;
+; Fix ???? for SET
+;
+l6734:
+	ld	hl,(Low.Rng)	; Get pointer
+	call	Get$ENV		; Get name
+	ld	hl,(TypLen)	; Get length
+	ld	a,(l7b6b)
+	rra
+	rra
+	rra
+	and	00011111b	; .. modulo 32
+	ld	h,a
+	jp	StLD.BC		; Set LD BC,val16
+;
+;
+;
+l6749:
+	call	GetConst	; Get constant
+	jr	nz,l677f	; .. label
+	ld	a,b
+	cp	_String		; Test string
+	call	ErrNZ		; .. should be
+	db	_ConstErr
+	ld	l,24
+	ld	h,c
+	call	StWrd
+	SavPC	TypVal		; Save PC
+	ld	a,_Array
+	ld	(Type),a	; Set type
+	ld	hl,.CHAR+7
+	ld	(Low.Rng),hl	; Set type array of char
+	ld	hl,0
+	ld	(High.Rng),hl	; .. set 2nd entry
+	ld	l,c		; Save length
+	ld	(TypLen),hl
+	call	StConst		; .. store string
+	ld	a,.LD.HL	; LD HL,val16
+	ld	hl,(TypVal)	; Get value
+	jp	StCode
+
+;
+;
+;
+l677f:
+	call	l6787
+	ret	z
+	call	ERROR		; Syntax error
+	db	_Undef
+;
+;
+;
+l6787:
+	call	l67b2
+	ret	nz
+;
+; ????????????????????????????????????~
+;
+l678b:
+	ld	a,(AdrMode)	; Get address mode
+	ld	hl,(VarAdr)
+	bit	1,a		; Test bit
+	jr	nz,l67a2
+	bit	0,a
+	ld	a,.LD.HL	; LD HL,val16
+	jr	z,l679d
+	ld	a,.LD@HL	; LD HL,(addr16)
+l679d:
+	call	StCode
+	jr	l67b0
+l67a2:
+	bit	0,a		; Test bit
+	jr	nz,l67b0
+	ld	a,.LD.DE	; LD DE,val16
+	call	StCode
+	call	StImm		; Set code
+	db	@L67
+$I67:
+	ADD	HL,DE
+@L67	equ	$-$I67
+l67b0:
+	xor	a
+	ret
+;
+;
+;
+l67b2:
+	call	l680c
+	jr	z,l67d9
+	_BC	_pointer,0
+	call	FndLABEL	; Find label
+	jr	nz,l67ed	; .. nope
+	call	Get@Table	; Get values
+	ld	a,(l7b57)
+	or	a
+	ld	a,.LD.HL	; LD HL,val16
+	ld	b,0
+	jr	z,l67cf
+	ld	a,.LD@HL	; LD HL,(addr16)
+	inc	b
+l67cf:
+	ld	hl,AdrMode
+	ld	(hl),b		; Set address mode
+	ld	hl,(TypVal)	; Unpack value
+	ld	(VarAdr),hl
+l67d9:
+	call	l683a
+	jr	z,l67d9
+	call	l6931
+	jr	z,l67d9
+	call	l6974
+	jr	z,l67d9
+	call	l699f
+	xor	a
+	ret
+l67ed:
+	call	FindStr		; Check MEM
+	dw	$MEM
+	ret	nz		; .. nope
+	call	@IntExpr	; Get () []
+	ld	a,_Integ	; Force integer
+	ld	(Type),a
+	ld	hl,1
+	ld	(TypLen),hl	; Set byte length
+	dec	l
+	ld	(Low.Rng),hl	; .. set limits 0..255
+	dec	l
+	ld	(High.Rng),hl
+	jp	l6903
+;
+;
+;
+l680c:
+	ld	a,(l7bc9)
+	ld	b,a
+l6810:
+	dec	b
+	ret	m
+	push	bc
+	ld	e,b
+	ld	d,0
+	ld	hl,l7bcc
+	add	hl,de
+	ld	a,(hl)
+	ld	c,a
+	ld	b,_pointer
+	call	FndLABEL	; Find label
+	pop	bc
+	jr	nz,l6810	; .. nope
+	push	hl
+	ld	a,b
+	add	a,a
+	ld	e,a
+	ld	d,0
+	ld	hl,(l7bca)
+	add	hl,de
+	ld	(VarAdr),hl
+	ld	hl,AdrMode
+	ld	(hl),1		; Set address mode
+	pop	hl
+	jp	l6948
+	.comment		|
+;
+; Perform expression for DEC and INC procedure
+; EXIT	Reg HL holds address of variable
+;	Reg B  holds type BYTE or INTEGER
+;	Reg C  holds address mode
+;
+ll6271:
+	call	l.l6271		; Verify integer
+	call	l66da
+	ld	hl,(VarAdr)	; Return address
+	ld	a,(TypLen)	; .. and length
+	ld	b,a
+	ld	a,(AdrMode)	; .. and mode
+	ld	c,a
+	ret
+				|
+;
+; Verify integer variable
+;
+l.l6271:
+	call	l67b2
+	jr	nz,lllERR
+	ld	a,(Type)	; Get type
+	cp	_Integ		; Verify integer
+	ret	z
+lllERR:
+	call	ERROR
+	db	_SimpIexp
+IF	@@DU
+;
+; GETENV(D,U{,F})
+;
+.GETENV:
+	ld	hl,GetEnv
+	xor	a
+	jr	???Env
+;
+; SETENV(D,U{,F})
+;
+.SETENV:
+	ld	hl,SetEnv
+	ld	a,1
+???Env:
+	push	hl
+	or	a
+	push	af
+	call	MustLeftParen	; Verify (
+	call	l.l6271		; Get expression @D
+	ld	hl,(VarAdr)
+	call	StLD.HL		; Set LD HL,@VAR
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	l.l6271		; Get expression @U
+	call	IsComma		; Test comma
+	pop	bc
+	jr	nz,Env.D.U	; .. nope
+	push	bc
+	ld	hl,(VarAdr)	; Get address of @U
+	call	StLD.HL		; Set LD HL,@VAR
+	call	StPUSH		; Set PUSH HL
+	call	.GetFilVar	; Get file variable
+	pop	af		; Get back entry
+	pop	hl
+	ld	hl,FSetEnv	; Change library code
+	jr	nz,..Env.D.U
+	ld	hl,FGetEnv
+	jr	..Env.D.U
+Env.D.U:
+	ld	hl,(VarAdr)
+	call	StLD.HL		; Set LD HL,@VAR
+	pop	hl
+..Env.D.U:
+	call	l5960		; Set call and verify )
+	jp	l5abe		; Set I/O check
+ELSE
+;
+; GETENV(D,U)
+;
+.GETENV:
+	ld	hl,GetEnv
+	jr	???Env
+;
+; SETENV(D,U)
+;
+.SETENV:
+	ld	hl,SetEnv
+???Env:
+	push	hl
+	call	MustLeftParen	; Verify (
+	call	l.l6271		; Get expression @D
+	ld	hl,(VarAdr)
+	call	StLD.HL		; Set LD HL,@VAR
+	call	StPUSH		; Set PUSH HL
+	call	MustComma	; Verify ,
+	call	l.l6271		; Get expression @U
+	ld	hl,(VarAdr)
+	call	StLD.HL		; Set LD HL,@VAR
+	pop	hl
+	call	l5960		; Set call and verify )
+	jp	l5abe		; Set I/O check
+ENDIF	;@@DU
+

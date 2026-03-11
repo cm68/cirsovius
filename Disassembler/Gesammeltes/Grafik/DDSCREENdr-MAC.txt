@@ -1,0 +1,3166 @@
+	title	GSX Screen Driver for JOYCE
+	name	('DDSCREEN')
+
+; DASMed version of CP/M PLUS (JOYCE)
+; By W. Cirsovius
+
+; GSX screen driver DDSCREEN.PRL
+
+; Implements also opcodes	23 (Set fill style)
+;				24 (Set fill index)
+;				28 (Read locator (eg tablet or mouse))
+;				33 (Set input mode)
+; And ESCape code		16 (Is a tablet (or mouse etc.) available?)
+
+BIOS	equ	0000h
+BDOS	equ	0005h
+
+.conout	equ	 2
+.condir	equ	 6
+.vers	equ	12
+.SCB	equ	49
+.RSX	equ	60
+
+_get	equ	-1
+
+_Conout	equ	024h
+
+.Get	equ	000h
+.SetW	equ	0feh
+
+_ConVec	equ	1000000000000000b
+
+CPM3	equ	30h
+;
+; Special BIOS function
+;
+_USERF	equ	30
+;
+; eXtended BIOS vectors
+;
+_TEASK	equ	00bfh
+_KTGET	equ	00dah
+_KTPUT	equ	00ddh
+_CDVERS	equ	00e3h
+_SCRrun	equ	00e9h
+;
+; Cursor key numbers
+;
+_CUP	equ	14
+_CDWN	equ	79
+_CLFT	equ	15
+_CRGT	equ	 6
+
+_COL	equ	90		; Columns on screen
+_ROW	equ	32		; Rows on screen
+_OFFS	equ	32		; Cursor offset
+
+COM.RAM	equ	0c000h
+COM.pag	equ	COM.RAM SHR 8
+
+lf	equ	0ah
+cr	equ	0dh
+esc	equ	1bh
+eot	equ	-1
+
+MSB	equ	10000000b
+NOMSB	equ	01111111b
+HIMASK	equ	11110000b
+
+l0101	equ	0101h
+
+l0000	equ	00h
+l0001	equ	01h
+l0003	equ	03h
+l0004	equ	04h
+l0005	equ	05h
+l0007	equ	07h
+l0008	equ	08h
+lb600	equ	0b600h
+lb800	equ	0b800h
+l0100:
+
+;
+; %%%%%%%%%%%%%%%%%%
+; %% Driver entry %%
+; %%%%%%%%%%%%%%%%%%
+;
+; ENTRY	Reg DE points to GSX parameter block
+;
+	jr	l0112
+;
+	db	'PCW8256 GIOS #8',0ffh
+l0112:
+	ex	de,hl
+	ld	de,l0c00
+	ld	bc,PBlen
+	ldir			; Copy parameter block
+	ld	a,3
+	ld	de,0
+	call	l0b01		; Preset result CONTRL(3):=0
+	ld	a,1
+	ld	de,l0145
+	jr	l0134		; Get opcode CONTRL(1)
+;
+; Opcode = 5 : Escape
+;
+l012a:
+	ld	de,l0188
+	jr	l0132
+;
+; Opcode = 11 : General Drawing Primitive
+;
+l012f:
+	ld	de,l01af
+l0132:
+	ld	a,6		; Get ID CONTRL(6)
+l0134:
+	call	l0ae3		; Get CONTRL()
+	ld	a,h
+	or	a		; Test correct range
+	ret	nz		; Invalid
+	ld	a,(de)
+	cp	l		; Test against max
+	ret	c		; Also invalid if out of range
+	add	hl,hl
+	dec	hl
+	add	hl,de		; Position in table
+	ld	a,(hl)		; Get address
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	jp	(hl)		; Execute it
+;
+; Main opcode table
+;
+l0145:
+	db	opc.len		; Max opcode
+;
+	dw	l0216		; Opcode  1 : Open workstation
+	dw	l0318		; Opcode  2 : Close workstation
+	dw	l0323		; Opcode  3 : Clear picture
+	dw	l032a		; Opcode  4 : Output graphics
+	dw	l012a		; Opcode  5 : Escape
+	dw	l04d9		; Opcode  6 : Draw a polyline
+	dw	l0564		; Opcode  7 : Plot a group of markers
+	dw	l05ac		; Opcode  8 : Draw text
+	dw	l04ac		; Opcode  9 : Draw a filled polygon
+	dw	l0679		; Opcode 10 : Output colour index array
+	dw	l012f		; Opcode 11 : General Drawing Primitive
+	dw	l05e8		; Opcode 12 : Set text size
+	dw	l0bd0		; Opcode 13 : [Set text direction]
+	dw	l08cc		; Opcode 14 : Set colour index (palette registers)
+	dw	l0474		; Opcode 15 : Set line style
+	dw	l0bd0		; Opcode 16 : [Set line width]
+	dw	l08fd		; Opcode 17 : Set line colour
+	dw	l052d		; Opcode 18 : Set marker type
+	dw	l0bd0		; Opcode 19 : [Set marker height]
+	dw	l0902		; Opcode 20 : Set marker colour
+	dw	l0bd0		; Opcode 21 : [Set text font]
+	dw	l0907		; Opcode 22 : Set text colour
+	dw	l06b2		; Opcode 23 : Set fill style
+	dw	l06ba		; Opcode 24 : Set fill index
+	dw	l090c		; Opcode 25 : Set fill colour
+	dw	l0926		; Opcode 26 : Inquire colour representation (read palette)
+	dw	l0bd0		; Opcode 27 : [Inquire cell array]
+	dw	l0982		; Opcode 28 : Read locator (eg tablet or mouse)
+	dw	l0bd0		; Opcode 29 : [Read valuator]
+	dw	l0bd0		; Opcode 30 : [Read choice]
+	dw	l0bd0		; Opcode 31 : [Read string]
+	dw	l0ac1		; Opcode 32 : Set writing mode
+	dw	l0aa7		; Opcode 33 : Set input mode
+opc.len	equ	($-l0145-1) / 2
+;
+; ESCape code table
+;
+l0188:
+	db	esc.len		; Max code
+;
+	dw	l032b		; Escape  1 : Get text screen size in characters
+	dw	l033b		; Escape  2 : Enter graphics mode
+	dw	l0342		; Escape  3 : Enter text mode
+	dw	l0349		; Escape  4 : Text cursor up
+	dw	l0350		; Escape  5 : Text cursor down
+	dw	l0357		; Escape  6 : Text cursor right
+	dw	l035e		; Escape  7 : Text cursor left
+	dw	l0365		; Escape  8 : Clear text screen
+	dw	l036c		; Escape  9 : Clear from text cursor to end of screen
+	dw	l0373		; Escape 10 : Clear from text cursor to end of line
+	dw	l037a		; Escape 11 : Move text cursor to coordinates given in INTIN
+	dw	l03ac		; Escape 12 : Print (to the text screen) a string whose characters are stored in INTIN
+	dw	l03d6		; Escape 13 : Select reverse video
+	dw	l03cf		; Escape 14 : Cancel reverse video
+	dw	l03dd		; Escape 15 : Return the coordinates of the text cursor in the first two words of INTOUT
+	dw	l03fa		; Escape 16 : Is a tablet (or mouse etc.) available?
+	dw	l0bd0		; Escape 17 : [Dump the current screen to the printer]
+	dw	l041a		; Escape 18 : Place a graphic cursor
+	dw	l0407		; Escape 19 : Remove the graphic cursor
+esc.len	equ	($-l0188-1) / 2
+;
+; Primitive code table
+;
+PRM.TAB:
+l01af:
+	db	prm.len		; Max code
+;
+	dw	l0608		; Primitive ID 1 : Filled bar
+	dw	l0bd0		; Primitive ID 2 : [Arc]
+	dw	l0bd0		; Primitive ID 3 : [Pie slice]
+	dw	l0bd0		; Primitive ID 4 : [Filled circle]
+	dw	l0bd0		; Primitive ID 5 : [Draw text]
+prm.len	equ	($-l01af-1) / 2
+;
+; Print immediate string
+; ENTRY	Call follows string closed by -1
+;
+l01ba:
+	call	l01e1		; Set console as output vector
+	ex	(sp),hl		; Get string pointer
+l01be:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test end
+	jp	m,l01ce		; Yeap
+	ld	e,a
+	ld	c,.conout
+	push	hl
+	call	BDOS		; Put to console
+	pop	hl
+	jr	l01be
+l01ce:
+	ex	(sp),hl		; Get back old vector
+l01cf:
+	ld	(l0c0a+2),hl	; Set new value
+	ld	b,.SetW		; Code for setting a word
+;
+; Set or get bit mapped console output devices
+;
+l01d4:
+	ld	hl,l0c0a+1
+	ld	(hl),b		; Set mode
+	dec	hl
+	ld	(hl),_Conout	; Set offset
+	ex	de,hl
+	ld	c,.SCB
+	jp	BDOS		; Set/get FCB value
+;
+; Set console as output device
+; EXIT	Reg HL holds current vector
+;
+l01e1:
+	ld	b,.Get
+	call	l01d4		; Get current device
+	push	hl
+	ld	hl,_ConVec
+	call	l01cf		; Set console
+	pop	hl
+	ret
+;
+; Illegal OS or environment found
+;
+l01ef:
+	call	l01ba		; Tell error
+	db	cr,lf
+	db	'Cannot run in this environment'
+	db	cr,lf,eot
+	rst	0		; Exit
+;
+; Opcode = 1 : Open workstation
+;
+l0216:
+	ld	c,.vers
+	call	BDOS		; Get OS version
+	ld	a,l
+	and	HIMASK
+	cp	CPM3		; Verify CP/M 3 or higher
+	jr	nz,l01ef
+	call	l0d20		; Install user vector
+	jr	nc,l01ef	; Invalid
+	call	l0d88		; Get machine version
+	dw	_CDVERS
+	dec	a		; Verify PCW8xxx
+	jr	nz,l01ef
+	call	l01ba
+	db	esc,'f'		; Cursor off
+	db	esc,'E'		; Clear screen
+	db	esc,'H'		; Home cursor
+	db	eot
+	call	l0d88
+	dw	_TEASK		; Get current cursor position
+	ld	a,b		; Swap top row
+	ld	b,c		; And left column
+	ld	c,a
+	ld	l,d		; Unpack height
+	ld	h,e		; And width
+	add	hl,bc		; Build limits
+	ex	de,hl
+	call	l0d5e		; Save window
+	ld	hl,(l1182)	; Get horizontal pixel
+	ld	de,(l1180)	; Get left pixel
+	or	a
+	sbc	hl,de		; Build pixel width
+	ld	(l02a6),hl	; Save screen width
+	ld	hl,(l1186)	; Get vertical pixel
+	ld	de,(l1184)	; Get top pixle
+	or	a
+	sbc	hl,de		; Build pixel height
+	ld	(l02a6+2),hl	; Save screen height
+	call	l0897		; Init data
+	call	l03cf		; Cancel reverse video
+	call	l047c
+	call	l0535
+	call	l0abb		; Set default write mode replace
+	call	l0414		; Mark graphic cursor passive
+	call	l0963		; Get number of locator devices
+	ld	(l02a6+2*(41-1)),hl
+	call	l0682
+	ld	a,3
+	ld	de,6
+	call	l0b01		; CONTRL(3):=number of vertices
+	ld	a,5
+	ld	de,INT.len
+	call	l0b01		; CONTRL(5):=length of INTOUT
+	ld	de,(l0c06)
+	ld	hl,l02a6
+	ld	bc,2*INT.len
+	ldir			; Copy to INTOUT(1)..INTOUT(45)
+	ld	de,(l0c08)
+	ld	hl,l0300
+	ld	bc,2*PSO.len
+	ldir			; Copy to PTSOUT(1)..PTSOUT(12)
+	ret
+;
+; INTOUT field as result for caller
+;
+l02a6:
+	dw	_COL*8-1	;  (1) Screen width, device units
+	dw	_ROW*8-1	;  (2) Screen height, device units
+	dw	  1		;  (3) Device is a CRT
+	dw	375		;  (4) Width of a pixel, in thousandths of a millimetre
+	dw	800		;  (5) Height of a pixel, in thousandths of a millimetre
+	dw	  1		;  (6) Number of character sizes
+	dw	  5		;  (7) Number of line styles
+	dw	  1		;  (8) Number of line widths
+	dw	  5		;  (9) Number of marker styles
+	dw	  1		; (10) Number of marker sizes
+	dw	  1		; (11) Number of fonts
+	dw	  6		; (12) Number of patterns
+	dw	  6		; (13) Number of hatch styles
+	dw	  2		; (14) Number of colours displayable at once
+	dw	  1		; (15) Number of General Drawing Primitives
+	dw	  1		; (16) General Drawing Primitive numbers [Bar]
+	dw	 -1		; (17) --
+	dw	 -1		; (18) --
+	dw	 -1		; (19) --
+	dw	 -1		; (20) --
+	dw	 -1		; (21) --
+	dw	 -1		; (22) --
+	dw	 -1		; (23) --
+	dw	 -1		; (24) --
+	dw	 -1		; (25) --
+	dw	  4		; (26) General Drawing Primitive attributes [None]
+	dw	 -1		; (27) --
+	dw	 -1		; (28) --
+	dw	 -1		; (29) --
+	dw	 -1		; (30) --
+	dw	 -1		; (31) --
+	dw	 -1		; (32) --
+	dw	 -1		; (33) --
+	dw	 -1		; (34) --
+	dw	 -1		; (35) --
+	dw	  0		; (36) Black/white
+	dw	  0		; (37) Text rotation is not possible
+	dw	  1		; (38) Filled areas are possible
+	dw	  0		; (39) Cannot read cell array
+	dw	  2		; (40) Number of colours in the palette [Black and white]
+	dw	  1		; (41) Number of locator devices
+	dw	  0		; (42) Number of valuator devices
+	dw	  0		; (43) Number of choice devices
+	dw	  0		; (44) Number of string devices
+	dw	  2		; (45) Workstation type [Input and output]
+INT.len	equ	($-l02a6) / 2
+;
+; PTSOUT field as result for caller
+;
+l0300:
+	dw	  0		;  (1) Always zero
+	dw	  7		;  (2) Min character height
+	dw	  0		;  (3) Always zero
+	dw	  7		;  (4) Max character height
+	dw	  1		;  (5) Min line width
+	dw	  0		;  (6) Always zero
+	dw	  1		;  (7) Max line width
+	dw	  0		;  (8) Always zero
+	dw	  0		;  (9) Always zero
+	dw	  7		; (10) Min marker height
+	dw	  0		; (11) Always zero
+	dw	  7		; (12) Max marker height
+PSO.len	equ	($-l0300) / 2
+;
+; Opcode = 2 : Close workstation
+;
+l0318:
+	call	l01ba
+	db	esc,'E'		; Clear screen
+	db	esc,'H'		; Home cursor
+	db	esc,'e'		; Cursor on
+	db	eot
+	ret
+;
+; Opcode = 3 : Clear picture
+;
+l0323:
+	xor	a		; Clear pattern
+	ld	hl,(l1186)	; Get vertical pixel
+	jp	l10f5		; Go clear
+;
+; Opcode = 4 : Output graphics
+;
+l032a:
+	ret			; Dummy here
+;
+; ESCape Code = 1 : Get text screen size in characters
+;
+l032b:
+	call	l03f0		; Get screen dimensions
+	ld	a,d		; Get height for row
+	push	de
+	call	l0af7		; INTOUT(1):=rows
+	pop	de
+	ld	d,0
+	ld	a,2
+	jp	l0afc		; INTOUT(2):=columns
+;
+; ESCape Code = 2 : Enter graphics mode
+;
+l033b:
+	call	l01ba
+	db	esc,'f'		; Cursor off
+	db	eot
+	ret
+;
+; ESCape Code = 3 : Enter text mode
+;
+l0342:
+	call	l01ba
+	db	esc,'e'		; Cursor on
+	db	eot
+	ret
+;
+; ESCape Code = 4 : Text cursor up
+;
+l0349:
+	call	l01ba
+	db	esc,'A'		; Cursor up
+	db	eot
+	ret
+;
+; ESCape Code = 5 : Text cursor down
+;
+l0350:
+	call	l01ba
+	db	esc,'B'		; Cursor down
+	db	eot
+	ret
+;
+; ESCape Code = 6 : Text cursor right
+;
+l0357:
+	call	l01ba
+	db	esc,'C'		; Cursor right
+	db	eot
+	ret
+;
+; ESCape Code = 7 : Text cursor left
+;
+l035e:
+	call	l01ba
+	db	esc,'D'		; Cursor left
+	db	eot
+	ret
+;
+; ESCape Code = 8 : Clear text screen
+;
+l0365:
+	call	l01ba
+	db	esc,'H'		; Clear screen 
+	db	eot
+	ret
+;
+; ESCape Code = 9 : Clear from text cursor to end of screen
+;
+l036c:
+	call	l01ba
+	db	esc,'J'		; Clear to end of screen 
+	db	eot
+	ret
+;
+; ESCape Code = 10 : Clear from text cursor to end of line
+;
+l0373:
+	call	l01ba
+	db	esc,'K'		; Clear to end of line
+	db	eot
+	ret
+;
+; ESCape Code = 11 : Move text cursor to coordinates given in INTIN
+;
+l037a:
+	call	l03f0		; Get screen dimensions
+	ld	a,1
+	call	l0ae8		; Get row from INTIN(1)
+	ld	a,h
+	or	a		; Verify valid range
+	jr	nz,l038b
+	ld	a,d
+	cp	l
+	jr	c,l038b
+	ld	d,l		; Set if in range
+l038b:
+	ld	a,2
+	call	l0ae8		; Get column from INTIN(2)
+	ld	a,h
+	or	a		; Verify valid range
+	jr	nz,l0399
+	ld	a,e
+	cp	l
+	jr	c,l0399
+	ld	e,l		; Set if in range
+l0399:
+	ld	hl,256*(_OFFS-1) + _OFFS-1
+	add	hl,de		; Add offset
+	ld	a,h		; Swap bytes
+	ld	h,l
+	ld	l,a
+	ld	(l03a8),hl	; Save position
+	call	l01ba		; Set cursor
+	db	esc,'Y'
+l03a8:
+	db	0		; Row
+	db	0		; Column
+	db	eot
+	ret
+;
+; ESCape Code = 12 : Print (to the text screen) a string whose characters are stored in INTIN
+;
+l03ac:
+	call	l01e1		; Set console as output vector
+	push	hl		; Save it
+	ld	a,4
+	call	l0ae3		; Get CONTRL(4)
+	ld	b,h		; Set for length
+	ld	c,l
+	ld	hl,(l0c02)	; Init array
+l03ba:
+	ld	e,(hl)		; Get low byte for character
+	inc	hl
+	inc	hl
+	push	hl
+	push	bc
+	ld	c,.conout
+	call	BDOS		; Output it
+	pop	bc
+	pop	hl
+	dec	bc
+	ld	a,b
+	or	c		; Test end
+	jr	nz,l03ba
+	pop	hl		; Get back vector
+	jp	l01cf		; Reset it
+;
+; ESCape Code = 14 : Cancel reverse video
+;
+l03cf:
+	call	l01ba
+	db	esc,'q'		; Normal on
+	db	eot
+	ret
+;
+; ESCape Code = 13 : Select reverse video
+;
+l03d6:
+	call	l01ba
+	db	esc,'p'		; Reverse on
+	db	eot
+	ret
+;
+; ESCape Code = 15 : Return the coordinates of the text cursor in the first two words of INTOUT
+;
+l03dd:
+	call	l03f0		; Get screen dimensions
+	ld	d,0
+	ld	e,h
+	ld	a,1
+	push	hl
+	call	l0afc		; INTOUT(1):=row
+	pop	hl
+	ld	e,l
+	ld	a,2
+	jp	l0afc		; INTOUT(2):=column
+;
+; Get screen dimensions
+; EXIT	Reg D holds bottom row
+; 	Reg E holds right column
+;	Reg H holds cursor row
+;	Reg L holds cursor column
+;
+l03f0:
+	call	l0d88		; Get screen dimensions
+	dw	_TEASK
+	inc	d		; Fix height
+	inc	e		; And width
+	inc	h		; And row
+	inc	l		; And column
+	ret
+;
+; ESCape Code = 16 : Is a tablet (or mouse etc.) available?
+;
+l03fa:
+	ld	hl,(l02a6+2*(41-1))
+	ld	a,l
+	dec	a		; Verify number of locator devices
+	or	h
+	jr	z,l0404
+	ld	a,1
+l0404:
+	jp	l0af7		; INTOUT(1):=value
+;
+; ESCape Code = 18 : Remove the graphic cursor
+;
+l0407:
+	ld	hl,(l0c10)	; Get row
+	ld	de,(l0c0e)	; And column
+	ld	a,h
+	or	a		; Test active
+	ret	m		; Nope
+	call	l0427		; Place cursor
+;
+; Mark graphic cursor passive
+;
+l0414:
+	ld	a,-1
+	ld	(l0c10+1),a	; Mark it
+	ret
+;
+; ESCape Code = 18 : Place a graphic cursor
+;
+l041a:
+	ld	hl,(l0c04)
+	call	l0b4f		; Fetch coordinates
+	ld	(l0c10),hl	; Set row
+	ld	(l0c0e),de	; Set column
+;
+; Place cursor
+;
+l0427:
+	push	iy
+	push	ix
+	push	hl
+	push	de
+	push	af
+	push	hl
+	push	de
+	ld	a,3
+	call	l0dae		; Set mode for writing
+	ld	a,1
+	call	l0d98		; Set intensity pointer
+	ld	hl,1111111111111111b
+	call	l0dca		; Save pattern
+	pop	de
+	pop	hl
+	push	de
+	pop	ix		; Get column
+	push	hl
+	pop	iy		; Get row
+	ld	bc,-7
+	add	iy,bc		; Row - 7
+	push	hl
+	push	de
+	ld	bc,7
+	add	hl,bc		; Row + 7
+	call	l0b2b		; Set cursor and pixel
+	pop	de
+	pop	hl
+	push	hl
+	pop	iy
+	push	de
+	pop	ix
+	ld	bc,-7
+	add	ix,bc
+	ld	bc,7
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	call	l0b2b		; Set cursor and pixel
+	pop	af
+	pop	de
+	pop	hl
+	pop	ix
+	pop	iy
+	ret
+;
+; Opcode = 15 : Set line style
+;
+l0474:
+	ld	a,1
+	call	l047e		; Get from INTIN(1)
+	jp	l0af7		; INTOUT(1):=val
+;
+; Set polyline linetype from INTIN(2)
+; EXIT	Accu holds type selected
+;
+l047c::
+	ld	a,2
+l047e:
+	call	l0ae8		; Get INTIN()
+	ld	a,h
+	or	a
+	ld	b,1
+	jr	nz,l048e
+	ld	a,l
+	dec	a
+	cp	LT
+	jr	nc,l048e
+	ld	b,l
+l048e:
+	ld	a,b
+	push	af
+	dec	a
+	add	a,a
+	add	a,LOW l04a2
+	ld	l,a
+	adc	a,HIGH l04a2
+	sub	l
+	ld	h,a
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ld	(l0c12),hl	; Save pattern
+	pop	af
+	ret
+;
+l04a2:
+	dw	1111111111111111b
+	dw	1111111000000000b
+	dw	1110000011100000b
+	dw	1111111000111000b
+	dw	1111111111110000b
+LT	equ	($-l04a2) / 2
+;
+; Opcode = 9 : Draw a filled polygon
+;
+l04ac:
+	call	l051f		; Get vertices
+	ret	z		; Only one, so exit
+	push	hl
+	push	bc
+	ld	a,(l0d0a)	; Get fill color index
+	call	l0ada		; Set intensity and write mode
+	pop	bc
+	pop	hl
+	push	bc
+	push	hl
+	call	l06c2
+	pop	hl
+	pop	bc
+	ld	a,(l0d0a)	; Get fill color index
+l04c4:
+	push	iy
+	push	ix
+	ld	de,1111111111111111b
+	call	l04f0		; Draw line
+	call	l0b4f		; Fetch pair
+	call	l0b2b		; Set cursor and pixel
+	pop	ix
+	pop	iy
+	ret
+;
+; Opcode = 6 : Draw a polyline
+;
+l04d9:
+	call	l051f		; Get vertices
+	ret	z
+	ld	de,(l0c12)	; Get pattern
+	ld	a,(l0d07)	; Get color index
+	push	iy
+	push	ix
+	call	l04f0		; Draw line
+	pop	ix
+	pop	iy
+	ret
+;
+; Draw line
+;
+l04f0:
+	push	hl
+	push	bc
+	push	hl
+	push	de
+	call	l0ada		; Set intensity and write mode
+	pop	hl
+	call	l0dca		; Save pattern
+	pop	hl
+	push	hl
+	call	l0b4f		; Fetch pair
+	push	hl
+	push	de
+	jr	l050e
+l0504:
+	push	bc
+	push	hl
+	call	l0b4f		; Fetch next pair
+	push	hl
+	push	de
+	call	l0b2b		; Set cursor and pixel
+l050e:
+	pop	ix
+	pop	iy
+	pop	hl
+	pop	bc
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c		; Test all pixel set
+	jr	nz,l0504	; Nope
+	pop	hl
+	ret
+;
+; Load number of vertices
+; EXIT	Reg HL points to input coordinate array
+;	Reg BC holds number
+;	Zero reflects a number of 1
+;
+l051f:
+	ld	a,2
+	call	l0ae3		; Get CONTRL(2)
+	ld	b,h		; Copy it
+	ld	c,l
+	ld	hl,(l0c04)	; Get address of array
+	ld	a,c
+	dec	a
+	or	b		; Test CONTRL(2)=1
+	ret
+;
+; Opcode = 18 : Set marker type
+;
+l052d:
+	ld	a,1
+	call	l0537		; Set marker from INTIN(1)
+	jp	l0af7		; INTOUT(1):=val
+;
+; Set polyline marker from INTIN(4)
+;
+l0535::
+	ld	a,4
+l0537:
+	call	l0ae8		; Get INTIN()
+	ld	a,h
+	or	a
+	ld	b,3
+	jr	nz,l0547
+	ld	a,l
+	dec	a
+	cp	PM
+	jr	nc,l0547
+	ld	b,l
+l0547:
+	ld	a,b
+	push	af
+	add	a,a
+	add	a,(LOW l055a)-2
+	ld	l,a
+	adc	a,HIGH l055a
+	sub	l
+	ld	h,a
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ld	(l0c14),hl	; Save marker
+	pop	af
+	ret
+;
+l055a::
+	db	'.',0
+	db	'+',3
+	db	'*',3
+	db	'o',4
+	db	'x',4
+PM	equ	($-l055a) / 2
+;
+; Opcode =7 : Plot a group of markers
+;
+l0564:
+	ld	a,(l0d08)	; Get color index
+	call	l0d98		; Set intensity pointer
+	ld	a,(l0d0f)	; Get writing mode
+	cp	1		; Test replace
+	jr	nz,l0572	; Nope
+	inc	a
+l0572:
+	call	l0dae		; Set write mode
+	ld	a,2
+	call	l0ae3		; Get CONTRL(2)
+	ld	b,h		; Copy it
+	ld	c,l
+	ld	hl,(l0c04)
+l057f:
+	push	hl
+	push	bc
+	call	l0590
+	pop	bc
+	pop	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l057f
+	ret
+;
+;
+;
+l0590:
+	call	l0b4f		; Fetch pair
+	ld	bc,(l0c14)	; Get marker
+	ld	a,c
+	cp	'.'		; Test it
+	jp	z,l0b25
+	dec	de
+	dec	de
+	dec	de
+	ld	a,l
+	add	a,b
+	ld	l,a
+	jr	nc,l05a6
+	inc	h
+l05a6:
+	ld	a,(l0c14)	; Get marker
+	jp	l0b1f		; Write it
+;
+; Opcode = 8 : Draw text
+;
+l05ac:
+	push	ix
+	ld	a,(l0d09)	; Get text color index
+	call	l0ada		; Set intensity and write mode
+	ld	hl,(l0c04)
+	call	l0b4f		; Fetch pair
+	ld	bc,6
+	add	hl,bc		; Fix Y
+	push	hl
+	ld	a,4
+	call	l0ae3		; Get CONTRL(4)
+	ld	b,h		; Get as length
+	ld	c,l
+	ld	ix,(l0c02)	; Point to input
+	pop	hl
+l05cb:
+	ld	a,(ix)		; Get character
+	inc	ix
+	inc	ix
+	push	bc
+	push	hl
+	push	de
+	call	l0b1f		; Write it
+	pop	hl
+	pop	de
+	ld	bc,8
+	add	hl,bc
+	ex	de,hl
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l05cb
+	pop	ix
+	ret
+;
+; Opcode = 12 : Set text size
+;
+l05e8:
+	ld	a,3
+	ld	de,2
+	call	l0b01		; CONTRL(3):=2
+	xor	a
+	ld	hl,(l0c08)	; Get PTSOUT()
+	ld	(hl),7		; Init size
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),7
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),8
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),8
+	inc	hl
+	ld	(hl),a
+	ret
+;
+; Primitive ID 1 : Filled bar
+;
+l0608::
+	ld	a,(l0d0a)	; Get fill color index
+	push	af
+	call	l0ada		; Set intensity and write mode
+	call	l0649
+	push	iy
+	push	ix
+	push	hl
+	push	bc
+	ld	hl,(l0c1c)
+	ld	de,(l0c18)
+	push	de
+	or	a
+	sbc	hl,de
+	inc	hl
+	ld	b,h
+	ld	c,l
+	pop	hl
+l0627:
+	push	bc
+	push	hl
+	push	hl
+	pop	iy
+	ld	ix,(l0c16)
+	ld	de,(l0c22)
+	call	l07f7
+	pop	hl
+	pop	bc
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l0627
+	pop	bc
+	pop	hl
+	pop	ix
+	pop	iy
+	pop	af
+	jp	l04c4
+;
+;
+;
+l0649:
+	ld	hl,(l0c04)
+	push	hl
+	call	l0b4f		; Fetch pair
+	ld	(l0c18),hl
+	ld	(l0c24),hl
+	ex	de,hl
+	ld	(l0c16),hl
+	ld	(l0c1a),hl
+	pop	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	call	l0b4f		; Fetch pair
+	ld	(l0c1c),hl
+	ld	(l0c20),hl
+	ex	de,hl
+	ld	(l0c1e),hl
+	ld	(l0c22),hl
+	ld	hl,l0c16
+	ld	bc,l0004
+	ret
+;
+; Opcode = 10 : Output colour index array
+;
+l0679:
+	call	l0649
+	ld	a,(l0d07)	; Get color index
+	jp	l04c4
+;
+;
+;
+l0682::
+	ld	a,8
+	call	l069e
+	ld	a,9
+l0689:
+	call	l0ae8		; Get INTIN()
+	ld	e,1
+	ld	a,h
+	or	a
+	jr	nz,l0699
+	ld	a,l
+	dec	a
+	cp	6
+	jr	nc,l0699
+	ld	e,l
+l0699:
+	ld	a,e
+	ld	(l0c26),a
+	ret
+;
+;
+;
+l069e:
+	call	l0ae8		; Get INTIN()
+	ld	e,1
+	ld	a,h
+	or	a
+	jr	nz,l06ad
+	ld	a,l
+	cp	4
+	jr	nc,l06ad
+	ld	e,l
+l06ad:
+	ld	a,e
+	ld	(l0c27),a
+	ret
+;
+; Opcode = 23 : Set fill style
+;
+l06b2:
+	ld	a,1
+	call	l069e
+	jp	l0af7
+;
+; Opcode = 24 : Set fill index
+;
+l06ba:
+	ld	a,1
+	call	l0689		; Get INTIN(1)
+	jp	l0af7		; Store value into INTOUT(1)
+;
+;
+;
+l06c2::
+	push	iy
+	push	ix
+	ld	(l0cf1),hl
+	push	bc
+	call	l07c2
+	push	de
+	pop	iy
+	or	a
+	sbc	hl,de
+	inc	hl
+	ex	de,hl
+	pop	bc
+l06d6:
+	push	de
+	push	bc
+	call	l06e9
+	pop	bc
+	pop	de
+	inc	iy
+	dec	de
+	ld	a,d
+	or	e
+	jr	nz,l06d6
+	pop	ix
+	pop	iy
+	ret
+;
+;
+;
+l06e9:
+	xor	a
+	ld	(l0c28),a
+	push	bc
+	ld	hl,(l0cf1)
+	ld	de,l0cf3
+	ld	bc,l0004
+	ldir
+	pop	bc
+	jr	l070b
+l06fc:
+	push	hl
+	push	bc
+	ld	hl,l0cf7
+	ld	de,l0cf3
+	ld	bc,l0004
+	ldir
+	pop	bc
+	pop	hl
+l070b:
+	ld	a,c
+	dec	a
+	or	b
+	jr	nz,l0713
+	ld	hl,(l0cf1)
+l0713:
+	push	bc
+	ld	bc,l0004
+	ldir
+	pop	bc
+	push	hl
+	push	bc
+	push	iy
+	pop	hl
+	ld	de,(l0cf5)
+	or	a
+	sbc	hl,de
+	ld	a,h
+	push	iy
+	pop	hl
+	ld	de,(l0cf9)
+	or	a
+	sbc	hl,de
+	xor	h
+	and	80h
+	jr	z,l075b
+	ld	b,h
+	ld	c,l
+	ld	hl,(l0cf3)
+	ld	de,(l0cf7)
+	or	a
+	sbc	hl,de
+	push	hl
+	ld	hl,(l0cf5)
+	ld	de,(l0cf9)
+	or	a
+	sbc	hl,de
+	pop	de
+	call	l0b58
+	jr	nc,l075b
+	ld	de,(l0cf7)
+	add	hl,de
+	call	l0788
+l075b:
+	pop	bc
+	pop	hl
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l06fc
+	ld	a,(l0c28)
+	srl	a
+	ret	z
+	ld	b,a
+	ld	hl,l0c29
+l076d:
+	push	bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	de
+	pop	ix
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	iy
+	ex	(sp),hl
+	push	iy
+	call	l07f7
+	pop	iy
+	pop	hl
+	pop	bc
+	djnz	l076d
+	ret
+;
+;
+;
+l0788:
+	ex	de,hl
+	ld	hl,l0c29
+	ld	a,(l0c28)
+	cp	64h
+	ret	nc
+	or	a
+	jr	z,l07ba
+	ld	b,a
+l0796:
+	push	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	or	a
+	sbc	hl,de
+	pop	hl
+	jp	p,l07a8
+	inc	hl
+	inc	hl
+	djnz	l0796
+	jr	l07ba
+l07a8:
+	push	hl
+	push	de
+	ld	a,b
+	add	a,a
+	ld	c,a
+	ld	a,0
+	rla
+	ld	b,a
+	add	hl,bc
+	ld	d,h
+	ld	e,l
+	dec	hl
+	inc	de
+	lddr
+	pop	de
+	pop	hl
+l07ba:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,l0c28
+	inc	(hl)
+	ret
+;
+;
+;
+l07c2:
+	inc	hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	pop	ix
+	ld	l,e
+	ld	h,d
+	dec	bc
+l07ce:
+	inc	ix
+	inc	ix
+	push	hl
+	ld	l,(ix+0)
+	inc	ix
+	ld	h,(ix+0)
+	inc	ix
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jp	p,l07e6
+	ld	d,h
+	ld	e,l
+l07e6:
+	ex	de,hl
+	ex	(sp),hl
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jp	p,l07f0
+	ex	de,hl
+l07f0:
+	pop	de
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l07ce
+	ret
+;
+;
+;
+l07f7::
+	push	hl
+	call	l0804
+	ld	l,c
+	ld	h,c
+	call	l0dca		; Save pattern
+	pop	hl
+	jp	l0b31
+;
+;
+;
+l0804:
+	ld	a,(l0c27)
+	or	a
+	ld	c,0
+	ret	z
+	dec	c
+	dec	a
+	ret	z
+	ld	b,a
+	add	a,a
+	add	a,b
+	add	a,a
+	ld	b,a
+	ld	a,(l0c26)
+	add	a,b
+	sub	7
+	add	a,a
+	add	a,a
+	add	a,a
+	ld	b,a
+	ld	a,l
+	and	7
+	add	a,b
+	add	a,LOW l0837
+	ld	l,a
+	adc	a,HIGH l0837
+	sub	l
+	ld	h,a
+	ld	c,(hl)
+	push	ix
+	pop	hl
+	ld	a,l
+	and	7
+	ret	z
+	ld	b,a
+	ld	a,c
+l0832:
+	rlca
+	djnz	l0832
+	ld	c,a
+	ret
+;
+l0837::
+	db	080h,000h,008h,000h,080h,000h,008h,000h
+	db	080h,008h,080h,008h,080h,008h,080h,008h
+	db	088h,022h,088h,022h,088h,022h,088h,022h
+	db	0aah,055h,0aah,055h,0aah,055h,0aah,055h
+	db	077h,0ddh,077h,0ddh,077h,0ddh,077h,0ddh
+	db	07fh,0f7h,07fh,0f7h,07fh,0f7h,07fh,0f7h
+	db	080h,080h,080h,080h,080h,080h,080h,080h
+	db	0ffh,000h,000h,000h,0ffh,000h,000h,000h
+	db	080h,040h,020h,010h,008h,004h,002h,001h
+	db	001h,002h,004h,008h,010h,020h,040h,080h
+	db	0ffh,080h,080h,080h,0ffh,080h,080h,080h
+	db	081h,042h,024h,018h,018h,024h,042h,081h
+;
+; Initialize data for opening a workstation
+;
+l0897:
+	xor	a
+	ld	hl,l08c0
+	call	l08de		; Set no intensity
+	ld	a,1
+	ld	hl,l08c6	; Set full intensity
+	call	l08de
+	ld	a,3
+	ld	de,l0d07	; Init color index pointer
+	call	l08ba		; Get from INTIN(3)
+	ld	a,5
+	call	l08ba		; And from INTIN(5)
+	ld	a,7
+	call	l08ba		; And from INTIN(7)
+	ld	a,10		; And from INTIN(10)
+;
+; Store index from INTIN()
+; ENTRY	Reg DE points to current index
+;	Accu holds index to INTIN
+;
+l08ba:
+	call	l091a		; Map to 0 or 1
+	ld	(de),a		; Store it
+	inc	de
+	ret
+;
+l08c0:
+	dw	0,0,0
+l08c6:
+	dw	1000,1000,1000
+;
+; Opcode = 14 : Set colour index (palette registers)
+;
+l08cc:
+	ld	a,1
+	call	l0ae8		; Get INTIN(1)
+	ld	a,h		; Test index
+	or	a
+	ret	nz		; End if not in range
+	ld	a,1
+	cp	l
+	ret	c		; Verify 0 or 1
+	ld	a,l		; Get index
+	ld	hl,(l0c02)
+	inc	hl		; Get INTIN(2)
+	inc	hl
+;
+; Save color intensity
+;
+l08de:
+	push	af
+	call	l08f1		; Get index
+	push	de
+	ld	bc,2*3
+	ldir			; Unpack bytes
+	pop	hl
+	call	l0958		; Test zero color
+	ld	b,a
+	pop	af
+	jp	l0d8b		; Save intensity state
+;
+; Return indexed pointer
+; ENTRY	Accu holds index - either 0 or 1
+; EXIT	Reg DE holds pointer
+;
+l08f1:
+	add	a,a		; *2
+	ld	e,a
+	add	a,a		; *4
+	add	a,e		; *6
+	add	a,LOW l0cfb	; Add base l0cfb
+	ld	e,a
+	adc	a,HIGH l0cfb
+	sub	e
+	ld	d,a
+	ret
+;
+; Opcode = 17 : Set line colour
+;
+l08fd:
+	ld	hl,l0d07	; Point to color index
+	jr	l090f
+;
+; Opcode = 20 : Set marker colour
+;
+l0902:
+	ld	hl,l0d08	; Point to color index
+	jr	l090f
+;
+; Opcode = 22 : Set text colour
+;
+l0907:
+	ld	hl,l0d09	; Point to text color index
+	jr	l090f
+;
+; Opcode = 25 : Set fill colour
+;
+l090c:
+	ld	hl,l0d0a	; Point to fill color index
+l090f:
+	push	hl
+	call	l0918		; Get INTIN(1)
+	pop	hl
+	ld	(hl),a
+	jp	l0af7		; INTOUT(1):=val
+;
+; Return color index equivalent of INTIN(1)
+; EXIT	Accu holds either 0 or 1
+;
+l0918:
+	ld	a,1
+;
+; Return color index equivalent
+; ENTRY	Accu holds undex to INTIN()
+; EXIT	Accu holds either 0 or 1
+;
+l091a:
+	call	l0ae8		; Get INTIN()
+	ld	a,h
+	or	a
+	ld	a,1
+	ret	nz		; Return 1 if out of range
+	cp	l
+	ret	c
+	ld	a,l		; Else get value
+	ret
+;
+; Opcode = 26 : Inquire colour representation (read palette)
+;
+l0926:
+	call	l0918		; Get INTIN(1)
+	call	l0af7		; INTOUT(1):=val
+	call	l08f1		; Get index[0,1]
+	ld	hl,(l0c02)	; Get requested index
+	ld	a,(hl)
+	inc	hl
+	or	(hl)		; Test zero
+	ld	hl,(l0c06)
+	inc	hl		; Fix for INTOUT(2)
+	inc	hl
+	ex	de,hl
+	jr	nz,l0943	; Got any request
+	ld	bc,2*3
+	ldir			; Copy entire index
+	ret
+l0943:
+	call	l0958		; Test color
+	ex	de,hl
+	ld	de,0
+	jr	nc,l094f	; Nope
+	ld	de,1000		; Set percentage
+l094f:
+	ld	b,3
+l0951:
+	ld	(hl),e		; Init value
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	djnz	l0951
+	ret
+;
+; Test color definition
+; ENTRY	Reg HL points to three color field
+; EXIT	Carry set if any definition
+;
+l0958:
+	ld	b,2*3
+	xor	a
+l095b:
+	or	(hl)		; Test for zero
+	inc	hl
+	djnz	l095b
+	add	a,-1
+	sbc	a,a		; Get CY
+	ret
+;
+; Get number of locator devices
+;
+l0963:
+	ld	hl,l0101
+	ld	(l0d0b),hl
+	ld	(l0d0d),hl
+	ld	hl,1
+	ld	(l097e+2),hl	; Init number
+	ld	c,.RSX
+	ld	de,l097e
+	call	BDOS		; Request RSX
+	ld	hl,(l097e+2)	; Get number
+	ret
+;
+l097e:
+	db	1		; RSX function number
+	db	1		; Parameter in this call
+	dw	1
+;
+; Opcode = 26 : Read locator (eg tablet or mouse)
+;
+l0982::
+	push	iy
+	push	ix
+	ld	hl,(l0c04)
+	call	l0b4f		; Fetch pair
+	ld	a,(l0d0b)
+	dec	a
+	jr	nz,l09af
+l0992:
+	call	l0427		; Place cursor
+l0995:
+	call	l09de		; Get input
+	jr	nc,l0995	; Wait for any key
+	call	l0427		; Place cursor
+	jr	nz,l09a4
+	call	l0a6f
+	jr	l0992
+l09a4:
+	call	l0a9a		; Save pair into PTSOUT(1..2)
+	call	l0af7		; Store value into INTOUT(1)
+	ld	bc,l0101
+	jr	l09cc
+l09af:
+	call	l09de		; Get input
+	jr	nc,l09c9	; Got none
+	jr	nz,l09c1	; Got no cursor
+	call	l0a6f
+	call	l0a9a		; Save pair into PTSOUT(1..2)
+	ld	bc,l0100
+	jr	l09cc
+l09c1:
+	call	l0af7		; Store value into INTOUT(1)
+	ld	bc,l0001
+	jr	l09cc
+l09c9:
+	ld	bc,l0000
+l09cc:
+	ld	d,0
+	ld	e,b
+	ld	a,3
+	call	l0b01		; Store value into CONTRL(3)
+	ld	a,5
+	ld	e,c
+	pop	ix
+	pop	iy
+	jp	l0b01		; Store value into CONTRL(5)
+;
+; Get input
+; EXIT	Carry set if key pressed
+;	Zero set if cursor detected
+;
+l09de:
+	push	hl
+	ld	a,1
+	call	l0ae8		; Get INTIN(1)
+	ld	b,h
+	ld	c,l
+	pop	hl
+	ld	a,c
+	dec	a
+	or	b
+	jr	nz,l0a4a
+	call	l0d88		; Get key
+	dw	_KTGET
+	ret	nc		; Nothing pressed
+	push	hl
+	push	de
+	ld	a,b		; Get bit map
+	and	01100000b	; Test shift
+	ld	hl,l0a32
+	jr	z,l09ff		; Nope
+	ld	hl,l0a3e
+l09ff:
+	ld	d,4
+l0a01:
+	ld	a,(hl)
+	inc	hl
+	cp	c		; Test key number found
+	jr	z,l0a1c		; Yeap
+	inc	hl
+	inc	hl
+	dec	d
+	jr	nz,l0a01
+	call	l0d88		; Not found, bring back key bytes
+	dw	_KTPUT
+	ld	c,.condir
+	ld	e,_get
+	call	BDOS		; Read character
+	or	a
+	jr	z,l0a2f		; Got none
+	jr	l0a2e
+l0a1c:
+	ld	a,(hl)		; Get 1st value
+	ld	c,a		; Expand to 16 bit
+	add	a,a
+	sbc	a,a
+	ld	b,a
+	push	bc
+	pop	ix
+	inc	hl
+	ld	a,(hl)		; Same for 2nd value
+	ld	c,a
+	add	a,a
+	sbc	a,a
+	ld	b,a
+	push	bc
+	pop	iy
+	xor	a
+l0a2e:
+	scf
+l0a2f:
+	pop	de
+	pop	hl
+	ret
+;
+; Normal table
+;
+l0a32:
+	db	_CUP,0,10
+	db	_CDWN,0,-10
+	db	_CLFT,-10,0
+	db	_CRGT,10,0
+;
+; Shift table
+;
+l0a3e:
+	db	_CUP,0,1
+	db	_CDWN,0,-1
+	db	_CLFT,-1,0
+	db	_CRGT,1,0
+;
+;
+;
+l0a4a:
+	push	hl
+	push	de
+	ld	(l0a67+2),bc	; Set parameters
+	ld	(l0a67+4),de
+	ld	(l0a67+6),hl
+	ld	de,l0a67
+	ld	c,.RSX
+	call	BDOS		; Call RSX
+	pop	de
+	pop	hl
+	cp	0ffh		; Test RSX there
+	ret	z		; Nope, return NC
+	or	a
+	scf			; Return C set
+	ret
+;
+l0a67:
+	db	2		; RSX function number
+	db	3		; Parameter in this call
+	ds	3*2
+;
+;
+;
+l0a6f:
+	push	hl
+	ld	bc,(l02a6)	; Get screen width
+	push	ix
+	pop	hl
+	call	l0a89		; HL:=MIN(HL+DE,BC)
+	ex	de,hl
+	pop	hl
+	push	de
+	ld	bc,(l02a6+2)	; Get screen height
+	push	iy
+	pop	de
+	call	l0a89		; HL:=MIN(HL+DE,BC)
+	pop	de
+	ret
+;
+; HL:=MIN(HL+DE,BC)
+;
+l0a89:
+	add	hl,de		; Add value
+	ld	a,h
+	or	a		; Test in 0x0000...0x7FFF
+	jp	p,l0a93		; Yeap
+	ld	hl,0		; Return 0 on overflow
+	ret
+l0a93:
+	sbc	hl,bc		; Test HL<BC
+	add	hl,bc
+	ret	c		; Yeap
+	ld	h,b		; Truncate it
+	ld	l,c
+	ret
+;
+; PTSOUT(1):=DE
+; PTSOUT(2):=HL
+;
+l0a9a:
+	push	hl
+	ld	hl,(l0c08)	; Get PTSOUT()
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Opcode = 33 : Set input mode
+;
+l0aa7:
+	ld	a,1
+	call	l0ae8		; Get INTIN(1)
+	ld	de,l0d0a	; Point to fill color index
+	add	hl,de
+	ex	de,hl
+	ld	a,2
+	call	l0ae8		; Get INTIN(2)
+	ld	a,l
+	ld	(de),a		; Unpack
+	jp	l0af7		; Store value into INTOUT(1)
+;
+; Set default write mode replace
+;
+l0abb:
+	ld	a,1
+	ld	(l0d0f),a	; Set write mode replace
+	ret
+;
+; Opcode = 32 : Set writing mode
+;
+l0ac1:
+	ld	a,1
+	call	l0ae8		; Get INTIN(1)
+	ld	e,1		; Set default replace
+	ld	a,h		; Check range
+	or	a
+	jr	nz,l0ad3
+	ld	a,l
+	dec	a
+	cp	4+1		; Verify range
+	jr	nc,l0ad3
+	ld	e,l
+l0ad3:
+	ld	a,e
+	ld	(l0d0f),a	; Set write mode replace
+	jp	l0af7		; Store value into INTOUT(1)
+;
+; Set intensity and write mode
+;
+l0ada:
+	call	l0d98		; Set intensity pointer
+	ld	a,(l0d0f)	; Get writing mode
+	jp	l0dae		; Set it
+;
+; Load value from CONTRL()
+; ENTRY	Accu holds index
+; EXIT	Reg HL holds value
+;
+l0ae3:
+	ld	hl,(l0c00)
+	jr	l0aeb
+;
+; Load value from INTIN()
+; ENTRY	Accu holds index
+; EXIT	Reg HL holds value
+;
+l0ae8:
+	ld	hl,(l0c02)
+l0aeb:
+	dec	a		; Fix index
+	add	a,a		; *2
+	adc	a,l
+	ld	l,a
+	adc	a,h
+	sub	l
+	ld	h,a
+	ld	a,(hl)		; Get value
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ret
+;
+; Store value into INTOUT(1)
+; ENTRY	Accu holds value
+;
+l0af7:
+	ld	e,a		; Expand to 16 bit
+	ld	d,0
+	ld	a,1		; Set index
+;
+; Store value into INTOUT()
+; ENTRY	Reg DE holds value
+;	Accu holds index
+;
+l0afc:
+	ld	hl,(l0c06)
+	jr	l0b04
+;
+; Store value into CONTRL()
+; ENTRY	Reg DE holds value
+;	Accu holds index
+;
+l0b01:
+	ld	hl,(l0c00)	; Get base
+l0b04:
+	dec	a		; Fix index
+	add	a,a		; *2
+	adc	a,l
+	ld	l,a		; Buld address
+	adc	a,h
+	sub	l
+	ld	h,a
+	ld	(hl),e		; Store value
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Get view point cursor coordinates
+; ENTRY	Reg HL points to right position
+;	Reg DE points to upper position
+; EXIT	Reg HL points to fixed right position
+;	Reg DE points to fixed upper position
+;
+l0b0f:
+	ld	b,h		; Copy right position
+	ld	c,l
+	ld	hl,(l1186)	; Get vertical pixel
+	or	a
+	sbc	hl,bc		; Get difference
+	ld	bc,(l1180)	; Get left pixel
+	ex	de,hl		; Fix next one
+	add	hl,bc		; By adding limits
+	ex	de,hl
+	ret
+;
+; Write character
+; ENTRY	Accu holds character
+;	Regs HL, DE, IX and IY hold position
+;
+l0b1f:
+	call	l0b0f		; Get relative cursor
+	jp	l10b1		; Write character
+;
+; Manipulate pattern
+; ENTRY	Accu holds ???
+;	Regs HL, DE, IX and IY hold position
+;
+l0b25::
+	call	l0b0f		; Get relative cursor
+	jp	l0dce		; Manipulate pattern
+;
+; Set cursor and pixel
+;
+l0b2b:
+	call	l0b37		; Set cursor
+	jp	l0ee9		; Set pixel
+;
+;
+;
+l0b31:
+	call	l0b37		; Set cursor
+	jp	l0f8e
+;
+; Set cursor
+; ENTRY	Reg HL points to right position
+;	Reg IY points to left  position
+;	Reg DE points to upper position
+;	Reg IX points to lower position
+;
+l0b37:
+	call	l0b0f		; Get relative cursor
+	push	hl
+	push	iy
+	pop	bc
+	ld	hl,(l1186)	; Get vertical pixel
+	or	a
+	sbc	hl,bc
+	push	hl
+	pop	iy
+	pop	hl
+	ld	bc,(l1180)	; Get left pixel
+	add	ix,bc
+	ret
+;
+; Load two consecutive words from memory
+; ENTRY	Reg HL points to address
+; EXIT	Reg DE holds 1st word
+;	Reg HL holds 2nd word
+;
+l0b4f:
+	ld	e,(hl)		; Get ist one
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)		; Get 2nd one
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ret
+;
+;
+;
+l0b58:
+	ld	a,h
+	or	l
+	ret	z
+	ld	a,b
+	xor	d
+	xor	h
+	push	af
+	push	hl
+	ld	a,d
+	or	a
+	jp	p,l0b6b
+	ld	hl,l0000
+	sbc	hl,de
+	ex	de,hl
+l0b6b:
+	ld	l,e
+	ld	h,d
+	ld	a,b
+	or	a
+	ld	a,c
+	jp	p,l0b75
+	xor	a
+	sub	c
+l0b75:
+	dec	a
+	jr	z,l0b8a
+	inc	a
+	jr	z,l0bc9
+	ld	b,8
+l0b7d:
+	dec	b
+	add	a,a
+	jr	nc,l0b7d
+l0b81:
+	add	hl,hl
+	adc	a,a
+	jr	nc,l0b88
+	add	hl,de
+	adc	a,0
+l0b88:
+	djnz	l0b81
+l0b8a:
+	pop	bc
+	inc	b
+	dec	b
+	jp	p,l0b95
+	ld	d,a
+	xor	a
+	sub	c
+	ld	c,a
+	ld	a,d
+l0b95:
+	cp	c
+	jr	nc,l0bc5
+	ld	b,10h
+l0b9a:
+	add	hl,hl
+	adc	a,a
+	jr	c,l0ba1
+	cp	c
+	jr	c,l0ba3
+l0ba1:
+	sub	c
+	or	a
+l0ba3:
+	ccf
+	rl	e
+	rl	d
+	djnz	l0b9a
+	add	hl,hl
+	adc	a,a
+	cp	c
+	jr	c,l0bb0
+	inc	de
+l0bb0:
+	pop	af
+	jp	m,l0bbb
+	ex	de,hl
+	ld	a,h
+	cp	80h
+	ret	c
+	jr	l0bc6
+l0bbb:
+	xor	a
+	ld	l,a
+	ld	h,a
+	sbc	hl,de
+	scf
+	ret	z
+	ret	m
+	jr	l0bc6
+l0bc5:
+	pop	af
+l0bc6:
+	or	1
+	ret
+l0bc9:
+	pop	af
+	pop	hl
+	ld	hl,l0000
+	scf
+	ret
+;
+; Unimplemented codes
+;
+; Opcodes		13,16,19,21,27,29,30,31
+; ESCape codes		17
+; Primitive codes	2,3,4,5
+;
+l0bd0:
+	ret
+;
+	ds	47
+;
+PB	equ	$
+l0c00:
+	dw	0		; Address of CONTRL
+l0c02:
+	dw	0		; Address of INTIN
+l0c04:
+	dw	0		; Address of PTSIN
+l0c06:
+	dw	0		; Address of INTOUT
+l0c08:
+	dw	0		; Address of PTSOUT
+PBlen	equ	$-PB
+;
+l0c0a:
+	db	0		; Offset
+	db	0		; Function
+	dw	0		; New value
+l0c0e:
+	dw	0		; Column of graphic cursor
+l0c10:
+	dw	0		; Row of graphic cursor
+l0c12:
+	dw	0		; Line style pattern
+l0c14:
+	dw	0		; Marker
+l0c16:
+	dw	0
+l0c18:
+	dw	0
+l0c1a:
+	dw	0
+l0c1c:
+	dw	0
+l0c1e:
+	dw	0
+l0c20:
+	dw	0
+l0c22:
+	dw	0
+l0c24:
+	dw	0
+l0c26:
+	db	0
+l0c27:
+	db	0
+l0c28:
+	db	0
+l0c29:
+	ds	2*100
+l0cf1:
+	dw	0
+l0cf3:
+	dw	0
+l0cf5:
+	dw	0
+l0cf7:
+	dw	0
+l0cf9:
+	dw	0
+l0cfb:
+	ds	2*6
+l0d07:
+	db	0		; Color index
+l0d08:
+	db	0		; Marker color index
+l0d09:
+	db	0		; Text color index
+l0d0a:
+	db	0		; Fill color index
+l0d0b:
+	dw	0
+l0d0d:
+	dw	0
+l0d0f:
+	db	0		; Writing mode (1=replace, 2=transparent, 3=xor, 4=erase)
+;
+	ds	16
+;
+; Install user vector
+; EXIT	Carry set indicates OK
+;
+l0d20:
+	ld	a,COM.pag-1
+	cp	0dh		; HIGH l0d20	; Check room ;;; 13
+	ret	nc
+	ld	hl,(BIOS+1)	; Get BIOS base
+	ld	de,3*(_USERF-1)
+	add	hl,de		; Point to vector
+	ld	de,l0d88
+	ld	bc,3
+	ldir			; Copy it
+	ld	bc,0
+	ld	de,256*(_Col-1) + _Row-1
+	call	l0d5e		; Save max window size
+	xor	a
+	ld	b,a
+	call	l0d8b		; Clear intensity state
+	ld	a,1
+	ld	b,a
+	call	l0d8b		; Set intensity state
+	xor	a
+	call	l0da3		; Set intensity pointer
+	ld	a,1
+	call	l0d98		; Set intensity pointer
+	ld	hl,1111111111111111b
+	call	l0dca		; Save pattern
+	ld	a,1
+	call	l0dae		; Set write mode
+	scf
+	ret
+;
+; Save window size
+; ENTRY	Reg B holds left column
+;	Reg C holds top row
+;	Reg D holds horizontal width
+;	Reg E holds vertical height
+;
+l0d5e:
+	ld	l,b		; Get X environment
+	ld	h,d
+	ld	(l1188),hl	; Save it
+	xor	a
+	ld	h,a
+	add	hl,hl		; Left*8
+	add	hl,hl
+	add	hl,hl
+	ld	(l1180),hl	; Save left pixel
+	ld	l,d
+	ld	h,a
+	inc	hl
+	add	hl,hl		; Same for horizintal width
+	add	hl,hl
+	add	hl,hl
+	dec	hl
+	ld	(l1182),hl	; Save horizontal pixel
+	ld	l,c
+	ld	h,a
+	add	hl,hl		; Then top row
+	add	hl,hl
+	add	hl,hl
+	ld	(l1184),hl	; Save top pixle
+	ld	l,e
+	ld	h,a
+	inc	hl
+	add	hl,hl		; Then vertical height
+	add	hl,hl
+	add	hl,hl
+	dec	hl
+	ld	(l1186),hl	; Save vertical pixel
+	ret
+;
+; Hook to XBIOS - special BIOS call #30
+;
+l0d88:
+	ds	3
+;
+; Set intensity
+; ENTRY	Accu holds flag - either 0 or 1
+;	Reg B holds value
+;
+l0d8b:
+	ld	hl,l1190	; Get base of intensity
+	or	a		; Test flag
+	jr	z,l0d92
+	inc	hl		; Fix pointer
+l0d92:
+	ld	a,b
+	add	a,-1
+	sbc	a,a		; Map 0 -> 0x00, other -> 0xFF
+	ld	(hl),a
+	ret
+;
+; Set intensity pointer
+;
+l0d98:
+	ld	hl,l1190	; Get base of intensity
+	or	a		; Test flag
+	jr	z,l0d9f
+	inc	hl		; Fix pointer
+l0d9f:
+	ld	(l118c),hl	; Save pointer
+	ret
+;
+; Set 2nd intensity pointer
+; ENTRY	Accu holds flag - either 0 or 1
+;
+l0da3:
+	ld	hl,l1190	; Get base of intensity
+	or	a		; Test flag
+	jr	z,l0daa
+	inc	hl		; Fix pointer
+l0daa:
+	ld	(l118e),hl	; Save pointer
+	ret
+;
+; Set mode for writing
+; ENTRY	Accu holds mode
+;
+l0dae:
+	ld	(l1192),a	; Save write mode
+	ld	hl,l0dea
+	dec	a
+	jr	z,l0dc6		; Mode 1
+	ld	hl,l0dfe
+	dec	a
+	jr	z,l0dc6		; Mode 2
+	ld	hl,l0e01
+	dec	a
+	jr	z,l0dc6		; Mode 3
+	ld	hl,l0e0e	; Mode 4
+l0dc6:
+	ld	(l0de7+1),hl	; Change address
+	ret
+;
+; Save pattern
+;
+l0dca:
+	ld	(l118a),hl	; Just save it
+	ret
+;
+; Manipulate pattern
+;
+l0dce:
+	call	l1041
+	ret	nc
+	ld	bc,l0de7
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Rotate current pattern
+; EXIT	Carry reflects the bit stae of MSB
+;
+l0ddb:
+	push	hl
+	ld	hl,(l118a)	; Get pattern
+	add	hl,hl		; Shift left
+	jr	nc,l0de3
+	inc	l		; Remember carry into LSB
+l0de3:
+	ld	(l118a),hl	; Save pattern
+	pop	hl
+;
+; Routine in video bank
+;
+l0de7:
+	jp	l0dea		; Mode 1 : Replace
+;;		l0dfe		; Mode 2 : Transparent
+;;		l0e01		; Mode 3 : Xor
+;;		l0e0e		; Mode 4 : Erase
+;
+; Write mode 1 : Replace
+;
+l0dea:
+	jr	nc,l0e0f	; Erase if not set
+l0dec:
+	ld	bc,(l118c)	; Get intensity pointer
+l0df0:
+	ld	a,(bc)		; Get value
+	push	af
+	call	l0e45		; Get video address
+	pop	af
+	and	b		; Mask bits
+	ld	c,a
+	ld	a,b
+	cpl			; Reverse pattern
+	and	(hl)		; Clear bits
+	or	c		; Set new
+	ld	(hl),a
+	ret
+;
+; Write mode 2 : Transparent
+;
+l0dfe:
+	jr	c,l0dec		; Replace if bit set
+	ret
+;
+; Write mode 3 : Xor
+;
+l0e01:
+	ret	nc		; Ignore if bit not set
+	call	l0e45		; Get video address
+	ld	de,(l118c)	; Get intensity pointer
+	ld	a,(de)
+	and	b		; Mask bits
+	xor	(hl)		; XOR them
+	ld	(hl),a
+	ret
+;
+; Write mode 4 : Erase
+;
+l0e0e:
+	ret	nc		; Ignore if bit not set
+l0e0f:
+	ld	bc,(l118e)	; Get 2nd intensity pointer
+	jr	l0df0		; Then replace
+;
+;
+;
+l0e1x::
+	call	l1041
+	ld	bc,(l118e)	; Get 2nd intensity pointer
+	ld	a,(bc)
+	ret	nc
+	ld	bc,l0e27
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Routine in video bank
+;
+l0e27:
+	call	l0e45		; Get video address
+	ld	a,(hl)
+	ld	e,b
+	ret
+;
+;
+;
+l0e2x::
+	ld	b,a
+	push	bc
+	call	l1041
+	pop	bc
+	ld	a,b
+	ret	nc
+	ld	bc,l0e3e
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Routine in video bank
+;
+l0e3e:
+	push	af
+	call	l0e45		; Get video address
+	pop	af
+	ld	(hl),a
+	ret
+;
+; Calculate video address
+;
+l0e45:
+	ld	bc,lb600	; Get roller base
+	add	hl,hl		; Fix a bit
+	add	hl,bc
+	ld	a,(hl)		; Fetch word in roller
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	and	11111000b	; Mask bits
+	add	a,l
+	ld	l,a
+	rl	h		; Shift hi
+	ld	c,e
+	ld	a,e
+	and	11111000b	; Mask bits
+	ld	e,a
+	add	hl,de		; Build address
+	ld	a,c
+	and	00000111b	; Get index bits
+	add	a,LOW l0e67
+	ld	e,a
+	adc	a,HIGH l0e67
+	sub	e
+	ld	d,a
+	ld	a,(de)		; Get mask
+	ld	b,a
+	ret
+;
+l0e67:
+	db	10000000b
+	db	01000000b
+	db	00100000b
+	db	00010000b
+	db	00001000b
+	db	00000100b
+	db	00000010b
+	db	00000001b
+;
+;
+;
+l0e6f:
+	call	l0e73
+	ret	nc
+l0e73:
+	push	iy
+	push	ix
+	call	l0e83
+	push	hl
+	pop	iy
+	push	de
+	pop	ix
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l0e83:
+	call	l1041
+	ret	c
+l0e87:
+	call	l1071
+	ret	nc
+	ld	b,h
+	ld	c,l
+	push	de
+	push	ix
+	pop	hl
+	add	hl,de
+	sra	h
+	rr	l
+	push	hl
+	push	iy
+	pop	hl
+	add	hl,bc
+	sra	h
+	rr	l
+	pop	de
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	jr	nz,l0ead
+	ex	(sp),hl
+	sbc	hl,de
+	add	hl,de
+	ex	(sp),hl
+	jr	z,l0ec0
+l0ead:
+	push	ix
+	ex	(sp),hl
+	or	a
+	sbc	hl,de
+	pop	hl
+	jr	nz,l0ec9
+	push	iy
+	ex	de,hl
+	ex	(sp),hl
+	sbc	hl,de
+	pop	hl
+	ex	de,hl
+	jr	nz,l0ec9
+l0ec0:
+	pop	bc
+	push	ix
+	pop	de
+	push	iy
+	pop	hl
+	scf
+	ret
+l0ec9:
+	ex	(sp),ix
+	push	iy
+	push	bc
+	pop	iy
+	push	bc
+	call	l1071
+	pop	bc
+	pop	iy
+	ex	(sp),ix
+	jr	c,l0ede
+	pop	bc
+	jr	l0e87
+l0ede:
+	push	de
+	pop	ix
+	push	hl
+	pop	iy
+	pop	de
+	ld	h,b
+	ld	l,c
+	jr	l0e87
+;
+; Set pixel
+;
+l0ee9:
+	ld	bc,l0ef2
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Routine in video bank
+;
+l0ef2:
+	call	l0e6f
+	ret	nc
+	push	hl
+	push	ix
+	pop	hl
+	or	a
+	sbc	hl,de
+	call	l1168
+	ld	b,-1
+	jp	p,l0f0a
+	ld	b,1
+	call	l1151		; HL:=-HL
+l0f0a:
+	ex	(sp),hl
+	push	iy
+	pop	de
+	or	a
+	sbc	hl,de
+	call	l1168
+	ld	c,1
+	jp	p,l0f1e
+	ld	c,-1
+	call	l1151		; HL:=-HL
+l0f1e:
+	pop	de
+	call	l115e		; HL:DE
+	ld	a,0
+	jp	m,l0f35		; HL<DE
+	ex	de,hl
+	ld	a,b
+	ld	b,c
+	ld	c,a
+	push	ix
+	push	iy
+	pop	ix
+	pop	iy
+	ld	a,-1
+l0f35:
+	ld	(l1199),a
+	push	de
+	add	hl,hl
+	ld	(l1195),hl
+	sbc	hl,de
+	push	hl
+	ex	de,hl
+	add	hl,hl
+	call	l1151		; HL:=-HL
+	ld	(l1193),hl
+	ld	a,b
+	ld	e,a
+	add	a,a
+	sbc	a,a
+	ld	d,a
+	ld	a,c
+	ld	(l1197),a
+	add	a,a
+	sbc	a,a
+	ld	(l1198),a
+	pop	hl
+	pop	bc
+	inc	bc
+l0f59:
+	push	bc
+	push	hl
+	push	de
+	push	ix
+	pop	de
+	push	iy
+	pop	hl
+	ld	a,(l1199)
+	or	a
+	jr	z,l0f69
+	ex	de,hl
+l0f69:
+	call	l0ddb		; Rotate current pattern
+	pop	de
+	pop	hl
+	ld	a,h
+	add	a,a
+	jr	c,l0f80
+	or	l
+	jr	z,l0f80
+	ld	bc,(l1197)
+	add	iy,bc
+	ld	bc,(l1193)
+	add	hl,bc
+l0f80:
+	ld	bc,(l1195)
+	add	hl,bc
+	add	ix,de
+	pop	bc
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l0f59
+	ret
+;
+;
+;
+l0f8e:
+	ld	bc,l0f97
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Routine in video bank
+;
+l0f97:
+	push	ix
+	pop	bc
+	ld	a,b
+	cp	d
+	jr	nz,l0faa
+	ld	a,c
+	xor	e
+	and	11111000b
+	jr	nz,l0faa
+	ld	a,e
+	sub	c
+	inc	a
+	ld	b,a
+	jr	l0ff8
+l0faa:
+	ld	a,c
+	and	00000111b
+	jr	z,l0fb8
+	cpl
+	add	a,9
+	ld	b,a
+	push	de
+	call	l0ff8
+	pop	de
+l0fb8:
+	push	de
+	push	ix
+	pop	bc
+	ex	de,hl
+	or	a
+	sbc	hl,bc
+	inc	hl
+	ld	b,3
+l0fc3:
+	srl	h
+	rr	l
+	djnz	l0fc3
+	jr	z,l0fea
+	ld	b,l
+	push	bc
+	push	ix
+	pop	de
+	push	iy
+	pop	hl
+	call	l0e45		; Get video address
+	pop	bc
+	push	hl
+	call	l1008
+	pop	hl
+l0fdc:
+	ld	a,(hl)
+	and	c
+	or	d
+	xor	e
+	ld	(hl),a
+	ld	a,l
+	add	a,8
+	ld	l,a
+	adc	a,h
+	sub	l
+	ld	h,a
+	djnz	l0fdc
+l0fea:
+	pop	de
+	inc	de
+	ld	a,e
+	and	00000111b
+	ret	z
+	ld	b,a
+	ld	a,e
+	and	11111000b
+	ld	e,a
+	push	de
+	pop	ix
+;
+;
+;
+l0ff8:
+	push	bc
+	push	ix
+	pop	de
+	push	iy
+	pop	hl
+	call	l0ddb		; Rotate current pattern
+	inc	ix
+	pop	bc
+	djnz	l0ff8
+	ret
+;
+;
+;
+l1008:
+	ld	de,(l118c)	; Get intensity pointer
+	ld	hl,(l118a)	; Get pattern
+	ld	a,(l1192)	; Get write mode
+	dec	a
+	jr	z,l1030		; Mode=1 - replace
+	dec	a
+	jr	z,l101f		; Mode=2 - transparent
+	dec	a
+	jr	z,l1028		; Mode=3 - xor
+	ld	de,(l118e)	; Get 2nd intensity pointer for erase
+;
+; Mode=2 - transparent
+;
+l101f:
+	ld	a,(de)
+	and	l
+	ld	d,a
+	ld	a,l
+	cpl
+	ld	c,a
+	ld	e,00000000b
+	ret
+;
+; Mode=3 - xor
+;
+l1028:
+	ld	a,(de)
+	and	l
+	ld	e,a
+	ld	c,11111111b
+	ld	d,00000000b
+	ret
+;
+; Mode=1 - replace
+;
+l1030:
+	ld	a,(de)
+	and	l
+	ld	c,a
+	ld	de,(l118e)	; Get 2nd intensity pointer
+	ld	a,(de)
+	cpl
+	or	l
+	cpl
+	or	c
+	ld	d,a
+	ld	c,00000000b
+	ld	e,c
+	ret
+;
+;
+;
+l1041:
+	ld	bc,(l1184)	; Get top pixle
+	call	l1164		; HL:BC
+	jp	m,l106f		; HL<BC
+	ld	bc,(l1186)	; Get vertical pixel
+	call	l1164		; HL:BC
+	jr	z,l1057		; HL=BC
+	jp	p,l106f		; HL>BC
+l1057:
+	ld	bc,(l1180)	; Get left pixel
+	call	l1158		; DE:BC
+	jp	m,l106f		; DE<BC
+	ld	bc,(l1182)	; Get horizontal pixel
+	call	l1158		; DE:BC
+	jr	z,l106d		; DE=BC
+	jp	p,l106f		; DE>BC
+l106d:
+	scf
+	ret
+l106f:
+	or	a
+	ret
+;
+;
+;
+l1071:
+	push	ix
+	ex	(sp),hl
+	ld	bc,(l1180)	; Get left pixel
+	call	l1099
+	ld	bc,(l1182)	; Get horizontal pixel
+	call	c,l10a3
+	pop	hl
+	ret	nc
+	ex	de,hl
+	push	iy
+	ex	(sp),hl
+	ld	bc,(l1184)	; Get top pixle
+	call	l1099
+	ld	bc,(l1186)	; Get vertical pixel
+	call	c,l10a3
+	pop	hl
+	ex	de,hl
+	ret
+;
+;
+;
+l1099:
+	call	l1164		; HL:BC
+	call	m,l1158		; DE:BC if HL<BC
+	scf
+	ret	p
+	or	a
+	ret
+;
+;
+;
+l10a3:
+	call	l1164		; HL:BC
+	scf
+	ret	m
+	ret	z
+	call	l1158		; DE:BC if HL>BC
+	scf
+	ret	m
+	ret	z
+	or	a
+	ret
+;
+; Write character
+; ENTRY	Accu holds character
+;
+l10b1:
+	ld	bc,l10ba
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Routine in video bank
+;
+l10ba:
+	push	ix
+	push	hl
+	ld	l,a		; Get character
+	ld	h,0
+	add	hl,hl		; *8
+	add	hl,hl
+	add	hl,hl
+	ld	bc,lb800
+	add	hl,bc		; Point into character matrix
+	push	hl
+	pop	ix
+	pop	hl
+	ld	b,8
+l10cd:
+	push	de
+	push	bc
+	ld	c,(ix)		; Get character pixel row
+	inc	ix
+	ld	b,8		; Set bit count
+l10d6:
+	push	bc
+	call	l1041		; Validate place on screen
+	pop	bc
+	jr	nc,l10e8	; Out of sight
+	ld	a,c
+	add	a,a		; Get bit
+	push	hl
+	push	de
+	push	bc
+	call	l0de7		; Write bit
+	pop	bc
+	pop	de
+	pop	hl
+l10e8:
+	sla	c		; Shift bit
+	inc	de
+	djnz	l10d6		; Do one line
+	pop	bc
+	pop	de
+	inc	hl
+	djnz	l10cd		; Do all rows
+	pop	ix
+	ret
+;
+; Clear screen window
+; ENTRY	Accu holds pattern
+;	Reg HL holds vertical count
+;
+l10f5:
+	ld	bc,l10fe
+	call	l0d88		; Execute routine in video bank
+	dw	_SCRrun
+	ret
+;
+; Routine in video bank
+;
+l10fe:
+	ld	b,a
+	ld	de,(l1184)	; Get top pixle
+	xor	a
+	sbc	hl,de
+	inc	hl
+	or	h
+	ret	m
+	or	l
+	ret	z
+	ld	h,l
+	push	hl
+	ld	a,b
+	ld	hl,l1190	; Get base of intensity
+	or	a		; Test mode
+	jr	z,l1115
+	inc	hl		; Fix address
+l1115:
+	ld	c,(hl)
+	ld	hl,(l1184)	; Get top pixle
+	add	hl,hl
+	ld	de,lb600	; Get roller base
+	add	hl,de		; Add it
+	push	hl
+	ld	a,(l1189)	; Get horizontal width
+	ld	hl,l1188	; Point to X environment
+	sub	(hl)
+	inc	a
+	ld	b,a
+	ld	l,(hl)
+	ld	h,0
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	ex	de,hl
+	pop	hl
+	pop	af
+l1131:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	and	11111000b
+	add	a,l
+	ld	l,a
+	rl	h
+	add	hl,de
+	ld	de,l0008
+l1143:
+	ld	(hl),c
+	add	hl,de
+	djnz	l1143
+	pop	hl
+	inc	hl
+	inc	hl
+	pop	de
+	pop	bc
+	pop	af
+	dec	a
+	jr	nz,l1131
+	ret
+;
+; HL:=-HL
+;
+l1151:
+	xor	a
+	sub	l		; Simple one
+	ld	l,a
+	sbc	a,h
+	sub	l
+	ld	h,a
+	ret
+;
+; DE:BC
+;
+l1158:
+	ex	de,hl
+	call	l1164		; HL:BC
+	ex	de,hl
+	ret
+;
+; HL:DE
+;
+l115e:
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	l1168
+;
+; HL:BC
+;
+l1164:
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+l1168:
+	ret	po
+	jp	m,l116f
+	or	MSB
+	ret
+l116f:
+	and	NOMSB
+	ret
+;
+	ds	14
+;
+l1180:
+	dw	0		; Left pixel
+l1182:
+	dw	0		; Horizontal pixel
+l1184:
+	dw	0		; Top pixle
+l1186:
+	dw	0		; Vertical pixel
+l1188:
+	db	0		; Left column
+l1189:
+	db	0		; Horizontal width
+l118a:
+	dw	0		; Pattern
+l118c:
+	dw	0		; Intensity pointer
+l118e:
+	dw	0		; Second intensity pointer
+l1190:
+	db	0		; Intensity 0
+	db	0		; Intensity 1
+l1192:
+	db	0		; Write mode
+l1193:
+	dw	0
+l1195:
+	dw	0
+l1197:
+	db	0
+l1198:
+	db	0
+l1199:
+	db	0
+;
+	ds	6
+
+	end
+

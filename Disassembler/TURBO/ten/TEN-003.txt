@@ -1,0 +1,788 @@
+;
+;
+;
+l39cb:
+	ld	hl,(CurMemPtr)	; Get text pointer
+	call	PrevEOL		; Get previous line
+	jr	c,l3a05		; .. below start
+	push	hl
+	call	PollAppend	; Sample character
+	pop	hl
+	ld	(CurMemPtr),hl	; .. set new text pointer
+	res	0,(iy+14)
+	call	l401f
+	call	ED.RESLIN	; Restore line
+	call	LastInLine	; Find last non blank
+	jr	l3a01
+;
+; WORT : Word left
+;
+ED.WLFT:
+	ld	hl,(CurEdPtr)	; Get current pointer
+l39ed:
+	call	..Left		; .. move left
+	jr	c,l39cb		; .. at beginning of line
+	call	FndDelim	; Find delimiter
+	jr	c,l39ed		; .. yeap
+l39f7:
+	call	..Left		; Move left
+	jr	c,l3a01		; .. at beginning of line
+	call	FndDelim	; Find delimiter
+	jr	nc,l39f7	; .. nope
+l3a01:
+	inc	hl
+l3a02:
+	ld	(CurEdPtr),hl	; Set current pointer
+l3a05:
+	ld	hl,(CurEdPtr)	; Get it
+	jp	l3fe7
+;
+; SHIFT WORT : Word right
+;
+ED.WRGT:
+	call	LastInLine	; Find last non blank
+	ld	de,(CurEdPtr)	; Get current pointer
+	push	de
+	xor	a
+	sbc	hl,de
+	jr	nc,l3a19
+	inc	a
+l3a19:
+	ld	(WrdFlg),a	; Set flag
+	pop	hl
+l3a1d:
+	dec	hl
+l3a1e:
+	call	..Right		; Move right
+	jr	c,l3a4e		; .. still in limit
+l3a23:
+	ld	hl,(CurMemPtr)	; Get text pointer
+	call	NextEOL		; Get next end of line
+	ret	c		; .. out of text
+	call	PollAppend	; Sample character
+	ld	hl,(CurMemPtr)	; Get text pointer
+	call	NextEOL		; .. get next end of line
+	ld	(CurMemPtr),hl	; .. set as new one
+	res	0,(iy+14)
+	call	l401f
+	call	ED.RESLIN	; Restore line
+	ld	hl,EDLine
+	ld	(CurEdPtr),hl	; Init pointer
+	call	FndDelim	; Find delimiter
+	jr	c,l3a1d		; .. yeap
+	jp	l3fe7
+l3a4e:
+	call	FndDelim	; Find delimiter
+	jr	nc,l3a1e	; .. nope
+l3a53:
+	call	..Right		; Move right
+	jr	c,l3a64		; .. still in limit
+	ld	a,(WrdFlg)	; Get direction
+	or	a
+	jr	nz,l3a23
+	call	LastInLine	; Find last non blank
+	inc	hl		; .. skip
+	jr	l3a02
+l3a64:
+	call	FndDelim	; Find delimiter
+	jr	c,l3a53		; .. yeap
+	jr	l3a02
+;
+WrdFlg:
+	db	0
+;
+; Get pointer to previous line from current one
+; EXIT	Reg HL points to line
+;	Carry set if below start of text
+;
+CurEOL:
+	ld	hl,(CurMemPtr)	; Get current text pointer
+	call	PrevEOL		; Get previous line
+	ret
+;
+; TAB : Set tab
+;
+ED.TAB:
+	call	CurEOL		; Get pointer to previous line
+	ret	c		; .. below start of text
+	ld	a,(ED.Row)
+	push	af		; Save row
+	ld	hl,(CurEdPtr)	; Get pointer
+	ld	(l4468),hl
+	res	_LB,(iy+_Video)	; Disable video
+	call	PollAppend	; Sample character
+	ld	hl,(CurMemPtr)	; Get current text pointer
+	push	hl
+	call	PrevEOL		; Get previous line
+	ld	(CurMemPtr),hl	; .. set as current
+	call	ED.RESLIN	; Restore line
+	ld	hl,BlnkDelim
+	ld	(DelimP),hl	; Change delimiter table
+	call	ED.WRGT		; Word right to blank
+	ld	hl,AllDelim
+	ld	(DelimP),hl	; Reset table
+	pop	hl
+	pop	af
+	ld	(ED.Row),a	; Restore row
+	ld	(CurMemPtr),hl	; .. set current
+	call	ED.RESLIN	; Restore line
+	set	_LB,(iy+_Video)	; Enable video
+	bit	_M,(iy+_EdIns)	; Test insert
+	jp	nz,l374e	; .. overwrite
+	ld	hl,(CurEdPtr)	; Get pointer
+	ld	de,(l4468)
+	sbc	hl,de		; Get difference
+	ret	c		; .. nothing to clear
+	ret	z
+	ex	de,hl
+l3ac5:
+	push	de
+	call	RoomForOne	; Make room
+	ld	(hl),' '	; .. blank it
+	pop	de
+	dec	e
+	jr	nz,l3ac5
+	jp	l374e
+;
+; ALT AUSBL : Delete to end of line
+;
+ED.LENDEL:
+	ld	hl,(CurEdPtr)	; Get current pointer
+	push	hl
+	call	l3fc5
+	pop	hl
+	push	hl
+	ld	de,EDLine+_LinLen-1
+l3ade:
+	ld	(hl),' '
+	call	CmpAdr		; Compare addresses
+	jr	z,l3ae8		; .. same
+	inc	hl
+	jr	l3ade
+l3ae8:
+	pop	hl
+	jp	l4197
+;
+; AUSBL : Delete line
+;
+ED.LINDEL:
+	ld	hl,EDLine
+	ld	(CurEdPtr),hl	; Init pointer
+	call	l3fe7
+	call	ED.LENDEL	; Delete to end of line
+	call	PollAppend	; Sample character
+	ld	hl,(CurMemPtr)	; Get text pointer
+	push	hl
+	push	hl
+	call	NextEOL		; Get next end of line
+	pop	de
+	jr	c,l3b10		; .. out of text
+	or	a
+	sbc	hl,de
+	ld	c,l
+	ld	b,h
+	pop	hl
+	jp	nz,l3b26
+	ret
+l3b10:
+	pop	hl
+	jp	ED.RESLIN	; Restore line
+l3b14:
+	call	PollCurr	; Sample character
+	ld	hl,(CurMemPtr)	; Get text pointer
+	call	NextEOL		; Get next end of line
+	jp	c,ED.RESLIN	; Restore line if out of text
+	dec	hl
+	dec	hl
+	ld	bc,2
+	or	a
+l3b26:
+	call	l3f18
+	call	delline
+	ld	a,(@ScrRow)	; Get screen height
+	dec	a
+	call	l3bbc
+	jp	ED.RESLIN	; Restore line
+;
+; SHIFT DEL--> : Delete right word
+;
+ED.RWRDEL:
+	call	LastInLine	; Find last non blank
+	ld	de,(CurEdPtr)	; Get current pointer
+	call	CmpAdr		; Compare addresses
+	ex	de,hl
+	jr	c,l3b14		; .. HL<DE
+	ld	a,(hl)
+	cp	' '
+	jr	z,l3b8c
+	call	FndDelim	; Find delimiter
+	jr	c,l3b83		; .. yeap
+l3b59:
+	call	l4173
+	call	FndDelim	; Find delimiter
+	jr	c,l3b86		; .. yeap
+	jr	l3b59
+l3b63:
+	ld	hl,(CurMemPtr)	; Get current pointer
+	call	PrevEOL		; Get previous line
+	ret	c		; .. below start of text
+	call	ED.LUP		; Line up
+	call	ED.LEND		; .. goto end
+	jp	ED.RWRDEL	; Delete right word
+;
+; DEL--> : Delete current character
+;
+ED.CCHDEL:
+	ld	hl,(CurEdPtr)	; Get current pointer
+	jr	l3b83
+;
+; <--DEL : Delete left character
+;
+ED.LCHDEL:
+	ld	hl,(CurEdPtr)	; Get current pointer
+	call	..Left		; .. move left
+	jr	c,l3b63		; .. at beginning of line
+	ld	(CurEdPtr),hl	; .. set new one
+l3b83:
+	call	l4173
+l3b86:
+	call	l3fe7
+	jp	l4197
+l3b8c:
+	call	l4173
+	ld	a,(hl)
+	cp	' '
+	jr	z,l3b8c
+	jr	l3b86
+;
+;
+;
+l3b96:
+	call	IsAheadEmpty	; Test any character there
+	jp	nz,EdCursor	; .. yeap, set cursor
+	call	l3bac
+	jr	nc,l3b96
+	jp	EdCursor	; Set cursor
+;
+;
+;
+l3ba4:
+	call	l3bac
+	jr	nc,l3ba4
+	jp	EdCursor	; Set cursor
+;
+; ????????????????????????????????????????????
+; EXIT	Carry set if row same as screen height
+;
+l3bac:
+	ld	a,(Ed..Row)
+	ld	hl,@ScrRow	; Compare height
+	cp	(hl)
+	scf
+	ret	z		; .. same, exit
+	inc	(iy+_Ed.Row)	; Bump row
+	cp	(iy+_EdRow)	; Test against current
+	ret	z		; .. same
+;
+;
+;
+l3bbc:
+	ld	h,_First
+	ld	l,a
+	push	af
+	call	ExecXY
+	pop	af
+	ld	hl,(ScrBeg)	; Get start of screen
+	ld	b,a
+l3bc8:
+	dec	b
+	jr	z,l3bd8
+	call	NextEOL		; Get next end of line
+	jr	nc,l3bc8
+	call	.NormVideo	; Make normal video
+	call	ClrPart		; Clear line
+	xor	a
+	ret
+l3bd8:
+	call	l3c1a
+	xor	a
+	ret
+;
+;
+;
+l3bdd:
+	inc	hl
+	ld	de,(TxtEnd)	; Get end
+;
+; Compare addresses
+; ENTRY	Regs HL and DE hold addresses
+; EXIT	Zero  set if HL=DE
+;	Carry set if HL<DE
+;
+CmpAdr:
+	push	hl
+	or	a
+	sbc	hl,de		; .. compare
+	pop	hl
+	ret
+;
+; Move pointer right
+; ENTRY	Reg HL holds pointer
+; EXIT	Carry reset if pointer ou of limit
+;
+..Right:
+	inc	hl		; Point to next
+	ld	de,EDLine+_LinLen-2
+	jr	CmpAdr		; .. go compare
+;
+; Fix to start of line
+; ENTRY	Reg HL holds text pointer
+; EXIT	Reg HL decremented by 1
+;	Carry set if HL < Start_of_Text
+;
+FixBeg:
+	dec	hl		; Fix to previous
+	ld	de,(TxtBeg)	; Get start
+	jr	CmpAdr		; .. go compare
+;
+; Find EOL of previous line
+; ENTRY	Reg HL holds current pointer
+; EXIT	Reg HL points to previous end
+;
+FixEOL:
+	ld	a,lf
+l3bf7:
+	call	FixBeg		; Test start
+	ret	z		; ..yeap
+	jr	c,l3c00		; .. before start
+	cp	(hl)		; Find LF
+	jr	nz,l3bf7	; .. nope
+l3c00:
+	inc	hl		; Adjust pointer
+	ret
+;
+; Move pointer left
+; ENTRY	Reg HL holds pointer
+; EXIT	Carry set if pointer ou of limit
+;
+..Left:
+	dec	hl		; Get previous
+	ld	de,EDLine
+	jr	CmpAdr		; .. go compare
+;
+;
+;
+l3c08:
+	cp	cr
+	ret	nz
+	ld	a,(hl)
+	call	l3bdd
+	ret	nc
+	jr	l3c08
+;
+; Clear line
+;
+ClrPart:
+	ld	a,(@ScrCol)	; Get screen width
+	dec	a
+	ld	b,a
+..ClrEol:
+	jp	.ClrEol		; .. clear to end of line
+;
+;
+;
+l3c1a:
+	call	l3ca1
+	call	l3cc0
+	ld	a,(EditPSW)
+	ld	b,a
+	or	a
+	jr	z,l3c36
+l3c27:
+	ld	a,(hl)
+	call	l3bdd
+	jr	nc,ClrPart	; Clear line
+	call	l3c08
+	cp	lf
+	jr	z,ClrPart	; Clear line
+	djnz	l3c27
+l3c36:
+	ld	a,(@ScrCol)	; Get screen width
+	dec	a
+	ld	b,a
+	bit	0,(iy+16)
+	jr	z,l3c5e
+l3c41:
+	call	l3ca1
+	call	l3cc0
+	push	hl
+	call	LastInLine	; Find last non blank
+	ld	de,(CurEdPtr)	; Get current pointer
+	call	MinAdr		; Get MIN
+	ex	de,hl		; .. change to MAX
+	inc	hl
+	ld	(l4486),hl
+	ex	de,hl
+	pop	hl
+	call	CmpAdr		; Compare addresses
+	jr	nc,...ClrEol	; .. clear if HL>=DE
+l3c5e:
+	call	l3ca1
+	call	l3cc0
+	ld	de,(l4486)
+	call	CmpAdr		; Compare addresses
+	jr	z,...ClrEol	; .. clear if same
+	ld	a,(hl)
+	call	l3bdd
+	jr	nc,..ClrEol	; Clear line
+	call	l3c08
+	cp	lf
+	jr	z,..ClrEol	; Clear on new line
+	call	l3c8b
+	djnz	l3c5e
+l3c7f:
+	ld	a,(hl)
+	call	l3bdd
+	jr	nc,...ClrEol	; Clear line
+	cp	lf
+	jr	nz,l3c7f
+...ClrEol:
+	jr	..ClrEol	; Clear line
+l3c8b:
+	cp	' '
+	jr	nc,l3c96
+	add	a,'A'-1
+	push	af
+	call	.SelVideo	; Select video
+	pop	af
+l3c96:
+	jp	ChrPutCon
+;
+; Select video
+;
+.SelVideo:
+	ld	a,(Video)
+	or	a
+	jr	z,.NormVideo	; Set normal video
+	jr	.LowVideo	; Set low video
+;
+;
+;
+l3ca1:
+	bit	0,(iy+16)
+	ret	z
+	bit	_M,(iy+_EdBlk)	; Test block set
+	jr	nz,.NormVideo	; .. yeap, set video
+	ld	de,(BlkStrPtr)
+	call	CmpAdr		; Compare addresses
+	jr	c,.NormVideo	; .. HL < Start_Of_Block
+	ld	de,(BlkEndPtr)	; Get end of block
+	call	CmpAdr		; .. compare again
+	jr	c,.LowVideo	; .. HL < End_Of_Block
+	jr	.NormVideo	; Set normal video
+;
+;
+;
+l3cc0:
+	bit	0,(iy+16)
+	ret	nz
+	bit	_M,(iy+_EdBlk)	; Test block set
+	jr	nz,.NormVideo	; .. yeap, set normal video
+	ld	de,(MemStrPtr)	; Get start of block
+	call	CmpAdr		; Compare
+	jr	c,.NormVideo	; .. HL < Start_Of_Block
+	ld	de,(MemEndPtr)	; Get end of block
+	call	CmpAdr
+	jr	z,.NormVideo	; .. same
+	jr	nc,.NormVideo	; .. HL > End_Of_Block
+;
+; Set low video if selected
+;
+.LowVideo:
+	ld	a,(Video)	; Test enabled
+	or	a
+	ret	z		; .. nope
+	bit	_LB,(iy+_Video)	; Test selected
+	ret	z		; .. nope
+	jp	LowVideo	; .. do it
+;
+; Set normal video if selected
+;
+;
+.NormVideo:
+	ld	a,(Video)	; Test enabled
+	or	a
+	ret	nz		; .. nope
+	bit	_LB,(iy+_Video)	; Test selected
+	ret	z		; .. nope
+	jp	NormVideo	; .. do it
+;
+; Clear to end of line
+; ENTRY	Reg B holds column position
+;
+.ClrEol:
+	inc	b		; Test zero
+	dec	b
+	ret	z		; .. yeah, so skip
+	jp	ClrEol
+;
+; Delete current line
+;
+.DelLine:
+	@XY	_First,_StLin+1
+	call	ExecXY		; Set to left margin
+	jp	DelLine		; .. delete line
+;
+; ALT EINBL : Restore line
+;
+ED.RESLIN:
+	ld	hl,(CurMemPtr)	; Get current text pointer
+	ld	de,0
+	ld	(BlkStrPtr),de	; Clear block pointer
+	ld	(BlkEndPtr),de
+	ld	b,_LinLen
+	ld	ix,EDLine	; Set base
+	ld	(iy+_BlkSta),0	; .. clear block bits
+l3d44:
+	ld	a,(hl)
+	ld	de,(MemStrPtr)	; Get start of block address
+	call	CmpAdr		; Compare addresses
+	jr	nz,l3d56	; .. not the same
+	ld	(BlkStrPtr),ix	; .. save pointer
+	set	_BlkBeg,(iy+_BlkSta)
+l3d56:
+	ld	de,(MemEndPtr)	; Get end of block
+	call	CmpAdr		; Compare addresses
+	jr	nz,l3d67	; .. not the same
+	ld	(BlkEndPtr),ix	; .. save pointer
+	set	_BlkEnd,(iy+_BlkSta)
+l3d67:
+	cp	cr
+	jr	nz,l3dc3
+	ld	(ix),' '
+	inc	ix
+	dec	b
+	jr	z,l3dd9
+	call	l3bdd
+	jr	nc,l3d44
+l3d79:
+	ld	de,(MemEndPtr)	; Get end of block
+	call	CmpAdr		; Compare addresses
+	jr	nc,l3d8a	; .. HL >= End_Of_Block
+	push	hl
+	ld	hl,-1
+	ld	(BlkEndPtr),hl	; Set pointer
+	pop	hl
+l3d8a:
+	ld	de,(MemStrPtr)	; Get start of block
+	call	CmpAdr		; Compare addresses
+	jr	nc,l3d99	; .. HL >= Start_Of_Block
+	ld	hl,-1
+	ld	(BlkStrPtr),hl	; Set pointer
+l3d99:
+	ld	a,_LinLen
+	sub	b
+	ld	(Rel.Col),a	; Save relative column
+l3d9f:
+	ld	(ix),' '	; Blank line
+	inc	ix
+	djnz	l3d9f
+	ld	hl,(CurEdPtr)	; Get current pointer
+	call	l3fe7
+	bit	0,(iy+14)
+	set	0,(iy+14)
+	jp	nz,l374e
+	ld	a,(Ed..Row)	; Get row
+	dec	a
+	cp	(iy+_EdRow)	; Compare against current row
+	ret	nc
+	jp	l374e
+l3dc3:
+	cp	lf
+	jr	z,l3d79
+	ld	(ix),a		; Save character
+	inc	ix
+	dec	b
+	jr	nz,l3dd1
+	jr	l3dd9
+l3dd1:
+	call	l3bdd
+	jr	nc,l3d79
+	jp	l3d44
+l3dd9:
+	call	StrPosS
+IF	@@GERMAN
+	db	'Zeile zu lang - CR eingesetzt',eot
+ELSE
+	db	'Line too long - CR inserted',eot
+ENDIF	;;@@GERMAN
+	call	l3f12
+	ld	hl,FCB+_rrn
+	call	l3970
+	jp	ED.RESLIN	; .. restore line
+;
+;
+;
+StrPosS:
+	call	l3ba4
+StrPos:
+	call	l3e0d
+	jp	ctrlstrj
+;
+;
+;
+l3e0d:
+	ld	(iy+_New),0	; Clear flag
+	@XY	_First,_StLin
+	call	ExecXY		; Set cursor
+	call	ClrPart		; Clear line
+	@XY	_First,_StLin
+	call	ExecXY
+	jp	.LowVideo	; Set low video
+;
+; Find last non blank in current line
+; EXIT	Reg HL holds pointer to non blank
+;
+LastInLine:
+	ld	a,' '		; Set what we looking for
+	ld	hl,EDLine+_LinLen-1
+	ld	de,EDLine-1	; Init pointers
+LIL.loop:
+	cp	(hl)		; Find blank
+	ret	nz		; .. nope
+	dec	hl		; Fix address
+	call	CmpAdr		; Test beginning
+	jr	nz,LIL.loop	; .. no, go on
+	ret
+;
+; Get pointer within limits
+; ENTRY	Reg HL holds 1st pointer
+;	Reg BC holds 2nd pointer
+; EXIT	Reg HL unchanged if out of line
+;	Reg HL holds MIN(HL,BC) else
+;
+GetLimit:
+	ld	de,EDLine+_LinLen
+	call	CmpAdr		; Test end
+	ret	nc		; .. yeap
+	ld	d,b
+	ld	e,c
+	jp	MinAdr		; Get MIN
+;
+; Poll character, insert at end of line
+;
+PollAppend:
+	call	LastInLine	; Get last non blank
+	inc	hl		; .. skip over
+;
+; Poll character, insert at current position
+; ENTRY	Reg HL holds current text address
+;
+PollCurr:
+	ld	c,l		; Copy pointer
+	ld	b,h
+	ld	hl,(BlkStrPtr)	; Get start pointer
+	call	GetLimit	; .. fix it
+	ld	(BlkStrPtr),hl	; .. and set it
+	ld	hl,(BlkEndPtr)	; .. same for end pointer
+	call	GetLimit
+	ld	(BlkEndPtr),hl
+	ld	l,c
+	ld	h,b
+	inc	hl
+	ld	de,EDLine
+	or	a
+	sbc	hl,de		; Get relative position
+	push	hl
+	ld	a,(Rel.Col)
+	sub	l		; Subtract relative column
+	ld	c,a
+	ld	b,0		; Expand to 16 bit
+	jr	nc,l3e6d
+	ld	b,-1		; .. signed
+l3e6d:
+	ld	hl,(CurMemPtr)	; Get current text pointer
+	call	nz,l3f18	; .. fix if not the same
+	pop	bc		; Get back relative position
+	ld	ix,(CurMemPtr)	; Get real text pointer
+	ld	hl,EDLine	; Load base
+	ld	b,c		; .. copy position
+	dec	b
+	inc	b		; Test any
+	jr	z,l3ea5		; .. nope
+l3e80:
+	ld	a,(hl)		; Get character
+	ld	de,(BlkStrPtr)	; Get start pointer
+	call	CmpAdr		; Compare addresses
+	jr	nz,l3e8e	; .. not the same
+	ld	(MemStrPtr),ix	; Set start of block
+l3e8e:
+	ld	de,(BlkEndPtr)	; Get end pointer
+	call	CmpAdr		; Compare addresses
+	jr	nz,l3e9b	; .. not the same
+	ld	(MemEndPtr),ix	; Set end of block
+l3e9b:
+	ld	(ix),a		; .. unpack character
+	inc	hl
+	inc	ix
+	djnz	l3e80
+	dec	ix
+l3ea5:
+	ld	a,cr
+	ld	(ix),a		; Set end of line
+	ret
+;
+; Display characters left and check enough memory
+;
+DispLeft:
+	ld	hl,(TopMem)	; Get top
+	or	a
+	sbc	hl,de		; Test remainder
+	jr	c,l3ed9		; .. oops, no
+	ld	bc,254
+	sbc	hl,bc		; Test min
+	ret	nc		; .. yeap
+	add	hl,bc
+	push	hl
+	call	l3e0d		; Set cursor
+	pop	hl
+	ld	b,0
+	call	StatInt		; Tell bytes left
+	call	ctrlstrj
+IF	@@GERMAN
+	db	' Byte(s) Rest',eot
+ELSE
+	db	' byte(s) left',eot
+ENDIF	;@@GERMAN
+	call	l3f12
+	ret
+l3ed9:
+	call	StrPosS
+IF	@@GERMAN
+	db	'FEHLER: Kein Speicherplatz',eot
+ELSE
+	db	'ERROR: Out of space',eot
+ENDIF	;@@GERMAN
+	call	l3f12
+	jp	E.MAIN		; .. re-enter
+;
+; Test editor function cancelled
+;
+EDBreak:
+	cp	@Canc		; Test CAN
+	ret	nz		; .. nope
+	call	StrPosS		; .. give a note
+IF	@@GERMAN
+	db	'*** ABBRUCH',eot
+ELSE
+	db	'*** INTERRUPTED',eot
+ENDIF	;@@GERMAN
+	call	l3f12
+	jp	E.MAIN		; .. re-enter
+;
+;
+;
+l3f12:
+	call	ClrAhead	; Clear look ahead buffer
+	jp	ESCape		; Wait for escape
+

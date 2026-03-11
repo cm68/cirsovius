@@ -1,0 +1,5720 @@
+	title	ZSID kernel
+	name	('ZSIDREL')
+
+; The DASMed part of the ZSID kernel
+; By W. Cirsovius
+
+; NOTE:	The original version does not support LD A,R and LD R,A
+;	in L and A command.
+;	A commands LD A,R and LD R,A leads to an error, while L
+;	command displays LD A,I and LD I,A instead.
+
+BDOS	equ	0005h
+FCB	equ	005ch
+CCP	equ	0080h
+DMA	equ	0080h
+TPA	equ	0100h
+
+HIADR	equ	0ffffh
+
+.conin	equ	 1
+.conout	equ	 2
+.rdkbd	equ	10
+.kbstat	equ	11
+.open	equ	15
+.rdseq	equ	20
+
+OSerr	equ	-1
+
+reclng	equ	128
+
+__rec	equ	-1
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_DIR	equ	16
+_CR	equ	32
+
+_RST	equ	11000111b	; Base RST code
+.RST	equ	7		; RST number
+RST.adr	equ	.RST SHL 3	; Resulting RST memory address
+RST.cod	equ	_RST + RST.adr	; Resulting RST code
+
+null	equ	00h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+DEL	equ	7fh
+
+MSB	equ	10000000b
+LSB	equ	00000001b
+NOMSB	equ	01111111b
+LOMASK	equ	00001111b
+HIMASK	equ	11110000b
+EVENMSK	equ	11111110b
+
+CMDLIN	equ	64
+L.def	equ	12
+MNLEN	equ	 4
+DMPLEN	equ	96		; Number of bytes to be dumped on default
+SYMLEN	equ	16		; Max number of characters in symbol
+
+PASLEN	equ	4		; Length of one pass point entry
+PASMAX	equ	8		; Number of passpoints
+
+TraceU	equ	1		; Command U[ntrace] selected
+TraceT	equ	2		; Command T[race] selected
+
+	.phase	4000h
+;
+; Enter ZSID after relocation
+;
+; JP address will be changed to new OS entry address
+;
+l4000:
+	jp	l4e83		; Go to cold start
+;
+	ds	3
+l4006:
+	jp	l47b8		; Disassemble code
+l4009:
+	jp	l4bdb		; Re-enter assembler
+l400c:
+	ds	2		; Start address of L or A command
+l400e:
+	ds	2		; Finish address
+l4010:
+	ds	1		; List flag
+l4011:
+	ds	2		; Current assembler address
+l4013:
+	dw	BDOS		; Caller's stack pointer
+;
+; Put character on console
+;
+l4015:
+	push	af
+	ld	a,c
+	call	l4e8f		; Put character on console
+	pop	af
+	ret
+;
+; Test end character
+;
+l401c:
+	call	l419f		; Get next character from line
+l401f:
+	cp	'+'		; Filter characters
+	ret	z
+	cp	'-'
+	ret	z
+	cp	''''
+	ret	z
+	cp	'#'
+	ret	z
+	cp	'.'
+	ret	z
+	cp	'@'
+	ret	z
+	cp	'='
+	ret	z
+	cp	'9'		; Test digit
+	ret	nc
+	cp	'0'
+	ret	c
+	ld	c,a
+	xor	a		; Indicate digit
+	ld	a,c
+	ret
+;
+; Test character a delimiter - Z says yes
+;
+l403e:
+	cp	')'		; Filter characters
+	ret	z
+	cp	' '
+	ret	z
+	cp	tab
+	ret	z
+	cp	','
+	ret	z
+	cp	cr
+	ret	z
+	cp	DEL		; Maybe restart
+	jp	z,l4bdb		; Re-enter assembler if so
+	ret
+;
+; Give new line on console
+;
+l4053:
+	ld	c,cr
+	call	l4015		; Put new line on console
+	ld	c,lf
+	call	l4015
+	ret
+;
+; Sample operand - Z set on empty line
+;
+l405e:
+	call	l4e8c		; Get command line character
+l4061:
+	cp	cr		; Test end of command
+	jp	z,l4bcf		; Should not be
+	call	l403e		; Test delimiter
+	jp	z,l405e		; Yeap
+	ld	c,MNLEN
+	ld	hl,l4e0b	; Init mnemonic buffer
+l4071:
+	ld	(hl),' '	; Clear mnemonic buffer
+	inc	hl
+	dec	c
+	jp	nz,l4071
+	ld	c,MNLEN+1
+	ld	hl,l4e0b	; Init mnemonic buffer
+l407d:
+	ld	(hl),a		; Save character
+	call	l401f		; Test end character
+	jp	nz,l4087	; Nope
+	jp	l4098
+l4087:
+	call	l4e8c		; Get command line character
+	call	l403e		; Test delimiter
+	jp	z,l4098		; Yeap
+	inc	hl		; Advance pointer
+	dec	c		; Count down
+	jp	z,l4bcf		; Invalid if overflow
+	jp	l407d
+l4098:
+	ld	(l4bfc),a	; Save end character
+	ld	a,(l4e0b)	; Get first character
+	cp	' '		; Test empty line
+	ret
+;
+; Get address displacement
+; EXIT	Accu holds displacement
+;	Zero flag set indicates range ok
+;
+l40a1:
+	push	de
+	cp	'A'		; Test range
+	jp	nc,l4bcf	; Invalid
+	call	l4eaa		; Get simple expression
+	ld	b,d
+	ld	a,b
+	cp	0ffh		; Test displacement -1..-128
+	jp	nz,l40b8	; Nope
+	ld	a,e
+	or	a
+	jp	p,l40b8
+	ld	b,0		; Change it
+l40b8:
+	ld	a,e		; Get result
+	pop	de
+	dec	b
+	inc	b
+	ret
+;
+; Get displacement for BIT and SHIFT instructions
+; EXIT	Accu holds displacement
+;
+l40bd:
+	ld	a,(l4bfc)	; Get last operand character
+l40c0:
+	ld	b,a		; Save character
+	xor	a
+	ld	hl,(l4ead)
+	ld	(hl),a		; Clear pointer
+	inc	hl
+	ld	(hl),a
+	ld	a,b
+	call	l40a1		; Get displacement
+	jp	nz,l4bcf	; Invalid
+	ret
+;
+; Get displacement
+; EXIT	Accu holds displacement
+;
+l40d0:
+	call	l419f		; Get next character from line
+	jp	l40c0		; Get displacement
+;
+; Shift bits 00000bbbb into right place 00bbb000
+;
+l40d6:
+	rla			; Shift some places
+	rla
+	rla
+	and	00111000b	; Mask bits
+	ret
+;
+; Shift bits 0000000bb into right place 00bb0000
+;
+l40dc:
+	rla			; Shift some places
+	rla
+	rla
+	rla
+	and	00110000b	; Mask bits
+	ret
+;
+; Find condition code - Z set if found
+;
+l40e3:
+	ex	de,hl
+	ld	hl,(l4e0b)	; Get condition code letters
+	ex	de,hl
+l40e8:
+	ld	a,e
+	cp	(hl)		; Compare
+	jp	nz,l40f2	; Not found
+	inc	hl
+	ld	a,d
+	cp	(hl)		; Test second letter
+	ret	z		; Match
+	dec	hl
+l40f2:
+	dec	hl		; Position to previous pair
+	dec	hl
+	dec	c		; Test remainder
+	jp	nz,l40e8
+	dec	c		; Set no success
+	ret
+;
+; Find one mnemonic - Z set says success
+; ENTRY	Reg HL points to ASCII mnemonic table
+;	Reg DE holds optional opcode table parameter
+; EXIT	Z flag set indicates success
+;	Reg C holds index then
+;
+l40fa:
+	ld	c,1		; Set number of items
+;
+; Find one mnemonic - Z set says success
+; ENTRY	Reg HL points to ASCII mnemonic table
+;	Reg DE holds optional opcode table parameter
+;	Reg C holds length of table
+; EXIT	Z flag set indicates success
+;	Reg C holds index then
+;
+l40fc:
+	ld	b,MNLEN		; Init length of mnemonic
+	push	de
+	ld	de,l4e0b	; Init mnemonic buffer
+l4102:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jp	nz,l410f	; Not found
+	inc	hl
+	inc	de
+	dec	b		; Test done
+	jp	nz,l4102	; Nope, try next
+	pop	de
+	ret
+l410f:
+	inc	hl
+	dec	b
+	jp	nz,l410f	; Skip to end of mnemonic
+	ld	de,-2*MNLEN
+	add	hl,de		; Position to previous entry
+	pop	de
+	inc	de		; Update opcode pointer
+	dec	c		; Test all done
+	jp	nz,l40fc	; Nope
+	dec	c		; Indicate not found
+	ret
+;
+; Set prefix code for index register
+;
+l4120:
+	call	l4127		; Set prefix code for index register
+	jp	nz,l4bcf	; Invalid if not an index register
+	ret
+;
+; Set prefix code for index register if index register selected - Z set says yes
+;
+l4127:
+	cp	4		; Test IX
+	jp	nz,l4131
+	ld	a,0ddh
+	jp	l41f4		; Store prefix opcode
+l4131:
+	cp	5		; Test IY
+	ret	nz
+	ld	a,0fdh
+	jp	l41f4		; Store prefix opcode
+;
+; Get bit value 0..7
+;
+l4139:
+	push	bc
+	call	l405e		; Sample operand
+	jp	z,l4bcf		; Invalid if empty
+	cp	'0'		; Verify valid range
+	jp	c,l4bcf		; Invalid
+	cp	'7'+1
+	jp	nc,l4bcf	; Invalid
+	and	LOMASK		; Get bits
+	pop	bc
+	ret
+;
+; Get register relating to offset, e.g. IX+dd
+; EXIT	Accu holds register number
+;	Zero set if register found
+;
+l414e:
+	push	bc
+	push	de
+	call	l4061		; Sample operand
+	jp	l415b		; Check any
+;
+; Get register relating to offset, e.g. IX+dd
+; EXIT	Accu holds register number
+;	Zero set if register found
+;
+l4156:
+	push	bc
+	push	de
+	call	l405e		; Sample operand
+l415b:
+	jp	z,l4bcf		; Invalid if empty
+	ld	hl,l4e0b+3	; Point to possible sign "(Ix+"
+	ld	a,(hl)
+	cp	'-'		; Test sign
+	jp	nz,l4169	; Nope
+	ld	(hl),'+'	; Change it
+l4169:
+	ld	c,REGlen / MNLEN
+	ld	hl,l4e03
+	call	l40fc		; Find register
+	jp	nz,l4177	; Nope
+	dec	c		; Make 0 relativ
+	xor	a		; Reset Z flag
+	ld	a,c
+l4177:
+	pop	de
+	pop	bc
+	ret
+;
+; Find register pair
+; EXIT	Accu holds register pair number
+;
+l417a:
+	push	bc
+	push	de
+	jp	l418f		; Get pair
+;
+; Find register pair
+; EXIT	Accu holds register pair number
+;
+l417f:
+	push	bc
+	push	de
+	call	l4061		; Sample operand
+	jp	l418c		; Check pair
+;
+; Find register pair
+; EXIT	Accu holds register pair number
+;
+l4187:
+	push	bc
+	push	de
+	call	l405e		; Sample operand
+l418c:
+	jp	z,l4bcf		; Invalid if empty
+l418f:
+	ld	c,RPlen / MNLEN
+	ld	hl,l4deb
+	call	l40fc		; Find reg pair
+	jp	nz,l4bcf	; Invalid if not
+	dec	c		; Make zero relative
+	ld	a,c
+	pop	de
+	pop	bc
+	ret
+;
+; Skip delimiters
+; EXIT	Accu holds non delimiter character
+;	Zero set if opened parenthesis
+;
+l419f:
+	push	bc
+l41a0:
+	call	l4e8c		; Get command line character
+	cp	cr		; Test end of command
+	jp	z,l4bcf		; Invalid
+	call	l403e		; Test delimiter
+	jp	z,l41a0		; Yeap
+	cp	'('		; Z set if left parenthesis ???? NOT REQUIRED ????
+	pop	bc
+	ret
+;
+; Get reg pair code, doen't allow F
+; EXIT	Accu holds reg pair code
+;
+l41b2:
+	call	l4187		; Find register pair
+l41b5:
+	cp	6		; Test Flag
+	jp	z,l4bcf		; Invalid i so
+	ret
+;
+; Get reg pair code, doen't allow SP
+; EXIT	Accu holds reg pair code
+;
+l41bb:
+	call	l4187		; Find register pair
+	cp	3
+	jp	z,l4bcf		; Invalid if SP
+	cp	6		; Test Accu
+	ret	nz
+	ld	a,3		; Map to SP
+	ret
+;
+; Get reg pair code, allow AF only
+; EXIT	Accu holds reg pair code
+;
+l41c9:
+	call	l4156		; Find register
+l41cc:
+	cp	7		; Test Accu
+	jp	nz,l4bcf	; Invalid if not
+	ret
+;
+; Get condition code bits 00ccc000
+;
+l41d2:
+	call	l4061		; Sample operand
+	ld	hl,l4da3+2*(CClen-1)
+	ld	c,CClen
+	call	l40e3		; Find condition code
+	jp	nz,l4bcf	; Invalid if not found
+	dec	c		; Map to 0..7
+	ld	a,c
+	call	l40d6		; Shift bits into right place
+	ret
+;
+; Get condition code and displacement
+; EXIT	Accu holds condition code
+;	Reg C holds displacement
+;
+l41e6:
+	call	l41d2		; Get condition code bits
+	push	af
+	call	l419f		; Get next character from line
+	call	l40a1		; Get displacement
+	ld	c,a
+	pop	af
+	ret
+;
+; Store opcode from ^DE
+;
+l41f3:
+	ld	a,(de)		; Get code from table
+;
+; Store opcode from Accu
+;
+l41f4:
+	ld	hl,(l4011)	; Get current assembler address
+	ld	(hl),a		; Store code
+	inc	hl
+	ld	(l4011),hl	; Update address
+	ret
+;
+; Process assembler line
+;
+l41fd:
+	call	l4e8c		; Get command line character
+	cp	cr		; Test end of command
+	jp	z,l4bf7		; Yeap, exit
+	cp	'.'		; Test end character
+	jp	z,l4bf7		; Yeap, that's all
+	call	l4061		; Sample operand
+	jp	z,l4bcf		; Invalid if empty
+	ld	c,BASlen / MNLEN
+	ld	hl,l4c67
+	ld	de,l4bfd
+	call	l40fc		; Find one byte opcode
+	jp	nz,l4221	; Nope
+	jp	l41f3		; Store it
+l4221:
+	ld	hl,l4d9e
+	call	l40fa		; Find IM
+	jp	nz,l4230	; Nope
+	call	l419f		; Get mode digit
+	ld	(l4e0b+3),a	; Save into mnemonic
+l4230:
+	ld	c,BLKlen / MNLEN
+	ld	hl,l4d62
+	ld	de,l4c1b
+	call	l40fc		; Find block instruction
+	jp	nz,l4246	; Nope
+	ld	a,0edh
+	call	l41f4		; Store prefix opcode
+	jp	l41f3		; Store opcode from table
+l4246:
+	ld	c,JRlen / MNLEN
+	ld	hl,l4cae
+	ld	de,l4c0f
+	call	l40fc		; Find JR or DJNZ
+	jp	nz,l42ae	; Nope
+	ld	a,(de)
+	ld	d,a
+	call	l401c		; Test end character
+	jp	nz,l4263	; Nope
+	call	l40a1		; Get displacement
+	ld	c,a		; Unpack it
+	jp	l4269		; And store it
+l4263:
+	call	l41e6		; Get condition code and displacement
+	or	00100000b	; Build opcode
+	ld	d,a
+l4269:
+	ld	hl,(l4011)	; Get current assembler address
+	inc	hl
+	inc	hl
+	ld	a,c
+	sub	l		; Subtract displacement
+	ld	c,a
+	ld	a,b
+	sbc	a,h
+	cp	0		; Test range
+	jp	nz,l4280	; Must be 0xFF..
+	ld	a,c
+	or	a		; Verify max 0x7F
+	jp	m,l4bcf		; Invalid if not
+	jp	l428a
+l4280:
+	cp	0ffh
+	jp	nz,l4bcf	; Invalid if not 0xFF..
+	ld	a,c
+	or	a		; Vrify 0x80..0xFF
+	jp	p,l4bcf		; Invalid if not
+l428a:
+	ld	b,c		; Unpack displacement
+	ld	a,d		; And code
+	jp	l4299		; Store values
+;
+; Store code+reg pair and address
+; ENTRY	Reg B  holds base code
+;	Accu   holds reg
+;	Reg DE holds address
+;
+l428f:
+	call	l40dc		; Shift bits into right place
+	or	b		; Insert code
+;
+; Store code and address
+; ENTRY	Accu   holds code
+;	Reg DE holds address
+;
+l4293:
+	ld	c,e		; Unpack registers
+	ld	b,d
+;
+; Store code and address
+; ENTRY	Accu   holds code
+;	Reg BC holds address
+;
+l4295:
+	call	l41f4		; Store opcode
+	ld	a,c
+;
+; Store two bytes
+; ENTRY	Accu  holds 1st byte
+;	Reg B holds 2nd byte
+;
+l4299:
+	call	l41f4		; Store opcode
+	ld	a,b
+	jp	l41f4		; Store opcode
+;
+; Store code+reg pair and address
+; ENTRY	Accu holds base code
+;
+l42a0:
+	call	l40dc		; Shift bits into right place
+	or	b		; Complete code
+;
+; Store code and address
+; ENTRY	Accu holds code
+;
+l42a4:
+	call	l41f4		; Store opcode
+	ld	a,c
+	call	l40a1		; Get displacement
+	jp	l4299		; Store opcodes in Accu and reg B
+;
+; Continue assembler
+;
+l42ae:
+	ld	c,SHFlen / MNLEN
+	ld	de,LOW (00h - (SHFlen / MNLEN))	; Init code
+	ld	hl,l4d8a
+	call	l40fc		; Find shift mnemonic
+	jp	nz,l42c5	; Nope
+	ld	a,e		; Get code
+	cpl			; Build base 0x00, 0x08, ... 0x38
+	rlca
+	rlca
+	rlca
+	ld	c,a		; Save base code
+	jp	l42e2
+l42c5:
+	ld	de,LOW (NOT (HIGH(0c0h shl 2)-1))
+	ld	c,BITlen / MNLEN
+	ld	hl,l4d96
+	call	l40fc		; Find BIT related mnemonic
+	jp	nz,l432e	; Nope
+	ld	a,e		; Map 0xFD -> 0xC0
+	cpl			;     0xFE -> 0x80
+	add	a,1		;     0xFF -> 0x40
+	rrca
+	rrca
+	ld	c,a
+	call	l4139		; Get bit value 0..7
+	call	l40d6		; Shift bits into right place
+	or	c		; Combine with opcode
+	ld	c,a
+l42e2:
+	call	l4156		; Find register
+	cp	7+1		; Test simple register
+	jp	c,l4300		; Yeap
+	sbc	a,11		; Map register
+	call	l4120		; Set prefix code for index register
+	ld	a,00000110b
+	or	c		; Combine code
+	ld	b,a
+	ld	a,0cbh
+	call	l41f4		; Store prefix opcode
+	push	bc
+	call	l40bd		; Get displacement
+	pop	bc
+	jp	l4299		; Store opcodes in Accu and reg B
+l4300:
+	or	c		; Insert register
+	ld	b,a
+	ld	a,0cbh
+	jp	l4299		; Store opcodes in Accu and reg B
+l4307:
+	call	l4156		; Find register
+	jp	nz,l431e	; Not found
+	cp	7+1		; Test simple register
+	jp	c,l4329		; Yeap
+	sbc	a,11		; Map register
+	call	l4120		; Set prefix code for index register
+	ld	a,c
+	or	00000110b	; Build opcode
+	or	b
+	jp	l442a
+l431e:
+	ld	d,a		; Save last character
+	ld	a,0c6h
+	or	b		; Build immediate opcode
+	ld	b,a
+	jp	l442a
+l4326:
+	call	l40d6		; Shift bits into right place
+l4329:
+	or	c		; Combine code
+	or	b
+	jp	l41f4		; Store opcode
+l432e:
+	ld	c,ALUlen / MNLEN
+	ld	hl,l4cce
+	call	l40fc		; Find ALU opcode
+	jp	nz,l439e	; Nope
+	dec	c
+	ld	a,c
+	call	l40d6		; Shift bits into right place
+	ld	b,a		; Save code
+	ld	c,080h		; Set base code
+	cp	0a0h-080h	; Test AND, XOR, OR or CP
+	jp	nc,l4307	; Yeap
+	cp	090h-080h	; Test SUB
+	jp	z,l4307		; Yeap
+	call	l4156		; Find register
+	cp	7		; Test Accu
+	jp	z,l4307		; Yeap
+	sbc	a,8		; Map register
+	ld	c,a
+	cp	10-8		; Test HL
+	jp	nz,l437b	; Nope
+	ld	a,b
+	or	a		; Test ADD HL,..
+	jp	z,l4383		; Yeap
+	cp	088h-080h	; Test ADC HL,..
+	jp	z,l4366		; Yeap
+	xor	a		; Clear offset
+l4366:
+	or	01000010b	; Build instruction
+	ld	b,a
+	call	l41b2		; Get reg pair
+	cp	4		; Test index register
+	jp	nc,l4bcf	; Invalid if not
+	call	l40dc		; Shift bits into right place
+	or	b
+	ld	b,a
+	ld	a,0edh
+	jp	l4299		; Store opcodes in Accu and reg B
+l437b:
+	call	l4120		; Set prefix code for index register
+	ld	a,b
+	or	a
+	jp	nz,l4bcf	; Invalid
+l4383:
+	call	l41b2		; Get reg pair
+	cp	c		; Test HL
+	jp	nz,l438f	; Nope
+	ld	a,2		; Set HL
+	jp	l4399		; Build ADD HL,HL
+l438f:
+	cp	10-6		; Verify index register
+	jp	nc,l4bcf	; Invalid if not
+	cp	10-8		; Test register HL
+	jp	z,l4bcf		; Invalid if so
+l4399:
+	ld	c,009h		; Set base ADD HL,rp
+	jp	l4582
+l439e:
+	ld	c,INDClen / MNLEN
+	ld	hl,l4cd6
+	call	l40fc		; Find INC or DEC
+	jp	nz,l43e0	; Nope
+	ld	d,c
+	inc	c
+	inc	c
+	inc	c
+	call	l4156		; Find register
+	jp	nz,l4bcf	; Invalid
+	cp	7+1		; Test simple register
+	jp	c,l43dd		; Yeap
+	sbc	a,8		; Map register
+	call	l41b5		; Don't allow AF
+	call	l4127		; Set prefix code for index register
+	jp	nz,l43c5	; Not selected
+	ld	a,2		; Map HL
+l43c5:
+	cp	7
+	jp	c,l43d5
+	sbc	a,3
+	call	l4120		; Set prefix code for index register
+	ld	a,033h
+	add	a,d		; Add code
+	jp	l442a
+l43d5:
+	rlca
+	dec	c
+	dec	d
+	jp	z,l43dd
+	ld	c,00bh		; Set base
+l43dd:
+	jp	l4326		; Build code
+l43e0:
+	ld	c,1
+	ld	hl,l4d9a
+	call	l40fc		; Find LD
+	jp	nz,l4545	; Nope
+
+;;::	LD R,A,R
+
+	call	l419f		; Get next character from line
+	cp	'('		; Test operand opened
+	jp	z,l44b9		; Yeap
+	call	l414e		; Get register
+	cp	7+1		; Test range
+	jp	nc,l445b	; Not a simple register
+	ld	d,a
+l43fc:
+	call	l40d6		; Shift bits into right place
+	or	01000000b	; Insert base code
+	ld	b,a
+	call	l4156		; Find register
+	jp	z,l4416		; Got it
+	cp	'I'		; Test interrupt register
+	jp	nz,l4440	; Nope
+	ld	a,d
+	call	l41cc		; Verify AF
+	ld	b,057h		; Set LD A,I
+	jp	l4465		; Insert code
+l4416:
+	cp	7+1		; Test simple register
+	jp	nc,l441f	; Nope
+	or	b
+	jp	l41f4		; Store opcode
+l441f:
+	sbc	a,11
+	call	l4127		; Set prefix code for index register
+	jp	nz,l4433	; Not selected
+	ld	a,00000110b	; Set base code
+	or	b		; Insert reg
+l442a:
+	call	l41f4		; Store opcode
+	call	l40bd		; Get displacement
+	jp	l41f4		; Store opcode
+l4433:
+	sbc	a,6
+	ld	c,a
+	ld	a,d
+	call	l41cc		; Verify AF
+	ld	a,c
+	ld	c,00ah		; Set base LD A,(rp)
+	jp	l4582		; Insert register
+l4440:
+	cp	'('		; Test opend opearnd
+	jp	z,l444d		; Yeap
+	ld	a,b
+	or	00000110b	; Build base oprand
+	and	00111111b	; Fix it
+l444a:
+	jp	l442a		; Store opcode
+l444d:
+	ld	a,d
+	call	l41cc		; Verify AF
+	ld	d,03ah		; Set LD A,(addr)
+	ld	a,(l4e0b+1)
+	ld	c,a		; Set last character
+	ld	a,d		; Get back code
+	jp	l42a4		; Store address
+l445b:
+	cp	'I'
+	jp	nz,l446a
+	call	l41c9		; Get Accu
+	ld	b,047h		; Set LD I,A
+l4465:
+	ld	a,0edh
+	jp	l4299		; Store opcode with prefix ED
+l446a:
+	call	l417a		; Find register pair
+	ld	b,a
+	call	l4127		; Set prefix code for index register
+	jp	nz,l4476	; Not selected
+	ld	b,2
+l4476:
+	call	l4156		; Find register
+	jp	nz,l4494	; Not found
+	call	l417a		; Find register pair
+	ld	c,a
+	ld	a,b
+	cp	3
+	jp	nz,l4bcf	; Invalid
+	ld	a,c
+	cp	2
+	jp	z,l448f
+	call	l4120		; Set prefix code for index register
+l448f:
+	ld	a,0f9h
+	jp	l41f4		; Store LD SP,HL
+l4494:
+	cp	'('		; Test opened opcode
+	jp	z,l44a0		; Yeap
+	ld	c,a
+	ld	a,b
+	ld	b,001h		; Set base LD BC,dddd
+	jp	l42a0		; Store code
+l44a0:
+	ld	a,(l4e0b+1)
+	ld	c,a
+	ld	a,b
+	cp	2
+	jp	nz,l44af
+	ld	a,02ah		; Set LD HL,(addr)
+	jp	l42a4		; Store code
+l44af:
+	ld	a,0edh
+	call	l41f4		; Store opcode
+
+;;; *** 
+.comment	|
+IF	DESIGN
+	ld	a,b
+	ld	b,04bh		; Set LD rp,(adr)
+	jp	SetCodAdr	; .. go storing
+ELSE
+		|
+	ld	a,07bh
+	jp	l4e20
+;
+; Found '(' opened operand
+;
+l44b9:
+	call	l401c		; Test end character
+	jp	z,l44df		; Yeap
+	cp	'I'
+	jp	z,l450e
+	call	l417f		; Find register pair
+	ld	c,a
+	cp	2		; Test HL
+	ld	a,6
+	jp	z,l43fc
+	jp	nc,l4bcf	; Invalid
+	ld	b,2
+	call	l4156		; Find register
+	call	l41cc		; Verify AF
+	ld	a,c
+	ld	c,b
+	jp	l4582		; Insert register pair
+l44df:
+	call	l4eaa		; Get simple expression
+	call	l419f		; Get next character from line
+	cp	'A'		; Test Accu
+	jp	nz,l44ef	; Nope
+	ld	a,032h
+	jp	l4293		; Store LD (adr),A
+l44ef:
+	call	l417f		; Find register pair
+	cp	2		; Test HL
+	jp	z,l44fd
+	call	l4127		; Set prefix code for index register
+	jp	nz,l4502	; Not selected
+l44fd:
+	ld	a,022h
+	jp	l4293		; Store LD (adr),HL
+l4502:
+	push	af
+	ld	a,0edh
+	call	l41f4		; Store opcode
+	pop	af
+	ld	b,043h
+	jp	l428f		; Store LD (adr),rp
+l450e:
+	call	l419f		; Get next character from line
+	cp	'X'		; Test IX
+	ld	b,4
+	jp	z,l451e		; Yeap
+	cp	'Y'		; Verify IY
+	jp	nz,l4bcf	; Invalid if not
+	inc	b
+l451e:
+	ld	a,b
+	call	l4120		; Set prefix code for index register
+	call	l40d0		; Get displacement
+	ld	b,a
+	call	l4156		; Find register
+	jp	z,l4536		; Got it
+	ld	d,a
+	ld	a,036h
+	call	l41f4		; Store LD (Ir+xx),dd
+	ld	a,b
+	jp	l444a
+l4536:
+	cp	6		; Test (HL
+	jp	z,l4bcf		; Invalid if so
+	cp	7+1		; Verify simple register
+	jp	nc,l4bcf	; Invalid if not
+	or	01110000b
+	jp	l4299		; Store opcodes in Accu and reg B
+l4545:
+	ld	c,1
+	ld	hl,l4cde
+	call	l40fc		; Find RST
+	jp	nz,l4561	; Nope
+	call	l40d0		; Get displacement
+	ld	c,a
+	and	00000111b	; Mask bits
+	jp	nz,l4bcf	; Invalid if any set
+	ld	a,c
+	and	NOT 00000111b	; Mask bits
+	or	11000111b	; Combine opcode
+	jp	l41f4		; Store opcode
+l4561:
+	ld	c,PSHPlen / MNLEN
+	ld	hl,l4cea
+	call	l40fc		; Find PUSH or POP
+	jp	nz,l4589	; Neither
+	dec	c
+	jp	nz,l4575
+	ld	c,0c1h		; Set base POP rp
+	jp	l4577
+l4575:
+	ld	c,0c5h		; Set base PUSH rp
+l4577:
+	call	l41bb		; Get reg pair
+	call	l4127		; Set prefix code for index register
+	jp	nz,l4582	; Not selected
+	ld	a,2		; Set HL
+l4582:
+	call	l40dc		; Shift bits into right place
+	or	c		; Combine opcode
+	jp	l41f4		; Store it
+l4589:
+	ld	c,JPClen / MNLEN
+	ld	hl,l4cf2
+	call	l40fc		; Find JP or CALL
+	jp	nz,l45d2	; Neither
+	dec	c
+	ld	d,c
+	call	l401c		; Test end character
+	jp	z,l45c5		; Yeap
+	cp	'('		; Test opened operand
+	jp	z,l45b0
+	push	de
+	call	l41e6		; Get condition code and displacement
+	pop	de
+	or	11000000b	; Insert bits
+	ld	e,a
+	inc	d
+	ld	a,d
+	add	a,d
+	or	e
+	jp	l4295		; Store Accu, regs C and B
+l45b0:
+	ld	a,d
+	or	a
+	jp	nz,l4bcf	; Invalid
+	call	l41b2		; Get reg pair
+	cp	2		; Test HL
+	jp	z,l45c0
+	call	l4120		; Set prefix code for index register
+l45c0:
+	ld	a,0e9h
+	jp	l41f4		; Store JP (Ii)
+l45c5:
+	ld	c,a
+	ld	a,d
+	or	a
+	ld	a,0c3h
+	jp	z,l42a4		; Store JP addr
+	ld	a,0cdh
+	jp	l42a4		; Store CALL addr
+l45d2:
+	ld	hl,l4cf6
+	call	l40fa		; Find RET
+	jp	nz,l45f0	; Not found
+	call	l4e8c		; Get command line character
+	cp	cr		; Test end of command
+	jp	z,l45eb
+	call	l41d2		; Get condition code bits
+	or	11000000b	; Build opcode
+	jp	l41f4		; Store opcode
+l45eb:
+	ld	a,0c9h
+	jp	l41f4		; Store RET
+l45f0:
+	ld	c,IOlen / MNLEN
+	ld	hl,l4ca6
+	call	l40fc		; Find IN or OUT
+	jp	nz,l4645	; Nope
+	call	l4156		; Find register
+	jp	z,l4611		; Got it
+	dec	c
+	jp	z,l4bcf		; Invalid
+	call	l40bd		; Get displacement
+	ld	b,a
+	call	l41c9		; Get Accu
+	ld	a,0d3h
+	jp	l4299		; Store OUT (dd),A
+l4611:
+	ld	e,a
+	call	l4156		; Find register
+	jp	z,l4625		; Got it
+	dec	c
+	jp	nz,l4bcf	; Invalid
+	ld	a,e
+	call	l41cc		; Verify AF
+	ld	a,0dbh
+	jp	l442a		; Store IN A,(dd)
+l4625:
+	ld	d,a
+	dec	c
+	jp	z,l462d
+	ld	a,e
+	ld	e,d
+	ld	d,a
+l462d:
+	cp	19		; Verify (C
+	jp	nz,l4bcf	; Invalid if not
+	ld	a,0edh
+	call	l41f4		; Store prefix ED
+	ld	a,e
+	cp	7+1		; Verify simple register
+	jp	nc,l4bcf	; Invalid if not
+	call	l41b5
+	ld	b,01000000b
+	jp	l4326
+l4645:
+	ld	hl,l4cfa
+	call	l40fa		; Find EX
+	jp	nz,l4bcf	; Invalid if not
+	call	l4156		; Find register
+	cp	20		; Test (SP
+	jp	nz,l4668	; Nope
+	call	l4156		; Find register
+	cp	10		; Test HL
+	jp	z,l4663		; Got it
+	sbc	a,8
+	call	l4120		; Set prefix code for index register
+l4663:
+	ld	a,0e3h
+	jp	l41f4		; Store opcode
+l4668:
+	cp	14		; Test AF
+	jp	z,l4672
+	cp	22		; ???
+	jp	nz,l4677
+l4672:
+	ld	a,008h
+	jp	l41f4		; Store EX AF,AF'
+l4677:
+	cp	9		; Verify DE
+	jp	nz,l4bcf	; Invalid if not
+	call	l4156		; Find register
+	cp	10		; Verify HL
+	jp	nz,l4bcf	; Invalid if not
+	ld	a,0ebh
+	jp	l41f4		; Store EX DE,HL
+;
+; Get current byte
+; EXIT	Accu holds byte
+;
+l4689:
+	ld	hl,(l400e)	; Get finish address
+	push	de
+	ex	de,hl
+	ld	hl,(l400c)	; Get start address
+	ld	a,e
+	sub	l
+	ld	a,d
+	sbc	a,h		; Test in rnage
+	jp	nc,l469d	; Yeap
+	ld	hl,(l4013)	; Get back stack pointer
+	ld	sp,hl
+	ret			; Exit
+l469d:
+	pop	de
+	ld	a,(hl)		; Get byte
+	inc	hl
+	ld	(l400c),hl	; Update address
+	ret
+;
+;
+;
+l46a4:
+	ld	(l46b0),a	; Save entry
+	ld	a,b
+	and	11011101b	; Mask code
+	cp	11011101b	; Test match
+	ld	a,(l46b0)	; Get back code
+	ret
+;
+l46b0:
+	ds	1
+;
+; Print register from destination bits
+;
+l46b1:
+	call	l4755		; Extract bits 00.xxx.000
+;
+; Print register from register number
+;
+l46b4:
+	inc	a		; Map 0..7 -> 1..8
+	and	00000111b	; Mask bits
+	cp	00000101b+1	; Test range
+	jp	c,l46da		; Got simple reg
+	jp	z,l46d8
+	ld	a,e
+	and	11011111b
+	cp	11011101b	; Test possible index register
+	jp	nz,l46d1	; Nope
+	call	l4689		; Get current byte
+	ld	(l4bfc),a	; Save byte
+	call	l4a35		; Print index character reference
+	ret
+l46d1:
+	nop
+	ld	hl,l46f2
+	jp	l4ea4		; Print (HL)
+l46d8:
+	add	a,3		; Fix register for H or L
+l46da:
+	cp	5		; Test A..E
+	jp	c,l46e9		; Yeap
+	add	a,2		; Map for H and L
+	call	l46a4
+	jp	nz,l46e9
+	add	a,1
+l46e9:
+	add	a,'A'		; Create character
+	ld	c,a
+	jp	l4015		; Put on console
+;
+	db	'HL',null
+l46f2:
+	db	'(HL)',null
+;
+; Print register
+;
+l46f7:
+	ld	b,e
+	call	l46b4		; Print register
+	cp	'A'		; Test Accu
+	ret	z		; Yeap
+	inc	c
+	cp	'H'		; Test HL
+	jp	c,l4015		; Put on console if not
+	ld	c,'L'		; Change to L
+	jp	z,l4015		; Put on console if previous H
+	ld	a,e
+	ld	c,'X'		; Init index register
+	cp	11011101b	; Test IX related
+	jp	z,l4015		; Put on console if so
+	inc	c		; Change for IY
+	jp	l4015		; Put on console
+;
+; Put byte in Accu as hex on console
+;
+l4715:
+	ld	b,a		; Save byte
+	and	HIMASK		; Isolate hi bits
+	rrca			; Shift into right position
+	rrca
+	rrca
+	rrca
+	add	a,90h		; Convert to ASCII
+	daa
+	adc	a,40h
+	daa
+	ld	c,a
+	call	l4015		; Put on console
+	ld	a,b		; Get back byte
+	and	LOMASK		; Isolate lo bits
+	add	a,90h		; Convert to ASCII
+	daa
+	adc	a,40h
+	daa
+	ld	c,a
+	jp	l4015		; Put on console
+;
+; Print four character mnemonic followed by a blank
+;
+l4733:
+	ld	b,MNElen
+l4735:
+	ld	c,(hl)		; Get mnemonic character
+	call	l4015		; Put on console
+	inc	hl
+	dec	b
+	jp	nz,l4735
+	ld	c,' '
+	jp	l4015		; Put blank on console
+;
+; Process bit
+;
+l4743:
+	ld	a,d		; Get opcode
+	and	00111000b	; Extract bit 0..7
+	rrca			; Shift into right place
+	rrca
+	rrca
+	or	'0'		; Make ASCII
+	ld	c,a
+	call	l4015		; Put bit on console
+	ld	c,','
+	call	l4015		; Put delimiter on console
+	ret
+;
+; Extract bits 00.xxx.000 from opcode
+;
+l4755:
+	ld	a,d		; Get opcode
+	and	00111000b	; Get bits
+	rrca			; Return as 00000xxx
+	rrca
+	rrca
+	ret
+;
+; Print condition code
+;
+l475c:
+	call	l4755		; Extract bits 00.xxx.000
+	add	a,a		; *2
+	ld	c,a
+	ld	hl,l4da3
+	add	hl,bc		; Buld address for conditions
+	ld	c,(hl)
+	call	l4015		; Put on console
+	inc	hl
+	ld	c,(hl)		; Get 2nd character
+	ld	a,c
+	cp	' '		; Test blank
+	jp	nz,l4015	; Put on console if not
+	ret
+;
+; Print (C) reference
+;
+l4772:
+	ld	c,','
+	call	l4015		; Put on console
+l4777:
+	ld	hl,l477d
+	jp	l4ea4		; Print (C)
+;
+l477d:
+	db	'(C)',null
+;
+; Print mnemonic followed by register
+;
+l4781:
+	call	l4733		; Print mnemonic
+	call	l46b1		; Print register
+	ret
+;
+; Print comma followed by register or SP on console
+;
+l4788:
+	ld	c,','
+	call	l4015		; Put on console
+;
+; Print register or SP on console
+;
+l478d:
+	call	l4755		; Extract bits 00.xxx.000
+;
+; Print register or SP on console
+;
+l4790:
+	and	00000110b	; Mask bits
+	cp	00000110b	; Test 6 or 7
+	jp	nz,l46f7	; Print register if not
+	ld	c,'S'
+	call	l4015		; Put SP on console
+	ld	c,'P'
+	jp	l4015
+;
+; Put current address on console
+;
+l47a1:
+	call	l4053		; Give new line on console
+;
+; Put current address on console
+;
+l47a4:
+	ld	hl,(l400c)	; Get start address
+	ld	a,h
+	call	l4715		; Tell hi byte
+	ld	a,l
+	call	l4715		; Tell low byte
+	ld	c,' '
+	call	l4015		; Put blanks on console
+	call	l4015
+	ret
+;
+; Disassemble code
+;
+l47b8:
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	(l4013),hl	; Save it
+	ld	a,(l4010)	; Get list flag
+	or	a		; Test lines given
+	jp	z,l47da		; Nope
+	ld	hl,HIADR
+	ld	(l400e),hl	; Set finish address
+	inc	a		; Test special -1
+	jp	nz,l47da
+	inc	a
+	ld	(l4010),a	; Update list flag
+	ld	hl,(l400c)	; Get start address
+	jp	l4800
+l47da:
+	call	l4e9e		; Test key pressed
+	jp	nz,l4bf7	; Yeap, exit
+	ld	hl,l4010
+	ld	a,(hl)		; Get list flag
+	or	a		; Get count
+	jp	z,l47ec		; Skip zero
+	dec	(hl)		; Count down
+	jp	z,l4bf7		; End
+l47ec:
+	ld	hl,(l400c)	; Get start address
+	call	l4ea1		; Tell label if defined
+	call	l4053		; Give new line on console
+	ld	c,' '
+	call	l4015		; Put on console
+	call	l4015
+	call	l47a4		; Put current address on console
+l4800:
+	call	l4689		; Get current byte
+	ld	e,0		; Set not Z80 expansion
+	ld	d,a
+l4806:
+	ld	hl,l4bfd	; Init base table
+	ld	bc,o000e	; Init count
+l480c:
+	cp	(hl)		; Compare opcode
+	jp	nz,l4816
+	ld	hl,l4c33-4	; Init base mnemonics
+	jp	l4a61		; Process it
+l4816:
+	inc	hl
+	dec	c
+	jp	nz,l480c
+	ld	c,o000c		; Init count for byte access
+l481d:
+	cp	(hl)		; Compare opcode
+	jp	z,l4a05		; Process it
+	inc	hl
+	dec	c
+	jp	nz,l481d
+	cp	0c3h		; Test JP
+	jp	z,l48b6
+	cp	0cdh		; Test CALL
+	jp	z,l48ad
+	ld	c,o0004
+l4832:
+	cp	(hl)		; Test address reference
+	jp	z,l49c3		; Yeap
+	inc	hl
+	dec	c
+	jp	nz,l4832
+;
+; Now the fine decoding starts
+;
+	and	11000000b	; Strip off hi bits
+	cp	01000000b	; Test 0x40..0x7F: LD r,r
+	jp	z,l496d
+	cp	10000000b	; Test 0x80..0xBF: ALU
+	jp	z,l4952
+;
+; Now the finest decoding starts
+;
+	ld	a,d		; Get opcode
+	and	11000111b	; Mask some bits
+	sub	4		; Test INC r
+	jp	z,l4949
+	dec	a		; Test DEC r
+	jp	z,l4943
+	dec	a
+	jp	z,l493a		; Test LD r,n
+;
+	ld	a,d		; Get back opcode
+	and	11000000b	; Test range
+	jp	z,l48db		; Got 0x00..0x3F
+;
+; Process remainder of code 0xC0..0xFF
+;
+	ld	a,d		; Get opcode
+	and	00000111b	; Test RET cc
+	jp	z,l48cf
+	sub	2		; Test JP cc
+	jp	z,l48b6
+	sub	2		; Test CALL cc
+	jp	z,l48ad
+	sub	3		; Test RST n
+	jp	z,l4895
+	ld	a,d		; Get opcode
+	and	00001010b	; Mask bits
+	jp	nz,l4a9f	; Process them
+;
+; Process PUSH and POP
+;
+	ld	a,d		; Get opcode
+	and	00000111b	; Build index (1 for POP and 5 for PUSH)
+	ld	c,a
+	dec	a		; Map to 0 and 4
+	ld	hl,l4ce6-1
+	add	hl,bc		; Position in list
+	call	l4733
+	call	l4755		; Extract bits 00.xxx.000
+	cp	6		; Test Accu
+	jp	nz,l49e2	; Nope, print register
+	ld	hl,l4ce2
+	call	l4733		; Print AF
+	jp	l47da
+;
+; Opcode 0xC7, 0xD7, 0xE7 or 0xF7 - 0xCF, 0xDF, 0xEF or 0xFF
+;
+l4895:
+	ld	hl,l4cde
+	call	l4733		; Print RST
+	call	l4755		; Extract address bits 00.xxx.000
+	ld	d,a
+	rla			; Calculate address
+	rla
+	rla
+	call	l4e92		; Put hex ASCII byte on console
+	ld	c,'H'
+	call	l4015		; Put on console
+	jp	l47da
+;
+; Print CALL ...
+; Opcode 0xC4, 0xD4, 0xE4 or 0xF4 - 0xCC, 0xDC, 0xEC or 0xFC
+;
+l48ad:
+	ld	hl,l4cf2
+	call	l4733		; Print CALL
+	jp	l48bc
+;
+; Print JP ...
+; Opcode 0xC2, 0xD2, 0xE2 or 0xF2 - 0xCA, 0xDA, 0xEA or 0xFA
+;
+l48b6:
+	ld	hl,l4cee
+	call	l4733		; Print JP
+l48bc:
+	and	1		; Test condition code
+	jp	nz,l48c9	; Nope
+	call	l475c		; Print condition code
+l48c4:
+	ld	c,','
+	call	l4015		; Put on console
+l48c9:
+	call	l49f7		; Print address on console
+	jp	l47da
+;
+; Opcode 0xC0, 0xD0, 0xE0 or 0xF0 - 0xC8, 0xD8, 0xE8 or 0xF8
+;
+l48cf:
+	ld	hl,l4cf6
+	call	l4733		; Print RET
+	call	l475c		; Print condition code
+	jp	l47da
+;
+; Process remainder of code 0x00..0x3F
+;
+l48db:
+	ld	hl,l4cda
+	ld	a,d		; Get opcode
+	and	00000111b	; Test JR or EX AF,AF'
+	jp	z,l4a6c		; Yeap
+	ld	a,d
+	and	00001111b	; Extract lower bits
+	dec	a		; Test LD d16
+	jp	z,l4931		; Yeap
+	push	af		; Save result
+	and	1		; Test more LD
+	jp	z,l4912		; Nope
+;
+; Opcode 0x02, 0x0A - 0x12, 0x1A
+;
+	call	l4733		; Print LD
+	pop	af
+	and	00001000b	; Test load from reg pair
+	jp	z,l4906		; Yeap
+	ld	hl,l492b
+	call	l4ea4		; Print Accu destination
+	call	l49b5		; Print register embedded in parentheses
+	jp	l47da
+l4906:
+	call	l49b5		; Print register embedded in parentheses
+l4909:
+	ld	hl,l492e
+	call	l4ea4		; Print Accu source
+	jp	l47da
+;
+; Opcode 0x03, 0x09, 0x0B - 0x13, 0x19, 0x1B - 0x23, 0x29, 0x2B
+;
+l4912:
+	pop	af
+	cp	008h		; Test ADD HL,...
+	ld	hl,l4cb2
+	jp	z,l4b1b		; Yeap
+	ld	hl,l4cd2-1
+	or	a
+	rra			; Divide index (get 1 or 5)
+	ld	c,a
+	add	hl,bc
+	call	l4733		; Print INC or DEC
+	call	l478d		; Print register or SP on console
+	jp	l47da
+;
+l492b:
+	db	'A,',null
+l492e:
+	db	',A',null
+;
+; Opcode 0x01, 0x11, 0x21 or 0x31
+;
+l4931:
+	call	l4733		; Print LD
+	call	l478d		; Print register or SP on console
+	jp	l48c4		; Print value separated by comma
+;
+; Opcode 0x06, 0x16, 0x26 or 0x36 - 0x0E, 0x1ED, 0x2E or 0x3E
+;
+l493a:
+	ld	hl,l4cda
+	call	l4781		; Print LD and register
+	jp	l4a81		; Print byte
+;
+; Opcode 0x05, 0x15, 0x25 or 0x35 - 0x0D, 0x1D, 0x2D or 0x3D
+;
+l4943:
+	ld	hl,l4cd6
+	jp	l494c
+;
+; Opcode 0x04, 0x14, 0x24 or 0x34 - 0x0C, 0x1C, 0x2C or 0x3C
+;
+l4949:
+	ld	hl,l4cd2	; Tell INC
+l494c:
+	call	l4781		; Print mnemonic and register
+	jp	l47da
+;
+; Opcode range 0x80..0xBF: ALU
+;
+l4952:
+	ld	a,d		; Get opcode
+	and	00111000b	; Mask bits
+	rrca			; Calculate index
+	ld	c,a
+	ld	hl,l4cb2
+	add	hl,bc		; Position ALU table
+	call	l4733		; Print ALU mnemonic
+	cp	8		; Test SUB
+	jp	z,l497e		; No Accu involved
+	cp	16		; Test Accu as destination
+	jp	nc,l497e	; Nope
+	ld	a,7		; Force Accu
+	jp	l4976		; Print as source
+;
+; Opcode range 0x40..0x7F: LD r,r
+;
+l496d:
+	ld	hl,l4d9a
+	call	l4733		; Tell LD
+	call	l4755		; Extract destination bits
+l4976:
+	call	l46b4		; Print register
+	ld	c,','
+	call	l4015		; Put on console
+l497e:
+	ld	a,d		; Get opcode
+l497f:
+	and	00000111b	; Mask source bits
+	call	l46b4		; Print register
+	jp	l47da
+;
+; Process 0xCB prefixed opcode
+;
+l4987:
+	ld	a,d		; Get opcode
+	and	11111000b	; Mask it
+	cp	01001000b	; Test bit reference
+	jp	c,l4996		; Nope
+	and	11000000b	; Mask hi bits
+	rrca			; Divide by 8
+	rrca
+	rrca
+	add	a,00111000b	; Add offset
+l4996:
+	rrca			; Build index
+	ld	c,a
+	ld	hl,l4d6e
+	add	hl,bc		; Position in table
+	call	l4733		; Print mnemonic
+	cp	00100000b	; Test bit reference
+	call	nc,l4743	; Process bit
+	ret
+;
+; Print (address)
+;
+l49a5:
+	push	de
+	ld	c,'('
+	call	l4015		; Put on console
+	call	l49f7		; Print address on console
+	ld	c,')'
+	call	l4015		; Put on console
+	pop	de
+	ret
+;
+; Print register embedded in parentheses
+;
+l49b5:
+	ld	c,'('
+	call	l4015		; Put left on console
+	call	l478d		; Print register or SP on console
+	ld	c,')'
+	call	l4015		; Put right on console
+	ret
+;
+; Found address reference
+;
+l49c3:
+	ld	hl,l4d9a
+	call	l4733		; Tell LD
+	cp	030h		; Test HL
+	ld	a,4
+	jp	c,l49d2		; Yeap
+	ld	a,7
+l49d2:
+	push	af
+	ld	a,d		; Get opcode
+	and	00001000b	; Test load from address
+	jp	nz,l49e8	; Yeap
+	call	l49a5		; Print (address)
+	pop	af
+	ld	c,','
+	call	l4015		; Put on console
+l49e2:
+	call	l46f7		; Print register
+	jp	l47da
+l49e8:
+	pop	af
+	call	l46f7		; Print register
+l49ec:
+	ld	c,','
+	call	l4015		; Put on console
+	call	l49a5		; Print (address)
+	jp	l47da
+;
+; Print address on console
+;
+l49f7:
+	call	l4689		; Get next byte
+	push	af
+	call	l4689		; Get 2nd byte
+	ld	d,a		; For hi
+	pop	af		; Set 1st byte for lo
+	ld	e,a
+	call	l4e95		; Print address and available label
+	ret
+;
+; Process opcode with immediate byte
+;
+l4a05:
+	ld	a,c		; Get index
+	add	a,a		; *4
+	add	a,a
+	ld	c,a
+	ld	hl,l4c92-4
+	add	hl,bc		; Position in table
+	call	l4733		; Print mnemonic
+	cp	5*4		; Test IN A,(n)
+	jp	z,l4a1f
+	cp	9*4		; Test possible Accu included
+	jp	c,l4a25		; Nope
+	cp	11*4		; Test SUB n
+	jp	z,l4a25		; Yeap, less Accu
+l4a1f:
+	ld	hl,l492b
+	call	l4ea4		; Print Accu destination
+l4a25:
+	ld	c,a
+	call	l4689		; Get current byte
+	call	l4e92		; Put hex ASCII byte on console
+	ld	a,c
+	cp	6*4		; Test OUT (n),A
+	jp	z,l4909		; Yeap, print Accu source
+	jp	l47da
+;
+; Print index register reference
+;
+l4a35:
+	ld	hl,l4a57
+	ld	a,e
+	cp	0ddh
+	jp	z,l4a41
+	ld	hl,l4a5c
+l4a41:
+	call	l4ea4		; Print IX or IY
+	ld	a,(l4bfc)	; Get byte
+	call	l4e92		; Put hex ASCII byte on console
+	ld	c,'H'
+	call	l4015		; Put on console
+	ld	c,')'
+	call	l4015		; Put on console
+	ld	e,0
+	ret
+l4a57:
+	db	'(IX+',null
+l4a5c:
+	db	'(IY+',null
+;
+; Print mnemonic from table
+;
+l4a61:
+	ld	a,c		; Get index
+	add	a,a		; * 4
+	add	a,a
+	ld	c,a
+	add	hl,bc		; Position in table
+	call	l4733		; Print it
+	jp	l47da
+;
+; Process codes 0x20, 0x30 - 0x08, 0x28 or 0x38
+;
+l4a6c:
+	ld	a,d		; Get opcode
+	cp	008h		; Test EX AF,AF'
+	jp	z,l4a89		; Yeap
+;
+; Process codes 0x00, 0x10, 0x20, 0x30 - 0x18, 0x28 or 0x38
+;
+	and	11011111b	; Extract condition code
+	ld	d,a		; Save
+	ld	hl,l4caa
+;				; ---
+	and	11011111b	; ??? ALREADY DONE
+	ld	d,a		; ??? ALREADY DONE
+;				; ---
+	call	l4733		; Tell JR
+	call	l475c		; Print condition code
+l4a81:
+	ld	c,','
+	call	l4015		; Put comma on console
+	jp	l4a25		; Print byte
+;
+; Process code 0x08
+;
+l4a89:
+	ld	hl,l4cfa
+	call	l4733		; Print EX
+	ld	hl,l4a98
+	call	l4ea4		; Print AF,AF'
+	jp	l47da
+;
+l4a98:
+	db	'AF,AF'''
+	db	null
+;
+; Process codes 0xE3, 0xE9, 0xF9, 0xCB, 0xEB, 0xDD, 0xED or 0xFD
+;
+l4a9f:
+	ld	hl,l4cfa
+	ld	a,d		; Get opcode
+	cp	0ebh		; Test EX DE,HL
+	ld	a,2
+	jp	z,l4ac1
+	ld	a,d
+	cp	0e9h		; Test JP (HL)
+	jp	z,l4acf
+	cp	0e3h		; Test EX SP,HL
+	jp	z,l4abd
+	cp	0f9h		; Test LD SP,HL
+	jp	nz,l4add
+	ld	hl,l4d9a	; Then set LD
+;
+; Here for operand SP,HL
+;
+l4abd:
+	ld	a,6		; Change index
+	ld	d,00111100b
+l4ac1:
+	call	l4733		; Print mnemonic
+	call	l4790		; Print register or SP on console
+	ld	d,11100000b
+	call	l4788		; Print comma followed by register or SP on console
+	jp	l47da
+;
+; Here for JP (HL)
+;
+l4acf:
+	ld	hl,l4cee
+	call	l4733		; Print JP
+	ld	d,00100000b
+	call	l49b5		; Print register embedded in parentheses
+	jp	l47da
+;
+; Process Z80 codes 0xCB, 0xDD, 0xED or 0xFD
+;
+l4add:
+	ld	e,d		; Save prefix opcode
+	call	l4689		; Get next opcode
+	ld	d,a
+	ld	a,e		; Get prefix
+	cp	0cbh		; Test them
+	jp	nz,l4aef
+	call	l4987		; Process opcode
+	ld	a,d
+	jp	l497f		; Process register
+l4aef:
+	cp	0edh
+	jp	nz,l4b96
+	ld	a,d
+	ld	hl,l4c1b	; Init opcode table
+	ld	bc,o0018	; Set length
+l4afb:
+	cp	(hl)		; Find opcode without operand
+	jp	nz,l4b05	; Nop, try next
+	ld	hl,l4d06-4	; Init mnemonic table
+	jp	l4a61		; Print base mnemonic
+l4b05:
+	inc	hl		; Point to next
+	dec	c		; Scan all
+	jp	nz,l4afb
+	ld	a,d		; Get opcode
+	and	11000111b	; Mask it
+	cp	01000010b	; Test ADC or SBC
+	jp	nz,l4b29	; Nope
+	ld	a,d
+	and	00001000b	; Extract bit
+	rrca			; Calculate index
+	ld	c,a
+	ld	hl,l4d66
+	add	hl,bc		; Position in table
+;
+; Opcode 0x09, 0x19, 0x29
+; ADD HL,rp
+;
+l4b1b:
+	call	l4733		; Print ADD
+	ld	a,4
+	call	l46f7		; Print register HL
+l4b23:
+	call	l4788		; Print comma followed by register or SP on console
+	jp	l47da
+;
+; Fine search for 0xED prefixed opcodes
+;
+l4b29:
+	cp	01000011b	; Test LD register
+	jp	z,l4b7e
+	cp	01000111b	; Test I load
+	jp	nz,l4b4b
+	ld	hl,l4d9a
+	call	l4733		; Print load
+	ld	a,d		; Get opcode
+	ld	hl,l4cfe
+	and	00010000b	; Test direction
+	jp	z,l4b45
+	ld	hl,l4d02
+l4b45:
+	call	l4733		; Tell A,I or I,A
+	jp	l47da
+l4b4b:
+	and	11000000b	; Strip off bits
+	cp	01000000b	; Test port reference
+	jp	nz,l4bcf	; Nope, invalid
+	ld	a,d		; Get opcode
+	and	00000110b	; Test valid code
+	jp	nz,l4bbe	; Nope
+	ld	a,d
+	ld	hl,l4ca2
+	and	00000001b	; Test OUT
+	jp	z,l4b75		; Nope
+	ld	hl,l4ca6
+	call	l4733		; Tell OUT
+	call	l4777		; Tell (C)
+	ld	c,','
+	call	l4015		; Put on console
+	call	l46b1		; Print register
+	jp	l47da
+l4b75:
+	call	l4781		; Print mnemonic and register
+	call	l4772		; Print (C)
+	jp	l47da
+;
+; 0xED prefixed opcodes 0x43, 0x53, 0x73 - 0x4B, 0x5B, 0x7B
+;
+l4b7e:
+	ld	hl,l4d9a
+	call	l4733		; Print LD
+	ld	a,d		; Get opcode
+	and	00001000b	; Calculate direction
+	jp	nz,l4b90	; Got LD rp,(n)
+	call	l49a5		; Print (address)
+	jp	l4b23		; Print register
+l4b90:
+	call	l478d		; Print register or SP on console
+	jp	l49ec		; Print (address)
+;
+; Process prefix 0xDD and 0xFD
+;
+l4b96:
+	ld	a,d		; Get opcode
+	cp	0cbh		; Test sequence 0x?D 0xCB
+	jp	nz,l4baf	; Nope
+;
+; Process prefix 0xDD 0xCB and 0xFD 0xCB
+;
+	call	l4689		; Get current byte
+	ld	(l4bfc),a	; Save byte
+	call	l4689		; Get current byte
+	ld	d,a
+	call	l4987		; Process opcode
+	call	l4a35		; Print index register reference
+	jp	l47da
+l4baf:
+	ld	a,d		; Get opcode
+	ld	c,o0027		; Set lenght
+	ld	hl,l4c6b	; Init opcode table
+l4bb5:
+	cp	(hl)		; Verify valid code
+	jp	z,l4806		; Got it, try standard code
+	inc	hl
+	dec	c
+	jp	nz,l4bb5
+;
+; Found invalid prefixed code
+;
+l4bbe:
+	ld	hl,l4e07
+	call	l4733		; Tell invalid
+	ld	a,e		; Get prefixed code
+	call	l4e92		; Put on console
+	ld	a,d		; Get unknown code
+	call	l4e92		; Put on console
+	jp	l47da
+;
+; Invalid entry detected
+;
+l4bcf:
+	call	l4053		; Give new line on console
+	ld	c,'?'
+	call	l4015		; Indicate invalid entry
+	ld	hl,(l4013)	; Get back stack pointer
+	ld	sp,hl
+;
+; Enter here for command A - Assemble
+;
+l4bdb:
+	ld	hl,0
+	add	hl,sp		; Copy stack pointer
+	ld	(l4013),hl	; Save it
+l4be2:
+	call	l47a1		; Put current address on console
+	ld	(l4011),hl	; Save current assembler address
+	call	l4e89		; Read line from console
+	call	l41fd		; Process assembler line
+	ld	hl,(l4011)	; Get current assembler address
+	ld	(l400c),hl	; Unpack address
+	jp	l4be2
+;
+; Exit to debugger
+;
+l4bf7:
+	ld	hl,(l4013)	; Get back stack pointer
+	ld	sp,hl
+	ret			; Exit
+;
+l4bfc:
+	ds	1
+;
+; Opcode tables
+;
+l4bfd:
+	db	000h,007h,00fh,017h	; NOP RLCA RRCA RLA
+	db	01fh,027h,02fh,037h	; RRA DAA CPL SCF
+	db	03fh,076h,0d9h,0f3h	; CCF HALT EXX DI
+	db	0fbh,0c9h		; EI RET
+o000e	equ	$-l4bfd
+l4c0b:
+	db	0deh,0d6h,0ceh,0c6h	; SBC A,n SUB n ADC A,n ADD A,n
+l4c0f:
+	db	010h,018h,0d3h,0dbh	; DJNZ disp JR disp OUT (n),A IN A,(n)
+	db	0e6h,0eeh,0f6h,0feh	; AND n XOR n OR n CP n
+o000c	equ	$-l4c0b
+l4c17:
+	db	022h,02ah		; LD (nn),HL LD HL,(nn)
+	db	032h,03ah		; LD (nn),A LD A,(nn)
+o0004	equ	$-l4c17
+;
+; 0xED prefixed opcodes with no operand
+;
+l4c1b:
+	db	0bbh,0bah,0b9h,0b8h,0b3h,0b2h,0b1h
+	db	0b0h,0abh,0aah,0a9h,0a8h,0a3h,0a2h
+	db	0a1h,0a0h,044h,045h,046h,04dh,056h
+	db	05eh,067h,06fh
+o0018	equ	$-l4c1b
+l4c33:
+	db	'RET '
+MNElen	equ	$-l4c33
+l4c37:
+	db	'EI  '		; \ O
+	db	'DI  '		; | N
+	db	'EXX '		; | E
+	db	'HALT'		; |
+	db	'CCF '		; | B
+	db	'SCF '		; | Y
+	db	'CPL '		; | T
+	db	'DAA '		; | E
+	db	'RRA '		; |
+	db	'RLA '		; | C
+	db	'RRCA'		; | O
+	db	'RLCA'		; | D
+l4c67:				; | E
+	db	'NOP '		; /
+BASlen	equ	$-l4c37
+;
+; 0xDD/0xFD prefixed opcodes
+;
+l4c6b:
+	db	009h,019h,021h,022h,023h,029h,02ah
+	db	02bh,034h,035h,036h,039h,046h,04eh
+	db	056h,05eh,066h,06eh,070h,071h,072h
+	db	073h,074h,075h,077h,07eh,086h,08eh
+	db	096h,09eh,0a6h,0aeh,0b6h,0beh,0e1h
+	db	0e3h,0e5h,0e9h,0f9h
+o0027	equ	$-l4c6b
+l4c92:
+	db	'CP  '
+	db	'OR  '
+	db	'XOR '
+	db	'AND '
+l4ca2:
+	db	'IN  '
+l4ca6:
+	db	'OUT '
+IOlen	equ	$-l4ca2
+l4caa:
+	db	'JR  '
+l4cae:
+	db	'DJNZ'
+JRlen	equ	$-l4caa
+l4cb2:				; \
+	db	'ADD '		; 
+	db	'ADC '		; A
+	db	'SUB '		; 
+	db	'SBC '		; L
+	db	'AND '		; 
+l4cc6:				; U
+	db	'XOR'		; 
+	db	' OR  '		; 0x80..0xBF
+l4cce:				; 
+	db	'CP  '		; /
+ALUlen	equ	$-l4cb2
+l4cd2:
+	db	'INC '
+l4cd6:
+	db	'DEC '
+INDClen	equ	$-l4cd2
+l4cda:
+	db	'LD  '
+l4cde:
+	db	'RST '
+l4ce2:
+	db	'AF  '
+l4ce6:
+	db	'POP '
+l4cea:
+	db	'PUSH'
+PSHPlen	equ	$-l4ce6
+l4cee:
+	db	'JP  '
+l4cf2:
+	db	'CALL'
+JPClen	equ	$-l4cee
+l4cf6:
+	db	'RET '
+l4cfa:
+	db	'EX  '
+l4cfe:
+	db	'I,A '
+l4d02:
+	db	'A,I '
+l4d06:				; \
+	db	'RLD '		; |
+	db	'RRD '		; |
+l4d0e:				; |
+	db	'IM 2'		; |
+l4d12:				; |
+	db	'IM 1'		; | B
+	db	'RETI'		; |
+l4d1a:				; | L
+	db	'IM 0'		; |
+l4d1e:				; | O
+	db	'RETN'		; |
+	db	'NEG '		; | C
+	db	'LDI '		; |
+	db	'CPI '		; | K
+	db	'INI '		; |
+	db	'OUTI'		; |
+	db	'LDD '		; |
+	db	'CPD '		; |
+	db	'IND '		; | C
+	db	'OUTD'		; |
+	db	'LDIR'		; | O
+	db	'CPIR'		; |
+	db	'INIR'		; | D
+	db	'OTIR'		; |
+	db	'LDDR'		; | E
+	db	'CPDR'		; |
+	db	'INDR'		; |
+l4d62:				; |
+	db	'OTDR'		; /
+BLKlen	equ	$-l4d06
+l4d66:
+	db	'SBC '
+	db	'ADC '
+l4d6e:				; \
+	db	'RLC '		; |
+	db	'RRC '		; | S
+	db	'RL  '		; | H
+	db	'RR  '		; | I
+	db	'SLA '		; | F
+	db	'SRA '		; | T
+	db	'    '		; |
+l4d8a:				; |
+	db	'SRL '		; /
+SHFlen	equ	$-l4d6e
+l4d8e:				; \
+	db	'BIT '		; | B
+l4d92:				; | I
+	db	'RES '		; | T
+l4d96:				; |
+	db	'SET '		; /
+BITlen	equ	$-l4d8e
+l4d9a:
+	db	'LD  '
+l4d9e:
+	db	'IM   '
+l4da3:
+	db	'NZ'
+	db	'Z '
+	db	'NC'
+	db	'C '
+	db	'PO'
+	db	'PE'
+	db	'P '
+	db	'M '
+CCs	equ	$-l4da3
+CClen	equ	CCs / 2
+;
+; Registers
+;
+l4db3:				; Value returned by routine l4156 l4187
+	db	'B   '		;  0
+	db	'C   '		;  1
+	db	'D   '		;  2
+	db	'E   '		;  3
+	db	'H   '		;  4
+	db	'L   '		;  5
+	db	'(HL '		;  6
+	db	'A   '		;  7
+l4dd3:
+	db	'BC  '		;  8  0
+	db	'DE  '		;  9  1
+	db	'HL  '		; 10  2
+	db	'SP  '		; 11  3
+	db	'IX  '		; 12  4
+	db	'IY  '		; 13  5
+l4deb:
+	db	'AF  '		; 14  6
+RPlen	equ	$-l4dd3 
+	db	'(IX+'		; 15
+	db	'(IY+'		; 16
+	db	'(BC '		; 17
+	db	'(DE '		; 18
+	db	'(C  '		; 19
+l4e03:
+	db	'(SP '		; 20 
+REGlen	equ	$-l4db3
+;
+l4e07:
+	db	'??= '
+l4e0b:				; Mnemonic buffer
+	ds	21
+;
+; Patch area ???
+;
+l4e20:
+	ld	a,b
+	ld	b,04bh		; Set LD rp,(adr)
+	jp	l42a0		; Store code
+;
+	ds	90
+;
+; ####################################################
+; ### Debugger starts here if L and A are disabled ###
+; ####################################################
+;
+l4e80:
+	jp	l4eaf		; Redirected BDOS entry
+l4e83:
+	jp	l4eb7		; Enter ZSID
+l4e86:
+	jp	l5d5a		; Breakpoint entry
+l4e89:
+	jp	l5868		; Read line from console
+l4e8c:
+	jp	l5890		; Get command line character
+l4e8f:
+	jp	l5879		; Put character on console
+l4e92:
+	jp	l58c1		; Put hex ASCII byte on console
+l4e95:
+	jp	l58ea		; Print address and available label
+	jp	l5ad0		; Parse parameters
+	jp	l5967		; Get parameter from list
+l4e9e:
+	jp	l58db		; Test key pressed
+l4ea1:
+	jp	l590c		; Tell label if defined
+l4ea4:
+	jp	l5886		; Print zero closed string on console
+	jp	l5ad3		; Parse line
+l4eaa:
+	jp	l5a7d		; Get simple expression
+l4ead:
+	dw	l611e		; Pointer to current parameter
+;
+; New BDOS entry
+;
+l4eaf:
+	ex	(sp),hl		; Get user stack
+	ld	(l6151),hl	; Save it
+	ex	(sp),hl
+l4eb5	equ	$+1
+	jp	$-$		; Enter real BDOS
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% COLD START OF ZSID %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+l4eb7:
+	ld	hl,(BDOS+1)	; Get BDOS vector
+	ld	(l4eb5),hl	; Save it
+	ld	hl,l4eaf
+	ld	(l4000+1),hl	; Set up OS address
+	ld	hl,l4000
+	ld	(BDOS+1),hl	; Change new BDOS entry
+	ld	(l61b2),hl	; Init symbol base address
+	xor	a
+	ld	(l6156),a	; Clear temporary breakpoint count
+	ld	(l614d),a	; Enable commands L and A
+	ld	(l6123),a	; Clear pass value
+	ld	(l6153),a	; Clear trace mode
+	ld	hl,TPA
+	ld	(l400c),hl	; Init start address
+	ld	(l6164),hl	; Init dump start address
+	ld	(l61f6),hl	; Init program counter address
+	ld	(l61b4),hl	; Init program top address
+	ld	hl,TPA
+	ld	sp,l61f4	; Init debugger stack
+	push	hl		; Init PC on top of stack
+	ld	hl,00000010b
+	push	hl		; Init AF
+	dec	hl		; Set zero
+	dec	hl
+	ld	(l61f4),hl	; Init reg HL
+	push	hl		; Init reg BC
+	push	hl		; Init reg DE
+	ld	(l614f),hl	; Clear trace value
+	ld	a,0c3h
+	ld	(RST.adr),a
+	ld	hl,l4e86	; Set breakpoint entry
+	ld	(RST.adr+1),hl
+	ld	a,(FCB+.drv)
+	cp	' '		; Test name given
+	jp	z,l4f16		; Nope
+	ld	hl,0		; Clear offset
+	jp	l54b7		; Load file(s)
+;
+; *************************
+; *** M A I N   L O O P ***
+; *************************
+;
+l4f16:
+	ld	sp,ll61ec	; Load local stack
+	call	l58db		; Test key pressed
+	ld	c,.conin
+	call	nz,l4eaf	; Yeap, clear pending character
+	call	l58d1		; Give new line on console
+	ld	a,'#'
+	call	l5879		; Indicate ready for input
+	call	l5868		; Read line from console
+	call	l5890		; Get command line character
+	cp	cr		; Test end of command
+	jp	z,l4f16		; Yeap, try next line
+	ld	hl,l614a
+	ld	(hl),0		; Disable '-'
+	cp	'-'		; Test '-'
+	jp	nz,l4f42	; Nope
+	dec	(hl)		; Enable it
+	call	l5890		; Get command line character
+l4f42:
+	sub	'A'		; Verify A..Z command
+	jp	c,l585d		; Command error if not
+	cp	'Z'-'A'+1
+	jp	nc,l585d
+	ld	e,a
+	ld	d,0
+	ld	hl,l4f59
+	add	hl,de		; Position in table
+	add	hl,de
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; Execute commamd
+;
+; Command table
+;
+l4f59:
+	dw	l4faf		; A: Enter assembly language statements
+	dw	l585d		; B: ---
+	dw	l5008		; C: Call to memory location from ZSID
+	dw	l5038		; D: Display memory in hex and ASCII
+	dw	l585d		; E: ---
+	dw	l511c		; F: Fill memory with constant value
+	dw	l5130		; G: Begin Execution
+	dw	l5203		; H: Displays all symbols with addresses in Hex
+	dw	l5333		; I: Input CCP command line
+	dw	l585d		; J: ---
+	dw	l585d		; K: ---
+	dw	l4fd9		; L: List Z80 mnemonic instructions
+	dw	l53a1		; M: Move Memory Block
+	dw	l585d		; N: ---
+	dw	l585d		; O: ---
+	dw	l53e5		; P: Pass point set, reset, and display
+	dw	l585d		; Q: ---
+	dw	l54a7		; R: Read Code/Symbols
+	dw	l5692		; S: Set Memory Values
+	dw	l5721		; T: Trace Program Execution
+	dw	l571c		; U: Monitor Execution without Trace
+	dw	l585d		; V: ---
+	dw	l585d		; W: ---
+	dw	l576a		; X: Examine/alter CPU state
+	dw	l585d		; Y: ---
+	dw	l585d		; Z: ---
+;
+; Open file
+;
+l4f8d:
+	push	hl
+	push	de
+	push	bc
+	xor	a
+	ld	(FCB+__rec),a	; Force empty buffer
+	ld	c,.open
+	ld	de,FCB
+	call	l4eaf		; Open file
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Disable commands L and A
+;
+l4fa0:
+	ld	a,1
+	ld	(l614d),a	; Disable commands L and A
+	ld	hl,l4e80
+	ld	(BDOS+1),hl	; Change BDOS vector
+	ld	(l61b2),hl	; Init symbol base address
+	ret
+;
+; Command A{s} - Enter assembly language statements.
+;                s is the start address
+;         -A     Disable further L and A command
+;
+l4faf:
+	call	l53d6		; Test valid command
+	jp	nc,l585d	; Command error if not
+	call	l5ad0		; Parse parameters
+	or	a
+	jp	nz,l4fc9
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	jp	z,l4fd3		; Not set
+	call	l4fa0		; Disable commands L and A
+	jp	l4f16
+l4fc9:
+	dec	a		; Verify pne parameter
+	jp	nz,l585d	; Command error if not
+	call	l5967		; Get parameter from list
+	ld	(l400c),hl	; Set start address
+l4fd3:
+	call	l4009		; Enter assembler
+	jp	l4f16
+;
+; Command L{s}{,f} - List Z80 mnemonic instructions
+;                    s is the start address
+;                    f is the finish address
+;         -L         List without symbolic feature
+;
+l4fd9:
+	call	l53d6		; Test valid command
+	jp	nc,l585d	; Command error if not
+	call	l5ad0		; Parse parameters
+	jp	z,l4ffd		; No parameter given
+	call	l5967		; Get parameter from list
+	ld	(l400c),hl	; Set start address
+	dec	a		; Test finish address given
+	jp	z,l4ffd		; Nope
+	call	l5967		; Get parameter from list
+	ld	(l400e),hl	; Save finish address
+	dec	a		; Verify no more parameters
+	jp	nz,l585d	; Command error if not
+	xor	a
+	jp	l4fff
+l4ffd:
+	ld	a,L.def
+l4fff:
+	ld	(l4010),a	; Set flag
+	call	l4006		; Disassemble code
+	jp	l4f16
+;
+; Command Cs{b{,d}} - Call to memory location from ZSID
+;                     s is the called address
+;                     b is the value of the BC register
+;                     pair d is the value of the DE register pair
+;
+l5008:
+	call	l5ad0		; Parse parameters
+	jp	c,l585d		; Command error on missing 1st parameter
+	jp	z,l585d		; And no parameter
+	call	l5967		; Get called address from list
+	push	hl		; Save
+	ld	bc,0
+	dec	a		; Test one parameter only
+	jp	nz,l5021	; Nope
+	push	bc		; No setting for regs BC and DE
+	push	bc
+	jp	l5031
+l5021:
+	call	l5967		; Get value for reg BC from list
+	push	hl
+	dec	a		; Test still one parameter
+	jp	nz,l502d	; Yeap
+	push	bc		; No setting for reg BC
+	jp	l5031
+l502d:
+	call	l5967		; Get parameter from list
+	push	hl
+l5031:
+	pop	de		; Get register values
+	pop	bc
+	ld	hl,l4f16
+	ex	(sp),hl		; Set return address, get called address
+	jp	(hl)		; Excecute it
+;
+; Command D{W}{s}{,f} - Display memory in hex and ASCII
+;                       W is a 16-bit word format
+;                       s is the start address
+;                       f is the finish address
+;         -D            Disable ASCII display
+;
+l5038:
+	call	l5ac1		; Parse parameters
+	jp	z,l5057		; No parameter given
+	call	l5967		; Get parameter from list
+	jp	c,l5047		; No first parameter
+	ld	(l6164),hl	; Save dump start address
+l5047:
+	and	NOMSB		; Make count real
+	dec	a		; Test one parameter only
+	jp	z,l5057		; Yeap
+	call	l5967		; Get parameter from list
+	dec	a		; Verify max two parameters
+	jp	nz,l585d	; Command error if not
+	jp	l5062
+l5057:
+	ld	hl,(l6164)	; Get current dump address
+	ld	a,l
+	and	HIMASK		; Extract line boundary
+	ld	l,a
+	ld	de,DMPLEN-1
+	add	hl,de		; Calculate default end address
+l5062:
+	ld	(l6166),hl	; Save dump end address
+l5065:
+	call	l58d1		; Give new line on console
+	call	l58db		; Test key pressed
+	jp	nz,l4f16	; Yeap, leave dump
+	ld	hl,(l6164)	; Get current dump address
+	ld	(l6168),hl	; Save it
+	call	l5923		; Put hex word on console
+	ld	a,':'
+	call	l5879		; Put character on console
+	ld	a,(l614b)	; Get WORD flag
+	or	a		; Test WORD
+	jp	z,l509e		; Nope
+;
+; Dump as hex words
+;
+	ld	c,8		; Set words in a line
+l5085:
+	call	l5877		; Put blank on console
+	ld	e,(hl)		; Fetch word
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	call	l5923		; Put hex word on console
+	ex	de,hl
+	call	l593a		; Test current dump address still in range
+	jp	c,l50b2		; Nope, start ASCII dump
+	dec	c		; Count down line count
+	jp	nz,l5085	; Still dumping
+	jp	l50b2
+;
+; Dump as hex bytes
+;
+l509e:
+	call	l5877		; Put blank on console
+	ld	a,(hl)		; Fetch byte
+	call	l58c1		; Put hex ASCII byte on console
+	inc	hl
+	call	l593a		; Test current dump address still in range
+	jp	c,l50b2		; Nope, start ASCII dump
+	ld	a,l
+	and	LOMASK		; Test at new byte boundary
+	jp	nz,l509e	; Not yet, keep on dumping
+;
+; Dump as ASCII characters
+;
+l50b2:
+	ld	(l6164),hl	; Set current dump address
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	jp	nz,l50f5	; Set, skip ASCII
+	ld	hl,(l6168)	; Get start dump address
+	ex	de,hl
+	call	l58d1		; Give new line on console
+	ld	b,6
+l50c5:
+	call	l5877		; Put blanks on console
+	dec	b
+	jp	nz,l50c5
+l50cc:
+	ld	a,(de)		; Get byte
+	call	l592b		; Put printable ASCII on console
+	ld	a,(l614b)	; Get WORD flag
+	or	a		; Test WORD
+	jp	z,l50e1		; Nope
+	ld	hl,l614c
+	ld	a,(hl)		; Get dump state
+	or	a
+	cpl			; Toggle it
+	ld	(hl),a
+	jp	z,l50e4		; One blank only
+l50e1:
+	call	l5877		; Put blank on console
+l50e4:
+	call	l5877		; Put blank on console
+	inc	de
+	ld	hl,(l6164)	; Get current dump address
+	ld	a,l
+	sub	e		; Test end
+	jp	nz,l50cc	; Nope, keep on dumpimg
+	ld	a,h
+	sub	d
+	jp	nz,l50cc
+l50f5:
+	ld	hl,(l6164)	; Get current dump address
+	call	l593a		; Test current dump address still in range
+	jp	c,l4f16		; Nope, exit
+	jp	l5065		; Next line
+;
+; Fetch three parameters (BC:=P1,DE:=P1,HL:=P3)
+;
+l5101:
+	call	l5ad0		; Parse parameters
+	cp	3		; Verify correct number
+	jp	nz,l585d	; Command error if not
+	call	l5967		; Get 1st parameter from list
+	push	hl
+	call	l5967		; Get 2nd parameter from list
+	push	hl
+	call	l5967		; Get 3rd parameter from list
+	pop	de		; P2
+	pop	bc		; P1
+	ret
+;
+; Compare DE:BC
+;
+l5117:
+	ld	a,e
+	sub	c		; Simple one
+	ld	a,d
+	sbc	a,b
+	ret
+;
+; Command Fs,f,d - Fill memory with constant value
+;                  s is the start address
+;                  f is the finish address
+;                  d is an eight-bit data item
+;
+l511c:
+	call	l5101		; Fetch three parameters (BC:=P1,DE:=P1,HL:=P3)
+	ld	a,h
+	or	a		; Verify byte
+	jp	nz,l585d	; Command error of not
+l5124:
+	call	l5117		; Compare finish:current
+	jp	c,l4f16		; finish<current
+	ld	a,l		; Get byte
+	ld	(bc),a		; Unpack
+	inc	bc		; Update address
+	jp	l5124
+;
+; Command G{p}{,a{,b}} - Begin Execution
+;                        p is a start address
+;                        a and b are temporary breakpoints
+;         -G             Don't display pass points
+;
+l5130:
+	xor	a
+	ld	(l6144),a	; Clear break code
+	call	l58d1		; Give new line on console
+	call	l5ad0		; Parse parameters
+	ld	(l6145),a	; Save number of parameters
+	call	l5967		; Get 1st parameter from list
+	push	hl
+	call	l5967		; Get 2nd parameter from list
+	ld	(l6146),hl	; Save 1st temporary breakpoint
+	push	hl
+	call	l5967		; Get 3rd parameter from list
+	ld	(l6148),hl	; Save 2nd temporary breakpoint
+	ld	b,h		; Unpack last parameter
+	ld	c,l
+	pop	de		; Get back temporary breakpoint
+	pop	hl		; Get back start address
+	jp	l515c
+;
+; #############################
+; # Re-enter after breakpoint #
+; #############################
+;
+l5155:
+	push	hl
+	ld	hl,l6144
+	ld	(hl),-1		; Set break code
+	pop	hl
+l515c:
+	di
+	jp	z,l5178		; No parameter
+	jp	c,l5166		; No 1st parameter
+	ld	(l61f6),hl	; Save program counter
+l5166:
+	and	NOMSB		; Make parameter count real
+	dec	a		; Test one parameter
+	jp	z,l5178		; Yeap
+	call	l51db		; Insert breakpoint
+	dec	a		; Test second breakpoint
+	jp	z,l5178		; Nope
+	ld	e,c		; Get it
+	ld	d,b
+	call	l51db		; Insert it
+l5178:
+	ld	hl,l6124	; Point to pass point array
+	ld	c,PASMAX	; Set max count
+l517d:
+	push	hl
+	ld	a,(hl)		; Get entry
+	or	a		; Test active
+	jp	z,l51b2		; Nope
+	inc	hl
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	push	hl
+	ld	a,(l6144)	; Get break code
+	or	a		; Test break
+	jp	z,l51ab		; Nope
+	ld	hl,(l61f6)	; Get program counter
+	ld	a,e
+	cp	l		; Test pass point reached
+	jp	nz,l51ab	; Nope
+	ld	a,d
+	cp	h
+	jp	nz,l51ab
+	pop	hl		; Clean stack
+	pop	hl		; Get array pointer
+	ld	(l6121),hl	; Save current pass pointer
+	push	hl
+	ld	a,(hl)		; Get code
+	ld	(hl),0		; Clear it
+	ld	(l6120),a	; Save opcode
+	jp	l51b2
+l51ab:
+	pop	hl		; Get array pointer
+	inc	hl
+	ld	a,(de)		; Get old code
+	ld	(hl),a		; Save it
+	ex	de,hl
+	ld	(hl),RST.cod	; Change to RST
+l51b2:
+	pop	hl
+	ld	de,PASLEN
+	add	hl,de		; Point to next
+	dec	c		; Test ready
+	jp	nz,l517d	; Nope
+	ld	sp,l61b6	; Init stack pointer
+	pop	iy		; Get index registers
+	pop	ix
+	exx
+	pop	hl		; Get alternate registers
+	pop	de
+	pop	bc
+	exx
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	ld	sp,l61ec	; Load local stack to registers
+	pop	de		; Get registers
+	pop	bc
+	pop	af
+	pop	hl		; Load stack
+	ld	sp,hl		; Get it
+	ld	hl,(l61f6)	; Get program counter
+	push	hl
+	ld	hl,(l61f4)	; Get reg HL
+	ei
+	ret			; Execute PC
+;
+; Insert one of max two temporary breakpoints
+;
+l51db:
+	push	af
+	push	bc
+	ld	hl,l6156
+	ld	a,(hl)		; Get temporary breakpoint count
+	inc	(hl)		; Advance count
+	or	a		; Test first entry
+	jp	z,l51f6		; Yeap
+	inc	hl
+	ld	a,(hl)		; Get first address
+	inc	hl
+	ld	b,(hl)
+	inc	hl
+	cp	e		; Test same
+	jp	nz,l51f6
+	ld	a,b
+	cp	d
+	jp	nz,l51f6
+	ld	a,(hl)		; Get old opcode
+	ld	(de),a		; Restore it
+l51f6:
+	inc	hl
+	ld	(hl),e		; Store address
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	a,(de)		; Get opcode
+	ld	(hl),a		; Save it
+	ld	a,RST.cod
+	ld	(de),a		; Set break code
+	pop	bc
+	pop	af
+	ret
+;
+; Command H    - Displays all symbols with addresses in Hex
+;         H.a  - Displays hex, decimal, and ASCII values of a
+;                where a is a symbolic expression
+;         Ha,b - Computes hex sum and difference of a and b
+;                where a and b are symbolic expressions
+;
+l5203:
+	call	l5ad0		; Parse parameters
+	jp	z,l52bf		; No parameter given
+	call	l5967		; Get parameter from list
+	dec	a		; Test only one
+	jp	z,l523d		; Yeap
+	dec	a		; Verify two
+	jp	nz,l585d	; Command error if not
+	push	hl
+	call	l5967		; Get 2nd parameter from list
+	pop	de
+	push	hl
+	call	l58d1		; Give new line on console
+	add	hl,de		; Build some
+	call	l5923		; Put hex word on console
+	call	l5877		; Put blank on console
+	pop	hl
+	xor	a
+	sub	l
+	ld	l,a
+	ld	a,0
+	sbc	a,h
+	ld	h,a
+	add	hl,de		; Build difference
+	call	l5923		; Put hex word on console
+	jp	l4f16
+;
+l5233:
+	dw	10000
+	dw	 1000
+	dw	  100
+	dw	   10
+	dw	    1
+;
+l523d:
+	ex	de,hl
+	call	l58d1		; Give new line on console
+	push	de
+	push	de
+	call	l58ea		; Print address and available label
+	call	l5877		; Put blank on console
+	ld	a,'#'
+	call	l5879		; Put decimal indicator on console
+	ld	b,MSB+5		; Set max digit count
+	ld	hl,l5233	; Init pointer to decimal array
+l5253:
+	ld	e,(hl)		; Fetch divisor
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl
+	ld	c,'0'		; Init quotient
+l525a:
+	ld	a,l
+	sub	e		; Divide by subtraction
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ld	h,a
+	jp	c,l5267		; That'it
+	inc	c		; Update quotient
+	jp	l525a
+l5267:
+	add	hl,de		; Make number GT 0
+	ld	a,b
+	or	a		; Test first digit
+	jp	p,l527e		; Nope, print it
+	push	af
+	ld	a,c
+	cp	'0'		; Test leading zero
+	jp	z,l5285		; Yeap
+	call	l5879		; Put character on console
+	pop	af
+	and	NOMSB		; Indicate no leading zero
+	ld	b,a
+	jp	l5291
+l527e:
+	ld	a,c
+	call	l5879		; Put character on console
+	jp	l5291
+l5285:
+	pop	af		; Get back digit count
+	and	NOMSB
+	cp	1		; Test last digit
+	jp	nz,l5291	; Nope
+	ld	b,a
+	jp	l527e		; Put last digit
+l5291:
+	ex	(sp),hl		; Get back table pointer
+	dec	b		; Count down
+	jp	nz,l5253	; Still more
+;
+	pop	de		; Get back value
+	pop	de
+	ld	a,d
+	or	a		; Test byte
+	jp	nz,l4f16	; Nope, ignore
+	ld	a,e
+	and	NOMSB		; No attribute
+	cp	' '		; Test printable
+	jp	c,l4f16		; Nope, ignore
+	inc	a					;;; **** NEVER 0xFF ****
+	jp	z,l4f16
+	call	l5877		; Put blank on console
+	ld	a,''''
+	call	l5879		; Indicate character follows
+	ld	a,e
+	and	NOMSB		; No attribute
+	call	l5879		; Put character on console
+	ld	a,''''
+	call	l5879		; Put indicator on console
+	jp	l4f16		; That's all
+l52bf:
+	ld	hl,(l61b2)	; Get symbol base address
+	inc	hl
+	inc	hl
+l52c4:
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	ld	c,(hl)
+	dec	hl
+	ld	a,c
+	cp	SYMLEN
+	jp	nc,l4f16
+	call	l58d1		; Give new line on console
+	ex	de,hl
+	call	l5923		; Put hex word on console
+	ex	de,hl
+	call	l5877		; Put blank on console
+	inc	c
+l52dc:
+	dec	c
+	jp	z,l52e8
+	ld	a,(hl)
+	dec	hl
+	call	l5879		; Put character on console
+	jp	l52dc
+l52e8:
+	call	l58db		; Test key pressed
+	jp	nz,l4f16	; Yeap
+	jp	l52c4
+;
+; Get next character
+;
+l52f1:
+	ld	b,null		; Force null
+;
+; Get next character if previous a null
+;
+l52f3:
+	ld	a,b		; Get previous character
+	ld	b,null		; Set null
+	or	a		; Test character available
+	ret	nz		; Yeap
+	jp	l5890		; Get command line character if not
+;
+; Test delimiter - Z set says yes
+;
+l52fb:
+	cp	'.'		; Filter characters
+	ret	z
+l52fe:
+	cp	cr
+	ret	z
+	cp	'*'
+	ret	z
+	cp	' '
+	ret
+;
+; Parse C bytes
+;
+l5307:
+	call	l52fb		; Test delimiter
+	jp	z,l5320		; Yes
+	ld	(hl),a		; Unpack character
+	inc	hl
+	call	l52f3		; Get next character
+	dec	c
+	jp	nz,l5307
+l5316:
+	call	l52fb		; Test delimiter
+	ret	z		; Yes
+	call	l52f3		; Get next character
+	jp	l5316		; Skip until delimiter found
+l5320:
+	ld	d,' '		; Set blank
+	cp	'*'		; Test wild card
+	jp	nz,l532c	; Nope
+	call	l52f3		; Get next character
+	ld	d,'?'		; Map it
+l532c:
+	ld	(hl),d		; Fill remainder of FCB
+	inc	hl
+	dec	c
+	jp	nz,l532c
+	ret
+;
+; Command Icommand tail - Input CCP command line
+;
+l5333:
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	jp	nz,l585d	; Set, invalid
+	ld	de,l616c+1	; Point to length of line
+	ld	hl,CCP	; Point to CCP command line
+	ld	a,(de)		; Get length
+	ld	c,a
+	ld	(hl),a		; Unpack it
+	inc	c
+	inc	de
+l5345:
+	inc	de
+	inc	hl
+	ld	a,(de)		; Copy line to CCP
+	ld	(hl),a
+	dec	c
+	jp	nz,l5345
+	ld	(hl),c		; Close line
+	ld	e,2		; Select two files
+	ld	hl,FCB
+l5353:
+	call	l52f1		; Get next character
+	cp	' '		; Test blank
+	jp	z,l5353		; Skip it
+	push	af
+	call	l52f3		; Get next character
+	cp	':'		; Test drive delimiter
+	jp	nz,l536f	; Nope
+	pop	af		; Get back drive
+	sub	'A'-1		; Make binary
+	ld	(hl),a		; Store drive
+	inc	hl
+	call	l52f1		; Get next character
+	jp	l5374
+l536f:
+	ld	b,a		; Suppress read next character
+	ld	(hl),0		; Set default drive
+	inc	hl
+	pop	af
+l5374:
+	ld	c,.nam
+	call	l5307		; Sample name
+	cp	'.'		; Test delimiter
+	call	z,l52f3		; Get next character if so
+	ld	c,.ext
+	call	l5307		; Sample extension
+l5383:
+	call	l52fe		; Test delimiter
+	jp	z,l538f		; Yes
+	call	l52f3		; Get next character
+	jp	l5383		; Skip until delimiter found
+l538f:
+	ld	c,_DIR-.drv-.nam-.ext
+l5391:
+	ld	(hl),0		; Clear next bytes
+	inc	hl
+	dec	c
+	jp	nz,l5391
+	dec	e		; Test all files parsed
+	jp	nz,l5353	; Nope
+	ld	(hl),0		; Close line
+	jp	l4f16
+;
+; Command Ms,h,d - Move Memory Block
+;                  s is the start address
+;                  h is the high address of the block
+;                  d is the destination start address
+;
+l53a1:
+	call	l5101		; Fetch three parameters (BC:=P1,DE:=P1,HL:=P3)
+l53a4:
+	call	l5117		; Compare high address:start
+	jp	c,l4f16		; high address<start
+	ld	a,(bc)		; Get from current
+	inc	bc
+	ld	(hl),a		; Unpack to destination
+	inc	hl
+	jp	l53a4
+;
+; Test files extension matches A,B,C - Z set says yes
+;
+l53b1:
+	ld	hl,FCB+.drv+.nam
+	xor	(hl)		; Test it
+	and	NOMSB		; Less attribute
+	ret	nz		; No match
+	ld	a,b
+	inc	hl
+	xor	(hl)
+	and	NOMSB
+	ret	nz
+	ld	a,c
+	inc	hl
+	xor	(hl)
+	and	NOMSB
+	ret
+;
+; Compare HL:top_program_address - C set says HL > top_program_address
+;
+l53c4:
+	ex	de,hl
+	ld	hl,(l61b4)	; Get program top address
+	ld	a,l
+	sub	e
+	ld	a,h
+	sbc	a,d
+	ex	de,hl
+	ret
+;
+; Set new top address if possible
+;
+l53ce:
+	call	l53c4		; Compare HL:top_program_address
+	ret	nc		; HL <= top_program_address
+	ld	(l61b4),hl	; Set program top address
+	ret
+;
+; Test commads L and A allowed - C set says yes
+;
+l53d6:
+	ld	a,(l614d)	; Get command flag
+	cp	1		; Test commands L and A enabled
+	ret	nc		; Nope
+	push	hl
+	ld	hl,l4000
+	call	l53c4		; Compare HL:top_program_address
+	pop	hl		; C set says HL > top_program_address
+	ret
+;
+; Command P{p{,c}} - Pass point set, reset, and display
+;                    p is a permanent breakpoint address
+;                    c is initial value of pass counter
+;         -P{p}      Clear pass point
+;
+l53e5:
+	call	l5ad0		; Parse parameters
+	jp	c,l585d		; Command error if no 1st parameters
+	jp	z,l5471		; Got none
+	call	l5967		; Get parameter from list
+	push	hl
+	ld	hl,1		; ???? WHY ????
+	dec	a
+	ld	a,(l614a)	; Get '-' flag
+	jp	z,l5406		; Got only one parameter
+	or	a
+	jp	nz,l585d	; Set, invalid
+	call	l5967		; Get parameter from list
+	jp	l5410
+l5406:
+	ld	hl,0
+	or	a		; Test '-' selected
+	jp	nz,l5410	; Yeap
+	ld	hl,1
+l5410:
+	ld	a,h		; Get pass count
+	or	a		; Verify byte
+	jp	nz,l585d	; Command error if not
+	ld	(l61b0),hl	; Save pass count
+	ld	hl,l6124	; Init pass point array
+	ld	c,PASMAX
+l541d:
+	push	hl		; Save current entry
+	ld	a,(hl)		; Get flag
+	or	a		; Test active entry
+	jp	z,l543d		; Nope
+	inc	hl		; Point to address
+	ld	a,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ex	(sp),hl
+	cp	l		; Test address found
+	jp	nz,l543b	; Nope
+	ld	a,d
+	cp	h
+	jp	nz,l543b
+	ld	a,(l61b0)	; Get pass count
+	pop	hl		; Get back pointer
+	ld	(hl),a		; Change pass point
+	or	a
+	jp	l4f16		; That's it
+l543b:
+	ex	(sp),hl		; Restore parameters
+	push	hl
+l543d:
+	pop	hl		; Get back pass point pointer
+	ld	de,PASLEN
+	add	hl,de		; Point to next
+	dec	c		; Test done
+	jp	nz,l541d	; Nope, try next
+	ld	a,(l61b0)	; Get pass count
+	or	a		; Test valid one
+	jp	z,l585d		; Command error if zero
+	ld	hl,l6124
+	ld	c,PASMAX
+l5452:
+	push	hl
+	ld	a,(hl)		; Get flag
+	or	a		; Test empty
+	jp	nz,l5465	; Nope
+	ld	a,(l61b0)	; Get pass count
+	pop	hl		; Get back pass point pointer
+	ld	(hl),a		; Store count
+	pop	de
+	inc	hl
+	ld	(hl),e		; Store address
+	inc	hl
+	ld	(hl),d
+	jp	l4f16		; That's all
+l5465:
+	pop	hl
+	ld	de,PASLEN
+	add	hl,de		; Point to next entry
+	dec	c		; Test done
+	jp	nz,l5452
+	jp	l585d		; Command error if no free slot found
+;
+; List pass points
+;
+l5471:
+	ld	hl,l6124	; Init pass point pointer
+	ld	c,PASMAX
+l5476:
+	push	hl
+	ld	a,(hl)		; Get flag
+	or	a		; Test active
+	jp	z,l549b		; Nope
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	jp	z,l5488		; Not set
+	ld	(hl),0		; Clear pass point
+	jp	l549b
+l5488:
+	push	bc
+	call	l58d1		; Give new line on console
+	ld	a,(hl)		; Get pass count
+	call	l58c1		; Put on console
+	call	l5877		; Put blank on console
+	inc	hl
+	ld	e,(hl)		; Get address of pass point
+	inc	hl
+	ld	d,(hl)
+	call	l58ea		; Print address and available label
+	pop	bc
+l549b:
+	pop	hl
+	ld	de,PASLEN
+	add	hl,de		; Point to next
+	dec	c		; Test done
+	jp	nz,l5476	; Nope, get next
+	jp	l4f16
+;
+; Command R{d} - Read Code/Symbols
+;                d is an offset to each address
+;
+l54a7:
+	call	l5ad0		; Parse parameters
+	ld	hl,0		; Preset offset
+	jp	z,l54b7		; Got none
+	dec	a		; Verify one parameter
+	jp	nz,l585d	; Command error if not
+	call	l5967		; Get parameter from list
+l54b7:
+	ld	(l61b0),hl	; Save offset
+	ld	hl,FCB+_DIR	; Point to second FCB
+	ld	de,l619e
+	ld	c,_DIR
+l54c2:
+	ld	a,(hl)
+	ld	(de),a		; Unpack FCB
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,l54c2
+	ld	a,(FCB+.drv)
+	cp	'?'		; Test wild card
+	jp	z,l5580		; Load symbol file only if so
+	call	l4f8d		; Open file
+	cp	OSerr		; Test found
+	jp	z,l585d		; Command error if not
+	ld	a,'H'
+	ld	bc,256*'E'+'X'	;;l4558
+	call	l53b1		; Test .HEX file
+	ld	hl,(l61b0)	; Load offset
+	push	hl
+	jp	z,l550f		; Yeap, load .HEX file
+	pop	hl		; Get back offset
+	ld	de,TPA
+	add	hl,de		; Build load address
+;
+; Load .COM file
+;
+l54ee:
+	push	hl
+	ld	de,FCB
+	ld	c,.rdseq
+	call	l4eaf		; Read record
+	pop	hl
+	or	a		; Test end of file
+	jp	nz,l5580	; Yeap
+	ld	de,DMA
+	ld	c,reclng
+l5501:
+	ld	a,(de)
+	inc	de
+	ld	(hl),a		; Unpack record
+	inc	hl
+	dec	c
+	jp	nz,l5501
+	call	l53ce		; Set new top address if possible
+	jp	l54ee
+;
+; Load .HEX file
+;
+; Format of HEX line:
+;
+; :<08> <0100> <00> <00 00 00 08 31 32 33 34> <25>
+;   ll   adr    ty     ---  data  ---          ck
+;
+; Checksum 'ck' is -(ll+adr+ty+..data..>
+;
+; :<00> <0000> <01> <FF>
+;
+l550f:
+	call	l5826		; Read character from file
+	cp	eof		; Test early end of file
+	jp	z,l585d		; Command error if so
+	sbc	a,':'		; Test start of line found
+	jp	nz,l550f	; Nope, wait for it
+	ld	d,a		; Clear checksum
+	pop	hl
+	push	hl
+	call	l5572		; Read length
+	ld	e,a
+	call	l5572		; Read start address
+	push	af
+	call	l5572
+	pop	bc
+	ld	c,a		; Combine start address
+	add	hl,bc		; Calculate load address
+	ld	a,e		; Get length
+	or	a		; Test end record
+	jp	nz,l5542	; Nope
+	ld	a,b		; Test address given
+	or	c
+	ld	hl,TPA
+	jp	z,l553c		; Nope, take default
+	ld	l,c		; Copy address
+	ld	h,b
+l553c:
+	ld	(l61f6),hl	; Save program counter
+	jp	l5580
+l5542:
+	call	l5572		; Read dummy byte
+l5545:
+	call	l5572		; Read bytes
+	ld	(hl),a		; Unpack
+	inc	hl
+	dec	e		; Test all read
+	jp	nz,l5545	; Nope
+	call	l5572		; Read byte from .HEX file
+	push	af
+	call	l53ce		; Set new top address if possible
+	pop	af
+	jp	nz,l585d	; Command error
+	jp	l550f
+;
+; Read byte from .HEX file
+;
+l555c:
+	call	l5826		; Read character from file
+l555f:
+	call	l595a		; Convert character to binary
+	rlca			; Shift into right place
+	rlca
+	rlca
+	rlca
+	and	HIMASK		; Mask bits
+	push	af
+	call	l5826		; Read character from file
+	call	l595a		; Convert character to binary
+	pop	bc
+	or	b		; Combine to byte
+	ret
+;
+; Read byte from .HEX file updating checksum
+;
+l5572:
+	push	bc
+	push	hl
+	push	de
+	call	l555c		; Read byte from .HEX file
+	ld	b,a
+	pop	de		; Get checksum
+	add	a,d		; Update it
+	ld	d,a
+	ld	a,b
+	pop	hl
+	pop	bc
+	ret
+;
+; End of loading .COM or .HEX file
+; Load symbol file on request
+;
+l5580:
+	ld	hl,l4000
+	call	l53c4		; Compare HL:top_program_address
+	jp	c,l5590		; HL > top_program_address
+	ld	a,(l614d)	; Get command flag
+	or	a		; Test commands L and A enabled
+	call	z,l4fa0		; Yeap, disable commands L and A
+l5590:
+	ld	a,'U'
+	ld	bc,256*'T'+'L'	;;l544c
+	call	l53b1		; Test .UTL file
+	push	af		; Save result
+	ld	hl,l619e
+	ld	de,FCB
+	ld	c,_DIR
+l55a1:
+	ld	a,(hl)
+	ld	(de),a		; Unpack FCB
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,l55a1
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	a,(FCB+.drv)
+	cp	' '		; Test file name name given
+	jp	z,l563e		; Nope
+	ld	hl,l5676
+;
+; Load symbol file
+;
+; Format of symbol file:
+;
+; <4246><blank><CONOUT><end_of_item>
+;  adr          symbol
+; 
+
+	call	l5886		; Tell loading symbols
+	call	l4f8d		; Open file
+	inc	a		; Test found
+	jp	z,l585d		; Command error if not
+l55c2:
+	call	l5826		; Read character from file
+l55c5:
+	cp	eof		; Test end of file
+	jp	z,l563e		; Yeap
+	cp	' '+1		; Test printable character
+	jp	c,l55c2		; Nope, skip control as well as blank
+	call	l555f		; Read byte from symbol file
+	push	af
+	call	l555c		; Read byte from symbol file
+	pop	de
+	ld	e,a		; Build address of symbol
+	ld	hl,(l61b0)	; Load offset
+	add	hl,de		; Make address real
+	push	hl
+	call	l5826		; Read character from file
+	cp	' '		; Test delimiting blank
+	jp	z,l55f1		; Yeap
+	pop	hl
+l55e6:
+	call	l5826		; Read character from file
+	cp	' '		; Skip control
+	jp	c,l55c5
+	jp	l55e6
+l55f1:
+	ld	hl,(BDOS+1)	; Get top of memory
+	ld	e,0		; Clear symbol length
+l55f6:
+	dec	hl
+	call	l5826		; Read character from file
+	cp	tab		; Test end of symbol
+	jp	z,l5614
+	cp	cr
+	jp	z,l5614
+	cp	' '+1		; Verify valid character
+	jp	c,l585d		; Command error if not
+	ld	(hl),a		; Unpack symbol
+	inc	e		; Update count
+	ld	a,e
+	cp	SYMLEN		; Verify in range
+	jp	nc,l585d	; Command error if not
+	jp	l55f6
+l5614:
+	push	de
+	push	hl
+	ex	de,hl
+	ld	hl,(BDOS+1)	; Get BDOS address
+	inc	hl
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ld	(hl),d		; Change vector
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),0c3h	; Set jump over symbol
+	call	l53c4		; Compare HL:top_program_address
+	jp	nc,l585d	; Command error if HL <= top_program_address
+	ex	de,hl
+	ld	hl,(BDOS+1)	; Get old vector
+	ex	de,hl
+	ld	(BDOS+1),hl	; Change it
+	ex	de,hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l55c2		; Load next symbol
+;
+; End of loading symbol file
+;
+l563e:
+	pop	af		; Get load flag
+	jp	nz,l5654	; Not an .UTL file loaded
+	ld	hl,l564a
+	push	hl		; Set return if so
+	ld	hl,(l61f6)	; Get program counter
+	jp	(hl)		; Execute load address
+l564a:
+	ld	hl,(BDOS+1)
+	add	hl,de
+	ld	(l61b2),hl	; Change symbol base address
+	jp	l4f16
+l5654:
+	ld	hl,l5680
+	call	l5886		; Tell load statistic
+	ld	hl,(l61b4)	; Get program top address
+	call	l5923		; Put hex word on console
+	call	l5877		; Put blank on console
+	ld	hl,(l61f6)	; Get program counter
+	call	l5923		; Put hex word on console
+	call	l5877		; Put blank on console
+	ld	hl,(BDOS+1)
+	dec	hl
+	call	l5923		; Put hex word on console
+	jp	l4f16
+;
+l5676:
+	db	cr,lf
+	db	'SYMBOLS'
+	db	null
+l5680:
+	db	cr,lf
+	db	'NEXT  PC  END'
+	db	cr,lf,null
+;
+; Command S{W}s - Set Memory Values
+;                 s is address where value is sent
+;                 W is 16 bit word
+;
+l5692:
+	call	l5ac1		; Parse parameters
+	dec	a		; Verify at least one parameter
+	jp	nz,l585d	; Command error if not
+	call	l5967		; Get parameter from list
+l569c:
+	call	l58d1		; Give new line on console
+	push	hl
+	call	l5923		; Put hex word on console
+	call	l5877		; Put blank on console
+	pop	hl
+	push	hl
+	ld	a,(l614b)	; Get WORD flag
+	or	a		; Test WORD
+	jp	z,l56b9		; Nope
+	ld	e,(hl)		; Fetch word value
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	call	l5923		; Put hex word on console
+	jp	l56bd
+l56b9:
+	ld	a,(hl)		; Fetch byte value
+	call	l58c1		; Put hex ASCII byte on console
+l56bd:
+	call	l5877		; Put blank on console
+	call	l5868		; Read line from console
+	call	l5890		; Get command line character
+	pop	hl
+	cp	cr		; Test not setting current one
+	jp	z,l5710		; Yeap, next address
+	cp	'.'		; Test possible end of command
+	jp	nz,l56da
+	ld	a,(l616c+1)
+	or	a		; Verify real end
+	jp	z,l4f16		; Yeap
+	ld	a,'.'		; Else restore character
+l56da:
+	cp	'"'		; Test ASCII input requested
+	push	hl
+	jp	nz,l56ef	; Nope
+l56e0:
+	call	l589c		; Get command line character
+	pop	hl
+	cp	cr		; Test end of line
+	jp	z,l569c		; Yeap, get next input
+	ld	(hl),a		; Unpack characters
+	inc	hl
+	push	hl
+	jp	l56e0
+l56ef:
+	call	l5ad3		; Get parameter
+	dec	a		; Verify only one
+	jp	nz,l585d	; Command error if not
+	call	l5967		; Get parameter from list
+	ld	a,(l614b)	; Get WORD flag
+	or	a		; Test WORD
+	jp	z,l5709		; Nope
+	ex	de,hl
+	pop	hl
+	ld	(hl),e		; Store word
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	jp	l569c
+l5709:
+	or	a
+	jp	nz,l585d	; Command error
+	ld	a,l		; Get byte
+	pop	hl
+	ld	(hl),a		; Store it
+l5710:
+	inc	hl		; Advance to next address
+	ld	a,(l614b)	; Get WORD flag
+	or	a		; Test WORD
+	jp	z,l569c		; Nope
+	inc	hl		; Advance twice if so
+	jp	l569c
+;
+; Command U{W}{n{,c}}  - Monitor Execution without Trace
+;                        n is the number of program steps
+;                        c is the utility entry address
+;                        W instructs ZSID not to trace subroutines
+;         -U{W}{n{,c}} - Disable pass point display
+;
+l571c:
+	ld	a,TraceU
+	jp	l5723
+;
+; Command T{n{,c}}     - Trace Program Execution
+;                        n is the number of program steps
+;                        c is the utility entry address.
+;         T{W}{n{,c}}  - Trace Without Call
+;                        W instructs ZSID not to trace subroutines
+;                        n is the number of program steps
+;                        c is the utility entry address
+;         -T{W}{n{,c}} - Trace without symbolic feature
+;
+l5721:
+	ld	a,TraceT
+l5723:
+	ld	(l6153),a	; Save trace mode
+	call	l5ac1		; Parse parameters
+	ld	hl,0
+	ld	(l614f),hl	; Clear trace value
+	inc	hl		; Set default 1
+	jp	z,l5750		; No parameter given
+	jp	c,l5740		; No first parameter given
+	call	l5967		; Get parameter from list
+	push	af
+	ld	a,l		; Verify count .GT. 0
+	or	h
+	jp	z,l585d		; Command error if not
+	pop	af
+l5740:
+	push	hl		; Save count
+	dec	a
+	jp	z,l574f
+	dec	a
+	jp	nz,l585d	; Command error
+	call	l5967		; Get parameter from list
+	ld	(l614f),hl	; Set trace value
+l574f:
+	pop	hl
+l5750:
+	ld	(l6154),hl	; Set trace count
+	xor	a
+	ld	(l6145),a	; Reset number of parameters
+	call	l5bd1		; Print registers
+	jp	l5155		; Re-enter command G
+;
+; Find register
+; ENTRY	Accu holds registers name
+;	Reg HL points to list
+; EXIT	Zero flag set indicates register found
+;	Reg B holds index then
+;
+l575d:
+	ld	bc,256*0+Regs	; Load length and index
+l5760:
+	cp	(hl)		; Compare
+	ret	z		; Match
+	inc	hl
+	inc	b		; Update index
+	dec	c		; Go thru list
+	jp	nz,l5760
+	or	a		; Not found
+	ret
+;
+; Command X{f}{r} - Examine/alter CPU state.
+;                   f is flag bit C,Z,M,E or I.
+;                   r is register A,B,D,H,S,P,X,Y or one of
+;                     the alternate register A',B',D' or H'.
+;
+l576a:
+	call	l5890		; Get command line character
+	cp	cr		; Test end of command
+	jp	nz,l5778	; Nope
+	call	l5bd1		; Print registers
+	jp	l4f16
+l5778:
+	ld	b,a		; Save register character
+	call	l5890		; Get command line character
+	cp	cr		; Test end of command
+	jp	nz,l5785	; Nope
+	ld	a,b		; Get back register name
+	jp	l5794
+l5785:
+	cp	''''		; Test alternate character
+	jp	nz,l585d	; Command error if not
+	call	l5890		; Get command line character
+	cp	cr		; Test end of command
+	jp	nz,l585d	; Command error if not
+	ld	a,b		; Get register name
+	cpl			; Force alternate set
+l5794:
+	ld	hl,l5d2a	; Init register name table
+	ld	de,l5d35	; Init register index
+	call	l575d		; Find normal register
+	jp	z,l57ac		; Got it
+	ld	hl,l5d3a	; Load for alternate set
+	ld	de,l5d45
+	call	l575d		; Find alternate register
+	jp	nz,l585d	; Command error if unknown
+l57ac:
+	call	l5890		; Get command line character
+	cp	cr		; Test end of command
+	jp	nz,l585d	; Command error if not
+	push	hl
+	push	bc
+	push	de
+	call	l58d1		; Give new line on console
+	call	l5b63		; Print CPU flag or reg
+	call	l5877		; Put blank on console
+	call	l5868		; Read line from console
+	call	l5ad0		; Parse parameters
+	or	a
+	jp	z,l4f16		; Got none
+	dec	a		; Only one parameter is allowed
+	jp	nz,l585d	; Command error if not
+	call	l5967		; Get parameter from list
+	pop	de
+	pop	bc
+	ld	a,b		; Get index
+	cp	CCodlen		; Test flag
+	jp	nc,l5802	; Nope
+	ld	a,h
+	or	a		; Verify 0 or 1
+	jp	nz,l585d	; Command error if not
+	ld	a,l
+	cp	1+1
+	jp	nc,l585d
+;
+; Attache condition bit
+;
+	ex	(sp),hl
+	call	l5b23		; Get condition bit position
+	pop	hl
+	ld	h,a		; Save 0 or 1
+	ld	b,c		; Save bit index
+	ld	a,EVENMSK
+	call	l57fc		; Get proper bit position
+	and	h		; Set bit to off
+	ld	b,c		; Get back index
+	ld	h,a		; Save result
+	ld	a,l		; Get 0 or 1
+	call	l57fc		; Get proper bit position
+	or	h		; Insert 0 or 1
+	ld	(de),a		; Save it
+	jp	l4f16
+;
+; Shift mask 11111110 into right place
+;
+l57fc:
+	dec	b		; Test place ok
+	ret	z		; Yeap
+	rlca			; Shift mask
+	jp	l57fc
+;
+; Attache register
+;
+l5802:
+	jp	nz,l581b	; Not Accu
+	ld	a,h
+	or	a		; Verfy byte range
+	jp	nz,l585d	; Command error if not
+	ld	b,l		; Save byte
+	pop	hl
+	ld	a,(hl)		; Get Accu name
+	or	a		; Test set
+	ld	hl,l61c1	; Select alternate Accu
+	jp	m,l5817
+	ld	hl,l61f1	; Select Accu
+l5817:
+	ld	(hl),b		; Store byte
+	jp	l4f16
+l581b:
+	push	hl
+	call	l5b4c		; Get address of register
+	pop	de
+	ld	(hl),e		; Save new value
+	inc	hl
+	ld	(hl),d
+	jp	l4f16
+;
+; Read character from file - C set on end of file
+;
+l5826:
+	push	hl
+	push	de
+	push	bc
+	ld	a,(FCB+__rec)	; Get record pointer
+	and	reclng-1
+	jp	z,l5846		; Read new record if empty
+l5831:
+	ld	d,0
+	ld	e,a		; Build index
+	ld	hl,DMA
+	add	hl,de		; Position in buffer
+	ld	a,(hl)		; Get character
+	cp	eof		; Test end of file
+	jp	z,l5858		; Yeap
+	ld	hl,FCB+__rec
+	inc	(hl)		; Update record pointer
+	or	a
+	jp	l5859
+l5846:
+	ld	c,.rdseq
+	ld	de,FCB
+	call	l4eaf		; Read record
+	or	a		; Test end of file
+	jp	nz,l5858	; Yeap
+	ld	(FCB+__rec),a	; Reset record pointer
+	jp	l5831
+l5858:
+	scf			; Indicate end of file
+l5859:
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Command error
+;
+l585d:
+	call	l58d1		; Give new line on console
+	ld	a,'?'
+	call	l5879		; Put character on console
+	jp	l4f16
+;
+; Read line from console
+;
+l5868:
+	ld	c,.rdkbd
+	ld	de,l616c
+	call	l4eaf		; Read line
+	ld	hl,l616c+2
+	ld	(l616a),hl	; Init command line pointer
+	ret
+;
+; Put blank on console
+;
+l5877:
+	ld	a,' '		; Simple one
+;
+; Put character on console
+;
+l5879:
+	push	hl
+	push	de
+	push	bc
+	ld	e,a
+	ld	c,.conout
+	call	l4eaf		; Put it
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Print zero closed string on console
+;
+l5886:
+	ld	a,(hl)		; Get character
+	or	a		; Test end
+	ret	z		; Yeap
+	call	l5879		; Put character on console
+	inc	hl
+	jp	l5886
+;
+; Get upper case command line character
+;
+l5890:
+	call	l589c		; Get command line character
+	cp	7fh
+	ret	z
+	cp	'a'		; Test case
+	ret	c
+	and	5fh
+	ret
+;
+; Get command line character
+;
+l589c:
+	push	hl
+	ld	hl,l616c+1
+	ld	a,(hl)
+	or	a
+	ld	a,cr		; Test end of command
+	jp	z,l58b0
+	dec	(hl)
+	ld	hl,(l616a)	; Get command line pointer
+	ld	a,(hl)		; Get command character
+	inc	hl		; Update pointer
+	ld	(l616a),hl
+l58b0:
+	pop	hl
+	ret
+;
+; Put nibble as hex ASCII on console
+;
+l58b2:
+	cp	9+1		; Test decimal
+	jp	nc,l58bc	; Nope
+	add	a,'0'		; Make ASCII
+	jp	l5879		; Put character on console
+l58bc:
+	add	a,'A'-10	; Make hex ASCII
+	jp	l5879		; Put character on console
+;
+; Put byte as hex ASCII on console
+;
+l58c1:
+	push	af
+	rra			; Get hi bits
+	rra
+	rra
+	rra
+	and	LOMASK
+	call	l58b2		; Put on console
+	pop	af
+	and	LOMASK		; Put lo nits on console
+	jp	l58b2
+;
+; Give new line on console
+;
+l58d1:
+	ld	a,cr
+	call	l5879		; Simple put twice
+	ld	a,lf
+	jp	l5879
+;
+; Get state of console - Z set if no key available
+;
+l58db:
+	push	bc
+	push	de
+	push	hl
+	ld	c,.kbstat
+	call	l4eaf		; Get state
+	and	1
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Tell label if defined
+;
+l58e9:
+	ex	de,hl
+;
+; Tell label if defined
+;
+l58ea:
+	push	de		; Save label address
+	ex	de,hl
+	call	l5923		; Put hex word on console
+	pop	de
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	ret	nz		; Set, ignore label
+	call	l60f3		; Find label
+	ret	z		; Not found
+;
+; Tell label
+;
+l58f9:
+	call	l5877		; Put blank on console
+	ld	a,'.'
+	call	l5879		; Indicate label follows
+l5901:
+	ld	e,(hl)		; Get length of label
+l5902:
+	dec	hl
+	ld	a,(hl)		; Get character
+	call	l5879		; Put label on console
+	dec	e
+	jp	nz,l5902
+	ret
+;
+; Tell label if defined
+;
+l590c:
+	push	hl
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	pop	de
+	ret	nz		; Set
+	call	l60f3		; Find label
+	ret	z		; Not found
+	call	l58d1		; Give new line on console
+	call	l5901		; Tell label
+	ld	a,':'
+	call	l5879		; Put delimiter on console
+	ret
+;
+; Put hex word on console
+;
+l5923:
+	ld	a,h		; Get hi byte
+	call	l58c1		; Put on console
+	ld	a,l		; Get lo byte
+	jp	l58c1		; Put on console
+;
+; Put printable ASCII on console
+;
+l592b:
+	cp	'~'+1		; Test character printable
+	jp	nc,l5935	; Nope
+	cp	' '
+	jp	nc,l5879	; Put it on console
+l5935:
+	ld	a,'.'		; map non printable
+	jp	l5879		; Put it on console
+;
+; Test current dump address still in range - C set says no
+;
+l593a:
+	ex	de,hl
+	ld	hl,(l6166)	; Get dump end address
+	ld	a,l
+	sub	e		; Compare
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ex	de,hl
+	ret
+;
+; Test character a delimiter - Z set says yes
+;
+l5945:
+	cp	'/'		; Filter characters
+	ret	z
+l5948:
+	cp	'+'
+	ret	z
+	cp	'-'
+	ret	z
+	cp	cr
+	ret	z
+	cp	','
+	ret	z
+	cp	')'
+	ret	z
+	cp	' '
+	ret
+;
+; Convert character to binary
+;
+l595a:
+	sub	'0'		; Strip off offset
+	cp	9+1		; Test decimal
+	ret	c		; Yeap
+	add	a,'0'-'A'+10	; Fix for hex
+	cp	15+1		; Verify valid digit
+	ret	c
+	jp	l585d		; Command error if not
+;
+; Get current parameter from list
+;
+l5967:
+	ex	de,hl
+	ld	e,(hl)		; Fetch parameter
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	ret
+;
+; Get address of label
+; EXIT	Reg DE holds value
+;
+l596e:
+	push	de
+	call	l5890		; Get command line character
+	ld	hl,(l61b2)	; Get symbol base address
+l5975:
+	push	af
+	ld	c,(hl)		; Fetch length
+	ld	a,c
+	cp	SYMLEN
+	jp	nc,l585d	; Command error
+	pop	af
+	ex	de,hl
+	push	de
+	push	af
+	ld	hl,(l616a)	; Load command line pointers
+	push	hl		; And save them
+	ld	hl,(l616c)
+	push	hl
+	ex	de,hl
+	inc	c
+l598b:
+	call	l5945		; Test character a delimiter
+	jp	z,l59a0		; Yeap
+	dec	c		; Test scanned
+	jp	z,l59ba		; Yeap
+	dec	hl
+	cp	(hl)		; Compare
+	jp	nz,l59ba	; No match
+	call	l5890		; Get next command line character
+	jp	l598b		; Try it
+l59a0:
+	dec	c		; Test done
+	jp	nz,l59ba	; Nope
+	pop	hl		; Clean stack
+	pop	hl
+	pop	hl
+	call	l5948		; Test character a delimiter
+	jp	z,l59b3		; Yeap
+	call	l5890		; Get command line character
+	jp	l59c3		; Fix table pointer
+l59b3:
+	pop	hl		; Get back pointer
+	inc	hl
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ret
+l59ba:
+	pop	hl		; Get back pointers
+	ld	(l616c),hl	; Restore them
+	pop	hl
+	ld	(l616a),hl
+	pop	af
+l59c3:
+	pop	hl
+	push	af
+	ld	a,(hl)		; Get length of symbol
+	cpl			; Negate it
+	add	a,l		; Build address of previous symbol
+	ld	l,a
+	ld	a,0ffh
+	adc	a,h
+	ld	h,a
+	dec	hl
+	dec	hl
+	pop	af
+	jp	l5975		; Maybe next symbol
+;
+; Calculate value from command line
+; ENTRY	Accu holds character
+; EXIT	Reg DE holds value
+;
+l59d3:
+	ex	de,hl
+	ld	hl,0		; Init result
+	cp	'.'		; Test label requested
+	jp	z,l596e		; Yeap
+	cp	'@'		; Test 16 bit value
+	jp	nz,l59eb
+	call	l596e		; Get address of label
+	push	hl
+	ex	de,hl
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ret
+l59eb:
+	cp	'='		; Test 8 bit value
+	jp	nz,l59fa
+	call	l596e		; Get address of label
+	push	hl
+	ex	de,hl
+	ld	e,(hl)		; Fetch low byte
+	ld	d,0
+	pop	hl
+	ret
+l59fa:
+	cp	''''		; Test character value
+	jp	nz,l5a1e
+	ex	de,hl
+l5a00:
+	call	l589c		; Get command line character
+	cp	' '		; Verify printable
+	jp	c,l585d		; Command error if not
+	cp	''''		; Test indicator
+	jp	nz,l5a19	; Nope
+	call	l589c		; Get command line character
+	call	l5948		; Test character a delimiter
+	ret	z		; Yeap
+	cp	''''		; Verify second indicator
+	jp	nz,l585d	; Command error if not
+l5a19:
+	ld	d,e		; Unpack previous character
+	ld	e,a		; Save new character
+	jp	l5a00		; Try more
+l5a1e:
+	cp	'#'		; Test decimal value
+	jp	nz,l5a42
+l5a23:
+	call	l5890		; Get command line character
+	call	l5948		; Test character a delimiter
+	jp	z,l5a40		; Yeap
+	sub	'0'		; Strip off offset
+	cp	9+1		; Verify correct range
+	jp	nc,l585d	; Command error if not
+	add	hl,hl		; Old * 2
+	ld	b,h
+	ld	c,l
+	add	hl,hl		; * 4
+	add	hl,hl		; * 8
+	add	hl,bc		; *10
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; Insert digit
+	jp	l5a23		; Get next
+l5a40:
+	ex	de,hl
+	ret
+l5a42:
+	cp	'^'		; Test stack reference
+	jp	nz,l5a59
+	push	de
+	ld	hl,(l61f2)	; Get address from stack
+l5a4b:
+	ld	e,(hl)		; Fetch it
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	call	l5890		; Get command line character
+	cp	'^'		; Test further stack reference
+	jp	z,l5a4b
+	pop	hl
+	ret
+l5a59:
+	call	l595a		; Convert character to binary
+	add	hl,hl		; *16
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	or	l		; Insert digit
+	ld	l,a
+	call	l5890		; Get command line character
+	call	l5948		; Test character a delimiter
+	jp	nz,l5a42	; Nope
+	ex	de,hl
+	ret
+;
+; Save parameter in reg DE to ^HL
+;
+l5a6d:
+	ex	de,hl
+	ld	(l611e),hl	; Save current parameter
+	ex	de,hl
+	ld	(hl),e		; Put into list
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	hl
+	ld	hl,l615d
+	inc	(hl)		; Update parameter count
+	pop	hl
+	ret
+;
+; Get simple expression
+;
+l5a7d:
+	cp	'-'		; Test unary sign
+	jp	nz,l5a88
+	ld	de,0		; Init value
+	jp	l5aae		; Negate
+l5a88:
+	cp	'+'		; Test unary plus
+	jp	nz,l5a95
+	ex	de,hl
+	ld	hl,(l611e)	; Get current parameter
+	ex	de,hl
+	jp	l5a9d
+l5a95:
+	call	l59d3		; Calculate value from command line
+l5a98:
+	cp	'+'		; Test addition
+	jp	nz,l5aab
+l5a9d:
+	push	de
+	call	l5890		; Get command line character
+	call	l59d3		; Calculate value from command line
+	pop	bc
+	ex	de,hl
+	add	hl,bc		; Add vlaues
+	ex	de,hl
+	jp	l5a98
+l5aab:
+	cp	'-'		; Test subtraction
+	ret	nz
+l5aae:
+	call	l5890		; Get command line character
+	push	de
+	call	l59d3		; Calculate value from command line
+	pop	bc
+	push	af
+	ld	a,c
+	sub	e		; Build differenece
+	ld	e,a
+	ld	a,b
+	sbc	a,d
+	ld	d,a
+	pop	af
+	jp	l5a98		; Try next
+;
+; Parse line for parameters with optional WORD select
+; EXIT	Accu holds number of parameters (MSB may be set)
+;	Reg DE points to parameter list
+;	Zero flag set indicates no parameter
+;	Carry flag set indicates no 1st parameter
+;
+l5ac1:
+	call	l5890		; Get command line character
+	ld	hl,l614b
+	ld	(hl),0		; Clear word flag
+	cp	'W'		; Test WORD
+	jp	nz,l5ad3	; Nope
+	ld	(hl),-1		; Set word flag
+;
+; Parse line for parameters
+; EXIT	Accu holds number of parameters (MSB may be set)
+;	Reg DE points to parameter list
+;	Zero flag set indicates no parameter
+;	Carry flag set indicates no 1st parameter
+;
+l5ad0:
+	call	l5890		; Get command line character
+l5ad3:
+	ld	hl,l615d
+	ld	(hl),0		; Init counter
+	inc	hl		; Init list pointer
+	cp	cr		; Test end
+	jp	z,l5b15		; Yeap
+	cp	','		; Test more
+	jp	nz,l5aee	; Nope
+	ld	a,MSB+0
+	ld	(l615d),a	; Init counter for pre-comma
+	ld	de,0
+	jp	l5af1		; Clear forst parameter
+l5aee:
+	call	l5a7d		; Get simple expression
+l5af1:
+	call	l5a6d		; Save 1st parameter
+	cp	cr		; Test end
+	jp	z,l5b15
+	call	l5890		; Get command line character
+	call	l5a7d		; Get simple expression
+	call	l5a6d		; Save 2nd parameter
+	cp	cr		; Test end
+	jp	z,l5b15
+	call	l5890		; Get command line character
+	call	l5a7d		; Get simple expression
+	call	l5a6d		; Save 3rd parameter
+	cp	cr		; Verify end
+	jp	nz,l585d	; Command error if not
+l5b15:
+	ld	de,l615d
+	ld	a,(de)		; Get parameter count
+	cp	MSB+1		; Test only one
+	jp	z,l585d		; Command error if so
+	inc	de		; Point to list
+	or	a
+	rlca			; Strip off MSB
+	rrca
+	ret
+;
+; Get condition bit position
+; ENTRY	Reg B holds bit index
+;	Reg HL points to name of flag
+; EXIT	Reg C holds bit position
+;	Accu  holds condition bit
+;
+l5b23:
+	push	hl
+	push	de
+	ld	hl,l5d4a
+	ld	e,b		; Unpack index
+	ld	d,0
+	add	hl,de		; Position to bit position		
+	ld	c,(hl)		; Get position
+	pop	de
+	pop	hl
+	ld	a,(hl)		; Get name
+	ld	de,l61c0
+	or	a		; Test alternate
+	jp	m,l5b3a		; Yeap
+	ld	de,l61f0	; Change to normal condition bits
+l5b3a:
+	ex	de,hl
+	ld	a,(hl)
+	ex	de,hl
+	ret
+;
+; Get condition bit
+; ENTRY	Reg B holds flag index
+;	Reg HL points to name of flag
+; EXIT	Accu  holds condition bit
+;
+l5b3e:
+	call	l5b23		; Get condition bit position
+l5b41:
+	dec	c		; Count dowm
+	jp	z,l5b49		; Got position
+	rra			; Shift it
+	jp	l5b41
+l5b49:
+	and	LSB		; Extract bit
+	ret
+;
+; Get address of register pair
+; ENTRY	Accu holds index
+;	Reg DE points to reg offset
+; EXIT	Reg HL holds address
+;
+l5b4c:
+	sub	CCodlen+1	; Make zero relativ
+	ex	de,hl
+	ld	e,a		; Build index
+	ld	d,0
+	add	hl,de		; Position in table
+	ld	e,(hl)		; Get index
+	ld	d,0ffh		; Remember backwards
+	ld	hl,l61f8
+	add	hl,de		; Calculate register address
+	ret
+;
+; Get content of register pair
+; ENTRY	Accu holds index
+;	Reg DE points to reg offset
+; EXIT	Reg HL holds content
+;
+l5b5b:
+	call	l5b4c		; Get address of register
+	ld	e,(hl)		; Get value
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Print CPU flag or reg
+; ENTRY	Reg B holds index
+;	Reg DE points to register offset
+;	Reg HL points to register name
+;
+l5b63:
+	ld	a,b		; Get index
+	cp	CCodlen		; Test still condition code
+	jp	nc,l5b7d	; Nope
+;
+; Process condition code
+;
+	push	de
+	call	l5b3e		; Get condition bit
+	pop	de
+	or	a		; Test set
+	ld	a,'-'
+	jp	z,l5879		; Indicate not
+	ld	a,(hl)		; Get name
+	or	a		; Test Z80 code
+	jp	p,l5879		; Nope, print it
+	cpl			; Calculate ASCII character
+	jp	l5879		; Print it
+;
+; Process register
+;
+l5b7d:
+	push	af		; Z flag if Accu selected
+	ld	a,(hl)		; Get name of register
+	or	a		; Test alternate register
+	jp	m,l5b8b		; Yeap
+	call	l5879		; Tell register
+	ld	a,'='
+	jp	l5b91
+l5b8b:
+	cpl			; Calculate ASCII character
+	call	l5879		; Tell register
+	ld	a,''''
+l5b91:
+	call	l5879		; Indicate register type
+	pop	af		; Test Accu selected
+	jp	nz,l5ba8	; Nope, reg pair
+	ld	a,(hl)		; Get character
+	or	a		; Test Z80 code
+	ld	hl,l61c1
+	jp	m,l5ba3		; Yeap
+	ld	hl,l61f1	; Select normal Accu
+l5ba3:
+	ld	a,(hl)		; Get value of Accu
+	call	l58c1		; Put hex ASCII byte on console
+	ret
+l5ba8:
+	push	de
+	call	l5b5b		; Get value of register
+	call	l5923		; Put hex word on console
+	pop	de
+	ret
+;
+; Display CPU flags and registers - 1st or 2nd set
+; ENTRY	Reg DE points to register offset
+;	Reg HL points to register name
+;
+l5bb1:
+	call	l58d1		; Give new line on console
+	call	l5877		; Put blank on console
+	ld	b,0		; Init counter
+l5bb9:
+	push	bc
+	push	hl
+	call	l5b63		; Display selected one
+	pop	hl
+	pop	bc
+	inc	b		; Update index
+	inc	hl		; Point to next character
+	ld	a,b
+	cp	Regs		; Test all registers printed
+	ret	nc		; Yeap
+	cp	CCodlen		; Test printing condition code
+	jp	c,l5bb9		; Ignore blank if so
+	call	l5877		; Put blank on console
+	jp	l5bb9
+;
+; Print CPU registers
+;
+l5bd1:
+	ld	de,l5d35	; Load reg offset
+	ld	hl,l5d2a	; Load reg names
+	call	l5bb1		; Display normal set
+	ld	de,l5d45
+	ld	hl,l5d3a
+	call	l5bb1		; Display alternate set
+	call	l5877		; Put blank on console
+	call	l5f20		; Adjust PC
+	push	af
+	push	de
+	push	bc
+	call	l53d6		; Test valid command
+	jp	nc,l5c19	; Nope
+	ld	hl,(l61f6)	; Get program counter
+	ld	(l400c),hl	; Set address
+	ld	hl,l4010	; Point to list flag
+	ld	(hl),-1		; Set special
+	call	l4006		; Disassemble code
+	jp	l5c63
+l5c03:
+	ld	c,0
+	cp	0cbh
+	jp	z,l5c12
+	cp	0ddh
+	ret	c
+	and	0cfh
+	cp	0cdh
+	ret	nz
+l5c12:
+	inc	hl
+	ld	a,(hl)
+	ld	c,a
+	call	l58c1		; Put hex ASCII byte on console
+	ret
+l5c19:
+	dec	hl
+	ld	(l6166),hl	; Save dump end address
+	ld	hl,(l61f6)	; Get program counter
+	ld	a,(hl)
+	call	l58c1		; Put hex ASCII byte on console
+	ld	a,(hl)
+	call	l5c03
+	inc	hl
+	call	l593a		; Test current dump address still in range
+	jp	c,l5c63		; Nope
+	push	af
+	call	l5877		; Put blank on console
+	pop	af
+	or	e
+	jp	z,l5c4a
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,c
+	cp	'6'
+	jp	nz,l5c44
+	ld	a,d
+	ld	d,e
+	ld	e,a
+l5c44:
+	call	l58ea		; Print address and available label
+	jp	l5c63
+l5c4a:
+	ld	a,(hl)
+	call	l58c1		; Put hex ASCII byte on console
+	ld	hl,(l61f6)	; Get program counter
+	ld	a,(hl)
+	and	0c7h
+	cp	0
+	jp	nz,l5c63
+	inc	hl
+	ld	e,(hl)
+	ld	d,0
+	dec	hl
+	add	hl,de
+	ex	de,hl
+	call	l58ea		; Print address and available label
+l5c63:
+	ld	hl,(l61f6)	; Get program counter
+	ld	a,(hl)
+	ld	b,a
+	and	0c0h
+	cp	80h
+	jp	nz,l5c7a
+	ld	a,b
+	and	7
+	cp	6
+	jp	nz,l5d26
+	jp	l5ca7
+l5c7a:
+	cp	'@'
+	jp	nz,l5c97
+	ld	a,b
+	cp	76h
+	jp	z,l5d26
+	and	7
+	cp	6
+	jp	z,l5cb3
+	ld	a,b
+	and	'8'
+	cp	'0'
+	jp	nz,l5d26
+	jp	l5cb3
+l5c97:
+	ld	a,b
+	cp	'6'
+	jp	z,l5cb3
+	cp	'4'
+	jp	z,l5ca7
+	cp	'5'
+	jp	nz,l5cb9
+l5ca7:
+	ld	a,'='
+	call	l5879		; Put character on console
+	ld	hl,(l61f4)	; Get reg HL
+	ld	a,(hl)
+	call	l58c1		; Put hex ASCII byte on console
+l5cb3:
+	ld	hl,(l61f4)	; Get reg HL
+	jp	l5ccc
+l5cb9:
+	and	0e7h
+	cp	2
+	jp	nz,l5ce0
+	ld	a,b
+	and	10h
+	ld	hl,(l61ec)
+	jp	nz,l5ccc
+	ld	hl,(l61ee)
+l5ccc:
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	jp	nz,l5d26	; Set
+	ex	de,hl
+	call	l60f3		; Find label
+	jp	z,l5d26		; Not found
+	call	l58f9		; Tell label
+	jp	l5d26
+l5ce0:
+	ld	a,b
+	cp	0cbh
+	jp	nz,l5cf4
+	ld	hl,(l61ae)
+	ld	a,(hl)
+	and	7
+	cp	6
+	jp	nz,l5d26
+	jp	l5cb3
+l5cf4:
+	and	0ddh
+	cp	0ddh
+	jp	nz,l5d26
+	ld	hl,(l61ae)
+	ld	a,(hl)
+	cp	'9'
+	jp	z,l5d26
+	cp	'4'
+	jp	c,l5d26
+	cp	0cch
+	jp	z,l5d26
+	inc	hl
+	ld	e,(hl)
+	ld	d,0
+	ld	a,b
+	cp	0ddh
+	jp	z,l5d1f
+	push	iy
+	pop	hl
+	add	hl,de
+	jp	l5ccc
+l5d1f:
+	push	ix
+	pop	hl
+	add	hl,de
+	jp	l5ccc
+l5d26:
+	pop	bc
+	pop	de
+	pop	af
+	ret
+;
+; Register tables
+;
+; Main register set
+;
+l5d2a:
+	db	'CZMEI'		; Condition codes
+CCodlen	equ	$-l5d2a
+	db	'ABDHSP'	; Register names
+Regs	equ	$-l5d2a
+;
+l5d35:
+	db	l61ee-l61f8	; 0f6h
+	db	l61ec-l61f8	; 0f4h
+	db	l61f4-l61f8	; 0fch
+	db	l61f2-l61f8	; 0fah
+	db	l61f6-l61f8	; 0feh
+;
+; Alternate register set
+;
+l5d3a:
+	db	NOT 'C'		; 0bch
+	db	NOT 'Z'		; 0a5h
+	db	NOT 'M'		; 0b2h
+	db	NOT 'E'		; 0bah
+	db	NOT 'I'		; 0b6h
+;
+	db	NOT 'A'		; 0beh
+	db	NOT 'B'		; 0bdh
+	db	NOT 'D'		; 0bbh
+	db	NOT 'H'		; 0b7h
+	db	'X'		; 058h
+	db	'Y'		; 059h
+l5d45:
+	db	l61be-l61f8	; 0c6h
+	db	l61bc-l61f8	; 0c4h
+	db	l61ba-l61f8	; 0c2h
+	db	l61b8-l61f8	; 0c0h
+	db	l61b6-l61f8	; 0beh
+;
+; +---+---+---+---+---+---+---+---+
+; | S | Z |   | H |   | P | N | C |
+; +---+---+---+---+---+---+---+---+
+;   8   7       5       3       1
+l5d4a:
+	db	1,7,8,3,5
+;
+; Reset trace environment
+;
+l5d4f:
+	ld	hl,0
+	ld	(l6154),hl	; Clear trace count
+	xor	a
+	ld	(l6153),a	; Clear trace mode
+	ret
+;
+; Breakpoint entry
+;
+l5d5a:
+	di
+	ld	(l61f4),hl	; Save reg HL
+	pop	hl		; Get user
+	dec	hl		; Fix PC
+	ld	(l61f6),hl	; Set program counter
+	push	af		; Preserve AF
+	ld	hl,2
+	add	hl,sp		; Copy stack
+	pop	af		; Get back AF
+	ld	sp,l61f4	; Init debugger stack
+	push	hl		; Save SP
+	push	af		; Save AF
+	push	bc		; Save BC
+	push	de		; Save DE
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	sp,l61c2	; Change stack to alternate registers
+	ex	af,af'
+	push	af		; Save register set
+	ex	af,af'
+	exx
+	push	bc
+	push	de
+	push	hl
+	exx
+	push	ix		; Save index registers
+	push	iy
+	ld	sp,hl		; Get back stack
+	nop
+	nop
+	nop
+	ei
+	ld	hl,(l61f6)	; Get program counter
+	ld	a,(hl)		; Get code
+	cp	RST.cod		; Check RST here
+	push	af		; Save result
+	push	hl
+	ld	a,(l6120)	; Get opcode
+	ld	(l6144),a	; Save it
+	ld	hl,l6124+PASLEN*(PASMAX-1)
+	ld	c,PASMAX
+l5d9b:
+	push	hl
+	ld	a,(hl)		; Get pass pointer
+	or	a		; Test empty
+	jp	z,l5da8		; Yeap, skip reset
+	inc	hl
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)		; Get opcode
+	ld	(de),a		; Restore it
+l5da8:
+	pop	hl
+	ld	de,-PASLEN
+	add	hl,de		; POint to previous pass
+	dec	c
+	jp	nz,l5d9b
+	call	l5efd		; Save current pass opcode
+	ld	hl,l6156
+	ld	a,(hl)		; Get temporary breakpoint count
+	ld	(hl),0		; Clear it
+l5dba:
+	or	a		; Test active
+	jp	z,l5dcb		; Nope
+	dec	a
+	ld	b,a
+	inc	hl
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	ld	(de),a		; Restore opcode
+	ld	a,b
+	jp	l5dba
+l5dcb:
+	pop	hl
+	pop	af		; Get back RST sate
+	jp	z,l5def		; Got breakpoint
+	inc	hl
+	ld	(l61f6),hl	; Set program counter
+	ex	de,hl
+	ld	hl,l4eb5	; Point to OS address
+	ld	c,(hl)		; Load it
+	inc	hl
+	ld	b,(hl)
+	call	l5117		; Test end reached [Compare DE:BC]
+	jp	c,l5def		; Yeap [DE<BC]
+	call	l5d4f		; Clear trace
+	ld	hl,(l6151)	; Get user stack
+	ex	de,hl
+	ld	a,MSB+2		; Set parameter
+	or	a
+	scf			; Set second one
+	jp	l5155		; Re-enter command G
+l5def:
+	ld	a,(l6123)	; Get pass value
+	or	a		; Test active
+	jp	nz,l5e94	; Yeap
+	ld	hl,l6124	; Init pass pointers
+	ld	c,PASMAX
+l5dfb:
+	push	hl
+	ld	a,(hl)
+	or	a		; Test active
+	jp	z,l5e51		; Nope
+	inc	hl
+	ld	a,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	ld	hl,(l61f6)	; Get program counter
+	cp	l		; Test agianst PC
+	jp	nz,l5e51	; Nope
+	ld	a,d
+	cp	h
+	jp	nz,l5e51
+	pop	hl
+	ld	a,(hl)
+	dec	a		; Count down
+	jp	nz,l5e1f	; Still remainder
+	push	af
+	dec	a
+	ld	(l6123),a	; Indicate pass
+	jp	l5e36
+l5e1f:
+	ld	(hl),a		; Set new count
+	push	af
+	call	l5eca		; Get trace mode
+	cp	TraceT		; Test T[race]
+	jp	z,l5e36		; Yeap, go dump
+	ld	a,(l614a)	; Get '-' flag
+	or	a
+	jp	z,l5e36		; Not set, so dump
+	call	l5f20		; Adjust PC
+	jp	l5155		; Re-enter command G
+l5e36:
+	call	l58d1		; Give new line on console
+	pop	af		; Get back count
+	inc	a
+	call	l58c1		; Put hex ASCII on console
+	ld	hl,l5ec3
+	call	l5886		; Tell pass
+	ld	hl,(l61f6)	; Get program counter
+	ex	de,hl
+	call	l58ea		; Print address and available label
+	call	l5bd1		; Print registers
+	jp	l5155		; Re-enter command G
+l5e51:
+	pop	hl
+	ld	de,PASLEN
+	add	hl,de		; Point to next
+	dec	c		; Test done
+	jp	nz,l5dfb	; Nope
+	call	l58db		; Test key pressed
+	jp	nz,l5e94	; Yeap
+	call	l5eca		; Get trace mode
+	jp	z,l5e7c		; Not active
+	dec	a		; Test U[ntrace]
+	jp	nz,l5e70	; Nope
+	call	l5f20		; Adjust PC
+	jp	l5155		; Re-enter command G
+l5e70:
+	ld	hl,(l61f6)	; Get program counter
+	call	l590c		; Tell label if defined
+	call	l5bd1		; Print registers
+	jp	l5155		; Re-enter command G
+l5e7c:
+	ld	a,(l6144)	; Get break code
+	or	a		; Test break
+	jp	z,l5e94		; Nope
+	ld	hl,(l6148)	; Get 2nd temporary breakpoint
+	ld	c,l
+	ld	b,h
+	ld	hl,(l6146)	; Get 1st temporary breakpoint
+	ex	de,hl
+	ld	a,(l6145)	; Get number of parameters
+	or	a
+	scf			; Set second one
+	jp	l5155		; Re-enter command G
+l5e94:
+	call	l58d1		; Give new line on console
+l5e97:
+	call	l5efd		; Save current pass opcode
+	ld	hl,0
+	ld	(l614f),hl	; Clear trace value
+	call	l5d4f		; Reset trace
+	ld	(l6123),a	; Set pass value
+	ld	a,'*'
+	call	l5879		; Put indicator on console
+	ld	hl,(l61f6)	; Get program counter
+	call	l53d6		; Test valid command
+	jp	nc,l5eb7	; Nope
+	ld	(l400c),hl	; Set address
+l5eb7:
+	call	l58e9		; Print address and available label
+	ld	hl,(l61f4)	; Get reg HL
+	ld	(l6164),hl	; Set current dump address
+	jp	l4f16
+;
+l5ec3:
+	db	' PASS ',null
+;
+; Get trace mode
+; EXIT	Accu holds mode
+;	Zero flag updated
+;
+l5eca:
+	ld	hl,l6153
+	ld	a,(hl)		; Get trace mode
+	or	a		; Test trace in progress
+	ret	z		; Nope
+	push	hl
+	ld	hl,(l6154)	; Get trace count
+	dec	hl		; Count down
+	ld	(l6154),hl
+	ld	a,h
+	or	l		; Test end of count
+	pop	hl
+	jp	nz,l5ee3	; Nope
+	ld	(hl),a		; Clear trace mode on end
+	dec	a
+	ld	(l6123),a	; Set pass value
+l5ee3:
+	ld	a,(hl)		; Get back result
+	or	a
+	ret
+;
+; Get index into code table
+; ENTRY	Reg B  holds opcode
+; EXIT	Reg DE holds index beginning with zero
+;
+l5ee6:
+	ld	de,l0013	; Load length
+	ld	hl,l60cd	; Init table pointer
+l5eec:
+	ld	a,(hl)		; Get mask
+	and	b		; Mask opcode
+	inc	hl
+	cp	(hl)		; Test match
+	inc	hl
+	jp	z,l5ef9		; Got it
+	inc	d
+	dec	e
+	jp	nz,l5eec
+l5ef9:
+	ld	e,d		; Expand index
+	ld	d,0
+	ret
+;
+; Save current pass opcode
+;
+l5efd:
+	ld	a,(l6120)	; Get opcode
+	or	a		; Test any
+	ret	z		; Nope
+	ld	hl,(l6121)	; Get current pass pointer
+	ld	(hl),a		; Save code
+	xor	a
+	ld	(l6120),a	; Clear entry code
+	ret
+;
+; Group : ED Prefix
+;
+l5f0b:
+	pop	hl		; Get PC
+	push	hl
+	ld	a,(hl)		; Get next code
+	and	11000111b	; Mask bits
+	cp	01000011b	; Check load reg pairs
+	jp	z,l603c		; Three byte opcode
+	cp	01000101b	; Test RETx instruction
+	jp	nz,l6042	; Nope, so one byte
+	call	l5f8d		; Pop from stack
+	jp	l6045
+;
+; Adjust PC depending on opcode
+;
+l5f20:
+	ld	hl,(l61f6)	; Get program counter
+	ld	b,(hl)		; Fetch opcode
+	inc	hl		; Update PC
+	push	hl
+	call	l5ee6		; Get group index
+	ld	hl,l614e
+	ld	(hl),e		; Save index
+	ld	hl,l5f37
+	add	hl,de		; Position in table
+	add	hl,de
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)		; Go
+;
+l5f37:
+	dw	l5f5f		;  0 : JP addr
+	dw	l5f94		;  1 : JP cc,addr
+	dw	l5f5f		;  2 : CALL addr
+	dw	l5f94		;  3 : CALL cc,addr
+	dw	l5f65		;  4 : RET
+	dw	l5fa6		;  5 : RST
+	dw	l5fb8		;  6 : JP (HL)
+	dw	l6042		;  7 : LD r,d8
+	dw	l6042		;  8 : ALU immediate opcodes
+	dw	l603f		;  9 : LD r,d16
+	dw	l603f		; 10 : LD rp,(adr), LS (adr),rp
+	dw	l6032		; 11 : RET cc
+	dw	l6042		; 12 : IO opcodes
+	dw	l6000		; 13 : DD FD prefix
+	dw	l5f0b		; 14 : ED Prefix
+	dw	l6042		; 15 : CB Prefix
+	dw	l5fec		; 16 : JR
+	dw	l5ff4		; 17 : DJNZ
+	dw	l5ff4		; 18 : JR cc
+	dw	l5fe7		; 19 : Other code
+;
+; Group : JP, CALL
+;
+l5f5f:
+	call	l5f75		; Fetch address
+	jp	nz,l6045	; Not OS address
+;				; Else immediate RET
+; Group : RET
+;
+l5f65:
+	call	l5f8d		; Pop from stack
+	jp	l6045
+;
+; Check address OS entry
+; ENTRY	Reg DE holds address
+; EXIT	Zero set if address equates OS entry
+;
+l5f6b:
+	ld	a,(l4eb5)	; Get OS address
+	cp	e		; Compare
+	ret	nz
+	ld	a,(l4eb5+1)
+	cp	d
+	ret
+;
+; Fetch address from operand and check limits
+; ENTRY	Current PC on stack
+; EXIT	Reg DE holds address
+;	Zero set if address equates OS entry
+;
+l5f75:
+	pop	bc		; Get caller
+	pop	hl		; Get PC
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl		; Bring both back
+	push	bc
+	jp	l5f6b		; Then check address
+;
+; Get displacement on relative jump
+; EXIT	Reg DE holds corresponding 16 bit address
+;
+l5f80:
+	pop	bc
+	pop	hl		; Get PC
+	ld	e,(hl)		; Get displacement
+	inc	hl
+	ld	d,0		; Expand for 16 bit
+	push	hl
+	push	bc
+	ld	a,e
+	or	a		; Test 0..127
+	ret	p		; Yeap
+	dec	d		; Map to -1..-128
+	ret
+;
+; Fetch value from top of stack
+; EXIT	Reg DE holds value
+;
+l5f8d:
+	ld	hl,(l61f2)	; Get address from stack
+	ld	e,(hl)		; Fetch word
+	inc	hl
+	ld	d,(hl)
+	ret
+;
+; Group : JP cc, CALL cc
+;
+l5f94:
+	call	l5f75		; Fetch address
+	jp	z,l5fa1		; OS call found
+	pop	bc
+	push	bc
+	ld	a,2
+	jp	l6047
+l5fa1:
+	pop	de
+	push	de
+	jp	l6045
+;
+; Group : RST
+;
+l5fa6:
+	ld	a,b
+	cp	RST.cod		; Test our code
+	jp	nz,l5fb0	; Nope
+	xor	a		; Set zero
+	jp	l6049
+l5fb0:
+	and	00111000b	; Mask RST address
+	ld	e,a		; Expand for 16 bit
+	ld	d,0
+	jp	l6045
+;
+; Group : JP HL
+;
+l5fb8:
+	ld	hl,(l61f4)	; Get reg HL
+l5fbb:
+	ex	de,hl
+	call	l5f6b		; Check OS address
+	jp	nz,l6045	; Nope
+	jp	l5f65		; Do a RET if so
+;
+; Execute JP (Index) instruction
+;
+l5fc5:
+	dec	hl		; Position to entry code
+	ld	a,(hl)		; Get prefix
+	push	ix
+	pop	hl
+	cp	0ddh		; Test DD E9 -> JP (IX)
+	jp	z,l5fbb
+	push	iy		; Must be FD E9 -> JP (IY)
+	pop	hl
+	jp	l5fbb
+;
+; Get return address on CALL instruction
+; EXIT	Reg DE holds address if C not set
+;
+l5fd5:
+	ld	a,(l614e)	; Get group index
+	cp	2
+	ret	c		; Ignore JP instructions
+	cp	3+1
+	ccf
+	ret	c		; Ignore other than CALL instruction
+	ld	hl,(l61f6)	; Get program counter
+	inc	hl		; Fix to return PC
+	inc	hl
+	inc	hl
+	ex	de,hl
+	ret
+;
+; Group : Remaining
+;
+l5fe7:
+	pop	de
+	push	de
+	jp	l6045
+;
+; Group : JR
+;
+l5fec:
+	call	l5f80		; Load displacement
+	add	hl,de		; Fix PC
+	ex	de,hl
+	jp	l6045
+;
+; Group : JR cc
+;
+l5ff4:
+	call	l5f80		; Load displacement
+	add	hl,de		; Fix PC
+	ex	de,hl
+	pop	bc
+	push	bc
+	ld	a,2
+	jp	l6047
+;
+; Group : DD FD prefix
+;
+l6000:
+	pop	hl		; Get PC
+	ld	a,(hl)		; Get code follows
+	push	hl
+	ld	e,a
+	cp	0e9h		; Test JP (Ix)
+	jp	z,l5fc5		; Yeap, process it
+;
+; Filter three byte instructions
+;
+	cp	021h		; Test immediate reg load
+	jp	z,l603c		
+	cp	0cbh		; Test bi attache
+	jp	z,l603c
+	and	11100011b
+	cp	022h		; Test indirect load
+	jp	z,l603c
+;
+	ld	a,e		; Get back code
+	and	11110000b	; Mask it
+	cp	01110000b	; Test indexed reg load
+	jp	z,l603f
+	ld	a,e
+	nop
+	nop
+	cp	00110101b	; Test INC or DEC
+	jp	z,l603f
+	and	1		; Test code length
+	jp	nz,l6042	; One byte
+	jp	l603f		; Two bytes
+;
+; Group : RET cc
+;
+l6032:
+	call	l5f8d		; Pop from stack
+	pop	bc
+	push	bc
+	ld	a,2
+	jp	l6047
+;
+; Group : 24 bit (3 bytes) immediate operand
+;
+l603c:
+	pop	de		; Get PC
+	inc	de		; Increment by 3
+	push	de
+;
+; Group : 16 bit (2 bytes) immediate operand
+;
+l603f:
+	pop	de		; Get PC
+	inc	de		; Increment by 2
+	push	de
+;
+; Group : 8 bit (1 byte) immediate operand
+;
+l6042:
+	pop	de		; Get PC
+	inc	de		; Increment by 1
+	push	de
+l6045:
+	ld	a,1
+;
+; Adjust PC
+; ENTRY	Accu holds adjustment value 0x01 or 0x02
+;
+l6047:
+	inc	a		; Map to 0x02 or 0x03
+	scf			; Set C
+;
+; Enter here for RST code
+; Accu holds 0x00, C reset
+;
+l6049:
+	push	af		; Save state
+	ld	hl,(l614f)	; Get trace value
+	ld	a,h
+	or	l		; Test zero
+	jp	z,l607a		; Yeap
+	push	de
+	push	bc
+	push	hl
+	ld	hl,l614e
+	ld	c,(hl)		; Get group index
+	ld	hl,(l61f6)	; Get program counter
+	ex	de,hl
+	ld	hl,l6062
+	ex	(sp),hl		; Set return address
+	jp	(hl)		; Go back
+;
+l6062:
+	or	a		; Get state
+	pop	bc
+	pop	de
+	jp	z,l607a		; Got RST
+	push	af
+	ld	a,'#'
+	call	l5879		; Indicate state
+	pop	af
+	call	l58c1		; Put hex ASCII byte on console
+	ld	a,' '
+	call	l5879		; Give blank
+	jp	l5e97
+;
+l607a:
+	ld	a,(l6153)	; Get trace mode
+	ld	hl,l614b	; Point to WORD flag
+	and	(hl)
+	jp	z,l6090
+	call	l5fd5		; Get return address
+	jp	c,l6090		; Got no CALL
+	pop	af		; Clear state
+	ld	a,2		; Change it
+	jp	l60bb
+l6090:
+	pop	af		; Get back state
+	push	af
+	or	a		; Test RST
+	jp	z,l60ba		; Yeap
+	dec	a
+l6097:
+	ex	de,hl
+	ld	e,a
+	ld	a,(hl)
+	cpl
+	ld	(hl),a
+	cp	(hl)
+	cpl
+	ld	(hl),a
+	ld	a,e
+	ex	de,hl
+	push	af
+	jp	z,l60ae
+	call	l5fd5		; Get return address
+	jp	nc,l60ae	; Ignore CALL
+	call	l5f8d		; Pop from stack
+l60ae:
+	pop	af
+	dec	a
+	jp	z,l60ba
+	push	de
+	ld	e,c
+	ld	d,b
+	pop	bc
+	jp	l6097
+l60ba:
+	pop	af
+l60bb:
+	pop	hl
+	ret
+;
+	db	0e3h,022h,0ffh,021h,0ffh,0cbh,007h,006h
+	db	0f0h,070h,0ffh,0e9h,0c7h,043h,0c7h,045h
+;
+; Opcode table
+; Byte 0 : Mask
+; Byte 1 : code
+;
+l60cd:
+	db	0ffh,0c3h	;  0 : JP addr
+	db	0c7h,0c2h	;  1 : JP cc,addr
+	db	0ffh,0cdh	;  2 : CALL addr
+	db	0c7h,0c4h	;  3 : CALL cc,addr
+	db	0ffh,0c9h	;  4 : RET
+	db	0c7h,0c7h	;  5 : RST
+	db	0ffh,0e9h	;  6 : JP (HL)
+	db	0c7h,006h	;  7 : LD r,d8
+	db	0c7h,0c6h	;  8 : ALU immediate opcodes
+	db	0cfh,001h	;  9 : LD r,d16
+	db	0e7h,022h	; 10 : LD rp,(adr), LS (adr),rp
+	db	0c7h,0c0h	; 11 : RET cc
+	db	0f7h,0d3h	; 12 : IO opcodes
+	db	0dfh,0ddh	; 13 : DD FD prefix
+	db	0ffh,0edh	; 14 : ED Prefix
+	db	0ffh,0cbh	; 15 : CB Prefix
+	db	0ffh,018h	; 16 : JR
+	db	0ffh,010h	; 17 : DJNZ
+	db	0e7h,020h	; 18 : JR cc
+l0013	equ	($-l60cd) / 2
+;
+; Find label - Z set says not found
+;
+l60f3:
+	ld	hl,(l61b2)	; Get symbol base address
+	inc	hl
+	inc	hl
+l60f8:
+	ld	b,(hl)		; Get address
+	dec	hl
+	ld	c,(hl)
+	dec	hl
+	ld	a,(hl)		; Get length
+	cp	SYMLEN		; Test valid
+	jp	nc,l611c	; Nope
+	push	hl
+	cpl
+	add	a,l
+	ld	l,a		; Build pointer to label
+	ld	a,-1
+	adc	a,h
+	ld	h,a
+	ld	a,e		; Get address searched for
+	cp	c		; Compare
+	jp	nz,l6117	; No match
+	ld	a,d
+	sub	b
+	jp	nz,l6117
+	pop	hl		; Get back pointer
+	inc	a		; Indicate found
+	ret
+l6117:
+	inc	sp		; Pseudo pop, clean stack
+	inc	sp
+	jp	l60f8		; Try next
+l611c:
+	xor	a		; Indicate no match
+	ret
+;
+l611e:
+	ds	2		; Current parameter
+l6120:
+	ds	1		; Opcode
+l6121:
+	ds	2		; Current pass pointer
+l6123:
+	ds	1		; Pass value
+;
+; Passpoint array
+; Byte  0  : Pass count
+; Byte 1,2 : Pass point PC
+; Byte  3  : Opcode
+;
+l6124:
+	ds	PASLEN*PASMAX
+l6144:
+	ds	1		; Break code
+l6145:
+	ds	1		; Number of parameters
+l6146:
+	ds	2		; 1st Temporary breakpoint
+l6148:
+	ds	2		; 2nd temporary breakpoint
+l614a:
+	ds	1		; '-' flag for command
+l614b:
+	ds	1		; WORD flag
+l614c:
+	ds	1		; Dump state
+l614d:
+	ds	1		; Commands L and A enable flag
+l614e:
+	ds	1		; Group index
+l614f:
+	ds	2		; Trace value
+l6151:
+	ds	2		; User stack
+l6153:
+	ds	1		; Trace mode
+l6154:
+	ds	2		; Trace count
+l6156:
+	ds	1		; Temporary breakpoint count
+;
+	ds	2		; Address of 1st breakpoint
+	ds	1		; First opcode
+;
+	ds	2		; Address of 2nd breakpoint
+	ds	1		; Second opcode
+l615d:
+	ds	1		; Parameter count
+;
+	ds	2*3		; Parameter list
+l6164:
+	ds	2		; Current dump address
+l6166:
+	ds	2		; Dump end address
+l6168:
+	ds	2		; Line start dump address
+l616a:
+	ds	2
+;
+; Command line
+;
+l616c:
+	db	CMDLIN
+	db	0
+	ds CMDLIN-_DIR
+l619e:
+	ds	_DIR		; Copy of FCB
+;
+l61ae:
+	ds	2
+l61b0:
+	ds	2		; Work space
+l61b2:
+	ds	2		; Symbol base address
+l61b4:
+	ds	2		; Program top address
+;
+; Alternate register save area
+;
+l61b6:
+	ds	2		; IY
+l61b8:
+	ds	2		; IX
+l61ba:
+	ds	2		; HL'
+l61bc:
+	ds	2		; DE'
+l61be:
+	ds	2		; BC'
+l61c0:
+	ds	1		; Flag
+l61c1:
+	ds	1		; Accu
+l61c2:
+	ds	2
+;
+; Local stack
+;
+	ds	2*20
+ll61ec	equ	$
+;
+; Normal register save area
+;
+l61ec:
+	ds	2		; DE
+l61ee:
+	ds	2		; BC
+l61f0:
+	ds	1		; Flag
+l61f1:
+	ds	1		; Accu
+l61f2:
+	ds	2		; SP - Address from stack
+l61f4:
+	ds	2		; HL
+l61f6:
+	ds	2		; PC - Program counter
+l61f8:
+	db	0
+
+	.dephase
+
+	end
+

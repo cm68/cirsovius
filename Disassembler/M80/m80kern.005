@@ -1,0 +1,1743 @@
+;
+; Pseudocode END
+;
+END.code:
+	push	af
+	call	clsMAC		; Close source file
+	ld	a,(l3ffa)	; Test pending macro
+	or	a
+	call	nz,l2f77	; .. yeap, give warning
+	ld	a,(IF.level.1)
+	or	a
+	call	nz,l2fa8	; .. dtto. if not terminated
+	pop	af
+	ld	hl,pass		; Get pass
+	inc	(hl)		; Bump
+	ld	a,(hl)
+	dec	a		; Test pass 2
+	jp	nz,Pass2.END	; .. yeap
+	ld	a,(Uopt)	; Test forcing to external
+	or	a
+	call	nz,ForceX	; .. yeap
+	ld	hl,ModName	; Test NAME given
+	ld	a,(hl)
+	or	a
+	jr	nz,mod.name.out
+	ld	hl,file.line	; Test name
+	ld	a,(hl)
+	or	a
+	jr	nz,mod.name.out
+	ld	hl,MACdev	; .. fix file for naming
+	inc	hl
+mod.name.out:
+	ld	bc,ModLen*256+0
+	ld	de,ModName
+mod..nam.loop:
+	ld	a,(hl)		; Get name
+	inc	hl
+	cp	' '
+	jr	z,mod..nam.end	; Test end
+	cp	tab
+	jr	z,mod..nam.end
+	or	a
+	jr	z,mod..nam.end
+	cp	cr
+	jr	z,mod..nam.end
+	ld	(de),a		; .. unpack
+	inc	de
+	inc	c		; Count length
+	djnz	mod..nam.loop
+mod..nam.end:
+	ld	hl,l3f56
+	ld	(hl),c		; Set length of name
+	inc	hl		; .. point to type
+	ld	(BField),hl	; .. save address
+	ld	c,0010b		; Set module name
+	call	rel.code	; .. output
+	call	l2732
+	ld	hl,(Heap)	; Get symbol base
+	ld	(TmpSymPtr),hl	; .. save
+l2e1a:
+	call	GetTmpSym	; Get symbol pointer
+	jr	c,l2e41		; .. empty
+	ld	(BField),hl	; .. save type pointer
+	res	7,(hl)		; .. clear definition bit
+	inc	hl
+	bit	6,(hl)		; Test definition
+	jr	nz,l2f6b	; .. yeap, output it
+	bit	2,(hl)		; Test COMMON
+	jr	z,l2e1a		; .. no, examine next
+	inc	hl
+	ld	e,(hl)		; Fetch COMMON size
+	inc	hl
+	ld	d,(hl)
+	ld	bc,0101b
+	call	rel.code	; Output it
+	jr	l2e1a
+l2f6b:
+	ld	c,0000b
+	ld	a,(code.flag)
+	ld	b,a
+	call	rel.code	; Output entry
+	jr	l2e1a
+l2e41:
+	ld	hl,(data.size)
+	ex	de,hl
+	ld	bc,1010b	; Output data size
+	call	rel.code
+	ld	bc,1*256+1101b	; Output program size
+	ld	hl,(prg.size)
+	ex	de,hl
+	ld	a,e
+	or	d
+	call	nz,rel.code
+	jp	Pass2		; Enter 2nd pass
+;
+; End of pass 2
+;
+Pass2.END:
+	ld	hl,(actptr)
+	push	af
+	call	nc,Function
+	push	de
+	push	bc
+	call	l192b
+	ld	hl,-1
+	ld	(pag.cnt),hl	; Init pages
+	ld	(page.flag),hl
+	ld	a,l
+	ld	(list.flag),a
+	call	new.page
+	ld	hl,$Macros
+	call	str.PRN
+	ld	hl,page.count
+	inc	(hl)
+	inc	(hl)
+	ld	hl,F.Arr.1
+	ld	a,5
+	call	l3b97
+	call	crlf.dev
+	ld	a,(page.count)
+	cp	PageLen		; Test page filled
+	call	nc,new.page
+	ld	hl,page.count
+	inc	(hl)
+	inc	(hl)
+	ld	hl,$Symb
+	call	str.PRN
+	ld	hl,SymbChn	; Print public symbols
+	ld	a,3
+	call	l3b97
+	call	crlf.dev
+	call	crlf.CON
+	ld	hl,(fatal)	; Test fatal error
+	ld	a,h
+	or	l
+	jr	z,l2ecb		; .. no, skip
+	push	hl
+	call	cnv.htd		; Print number
+	pop	hl
+	ld	a,(PRNdev)
+	inc	a
+	ld	(dev.flag),a	; Force device
+	call	nz,cnv.htd	; .. print number
+	xor	a
+	ld	(dev.flag),a	; Set back .PRN
+	jr	l2ed1
+l2ecb:
+	ld	hl,$noERR
+	call	str.CON		; Tell no error
+l2ed1:
+	ld	hl,$ERRfatal
+	call	str.CON
+	ld	hl,(warning)	; Test warning
+	ld	a,h
+	or	l
+	jr	z,l2f06		; .. no, skip
+	ld	a,','
+	call	putPRN
+	ld	a,(PRNdev)
+	inc	a
+	ld	a,','
+	call	nz,conout
+	push	hl
+	call	cnv.htd		; Print number
+	pop	hl
+	ld	a,(PRNdev)
+	inc	a
+	ld	(dev.flag),a	; Force device
+	call	nz,cnv.htd
+	xor	a
+	ld	(dev.flag),a	; Set back .PRN
+	ld	hl,$Warning
+	call	str.CON		; Tell warning
+l2f06:
+	call	crlf.CON
+	pop	bc
+	pop	de
+	pop	af		; Get active flag ????
+	jr	nc,l2f14
+	ld	b,0
+	ld	de,0		; .. clear chain address
+l2f14:
+	call	rel.spec
+	ld	c,1110b
+	call	rel.code	; Output end module
+l2f1c:
+	ld	hl,(bits)	; Get rel bit
+	ld	a,h
+	cp	-relbits	; Test boundary
+	jr	z,l2f2c
+	xor	a
+	call	rel.bit		; Fill zero
+	jr	l2f1c
+l2f2c:
+	ld	bc,1111b
+	call	rel.code	; Output end file
+	ld	b,0
+	call	rel.byte	; Close .REL bytes
+	ld	a,(Copt)	; Test cross-reference
+	or	a
+	ld	a,EOFitm+MSB
+	call	nz,putPRN
+	call	compti		; Tell compile time
+	call	clsPRN		; .. close files
+	call	clsREL
+	call	clsERR
+	ld	hl,(fatal)	; Test fatal error
+	ld	a,h
+	or	l
+	call	z,LNKchn	; .. chain to LINKER if any
+	ld	hl,(exitM80)
+	jp	(hl)		; .. that's all
+;
+; Statistic messages
+;
+$noERR:
+	db	'No',null
+$ERRfatal:
+	db	' Fatal error(s)',null
+$Warning:
+	db	' Warning(s)',null
+;
+; Get current symbol pointer
+; EXIT	Reg HL holds pointer to type field
+;	Carry set if zero length
+;
+GetTmpSym:
+	ld	hl,(TmpSymPtr)	; Get pointer
+	inc	hl		; Advance to length
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; .. get length
+	or	a
+	scf
+	ret	z		; .. zero
+	inc	hl
+	push	hl		; .. save pointer
+	add	a,11-5		; .. add header
+	ld	d,0
+	ld	e,a
+	add	hl,de		; .. get next pointer
+	ld	(TmpSymPtr),hl
+	pop	hl		; .. get previous
+	ret
+;
+; Give repetition warning
+;
+l2f77:
+	call	l2fcd		; Tell unterminated repetition
+	ld	hl,$REPmac
+	call	str.CON
+	call	err.up.warn
+	jr	crlf.CON
+;
+; Macro error
+;
+$REPmac:
+	db	'REPT/IRP/IRPC/MACRO',null
+$unterm:
+	db	'Unterminated ',null
+;
+; Tell unterminated condition
+;
+l2fa8:
+	call	l2fcd		; Tell unterminated
+	ld	hl,$Cond
+	call	str.CON
+	call	err.up.warn
+;
+; Print new line on .PRN device and console
+;
+crlf.CON:
+	ld	a,cr		; Give new line on device
+	call	crlf.dev
+	ld	a,lf		; ?????? Give twice NL
+	call	crlf.dev
+	ld	a,(PRNdev)	; Test device .EQ. console
+	inc	a
+	ret	z		; .. yes, exit
+	ld	a,cr		; .. else give to console
+	call	conout
+	ld	a,lf
+	jp	conout
+;
+; Give message on unterminated conditition
+;
+l2fcd:
+	ld	hl,$unterm	; Get message
+;
+; Print string on print file and console
+; ENTRY	: Reg HL points to string closed by zero
+;
+str.CON:
+	push	hl
+	call	str.PRN		; Print on file
+	pop	hl
+	ld	a,(PRNdev)
+	inc	a		; Test console device
+	ret	z
+	jp	string		; .. re-print if real file
+;
+$Cond:
+	db	'Conditional',null
+$Symb:
+	db	'Symbols:',cr,lf,null
+$Macros:
+	db	'Macros:',cr,lf,null
+;
+; Check enough room for stack
+;
+check.stack:
+	ld	hl,-2*15	; Allow depth of 15
+	add	hl,sp
+	ex	de,hl
+	ld	hl,(top.data)
+	call	cmp.HL.DE	; Test against top of data
+	jp	nc,Stk.Ovl	; .. no room
+	ld	a,(l3ffa)	; Test macro active
+	or	a
+	ld	hl,0
+	ld	(l4023),hl
+	ld	(l4025),hl
+	ld	hl,(l3ff8)	; Get macro pointer
+	jr	nz,l3023	; .. macro active
+	ld	hl,(top.data)	; .. get top pointer
+	dec	hl
+l3023:
+	inc	a		; Bump macro level
+	ld	(l3ffa),a	; .. save
+	xor	a
+	ld	(l3ffb),a
+	ld	(MacroLev),a	; Clear MACRO level
+l302e:
+	ex	de,hl
+	ld	hl,(l401f)
+	inc	h
+	call	cmp.HL.DE
+	jr	nc,l303e
+	ex	de,hl
+	ld	(l3ff8),hl
+	ret
+l303e:
+	dec	h
+	ex	de,hl
+	push	hl
+	call	l3b4f
+	pop	hl
+	jr	l302e
+;
+;
+;
+l3048:
+	call	DecodeStmt	; Find statement
+	ret	nz		; .. not found
+	ld	a,(hl)		; Get code
+	or	a
+	inc	a		; Check range
+	ret	p
+	dec	a
+	push	af
+	and	_macro shl 3	; Test macro
+	jr	z,l3072
+	ld	a,(MacroLev)
+	inc	a		; Bump level if so
+	ld	(MacroLev),a
+l305e:
+	pop	af
+	and	_endm shl 3	; Test end macro
+	xor	_endm shl 3
+	ret	nz
+	ld	a,(MacroLev)
+	or	a		; Test empty
+	ret	z
+	ld	a,(MacroLev)
+	dec	a		; Fix level if not
+	ld	(MacroLev),a
+	inc	a
+	ret
+l3072:
+	inc	hl
+	ld	a,(hl)
+	cp	..local		; Test LOCAL
+	jr	nz,l305e	; .. nope
+	ld	a,(MacroLev)
+	or	a		; Test level
+	jr	nz,l305e	; .. any value
+	ld	a,(l400f)
+	or	a
+	jr	nz,l305e
+	pop	af
+	scf
+	ret
+;
+; Decrement macro level
+;
+l308a:
+	ld	(l3ff8),hl
+	ld	a,(l3ffa)
+	dec	a		; .. decrement
+	ld	(l3ffa),a
+	ret
+;
+;
+;
+l3095:
+	call	chk.char
+	cp	'&'
+	jr	nz,l30d1
+	ld	hl,(actptr)
+	ld	a,(hl)
+	cp	' '
+	jr	z,l30cf
+	cp	tab
+	jr	z,l30cf
+	push	hl
+	push	bc
+	call	get.item
+	call	l30dd
+	pop	bc
+	pop	hl
+	ld	(actptr),hl
+	jr	nz,l30cf
+	ld	a,'&'
+	ld	(l3ffc),a
+	jr	l313e
+l30c3:
+	cp	'&'
+	jr	nz,l30d1
+	ld	a,(l3ffc)
+	or	a
+	jr	nz,l30d6
+l30cf:
+	ld	a,'&'
+l30d1:
+	call	l3a3b
+	or	a
+	ret	m
+l30d6:
+	push	af
+	xor	a
+	ld	(l3ffc),a
+	pop	af
+	ret
+;
+;
+;
+l30dd:
+	ld	hl,(l4007)
+	ld	b,0
+l30e2:
+	ld	a,(hl)
+	or	a
+	jr	z,l310b
+	ld	de,actbuf
+	ld	a,(de)		; Compare
+	cp	(hl)
+	jr	nz,l3100
+	ld	c,a
+l30f0:
+	dec	hl
+	inc	de
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l3100
+	dec	c
+	jr	nz,l30f0
+	ld	a,b
+	or	80h
+	cp	a
+	ret
+l3100:
+	dec	hl
+	ld	a,(hl)
+	cp	7
+	jr	nc,l3100
+	inc	b
+	jr	l30e2
+l310b:
+	ld	a,(l4010)
+	or	a
+	ret	nz
+	ld	hl,(l4011)
+	ld	b,0c0h
+l3115:
+	ld	a,(hl)
+	or	a
+	jr	z,l313c
+	ld	de,actbuf
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,l3131
+	ld	c,a
+l3123:
+	dec	hl
+	inc	de
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jr	nz,l3131
+	dec	c
+	jr	nz,l3123
+	xor	a
+	ld	a,b
+	ret
+l3131:
+	dec	hl
+	ld	a,(hl)
+	cp	7
+	jr	nc,l3131
+	inc	b
+	jr	l3115
+l313c:
+	inc	a
+	ret
+;
+;
+;
+l313e:
+	ld	hl,(actptr)
+	push	hl
+	call	get.item
+	push	af
+	call	l30dd
+	jr	nz,l3177
+	ld	b,a
+	pop	af
+	pop	hl
+	push	af
+l3150:
+	ld	a,(hl)
+	inc	hl
+	cp	' '
+	jr	z,l315c
+	cp	tab
+	jr	nz,l3164
+l315c:
+	push	hl
+	call	l30d1
+	pop	hl
+	jr	l3150
+l3164:
+	ld	a,b
+	call	l30d1
+	pop	af
+	ld	b,a
+	push	af
+l316b:
+	pop	af
+	jp	nz,l30c3
+	cp	'&'
+	jp	nz,l30c3
+	jp	pred.ptr
+l3177:
+	pop	af
+	pop	hl
+	push	af
+	ld	(actptr),hl
+l317d:
+	call	chk.char
+	cp	' '
+	jr	z,l3190
+	cp	tab
+	jr	z,l3190
+	call	pred.ptr
+	jr	l3196
+l3190:
+	call	l30d1
+	jr	l317d
+l3196:
+	call	legal.label
+	jr	nz,l316b
+	jr	l31a5
+l319f:
+	call	legal.label
+	jp	m,l316b
+l31a5:
+	call	l30d1
+	jr	l319f
+l31ab:
+	call	chk.char
+	cp	';'
+	jr	z,l31c7
+	jr	l31b9
+l31b6:
+	call	l3ac6
+l31b9:
+	call	l30d1
+	cp	cr
+	jp	z,l3a9e
+	call	chk.char
+	jr	l31b9
+l31c7:
+	call	l3ac6
+l31ca:
+	call	l3ac6
+	cp	' '
+	jr	z,l31ca
+	cp	tab
+	jr	z,l31ca
+	or	a
+	call	l3aed
+	ld	(l4025),hl
+	jp	z,l3a9e
+	cp	cr
+	jp	z,l3a9e
+	ld	a,cr
+	call	l3a3b
+	jp	l3a9e
+l31ee:
+	push	hl
+	push	af
+	ld	a,(l4010)
+	or	a
+	jr	z,l31ff
+	push	de
+	ld	de,(LastMem)	; Get top
+	add	hl,de
+	inc	(hl)
+	pop	de
+l31ff:
+	pop	af
+	res	7,a		; Clear high bit
+	push	af
+	add	a,a
+	jp	m,l3249
+	ld	hl,(l400b)
+	ld	a,(hl)
+	or	a
+	jr	z,l3238
+	pop	af
+	push	bc
+	ld	b,a
+	inc	b
+	dec	hl
+l3214:
+	dec	b
+	jr	z,l3223
+	ld	a,(hl)
+	push	de
+	cpl
+	ld	e,a
+	ld	d,-1
+	add	hl,de
+	pop	de
+	jr	l3214
+l3223:
+	ld	a,(hl)
+	or	a
+	jr	z,l3246
+	dec	a
+	ld	b,a
+l322a:
+	dec	hl
+	ld	a,(hl)		; Get character
+	inc	b
+	dec	b
+	jr	z,l3246
+	call	l33d8		; .. store it
+	dec	b
+	jr	l322a
+l3238:
+	pop	af
+	dec	hl
+	inc	a
+l323b:
+	dec	a
+	jr	z,l3243
+	dec	hl
+	jr	l323b
+l3243:
+	ld	a,(hl)
+	pop	hl
+	ret
+l3246:
+	pop	bc
+	pop	hl
+	ret
+l3249:
+	ld	a,'.'
+	call	l33d8		; Store two dots
+	call	l33d8
+	pop	af
+	and	00111111b
+	push	bc
+	ld	hl,(l4018)
+	ld	c,a
+	ld	b,0
+	add	hl,bc
+	ld	b,h
+	call	cnv.hex.byte
+	ld	b,l
+	call	cnv.hex.byte
+	pop	bc
+	pop	hl
+	dec	de
+	ld	a,(de)
+	ret
+;
+;
+;
+l3269:
+	push	hl		; Save buffer
+	call	get.item
+	pop	hl
+	call	nz,end.stmts	; Verify end of statements
+	push	af
+	ld	de,actbuf	; Get line
+	ld	a,(de)		; .. fetch length
+	inc	a
+	ld	c,a
+l3278:
+	ld	a,(de)		; .. unpack
+	ld	(hl),a
+	inc	de
+	dec	hl
+	dec	c
+	jr	nz,l3278
+	pop	af
+	ret
+;
+; Verify end of statements
+; ENTRY	Accu holds character
+;
+end.stmts:
+	cp	cr		; Verify end
+	ret	z
+	cp	';'
+	ret	z
+	pop	de		; .. fix stack level
+	jp	A.err		; .. argument error
+;
+;
+;
+l328c:
+	ld	b,0
+	push	bc
+	push	hl
+	dec	hl
+	call	white.space	; Skip blanks
+l3294:
+	cp	''''
+	jp	z,l337d
+	cp	'"'
+	jp	z,l337d
+	cp	'<'
+	jp	z,l339b
+	cp	'>'
+	jp	z,l33a6
+	cp	'%'
+	jr	z,l32d3
+	cp	','
+	jp	z,l33b0
+	cp	' '
+	jp	z,l33b0
+	cp	tab
+	jp	z,l33b0
+	cp	';'
+	jp	z,l33b0
+	cp	'!'
+	call	z,chk.no.NL
+	cp	cr
+	jp	z,l33cd
+l32cb:
+	ld	(hl),a
+	dec	hl
+l32cd:
+	call	chk.char
+	jr	l3294
+l32d3:
+	ld	(..dig.ptr),hl
+	push	bc
+	ld	bc,l3371
+	push	bc
+	call	l28c4
+	ex	de,hl
+	ld	c,0
+	ld	a,(out.line)	; Test error
+	cp	' '
+	jr	nz,l3336	; .. yeap
+	ld	a,(radix)	; Get radix
+	cp	16		; Test 16
+	jr	z,hex.notat
+	cp	8		; .. or 8
+	jr	z,oct.notat
+;
+; Convert 16 bit to decimal
+;
+	ld	bc,-10
+l32f9:
+	ld	d,b		; Init -1
+	ld	e,b
+l32fb:
+	add	hl,bc		; Fix
+	inc	de		; .. and count
+	jr	c,l32fb		; .. till borrow
+	push	hl
+	ex	de,hl
+	ld	a,h
+	or	l		; Test remainder
+	call	nz,l32f9	; .. call recursive if any
+	ld	a,'9'+1
+	pop	bc		; Get result
+	add	a,c		; .. as ASCII
+	jp	..store.dig
+;
+; Convert 16 bit to octal
+;
+oct.notat:
+	xor	a
+	add	hl,hl		; Get MSB
+	adc	a,'0'		; .. as ASCII
+	call	l3352
+	ld	a,5		; Set digit count
+l3317:
+	push	af
+	xor	a		; Clear bits
+	ld	b,3		; Set bit count
+l331b:
+	add	hl,hl		; Get MSB
+	adc	a,a		; .. sample
+	djnz	l331b
+	add	a,'0'		; .. make ASCII
+	call	l3352
+	pop	af
+	dec	a		; Test done
+	jr	nz,l3317
+	jr	l3336
+;
+; Convert 16 bit to hex
+;
+hex.notat:
+	ld	b,h		; Get HI
+	call	hex.nota.cnv
+	ld	b,l		; .. then LO
+	call	hex.nota.cnv
+l3336:
+	inc	c		; Test epilog
+	dec	c
+	ret	nz
+	ld	a,'0'		; .. set NULL
+	jr	..store.dig
+hex.nota.cnv:
+	ld	a,b		; Get byte
+	rra			; .. get HI four bits
+	rra
+	rra
+	rra
+	call	l3347		; Get HI nibble
+	ld	a,b
+l3347:
+	call	get.hex.nibble	; .. then LO nibble
+l3352:
+	inc	c
+	dec	c
+	jr	nz,..store.dig
+	cp	'0'		; Test leading zero
+	ret	z		; .. skip
+	ld	c,a
+	cp	'9'+1
+	jr	c,..store.dig
+	ld	a,'0'
+	call	..store.dig
+	ld	a,c
+..store.dig:
+	push	hl
+	ld	hl,(..dig.ptr)	; Get pointer
+	ld	(hl),a		; .. save digit
+	dec	hl
+	ld	(..dig.ptr),hl
+	pop	hl
+	ret
+l3371:
+	pop	bc
+	call	pred.ptr
+	ld	hl,(..dig.ptr)
+	jp	l32cd
+;
+..dig.ptr:
+	dw	0
+;
+l337d:
+	ld	c,a
+l337e:
+	ld	(hl),a
+	dec	hl
+	call	chk.char
+	cp	c
+	jr	z,l338f
+	cp	cr
+	jr	z,l33d2
+	jr	l337e
+l338f:
+	ld	(hl),a
+	dec	hl
+	call	chk.char
+	cp	c
+	jr	z,l337e
+	jp	l3294
+l339b:
+	inc	b
+	dec	b
+	jr	z,l33a2
+	ld	(hl),a
+	dec	hl
+l33a2:
+	inc	b
+	jp	l32cd
+l33a6:
+	dec	b
+	jp	z,l32cd
+	jp	m,l33b5
+	jp	l32cb
+l33b0:
+	inc	b
+	dec	b
+	jp	nz,l32cb
+l33b5:
+	pop	de
+	ld	a,e
+	sub	l
+	dec	a
+	ld	(de),a
+	pop	bc
+	ex	de,hl
+	ld	hl,(actptr)
+	dec	hl
+	ld	a,(hl)
+	cp	' '
+	call	z,pred.ptr
+	cp	tab
+	call	z,pred.ptr
+	ex	de,hl
+	ret
+l33cd:
+	inc	b		; Test ???
+	dec	b
+	jr	z,l33b5		; .. yeap
+l33d2:
+	call	X.err		; .. invalid macro exit
+	jr	l33b5
+;
+; ENTRY	Accu holds character to be stored
+;
+l33d8:
+	push	af
+	push	hl
+	ld	hl,src.line+SrcLen
+	call	cmp.HL.DE	; Test top reached
+	jr	nc,l33eb	; .. still room
+	inc	hl
+	ld	(hl),cr		; Store end into line
+	dec	hl
+	ex	de,hl
+	pop	hl
+.pp.flag:
+	pop	af
+	ret
+l33eb:
+	pop	hl
+	pop	af
+	ld	(de),a		; Store character
+	inc	de
+	ret
+;
+;
+;
+l33f0:
+	call	l313e
+	cp	'&'
+	jr	z,l33f0
+	cp	':'
+	jp	z,l313e
+	cp	' '+1
+	ret	nc
+	cp	cr
+	ret	z
+	push	af
+	call	l0c0e
+	jr	z,l3410
+	call	DecodeStmt	; Find statement
+	jr	z,.pp.flag	; .. found
+l3410:
+	pop	af
+	jp	l313e
+;
+; Stack overflow error
+;
+Stk.Ovl:
+	ld	hl,$stk.ovl	; Give message
+	jp	..full
+$stk.ovl:
+	db	'?Stack overflow, try more P switches'
+	db	cr,lf,null
+;
+; Pseudocode REPT
+;
+REPT.code:
+	call	l28c4
+	ld	a,(out.line)
+	cp	' '
+	jr	z,l344f
+	ld	de,0
+l344f:
+	ex	de,hl
+	ld	(l3ffd),hl
+	call	check.stack
+	pop	bc
+	pop	de
+	pop	hl
+	ld	bc,l3463
+l345c:
+	push	bc
+	push	de
+;
+;
+;
+l345e:
+	ld	a,cr
+	jp	l045c
+;
+;
+;
+l3463:
+	pop	bc
+	ld	bc,l345e
+	push	bc
+	call	get.item
+	cp	':'
+	call	z,get.item
+	call	l3048
+	jr	z,l3484
+	ld	de,src.line
+l3479:
+	ld	a,(de)
+	call	l3a3b
+	inc	de
+	cp	cr		; Wait for end of line
+	jr	nz,l3479
+	ret
+l3484:
+	xor	a
+	call	l3a3b
+	call	l3a9e
+	pop	bc
+	pop	de
+	pop	hl
+	ld	hl,scan.line
+	push	hl
+	push	de
+	ld	hl,(l4023)
+	push	hl
+	push	hl
+	ld	hl,(l3ffd)
+	push	hl
+	ld	hl,scan.line
+	push	hl
+	ld	hl,l34a6
+	push	hl
+	push	bc
+	ret
+;
+;
+;
+l3508:
+	dec	bc
+	ld	h,d
+	ld	l,e
+	jr	l34ab
+;
+;
+;
+l34a6:
+	call	l34f9
+	pop	bc
+	pop	hl
+l34ab:
+	pop	de
+	call	cmp.HL.DE
+	jr	nz,l34d5
+	ld	a,(l4006)
+	or	a
+	jr	nz,l34be
+	ld	a,b
+	or	c
+	jr	nz,l34d5
+l34be:
+	ld	hl,(l3ff8)
+l34c1:
+	push	hl
+	call	l3994
+	pop	hl
+l34c6:
+	call	l308a
+	xor	a
+	ld	(l4006),a
+	pop	de
+	push	de
+	ld	hl,(l3fff)
+	push	hl
+	ex	de,hl
+	jp	(hl)
+;
+;
+;
+l34d5:
+	push	de
+	call	l3a72
+	or	a
+	jr	z,l3508
+	ld	de,src.line
+l34e0:
+	call	l3a88
+	call	l33d8
+	cp	cr
+	jr	nz,l34e0
+	push	hl
+	push	bc
+l34ed:
+	ld	hl,(l4001)
+	push	hl
+	ld	hl,(l4003)
+	push	hl
+	ld	hl,(l3fff)
+	jp	(hl)
+;
+;
+;
+l34f9:
+	pop	de
+	pop	hl
+	ld	(l3fff),hl
+	pop	hl
+	ld	(l4003),hl
+	pop	hl
+	ld	(l4001),hl
+	ex	de,hl
+	jp	(hl)
+;
+; Pseudocode EXITM
+;
+EXITM.code:
+	ld	a,(l3ffa)	; Test macro active
+	or	a
+	jp	z,X.err		; .. invalid macro exit
+	ld	(l4006),a
+	pop	bc
+	pop	hl
+	pop	de
+	ld	de,l352b
+	push	de
+	push	hl
+	push	bc
+	xor	a
+	ld	(MacroLev),a	; Clear level
+	jp	succ.ptr
+;
+; Pseudo code ENDM, LOCAL
+;
+ENDM.code:
+	jp	O.err
+;
+;
+;
+l352b:
+	ld	a,(l4006)	; Test ???
+	or	a
+	jp	z,l358a		; .. empty, so reset pointer
+	pop	bc
+	ld	bc,M80.main
+	push	bc
+	call	get.item
+	cp	':'
+	call	z,get.item
+	call	DecodeStmt	; Find statement
+	ret	nz		; .. no
+	or	a
+	ret	p		; .. exit normal code
+	ld	c,a
+	and	_endm shl 3	; Test ending macro
+	jr	nz,l355e	; .. yeap
+	ld	a,c
+	and	_macro shl 3	; Test beginning macro
+	jr	nz,l3566	; .. yeap
+	ld	a,c
+	and	_endc shl 3	; Test ending conditional
+	jr	nz,l356e	; .. yeap
+	ld	a,c
+	and	_cond shl 3	; Test starting conditional
+	jr	nz,l357b	; .. yeap
+	ret
+l355e:
+	ld	a,(MacroLev)
+	dec	a		; Fix level on macro end
+	ld	(MacroLev),a
+	ret
+l3566:
+	ld	a,(MacroLev)
+	inc	a		; Fix level on macro start
+	ld	(MacroLev),a
+	ret
+l356e:
+	ld	a,(MacroLev)	; Test level
+	or	a
+	ret	nz		; .. yeap, skip
+	ld	a,(IF.level.1)	; Test any level
+	or	a
+	ret	z		; .. nope
+	jp	ENDIF.code
+l357b:
+	ld	a,(MacroLev)	; Test any level
+	or	a
+	ret	nz
+	inc	hl
+	ld	a,(hl)		; Get code
+	cp	..else		; Test ELSE
+	ret	z		; .. yeap
+	ld	a,-1
+	jp	l2950
+;
+; Pseudocode IRPC
+;
+IRPC.code:
+	xor	a
+	jr	l3594
+;
+; Pseudocode IRP
+;
+IRP.code:
+	ld	a,1
+l3594:
+	or	a
+	push	af
+	call	check.stack
+	ld	(l4007),hl
+	call	l3269
+	ld	c,a
+	ld	a,(out.line)
+	cp	' '
+	jr	z,l35b0
+	ld	hl,(l4007)
+	call	l308a
+	pop	af
+	ret
+l35b0:
+	ld	a,c
+	ld	(hl),0
+	dec	hl
+	cp	','
+	call	nz,A.err
+	pop	af
+	push	af
+	jr	z,l35ec
+	call	chk.no.NL
+	cp	'<'
+	call	nz,A.err
+l35c6:
+	pop	af
+	ld	(hl),a
+	push	hl
+	push	af
+	ld	c,0
+	dec	hl
+	ld	a,(out.line)
+	cp	' '
+	jr	nz,l3647
+	pop	af
+	push	af
+	ld	b,a
+	jr	z,l35fa
+l35db:
+	call	l328c
+	inc	c
+	cp	cr
+	jr	z,l3644
+	cp	'>'
+	jr	z,l3647
+	jr	l35db
+l35ec:
+	call	chk.curch	; Get current
+	sub	'<'		; .. test open
+	ld	(l400e),a
+	call	z,chk.char	; .. skip if so
+	jr	l35c6
+l35fa:
+	call	chk.char
+	cp	cr
+	jr	z,l363d
+	push	af
+	ld	a,(l400e)
+	or	a
+	jr	z,l361f
+	pop	af
+	ld	de,l3647
+	push	de
+	cp	' '
+	ret	z
+	cp	tab
+	ret	z
+	cp	';'
+	ret	z
+	cp	','
+	ret	z
+	pop	de
+	jr	l3637
+l361f:
+	pop	af
+	cp	'<'
+	jr	z,l3633
+	cp	'>'
+	jr	nz,l3637
+	inc	b
+	dec	b
+	jr	z,l3647
+	dec	b
+	jr	l3637
+l3633:
+	inc	b
+l3637:
+	inc	c
+	ld	(hl),a		; .. unpack
+	dec	hl
+	jr	l35fa
+l363d:
+	ld	a,(l400e)
+	or	a
+	jr	nz,l3647
+l3644:
+	call	Q.err
+l3647:
+	ld	(hl),0
+	dec	hl
+	call	l302e
+	ld	a,b
+	or	a
+	call	nz,A.err
+	pop	af
+	pop	hl
+	ld	(l4009),hl
+	ld	h,0
+	ld	l,c
+	ld	(l3ffd),hl
+	pop	bc
+	pop	de
+	pop	hl
+	ld	bc,l366d
+	jp	l345c
+;
+;
+;
+l366d:
+	pop	bc
+	ld	bc,l345e
+	push	bc
+	ld	hl,(l4025)
+	ld	a,1
+	ld	(l4010),a
+	push	hl
+	call	l33f0
+	push	af
+	call	l3048
+	jr	z,l36b1
+	pop	af
+	pop	hl
+l3687:
+	cp	cr
+	jp	z,l31b6
+	cp	';'
+	jp	z,l31ab
+	cp	''''
+	jr	z,l36a1
+	cp	'"'
+	jr	z,l36a1
+l369b:
+	call	l313e
+	jr	l3687
+l36a1:
+	ld	b,a
+l36a2:
+	call	l3095
+	cp	cr
+	jp	z,l31b6
+	cp	b
+	jr	z,l369b
+	jr	l36a2
+l36b1:
+	pop	af
+	pop	hl
+	ld	(l4025),hl
+	xor	a
+	call	l3a3b
+	call	l3a9e
+	pop	bc
+	pop	de
+	pop	hl
+	ld	hl,scan.line
+	push	hl
+	push	de
+	ld	hl,(l4023)
+	push	hl
+	push	hl
+	ld	hl,(l4009)
+	push	hl
+	ld	hl,(l3ffd)
+	push	hl
+	ld	hl,scan.line
+	push	hl
+	ld	hl,l36dc
+	push	hl
+	push	bc
+	ret
+;
+;
+;
+l36dc:
+	call	l34f9
+	pop	bc
+	pop	hl
+	pop	de
+	ld	a,1
+	ld	(l4010),a
+	ld	(l400b),hl
+	pop	hl
+	call	cmp.HL.DE
+	jr	nz,l370d
+l36f1:
+	ld	a,(l4006)
+	or	a
+	jr	nz,l36fd
+	ld	a,b
+	or	c
+	jr	nz,l370d
+l36fd:
+	ld	hl,(l400b)
+	inc	hl
+	inc	hl
+l3702:
+	ld	a,(hl)
+	cp	8
+	inc	hl
+	jr	nc,l3702
+	dec	hl
+	jp	l34c1
+l370d:
+	ex	de,hl
+	push	de
+	call	l3a72
+	or	a
+	jr	z,l3734
+	ld	de,src.line
+l3719:
+	call	l3a72
+	or	a
+	call	m,l31ee
+	call	l3aed
+	call	l33d8
+	cp	cr
+	jr	nz,l3719
+	push	hl
+	ld	hl,(l400b)
+	push	hl
+	push	bc
+	jp	l34ed
+l3734:
+	dec	bc
+	ex	de,hl
+	pop	de
+	jr	l36f1
+;
+; Pseudocode .PRINTX
+;
+.PRINTX.code:
+	call	white.space	; Get envelope
+	cp	cr
+	jp	z,A.err
+	ld	c,a		; .. save
+	call	x.out		; .. print
+.PRINTX.loop:
+	call	chk.no.NL
+	cp	cr		; Test end
+	jr	z,.PRINTX.end
+	call	x.out		; Print otherwise
+	cp	c		; .. till envelope
+	jr	nz,.PRINTX.loop
+.PRINTX.end:
+	ld	a,cr		; Close line
+	call	x.out
+	ld	a,lf
+	call	x.out
+	ld	a,(out.line)	; Test space
+	cp	' '
+	ret	nz
+	jp	succ.ptr	; Fix pointer if so
+;
+; Print character to console if not quiet
+;
+x.out:
+	push	bc
+	ld	c,a
+	ld	a,(Qopt)	; Get quiet mode
+	or	a
+	ld	a,c
+	call	z,conout	; .. print if not
+	pop	bc
+	ret
+;
+; Pseudocode .COMMENT
+;
+.COMMENT.code:
+	call	white.space	; Get character
+	cp	cr		; Must not end of line
+	jp	z,A.err
+	ld	(comm.sync),a	; .. save sync
+	ld	c,a
+l3775:
+	call	chk.char
+	cp	cr		; Test end of line
+	jr	z,l3784
+	cp	c		; Test 2nd sync
+	jp	z,succ.ptr
+	jr	l3775
+l3784:
+	pop	hl
+	pop	de
+	pop	bc
+	ld	bc,l378d
+	jp	l345c
+;
+;
+;
+l378d:
+	pop	bc
+	ld	bc,l345e
+	push	bc
+	ld	hl,src.line
+	ld	a,(comm.sync)
+	ld	c,a
+l3799:
+	ld	a,(hl)
+	cp	c		; Find sync
+	jp	z,l358a
+	cp	cr		; .. or end of line
+	ret	z
+	inc	hl
+	jr	l3799
+;
+; Found pseudocode MACRO
+;
+l37af:
+	or	a
+	call	l0dd4
+	inc	hl
+	ld	(l3ff6),hl
+	ld	a,(hl)		; Get code
+	or	28h		; .. fix it
+	ld	(hl),a
+	call	check.stack
+	ld	(l4007),hl
+	ld	c,0
+l37c3:
+	push	bc
+	call	l3269
+	pop	bc
+	inc	c
+	cp	','
+	jr	z,l37c3
+	xor	a
+	ld	(hl),a
+	dec	hl
+	ld	(l400f),a
+	ld	(l4015),a
+	inc	a
+	ld	(hl),a
+	dec	hl
+	ld	(l4011),hl
+	ld	(l4013),hl
+	ld	(hl),0
+	ld	a,c
+	ld	(l401a),a
+	call	l3a3b
+	xor	a
+	call	l3a3b
+	pop	bc
+	pop	de
+	pop	hl
+	ld	hl,l37f7	; Change routine
+	push	hl
+	push	de
+	push	bc
+	ret
+;
+;
+;
+l37f7:
+	pop	bc
+	ld	bc,l345e
+	push	bc
+	ld	hl,(l4025)
+	push	hl
+	xor	a
+	ld	(l400f),a
+	ld	(l4010),a
+	call	l33f0
+	push	af
+	call	l3048
+	jr	c,l381c
+	jr	z,l384f
+	pop	af
+	ld	(l400f),a
+	pop	hl
+	jp	l3687
+l381c:
+	pop	af
+l381d:
+	call	get.item
+	call	nz,A.err
+	ld	hl,(l4013)
+	push	af
+	jr	nz,l3831
+	ld	a,(l4015)
+	inc	a
+	ld	(l4015),a
+l3831:
+	ld	de,actbuf
+	ld	a,(de)
+	inc	a
+	ld	c,a
+l3837:
+	ld	a,(de)		; Unpack
+	ld	(hl),a
+	dec	hl
+	inc	de
+	dec	c
+	jr	nz,l3837
+	ld	(hl),0
+	ld	(l4013),hl
+	pop	af
+	cp	','
+	jr	z,l381d
+	pop	hl
+	ld	(l4025),hl
+	ret
+l384f:
+	pop	af
+	pop	hl
+	xor	a
+	ld	(l4025),hl
+	call	l3a3b
+	call	l3a9e
+	ld	hl,(l4023)
+	ld	de,5
+	add	hl,de
+	ld	de,(LastMem)	; Get top
+	add	hl,de
+	ld	a,(l4015)
+	ld	(hl),a
+	ld	de,(l4023)
+	ld	hl,(l3ff6)
+	inc	hl
+	push	de
+	push	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,d
+	or	e
+	call	nz,l3994
+	pop	hl
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	hl,(l4007)
+	call	l308a
+l358a:
+	pop	bc
+	pop	de
+	pop	hl
+	ld	hl,scan.line	; Swap line routine
+	push	hl
+	push	de
+	push	bc
+	ret
+;
+; Force all unknown labels to EXT
+;
+ForceX:
+	ld	hl,SymbChn+2*6	; .. prefix is 6
+	ld	b,'Z'-'A'+1
+..ForceX:
+	ld	e,(hl)		; Fetch current root
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	ex	de,hl
+	ld	a,l
+	or	h		; Test entry
+	call	nz,FixTree	; .. yeap
+	pop	hl
+	djnz	..ForceX
+	ret
+;
+; Scan thru the tree
+;
+FixTree:
+	push	de
+	push	hl
+	ld	e,(hl)		; Get left node
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	de,hl
+	ld	a,l
+	or	h		; Test defined
+	call	nz,FixTree	; .. yeap
+	ex	de,hl
+	call	FixExt		; Fix entry
+	ld	e,(hl)		; Get right node
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	a,l
+	or	h
+	call	nz,FixTree	; .. process right tree
+	pop	hl
+	pop	de
+	ret
+;
+; Fix address mode
+;
+FixExt:
+	push	hl		; Copy node
+	pop	ix
+	ld	a,(ix+3)	; Get 1st mode
+	and	HiMask		; .. extract mode only
+	ld	e,a
+	ld	a,(ix+4)	; Get 2nd mode
+	and	HiMask		; .. extract mode only
+	or	e
+	ret	nz		; .. any definition
+	ld	(ix+4),_DEF	; .. force defined
+	ret
+

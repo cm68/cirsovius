@@ -1,0 +1,171 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 //EN">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/ZSID.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:14:39 GMT -->
+<head><title>ZSID</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+
+<body  background="../../../gif/dri.gif" style="margin-top:2cm;margin-left:0.2cm">
+
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+
+<div>
+
+<div align="center"><h1>ZSID</h1></div>
+
+<div lang="de">
+Ein wichtiges Hilfsmittel bei der Entwicklung von Assemblerprogrammen ist ein <a href="ZSID/Debuginfo.html">Debugger</a>.
+Der Standard-Debugger unter CP/M 2.x war der <b>DDT</b> (<b>D</b>ynamic-<b>D</b>ebugging <b>T</b>ool).
+Unter CP/M 3.x gab es eine &uuml;berarbeitete Version, den <b>SID</b> (<b>S</b>ymbolic <b>I</b>nstruction <b>D</b>ebugger).
+Inoffiziell fand sich vom SID auch eine Version mit Z80-Mnemoics &#8212; der <b>ZSID</b> (<b>Z</b>80-SID).
+<br />
+F&uuml;r den JOYCE gab es hier aber das Problem mit einem Interrupt-Vektor, so dass ich den Original-ZSID disassembliert habe.
+Aus dem Quellcode habe ich dann einige Fehler des Programms entfernt und einige &Auml;nderungen vorgenommen.
+</div>
+<div lang="en">
+A very important tool developing assembler programs is a <a href="ZSID/Debuginfo.html">debugger</a>.
+The standard debugger for CP/M 2.x was the <b>DDT</b> (<b>D</b>ynamic <b>D</b>ebugging <b>T</b>ool).
+CP/M 3.x was shipped withe the advanced version, called <b>SID</b> (<b>S</b>ymbolic <b>I</b>nstruction <b>D</b>ebugger).
+There also did exist an unofficial version of SID handling Z80 mnemonics &#8212; the <b>ZSID</b> (<b>Z</b>80-SID).
+<br />
+Running on the Joyce there did exist a problem referring to the interrupt vector.
+So I decided to disassemble the original ZSID.
+I eliminated some bugs in the source and made some slight modifications.
+</div>
+<p></p>
+<span lang="de">Neue Kommandos sind:</span><span lang="en">New commands are:</span>
+<div lang="de">
+<table align="center" border="1">
+<tr><th>Kommando</th><th>Aktion</th></tr>
+<tr><td><b>B</b></td><td>Suche nach einer Byte- oder Zeichenkette</td></tr>
+<tr><td><b>O</b></td><td>Auswahl einer anderen Bank als TPA Bank 1</td></tr>
+<tr><td><b>Q</b></td><td>Beenden des Debuggers (statt Ende mit ^C)</td></tr>
+</table>
+</div>
+<div lang="en">
+<table align="center" border="1">
+<tr><th>Command</th><th>Action</th></tr>
+<tr><td><b>B</b></td><td>Find byte or string series</td></tr>
+<tr><td><b>O</b></td><td>Other bank select than TPA bank 1</td></tr>
+<tr><td><b>Q</b></td><td>Quit debugger (instead quit by ^C)</td></tr>
+</table>
+</div>
+<p></p>
+<div lang="de">
+Angeregt durch den Disassembler <b>DASM</b> kann das Modul f&uuml;r die Befehle <b>L</b> (<i><b>L</b>iste des Assemblercodes</i>) und <b>A</b> (<i><b>A</b>ssemblierung</i>) entweder f&uuml;r die 8080 oder die Z80 gew&auml;hlt werden.
+</div>
+<div lang="en">
+Suggested by the disassembler <b>DASM</b> the module for the commands <b>L</b> (<i><b>L</b>ist assembler code</i>) and <b>A</b> (<i><b>A</b>ssemble</i>) may be selected either for the 8080 or Z80 CPU.
+</div>
+<p></p>
+<div lang="de">
+Die Debugger sind &#8212; genau wie die zu untersuchenden Programme &#8212; .COM Dateien, d.h. sie werden ebenfalls ab 0100H in den Speicher geladen.
+Nach dem Laden des Debug-Programms muss dieses &uuml;ber ein Ladeprogramm den Platz ab 0100H freimachen, sich also selber verschieben.
+</div>
+<div lang="en">
+Debuggers &#8212; such as the programs to be examined &#8212; are .COM files which must also be loaded into memory starting at location 0100H.
+After loading the debugger it must be moved into top of memory to allow the program to be examined to be loaded into 0100H.
+</div>
+
+<p></p>
+<div lang="de">
+Programmunterbrechungen werden typischerweise &uuml;ber Breakpoints gemacht, beim 8080 bzw. Z80 sind dies meist <code>RST</code>-Befehle.
+Und genau hier gab es einen Konflikt mit dem JOYCE:
+Dieser benutzte den Interrupt Modus 1, welcher die Adresse 038H als Einsprungadresse verwendete.
+Der Breakpoint des ZSID ist der <code>RST&nbsp;7</code> &#8212; das ist ebenfalls die Einsprungadresse 0038h!
+</div>
+<div lang="en">
+Usually program interrupts will be performed by breakpoints.
+In fact using the 8080 resp. Z80 it is the <code>RST</code> opcode.
+This leads to an conflict running on the JOYCE:
+This machine runs in interrupt mode 1 using address 038H to be entered if an interrupt occurs.
+ZSID used <code>RST&nbsp;7</code> for the breakpoint &#8212; that is the same address 0038h!
+</div>
+
+<p></p>
+
+<div lang="de">
+Eine Anleitung zum Erstellen eines neuen ZSID findet sich <a href="ZSID/SID-DOC_ge.html">hier</a>.
+</div>
+<div lang="en">
+A guide for creating a new version of ZSID may be found <a href="ZSID/SID-DOC_en.txt">hier</a>.
+</div>
+
+<p></p>
+
+<table width="80%" cellpadding="5" border="3" bordercolor="red" align="center">
+<tr><td valign="top">
+<span lang="de">Hier die Quelldateien:</span><span lang="en">Find the sources here:</span>
+
+<ul>
+<li><a href="ZSID/LDBLD-MAC.txt"><span lang="de">Das&nbsp;Kombinationsprogramm</span><span lang="en">The binding utility</span></a><p></p></li>
+<li><a href="ZSID/XSID-LIB.txt"><span lang="de">Die Bibliothek</span><span lang="en">The library</span></a></li>
+<li><a href="ZSID/XSIDLOAD-MAC.txt"><span lang="de">Der Loader</span><span lang="en">The loader</span></a></li>
+<li><a href="ZSID/SIDRELO-MAC.txt"><span lang="de">Der Kern</span><span lang="en">The kernel</span></a></li>
+<li><a href="ZSID/SIDLA-MAC.txt"><span lang="de">Der 8080-Teil</span><span lang="en">The 8080 part</span></a></li>
+<li><a href="ZSID/ZSIDLA-MAC.txt"><span lang="de">Der Z80-Teil</span><span lang="en">The Z80 part</span></a></li>
+<li><a href="ZSID/SIDCMD-MAC.txt"><span lang="de">Der Kommandointerpreter</span><span lang="en">The&nbsp;command&nbsp;interpreter</span></a></li>
+</ul>
+</td>
+<td valign="top">
+<div align="center"><b><span lang="de">Originale Quellen</span><span lang="en">Original sources</span></b></div>
+<ul>
+<li><a href="ZSID/Original/ZSIDO-MAC.txt"><span lang="de">Das&nbsp;Ladeprogramm</span><span lang="en">The&nbsp;loader</span></a></li>
+<li><a href="ZSID/Original/ZSIDREL-MAC.txt"><span lang="de">Der Debugger</span><span lang="en">The&nbsp;Debugger</span></a></li>
+</ul>
+</td>
+<td valign="top">
+<div lang="de">
+SID und damit ZSID erlauben den Gebrauch zweier Dienstprogramme, die zus&auml;tzlich geladen werden k&ouml;nnen:
+</div>
+<div lang="en">
+Two utilites may be combined with SID as well as with ZSID which must be loaded additionally.
+</div>
+
+<ol>
+<li>
+<div lang="de">
+<code>HIST.UTL</code> erstellt ein Histogramm (Balkendiagramm), das die relative H&auml;ufigkeit von ausgef&uuml;hrtem Code innerhalb ausgesuchter Programmsegmente des Testprogramms anzeigt.
+Das Dienstprogramm HIST erlaubt die &Uuml;berwachung der Stellen mit dem am h&auml;ufigsten ausgef&uuml;hrten Code.
+</div>
+<div lang="en">
+<code>HIST.UTL</code> creates a histogram (bar graph) showing the relative frequency of execution of code within selected program segments of the test program.
+The <code>HIST</code> utility allows you to monitor those sections of code that execute most frequently.
+</div>
+</li>
+<li>
+<div lang="de">
+<code>TRACE.UTL</code> stellt eine Ablaufverfolgung der Anweisungen her, die zu einem bestimmten Breakpoint im Testprogramm f&uuml;hren.
+Es k&ouml;nnen die Adressen von bis zu 256 Anweisungen zwischen den Passpoints in der Betriebsart <b>U</b> und <b>T</b> erfasst werden.
+</div>
+<div lang="en">
+<code>TRACE.UTL</code> obtains a backtrace of the instructions that led to a particular breakpoint address in a program under test.
+You can collect the addresses of up to 256 instructions between pass points in <b>U</b> or <b>T</b> modes.
+</div>
+</li>
+</ol>
+
+<table><tr><td><span lang="de">Hier die Quelldateien:</span><span lang="en">Find the sources here:</span></td><td><ul><li><a href="ZSID/HIST-MAC.txt">HIST</a></li></ul></td><td><ul><li><a href="ZSID/TRACE-MAC.txt">TRACE</a></li></ul></td></tr></table>
+
+</td></tr>
+</table>
+
+<table border="1" bgcolor="#F4F4F4" align="center"><tr><td>
+<a href="Disassembler.html"><span lang="de">Zur&uuml;ck zu den Disassembler-Aktivit&auml;ten</span><span lang="en">Back to the disassembler activities</span></a>
+</td></tr></table>
+
+</div>
+
+</body>
+
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/ZSID.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:14:39 GMT -->
+</html>

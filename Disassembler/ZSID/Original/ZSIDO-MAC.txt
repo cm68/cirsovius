@@ -1,0 +1,101 @@
+	title	ZSID Loader
+	name	('ZSIDO')
+
+; The DASMed part of the ZSID loader
+; By W. Cirsovius
+
+	.z80
+	aseg
+	org	0100h
+
+eot	equ	'$'
+
+ZOBJECT	equ	8697		; Length of object code
+
+BDOS	equ	0005h
+
+.string	equ	9
+
+	ld	bc,ZOBJECT	; Load length of code
+	jp	l013d		; Start loader
+;
+	db	'COPYRIGHT (C) 1977, DIGITAL RESEARCH     '
+l012f:
+	db	'ZSID VERS 1.4',eot
+;
+; Start the loader
+;
+l013d:
+	ld	sp,l0200	; Load local stack
+	push	bc		; Save length of code
+	push	bc
+	ld	de,l012f
+	ld	c,.string
+	call	BDOS		; Tell what we are
+;
+; Pass 1 : Move code into hi memory
+;
+	pop	bc		; Get back length of code
+	ld	hl,BDOS+2
+	ld	a,(hl)		; Get BDOS page
+	dec	a		; Fix it
+	sub	b		; Subtract length
+	ld	d,a		; This results in start of code
+	ld	e,0
+	push	de		; Save new start of code
+	ld	hl,l0200	; Init start of relocatable code
+l0158:
+	ld	a,b
+	or	c		; Test done
+	jp	z,l0165		; Yeap
+	dec	bc
+	ld	a,(hl)
+	ld	(de),a		; Unpack code below BDOS
+	inc	de
+	inc	hl
+	jp	l0158
+;
+; Pass 2 : Relocate code
+;
+l0165:
+	pop	de		; Get back new start of code
+	pop	bc		; Get back length of code
+	push	hl		; Save pointer to bit map
+	ld	h,d		; Get page for relocation
+l0169:
+	ld	a,b
+	or	c		; Test done
+	jp	z,l0187		; Yeap
+	dec	bc
+	ld	a,e		; Get page pointer
+	and	00000111b	; Test at boundary
+	jp	nz,l017a	; Nope
+	ex	(sp),hl		; Get back pointer to bit map
+	ld	a,(hl)		; Get new map
+	inc	hl
+	ex	(sp),hl
+	ld	l,a
+l017a:
+	ld	a,l		; Get bit state
+	rla
+	ld	l,a
+	jp	nc,l0183	; Nothing to do
+	ld	a,(de)
+	add	a,h		; Relocate byte
+	ld	(de),a
+l0183:
+	inc	de
+	jp	l0169
+l0187:
+	pop	de		; Clean stack
+	ld	l,0		; Force start address 0x??00
+	jp	(hl)		; Start debugger in hi memory
+;
+	ds	117		; Reserved for stack
+				; Results in page boundary
+l0200:
+	ds	ZOBJECT		; Length of debugger code
+	ds	ZOBJECT	/ 8	; Length of bit map
+
+	end
+

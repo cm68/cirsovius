@@ -1,0 +1,4075 @@
+	title	LASM
+	name	('LASM')
+
+; DASMed version of LASM.COM
+; By W. Cirsovius - 19.12.1997
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+DMA	equ	0080h
+
+.conout	equ	 2
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdrec	equ	20
+.wrrec	equ	21
+.make	equ	22
+.retdsk	equ	25
+
+IOERR	equ	255
+OS$EOF	equ	  3
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+_EX	equ	12
+_CR	equ	32
+
+reclng	equ	128
+
+null	equ	00h
+tab	equ	09h
+lf	equ	0ah
+ff	equ	0ch
+cr	equ	0dh
+eof	equ	1ah
+
+ASMrec	equ	32
+PRNrec	equ	 8
+OBJrec	equ	 8
+
+SRClen	equ	120
+ITMlen	equ	 64
+PAGlen	equ	 55
+ASTlen	equ	 16
+ALUlen	equ	 10
+OBJlen	equ	 16
+SYMlen	equ	 16
+SYMman	equ	  7		; Control bytes in symbol entry
+CODlen	equ	 16		; Max number of bytes in line
+XPOS	equ	 18		; Column position
+YPOS	equ	 16		; Column position
+MAXBITS	equ	 16		; Max bits for shift
+DIVBIT	equ	 17		; Bit count for division
+
+HashLen	equ	256
+
+COLPOS	equ	8
+
+CREFITM	equ	8		; Number of referenced line numbers
+
+REFOFFS	equ	4		; Reference offset
+
+NIL	equ	0
+
+STKLEV	equ	25		; Stack level
+
+UPPMASK	equ	01011111b
+LOMASK	equ	00001111b
+HIMASK	equ	11110000b
+NOMSB	equ	01111111b
+
+HEAPfre	equ	8
+
+_SYM	equ	00000010b
+_CRF	equ	00000001b
+
+_LETTER	equ	1
+_DIGIT	equ	2
+_STRING	equ	3
+_OTHER	equ	4
+;
+; Type codes
+;
+_mul	equ	 0
+_div	equ	 1
+_mod	equ	 2
+_shl	equ	 3
+_shr	equ	 4
+_plus	equ	 5
+_minus	equ	 6
+_not	equ	 8
+_and	equ	 9
+_or	equ	10
+_xor	equ	11
+_lftpar	equ	12
+_rgtpar	equ	13
+_comma	equ	14
+_eol	equ	15
+;
+_reg	equ	16
+_psopc	equ	17
+_opc1	equ	19
+_ld16	equ	20
+_dad	equ	21
+_push	equ	22
+_jmp	equ	23
+_mov	equ	24
+_mvi	equ	25
+_opcim8	equ	26
+_ldax	equ	27
+_lddir	equ	28
+_opcr	equ	29
+_opcri	equ	30
+_opcrp	equ	31
+_rst	equ	32
+_io	equ	33
+;
+_maxopc	equ	52		; Why?
+;
+; Pseudo opcodes
+;
+@db	equ	 1
+@ds	equ	 2
+@dw	equ	 3
+@end	equ	 4
+@endif	equ	 5
+@link	equ	 6
+@equ	equ	 7
+@if	equ	 8
+@macro	equ	 9
+@org	equ	10
+@set	equ	11
+@title	equ	12
+;
+@sym	equ	13
+@xref	equ	14
+;
+; Symbol control bits
+;
+bct1	equ	0111b
+bct2	equ	0110b
+bct3	equ	0101b		; SET
+;
+bbc1	equ	0001b
+;
+; Register control bits
+;
+rbits	equ	00000111b	; Reg bits
+dstbits	equ	rbits SHL 3	; Destination reg
+rpxs	equ	00101000b	; Register pair LDAX/STAX
+rpbits	equ	00110000b	; Register pair
+rpsel	equ	00001000b	; Register pair bit
+rpx	equ	00010000b	; LDAX/STAX bit
+
+	ld	sp,LocStk	; Load local stack
+	jp	ColdLASM
+;
+PAGLN:
+	db	PAGlen
+$PRGHED:
+	db	'LASM NOV-82     ',null
+$PAGNUM:
+	db	'PAGE  000   '
+$PRGTTL:
+	db	'                              ',cr
+$PASS:
+	db	'PASS 1',cr
+SrcLIdx:
+	db	0		; Source line index
+ChrType:
+	db	0		; Type of character
+				; 0 - None
+				; 1 - A..Z
+				; 2 - 0..9
+				; 3 - '
+				; 4 - Other
+ExprVal:
+	dw	0		; Resulting expression value
+ActSymb:
+	db	0		; Length of symbol
+	ds	ITMlen		; Symbol
+Exprs:
+	dw	0		; Expression
+HeapPtr:
+	dw	DynData		; Heap pointer
+HeapTop:
+	dw	0		; Top of heap
+CurrPass:
+	db	0		; Current pass
+PrgCtr:
+	dw	0		; Program counter
+BegPrgCtr:
+	dw	0		; Current start address
+HeapBase:
+	dw	DynData		; Base of heap
+CurrSymb:
+	dw	0		; Current symbol pointer
+HEXstrt:
+	dw	0		; Start address of hex record
+HexBuff:
+	db	0		; Object buffer index/length
+	ds	OBJlen		; Object ASCII buffer
+CurrDrv:
+	db	0		; Current drive
+SrcDrv:
+	db	0		; Source drive
+PrnDrv:
+	db	0		; Print drive
+ObjDrv:
+	db	0		; Object drive
+;
+; Source FCB
+;
+SrcFCB:
+	ds	.drv+.nam
+	db	'ASM'
+	ds	21
+;
+; Print FCB
+;
+PrnFCB:
+	ds	.drv+.nam
+	db	'PRN'
+	ds	21
+;
+; Object FCB
+;
+ObjFCB:
+	ds	.drv+.nam
+	db	'HEX'
+	ds	21
+SrcIdx:
+	dw	ASMrec*reclng	; Source buffer index
+PrnIdx:
+	dw	0		; Print buffer index
+ObjIdx:
+	dw	0		; Object buffer index
+FileMod:
+	db	00000000b	; File bits
+				; Bit 0 : Cross reference
+				; Bit 1 : Symbol file
+;
+; Log drive if new one
+;
+LogDrv:
+	ld	hl,CurrDrv	; Point to current drive
+	cp	(hl)		; Test already logged
+	ret	z		; Yeap
+	ld	(hl),a		; Store it
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Log it
+	ret
+;
+; Get drive from ASCII
+; ENTRY	Reg HL points to ASCII drive
+; EXIT	Accu holds binary drive
+;
+GetDRv:
+	inc	hl		; Fix pointer
+	ld	a,(hl)		; Get character
+	cp	' '		; Test empty
+	jp	z,GetDefDrv	; Yeap
+	sbc	a,'A'		; Map it - special case is @
+	ret
+GetDefDrv:
+	ld	a,(CurrDrv)	; Get current drive
+	ret
+;
+; Put string to console
+; ENTRY	Reg HL points to string
+;
+String:
+	ld	a,(hl)		; Get character
+	call	Conout		; Put to console
+	ld	a,(hl)
+	inc	hl
+	or	a		; Test end
+	jp	z,PutCRLF	; Yeap
+	cp	cr
+	jp	nz,String
+PutLF:
+	ld	a,lf
+	call	Conout		; Put new line to console
+	ret
+PutCRLF:
+	ld	a,cr
+	call	Conout		; Put carriage return to console
+	jp	PutLF
+;
+; Unpack file name
+;
+CopyFN:
+	ld	de,FCB		; Point to main file
+	ld	b,.drv+.nam	; Set length
+CopyFx:
+	ld	a,(de)		; Get character
+	cp	'?'		; Test wildcard
+	jp	z,FNerror	; Source file name error if so
+	ld	(hl),a		; Unpack it
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,CopyFx
+	ret
+;
+; Open file
+;
+Open:
+	ld	c,.open
+	call	BDOS		; Open it
+	cp	IOERR		; Test error
+	ret	nz		; Nope
+	ld	hl,NO$SRC
+	call	String		; Tell no source file present
+	jp	OS		; Exit to CP/M
+;
+; Close file
+;
+Close:
+	ld	c,.close
+	call	BDOS		; Close it
+	cp	IOERR		; Test error
+	ret	nz		; Nope
+	ld	hl,CLS$ERR
+	call	String		; Tell cannot close files
+	jp	OS		; Exit to CP/M
+;
+; Delete file
+;
+Delete:
+	ld	c,.delete
+	jp	BDOS		; Delete it
+;
+; Create file
+;
+Create:
+	ld	c,.make
+	call	BDOS		; Create it
+	cp	IOERR		; Test error
+	ret	nz		; Nope
+	ld	hl,NO$DIR
+	call	String		; Tell no directory space
+	jp	OS		; Exit to CP/M
+;
+; Log source drive
+;
+LogSrc:
+	ld	a,(SrcDrv)	; Get source drive
+	call	LogDrv		; Log drive
+	ret
+;
+; Test printing to file
+; EXIT	Zero flag set says no
+;
+ToFile:
+	ld	a,(PrnDrv)	; Get print drive
+	cp	'Z'-'A'		; Test null
+	ret	z
+	cp	'X'-'A'		; Test console
+	ret
+;
+; Log print drive
+;
+LogPrn:
+	ld	a,(PrnDrv)	; Get print drive
+	call	LogDrv		; Log drive
+	ret
+;
+; Log object drive
+;
+LogObj:
+	ld	a,(ObjDrv)	; Get object drive
+	call	LogDrv		; Log drive
+	ret
+;
+; ####################
+; #### Enter LASM ####
+; ####################
+;
+ColdLASM:
+	ld	hl,$PRGHED
+	call	String		; Give header
+	ld	a,(FCB+.drv)
+	cp	' '		; Test file name given
+	jp	z,FNerror	; Nope, should be
+	ld	c,.retdsk
+	call	BDOS		; Get current drive
+	ld	(CurrDrv),a	; Save it
+	ld	hl,FCB+.drv+.nam-1
+	call	GetDRv		; Get source drive
+	ld	(SrcDrv),a
+	call	GetDRv		; Get object drive
+	ld	(ObjDrv),a
+	call	GetDRv		; Get print drive
+	ld	(PrnDrv),a
+	ld	hl,SrcFCB
+	call	CopyFN		; Unpack .ASM file name
+	ld	hl,PrnFCB
+	call	CopyFN		; Unpack .PRN file name
+	call	ToFile		; Test printing to file
+	jp	z,NotToFile	; Nope
+	call	LogPrn		; Log print drive
+	ld	de,PrnFCB
+	call	Delete		; Delete .PRN file
+	ld	de,PrnFCB
+	call	Create		; Create .PRN file
+NotToFile:
+	ld	a,(ObjDrv)	; Get object drive
+	cp	'Z'-'A'		; Test null
+	jp	z,StartLASM	; Yeap, start assembler
+	ld	hl,ObjFCB
+	push	hl
+	push	hl
+	call	CopyFN		; Unpack .HEX file name
+	call	LogObj		; Log object drive
+	pop	de
+	call	Delete		; Delete .HEX file
+	pop	de
+	call	Create		; Create .HEX file
+	jp	StartLASM	; Start assembling
+;
+; Reset source file
+;
+ResetSRC:
+	ld	hl,ASMrec*reclng
+	ld	(SrcIdx),hl	; Force read
+	xor	a
+	ld	(SrcFCB+_EX),a	; Clear FCB bytes
+	ld	(SrcFCB+_CR),a
+	call	LogSrc		; Log source drive
+	ld	de,SrcFCB
+	call	Open		; Open .ASM file
+	ret
+;
+; Error in file name
+;
+FNerror:
+	ld	hl,NAM$ERR
+	call	String		; Tell source file name error
+	jp	OS		; Exit to CP/M
+;
+; Compare DE:HL
+;
+Cmpr:
+	ld	a,d
+	cp	h		; Compare
+	ret	nz
+	ld	a,e
+	cp	l
+	ret
+;
+; Read character from source file
+;
+fgetsrc:
+	push	bc
+	push	de
+	push	hl
+	ld	hl,(SrcIdx)	; Get buffer index
+	ld	de,ASMrec*reclng
+	call	Cmpr		; Test buffer scanned
+	jp	nz,RdMem	; Nope
+	call	LogSrc		; Log source drive
+	ld	hl,0
+	ld	(SrcIdx),hl	; Reset buffer index
+	ld	b,ASMrec	; Set length
+	ld	hl,SrcBuff	; Init buffer
+RdBuff:
+	push	bc
+	push	hl
+	ld	c,.rdrec
+	ld	de,SrcFCB
+	call	BDOS		; Read record from file
+	pop	hl
+	pop	bc
+	or	a		; Test end of file
+	ld	c,reclng
+	jp	nz,RdEOF	; Maybe
+	ld	de,DMA
+	ld	c,reclng
+RdCpy:
+	ld	a,(de)
+	ld	(hl),a		; Unpack record
+	inc	de
+	inc	hl
+	dec	c
+	jp	nz,RdCpy
+	dec	b
+	jp	nz,RdBuff
+	jp	RdMem
+RdEOF:
+	cp	OS$EOF		; Verify EOF
+	jp	nc,RdError	; Source file read error
+MemEOF:
+	ld	(hl),eof	; Fill one record with end of file
+	inc	hl
+	dec	c
+	jp	nz,MemEOF
+RdMem:
+	ld	de,SrcBuff
+	ld	hl,(SrcIdx)	; Get buffer index
+	push	hl
+	inc	hl		; Advance it
+	ld	(SrcIdx),hl
+	pop	hl
+	add	hl,de		; Build buffer address
+	ld	a,(hl)		; Get character
+	push	af
+	cp	lf		; Test line feed
+	call	z,IncLine	; Advance line count if so
+	pop	af
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+RdError:
+	ld	hl,RD$ERR
+	call	String		; Tell source file read error
+	jp	OS		; Exit to CP/M
+;
+; Put character to print device
+;
+putprn:
+	push	bc
+	ld	b,a
+	ld	a,(PrnDrv)	; Get print drive
+	cp	'Z'-'A'		; Test null
+	jp	z,putpop	; Yeap, ignore
+	cp	'X'-'A'		; Test console
+	ld	a,b
+	jp	nz,fputfx	; Nope
+	call	Conout		; Put character to console
+	jp	putpop
+;
+; Put character to symbol file
+;
+fputsym:
+	push	bc
+fputfx:
+	push	de
+	push	hl
+	call	fputc		; Put character to print file
+	pop	hl
+	pop	de
+putpop:
+	pop	bc
+	ret
+;
+; Put character to print file
+;
+fputc:
+	ld	hl,(PrnIdx)	; Get buffer index
+	ex	de,hl
+	ld	hl,PrnBuff
+	add	hl,de		; Position in buffer
+	ld	(hl),a		; Store character
+	ex	de,hl
+	inc	hl
+	ld	(PrnIdx),hl	; Update buffer index
+	ex	de,hl
+	ld	hl,PRNrec*reclng
+	call	Cmpr		; Test buffer filled
+	ret	nz		; Nope
+	call	LogPrn		; Log print drive
+	ld	hl,0
+	ld	(PrnIdx),hl	; Reset buffer index
+	ld	hl,PrnBuff
+	ld	de,PrnFCB
+	ld	b,PRNrec	; Set length
+WrBuff:
+	ld	a,(hl)		; Get character
+	cp	eof		; Test end of file
+	ret	z		; Yeap, end
+	push	bc
+	push	de
+	ld	c,reclng
+	ld	de,DMA
+WrCpy:
+	ld	a,(hl)
+	ld	(de),a		; Unpack one record
+	inc	hl
+	inc	de
+	dec	c
+	jp	nz,WrCpy
+	pop	de
+	push	de
+	push	hl
+	ld	c,.wrrec
+	call	BDOS		; Write record to file
+	pop	hl
+	pop	de
+	pop	bc
+	or	a		; Test success
+	jp	nz,WrError	; Nope, error
+	dec	b
+	ret	z
+	jp	WrBuff
+WrError:
+	ld	hl,WR$ERR
+	call	String		; Tell output file write error
+	jp	NoFlshObj
+;
+; Put character to object file
+;
+fputobjs:
+	push	bc		; Preserve registers
+	push	de
+	push	hl
+	call	fputobj		; Put it
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Put character to object file
+;
+fputobj:
+	ld	hl,(ObjIdx)	; Get buffer index
+	ex	de,hl
+	ld	hl,ObjBuff
+	add	hl,de		; Position in buffer
+	ld	(hl),a		; Store byte
+	ex	de,hl
+	inc	hl
+	ld	(ObjIdx),hl	; Update buffer index
+	ex	de,hl
+	ld	hl,OBJrec*reclng
+	call	Cmpr		; Test buffer filled
+	ret	nz		; Nope
+	call	LogObj		; Log object drive
+	ld	hl,0
+	ld	(ObjIdx),hl	; Reset buffer index
+	ld	hl,ObjBuff
+	ld	de,ObjFCB
+	ld	b,OBJrec	; Set length
+	jp	WrBuff		; Write buffer
+;
+; Put character to console
+;
+Conout:
+	push	bc
+	push	de
+	push	hl
+	ld	c,.conout
+	ld	e,a		; Get character
+	call	BDOS		; Put it
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Put character to print device and log error
+;
+putprnlg:
+	ld	c,a
+	call	putprn		; Put character to print device
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '		; Test error
+	ret	z		; Nope
+	ld	a,(PrnDrv)	; Get print drive
+	cp	'X'-'A'		; Test console
+	ret	z		; Yeap
+	ld	a,c
+	call	Conout		; Put character to console
+	ret
+;
+; Put line to list device
+;
+prnline:
+	ld	a,(SrcLIdx)	; Get source line index
+	ld	hl,SrcLine	; Init source line
+	or	a		; Test any in line
+	jp	z,prnlend	; Nope
+	ld	b,a
+	push	bc
+	ld	b,.nam
+	ld	hl,LINE$NUM
+putprnPRG:
+	ld	a,(hl)
+	call	putprnlg	; Put character to print device
+	inc	hl
+	dec	b
+	jp	nz,putprnPRG
+	ld	hl,SrcLine	; Init source line
+	pop	bc
+prnloop:
+	ld	a,(hl)
+	call	putprnlg	; Put character to print device
+	inc	hl
+	dec	b
+	jp	nz,prnloop
+	xor	a
+prnlend:
+	ld	(SrcLIdx),a	; Set source line index
+	call	prnNL		; Put new line on print device
+	ld	hl,SrcLine	; Init source line
+	ld	a,SRClen
+IniSrcLine:
+	ld	(hl),' '	; Blank line
+	inc	hl
+	dec	a
+	jp	nz,IniSrcLine
+	ret
+;
+; Common error routine
+;
+SetERR:
+	ld	b,a
+	ld	hl,SrcLine	; Init source line
+	ld	a,(hl)
+	cp	' '		; Test already error set
+	ret	nz		; Yeap
+	ld	(hl),b		; Store it
+	ret
+;
+; Put new line on print device
+;
+prnNL:
+	ld	a,cr
+	call	putprnlg	; Put new line to print device
+	ld	a,lf
+	call	putprnlg
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	ret	z		; Yeap, exit
+	ld	hl,PAGLN
+	ld	a,(hl)		; Get line on page
+	inc	(hl)		; Advance it
+	cp	PAGlen		; Test page filled
+	ret	c		; Nope
+	ld	(hl),0		; Clear page line
+	ld	hl,$PAGNUM+8	; Init pointer to page number
+prPagNum:
+	ld	a,(hl)		; Get digit
+	or	'0'
+	inc	a		; Advance it
+	ld	(hl),a
+	cp	'9'+1		; Test in range
+	jp	c,prXrefHead	; Yeap
+	ld	(hl),'0'	; Init it
+	dec	hl
+	jp	prPagNum	; Advance previous digit
+prXrefLF:
+	ld	a,lf
+	call	putprnlg	; Put line feed to print device
+	ret
+;
+; Print header
+;
+prXrefHead:
+	ld	a,ff
+	call	putprnlg	; Put form feed to print device
+	ld	hl,$PRGHED	; Point to header
+;
+; Print cross reference item
+;
+prXrefString:
+	ld	a,(hl)
+	or	a		; Test end of header
+	jp	z,prXrefNL	; Yeap
+	push	hl
+	call	putprnlg	; Put header to print device
+	pop	hl
+	ld	a,(hl)
+prXrefNL:
+	inc	hl
+	cp	cr		; Test end of line
+	jp	nz,prXrefString
+	ld	a,lf
+	call	putprnlg	; Put line feed to print device
+	jp	prXrefLF	; Twice
+;
+; Flush buffers
+;
+Flush:
+	call	SymbAll		; Process symbols
+	call	ToFile		; Test printing to file
+	jp	z,NoFlshPrn	; Nope
+	call	ProcXref	; Print cross reference
+FlshPrnLoop:
+	ld	hl,(PrnIdx)	; Get print buffer index
+	ld	a,l
+	or	h		; Test buffer filled
+	jp	z,NoFlshPrn	; Yeap
+	ld	a,eof
+	call	putprn		; Put end of file to print device
+	jp	FlshPrnLoop
+;
+; No flush to print file
+;
+NoFlshPrn:
+	ld	a,(ObjDrv)	; Get object drive
+	cp	'Z'-'A'		; Test null device
+	jp	z,NoFlshObj	; Yeap
+	ld	a,(HexBuff)	; Get object buffer length
+	or	a		; Test any in buffer
+	call	nz,putHexRec	; Put HEX record to object file if so
+	ld	hl,(PrgCtr)	; Get program counter
+	ld	(HEXstrt),hl	; Set as start address of hex record
+	call	putHexRec	; Put HEX record to object file
+FlshObjLoop:
+	ld	hl,(ObjIdx)	; Get object buffer index
+	ld	a,l
+	or	h		; Test buffer empty
+	jp	z,NoFlshObj	; Yeap
+	ld	a,eof
+	call	fputobjs	; Put end of file to object file
+	jp	FlshObjLoop
+;
+; No flush to object file
+;
+NoFlshObj:
+	call	ToFile		; Test printing to file
+	jp	z,NoClsPrn	; Nope
+	call	LogPrn		; Log print drive
+	ld	de,PrnFCB
+	call	Close		; Close print file
+NoClsPrn:
+	ld	a,(ObjDrv)	; Get object drive
+	cp	'Z'-'A'		; Test null device
+	jp	z,EndLASM	; Yeap, end of assembly
+	call	LogObj		; Log object drive
+	ld	de,ObjFCB
+	call	Close		; Close object file
+;
+; Flush symbol file
+;
+	ld	a,(FileMod)	; Get file bits
+	and	_SYM		; Test symbol file requested
+	jp	z,EndLASM	; Nope, end of assembly
+	ld	hl,PrnFCB+.drv+.nam
+	ld	de,$SYMBOLS
+	ld	b,.ext
+	call	CopyFx		; Set extension .SYM
+	xor	a
+	ld	(PrnFCB+_EX),a
+	ld	(PrnFCB+_CR),a
+	ld	a,(CurrDrv)	; Get current drive
+	ld	(PrnDrv),a	; Set symbol drive
+	call	LogPrn		; Log symbol drive
+	ld	de,PrnFCB
+	push	de
+	call	Delete		; Delete symbol file
+	pop	de
+	call	Create		; Create symbol file
+	ld	hl,0
+	ld	(PrnIdx),hl	; Reset buffer index
+	ld	hl,$SYMBOLS
+	call	String		; Tell symbols
+	call	SymbPut		; Put symbols to file
+	jp	EndLASM		; End of assembly
+;
+; Process symbols
+;
+SymbAll:
+	ld	a,(FileMod)	; Get file bits
+	and	_SYM+_CRF	; Test symbols or cross reference enabled
+	ret	z		; Nope
+	ld	b,'A'		; Init letter
+	ld	de,SymbPtr	; Init pointer to symbol table
+SymbAlLoop:
+	call	SymbOne		; Process symbol(s)
+	inc	b		; Next letter
+	ld	a,b
+	cp	'Z'+1		; Test Z reached
+	jp	nz,SymbAlLoop	; Nope
+	xor	a
+	ld	(de),a		; Ground last entry
+	inc	de
+	ld	(de),a
+	ret
+;
+; Process symbol(s)
+; ENTRY	Reg B holds start letter
+;
+SymbOne:
+	ld	hl,SymbBas	; Init start of symbol table
+SymbOnLoop:
+	call	SymbGet		; Get pointer to symbol
+	ret	c		; That's all
+	call	z,SymbLink	; Get next link pointer
+	call	SymbNxt		; Get pointer to next symbol
+	jp	SymbOnLoop
+;
+; Get pointer to symbol
+; ENTRY	Reg HL points within heap
+; EXIT	Zero flag set says length does match
+;	Carry flag set if end
+;
+SymbGet:
+	ld	a,(HeapPtr)	; Get heap pointer
+	sub	l		; Test pointer within heap
+	ld	a,(HeapPtr+1)
+	sbc	a,h
+	ret	c		; Nope
+	ld	a,(hl)		; Get length of symbol
+	and	LOMASK		; Less control
+	ld	c,a		; Save length
+	inc	hl
+	ld	a,(hl)		; Get 1st letter of symbol
+	sub	b		; Test match
+	or	a
+	ret
+;
+; Get next link pointer
+; ENTRY	Reg DE holds entry pointer
+;	Reg HL holds address
+; EXIT	Reg DE holds next pointer
+;
+SymbLink:
+	ld	a,d
+	or	e		; Test NIL
+	jp	z,SymbNIL	; Yeap, skip this entry
+	dec	hl
+	ld	a,l
+	ld	(de),a		; Store new pointer
+	inc	de
+	ld	a,h
+	ld	(de),a
+	inc	hl
+SymbNIL:
+	push	hl
+	call	SymbPos		; Position to link
+	ld	d,h		; Get pointer
+	ld	e,l
+	pop	hl
+	ret
+;
+; Get pointer to next symbol
+;
+SymbNxt:
+	call	SymbPos		; Position to link
+	inc	hl
+	inc	hl
+	ret
+;
+; Position to link
+;
+SymbPos:
+	ld	a,b		; Save character
+	ld	b,0		; Make index 16 bit
+	add	hl,bc		; Position behind symbol
+	ld	b,a		; Get back character
+	inc	hl		; Skip to link
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	ret
+;
+; Structure of symbol
+;
+; Byte      0   : Length of symbol (+ control bits ???)
+; Bytes   1..n  : Name of symbol
+; Bytes n+1,n+2 : Value of symbol
+; Bytes n+3,n+4 : Reference line  (BCD)
+; Bytes n+5,n+6 : Address of next symbol
+;
+; Put symbols to file
+;
+SymbPut:
+	ld	hl,(SymbPtr)	; Get pointer of symbol table
+	ld	bc,0
+SymbPutLoop:
+	ld	a,h
+	or	l		; Test end
+	jp	z,SymbPutEnd	; Yeap
+	ld	a,(hl)		; Get length of name
+	and	LOMASK		; Mask bits
+	ld	e,a
+	ld	d,0
+	inc	hl
+	push	hl
+	add	hl,de		; Point to end of name
+	inc	hl
+	ld	c,(hl)		; Fetch address
+	inc	hl
+	ld	a,(hl)
+	call	Hex8ToSymb	; Put ASCII word to symbol file
+	ld	a,c
+	call	Hex8ToSymb
+	call	SymbPutBlnk	; Put blank to symbol file
+	pop	hl
+	inc	e
+	push	de
+SymbPutSym:
+	ld	a,(hl)		; Get name of symbol
+	call	fputsym		; Put it to symbol file
+	inc	hl
+	dec	e
+	jp	nz,SymbPutSym
+	pop	de
+	ld	a,b
+	cp	4		; Test symbols in line reached
+	jp	nc,SymbPutNL	; Yeap, give new line
+	inc	b
+	ld	a,tab
+	call	fputsym		; Put tab to symbol file
+	ld	a,e
+	cp	3		; Test length of name
+	jp	nc,SymbPutNoTAB
+	ld	a,tab
+	call	fputsym		; Put tab to symbol file
+SymbPutNoTAB:
+	ld	a,e
+	cp	11		; Test length of name
+	jp	c,SymbPutNxt
+	inc	b		; Fix symbol count
+	ld	a,tab
+	call	fputsym		; Put tab to symbol file
+SymbPutNxt:
+	inc	hl		; Skip bytes
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Fetch link to next symbol
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	jp	SymbPutLoop
+SymbPutNL:
+	ld	b,0
+	ld	a,cr
+	call	fputsym		; Put new line to symbol file
+	ld	a,lf
+	call	fputsym
+	jp	SymbPutNxt
+;
+; Put blank to symbol file
+;
+SymbPutBlnk:
+	ld	a,' '
+	jp	fputsym		; Put it
+;
+; End of symbols
+;
+SymbPutEnd:
+	ld	hl,(PrnIdx)	; Get print buffer index
+	ld	a,l
+	or	h		; Test any in there
+	jp	z,SymbPutCls	; Nope
+	ld	a,eof
+	call	putprn		; Put end of file to symbol device
+	jp	SymbPutEnd
+SymbPutCls:
+	call	LogPrn		; Log symbol drive
+	ld	de,PrnFCB
+	call	Close		; Close symbol file
+	ret
+;
+; Put hex byte as ASCII to symbol file
+;
+Hex8ToSymb:
+	push	af
+	rra			; Get upper bits
+	rra
+	rra
+	rra
+	call	Hex4ToSymb	; Print as ASCII
+	pop	af
+Hex4ToSymb:
+	and	LOMASK		; Mask lower bits
+	add	a,90h		; Convert to ASCII
+	daa
+	adc	a,40h
+	daa
+	jp	fputsym		; Put hex character to symbol file
+;
+SymbPtr:
+	dw	NIL		; Pointer of symbol table
+XREFptr:
+	dw	NIL		; Cross reference pointer
+XREFadr:
+	dw	0		; Reference address
+;
+; Print cross reference
+;
+ProcXref:
+	ld	a,(FileMod)	; Get file bits
+	and	_CRF		; Test cross reference file requested
+	ret	z		; Nope
+	call	prXrefHead	; Print header
+	ld	hl,CROSS$SYM
+	call	prXrefString	; Tell cross reference
+	ld	hl,(SymbPtr)	; Get pointer of symbol table
+	ld	(XREFptr),hl	; Set as cross reference pointer
+	ld	hl,PAGLN
+	ld	a,2		; Init lines on page
+	ld	(hl),a
+	call	prnNL		; Put new line on cross reference device
+prXrefItemLoop:
+	call	prXrefItem	; Put cross reference name and value to file
+	ret	z		; End of list
+	call	PrRefLine	; Print reference lines
+	call	prnNL		; Put new line on cross reference device
+	jp	prXrefItemLoop
+;
+; Put new line to cross reference file
+;
+prXrefItemNL:
+	ld	a,cr
+	call	fputsym		; Put new line to cross reference file
+	ld	a,lf
+	call	fputsym
+	ret
+;
+; Put cross reference name and value to file - Z set says end of list
+;
+prXrefItem:
+	ld	hl,(XREFptr)	; Get cross reference pointer
+	ld	a,h
+	or	l		; Test end
+	ret	z		; Yeap
+	ld	a,(hl)		; Get control byte
+	and	LOMASK		; Extract length
+	inc	a
+	ld	b,a
+	push	bc
+XrefItemLoop:
+	inc	hl
+	ld	a,(hl)		; Get name
+	call	fputsym		; Put character to cross reference file
+	dec	b
+	jp	nz,XrefItemLoop
+	inc	hl
+	pop	bc
+	ld	a,b
+	cp	COLPOS		; Length
+	jp	nc,XrefItemNoTab
+	ld	a,tab
+	call	fputsym		; Put tab to cross reference file
+XrefItemNoTab:
+	ld	a,tab
+	call	fputsym		; Put tab to cross reference file
+	inc	hl		; Skip value
+	inc	hl
+	ld	a,(hl)		; Fetch cross reference address
+	ld	d,a
+	call	Hex8ToSymb	; Put ASCII word to file
+	inc	hl
+	ld	a,(hl)
+	ld	e,a
+	call	Hex8ToSymb
+	ex	de,hl
+	ld	(XREFadr),hl	; Save reference address
+	ex	de,hl
+	inc	hl
+	ld	a,(hl)		; Fetch link to next symbol
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	ld	(XREFptr),hl	; Set as current cross reference pointer
+	ld	a,tab
+	call	fputsym		; Put tab to cross reference file
+	xor	a
+	inc	a		; Indicate more
+	ret
+;
+; Print reference lines
+;
+PrRefLine:
+	ld	hl,(HeapTop)	; Get top of heap
+	ld	de,REFOFFS
+	add	hl,de		; Point to real start of cross reference
+	ld	b,CREFITM	; Set items per line
+RefLineLoop:
+	call	XREFvalMem	; Test still in heap area
+	ret	c		; Nope
+	call	isXREF		; Test reference found
+	jp	nz,RefLineLoop	; Nope
+	call	PrXREFLine	; Print reference line number
+	jp	RefLineLoop
+;
+; Test reference found
+; EXIT	Z flag set says yes
+;
+isXREF:
+	ld	a,(XREFadr+1)	; Get reference address
+	cp	(hl)		; Compare
+	jp	nz,isXREFnxt	; Not found
+	inc	hl
+	ld	a,(XREFadr)
+	cp	(hl)
+	dec	hl
+	ret	z		; Got match
+isXREFnxt:
+	inc	hl		; Advance to next if no match
+	inc	hl
+	inc	hl
+	inc	hl
+	ret
+;
+; Print reference line number
+;
+PrXREFLine:
+	inc	hl		; Skip address
+	inc	hl
+	ld	a,(hl)		; Fetch BCD line number
+	call	Hex8ToSymb	; Put as ASCII word to file
+	inc	hl
+	ld	a,(hl)
+	call	Hex8ToSymb
+	inc	hl
+	ld	a,tab
+	call	fputsym		; Put tab to symbol file
+	dec	b		; Count down
+	ret	nz		; Any remaining
+	ld	b,CREFITM	; Reset count
+	call	prXrefItemNL	; Put new line to cross reference file
+	ld	a,tab
+	call	fputsym		; Put tabs to symbol file
+	ld	a,tab
+	call	fputsym
+	ld	a,tab
+	call	fputsym
+	ret
+;
+; Test address still in heap area
+; ENTRY	Reg HL holds address
+; EXIT	C flag set says not
+;
+XREFvalMem:
+	ex	de,hl
+	ld	hl,(TPATOP)	; Get top of memory
+	dec	hl		; Fix for last possible address
+	dec	hl
+	dec	hl
+	dec	hl
+	dec	hl
+	ld	a,l
+	sub	e		; Compare
+	ld	a,h
+	sbc	a,d
+	ex	de,hl
+	ret
+;
+CROSS$SYM:
+	db	'CROSS REFERENCED SYMBOL LIST',cr
+$SYMBOLS:
+	db	'SYMBOLS',cr
+;
+; Tell end of assembly
+;
+EndLASM:
+	ld	hl,LASM$RDY
+	call	String		; Tell it
+	jp	OS		; Exit to CP/M
+;
+NO$SRC:
+	db	'No source file present',cr
+NO$DIR:
+	db	'No directory space',cr
+NAM$ERR:
+	db	'Source file name error',cr
+RD$ERR:
+	db	'Source file read error',cr
+WR$ERR:
+	db	'Output file write error',cr
+CLS$ERR:
+	db	'Cannot close files',cr
+LASM$RDY:
+	db	'End of assembly',cr
+;
+; Put byte to object buffer
+;
+stObj:
+	push	bc
+	ld	b,a
+	ld	a,(ObjDrv)	; Get object drive
+	cp	'Z'-'A'		; Test null
+	ld	a,b
+	jp	z,NoStObj	; Yeap, ignore
+	push	de
+	push	af
+	ld	hl,HexBuff
+	ld	a,(hl)		; Get object buffer length
+	or	a		; Test any in buffer
+	jp	z,BuffEmpty	; Nope
+	cp	OBJlen
+	jp	c,BuffNoWrt
+	call	putHexRec	; Put HEX record to object file
+	jp	BuffEmpty
+BuffNoWrt:
+	ld	hl,(PrgCtr)	; Get program counter
+	ex	de,hl
+	ld	hl,(HEXstrt)	; Get start address of hex record
+	ld	c,a		; Build length
+	ld	b,0
+	add	hl,bc		; Get new top address
+	ld	a,e
+	cp	l		; Test same as PC
+	jp	nz,BuffHxWrt	; Nope, write record
+	ld	a,d
+	cp	h
+	jp	z,StHexBuff
+BuffHxWrt:
+	call	putHexRec	; Put HEX record to object file
+BuffEmpty:
+	ld	hl,(PrgCtr)	; Get program counter
+	ld	(HEXstrt),hl	; Set as start address of hex record
+StHexBuff:
+	ld	hl,HexBuff
+	ld	e,(hl)		; Get object buffer length for index
+	inc	(hl)		; Advance index
+	ld	d,0
+	ld	hl,HexBuff+1	; Point to object buffer
+	add	hl,de
+	pop	af
+	ld	(hl),a		; Store byte
+	pop	de
+NoStObj:
+	pop	bc
+	ret
+;
+; Put ASCII hex byte to object file updating checksum
+;
+Hex8ToObj:
+	push	af
+	rrca			; Get hi bits
+	rrca
+	rrca
+	rrca
+	and	LOMASK
+	call	Hex4ToObj	; Convert and put to file
+	pop	af
+	push	af
+	and	LOMASK		; Then low bits
+	call	Hex4ToObj
+	pop	af
+	add	a,d		; Update checksum
+	ld	d,a
+	ret
+;
+; Put hex digit to object file
+;
+Hex4ToObj:
+	add	a,90h		; Convert it
+	daa
+	adc	a,40h
+	daa
+	jp	fputobjs	; Put hex digit to object file
+;
+; Put HEX record to object file
+;
+putHexRec:
+	ld	a,':'
+	call	fputobjs	; Put start of line to object file
+	ld	hl,HexBuff
+	ld	e,(hl)		; Get length of object buffer
+	xor	a
+	ld	d,a		; Clear checksum
+	ld	(hl),a
+	ld	hl,(HEXstrt)	; Get address of HEX start
+	ld	a,e
+	call	Hex8ToObj	; Put length of line
+	ld	a,h
+	call	Hex8ToObj	; Put start address of line
+	ld	a,l
+	call	Hex8ToObj
+	xor	a
+	call	Hex8ToObj	; Put normal type
+	ld	a,e
+	or	a		; Test zero length
+	jp	z,putNoHexItem	; Yeap, skip
+	ld	hl,HexBuff+1	; Point to object buffer
+putHexItem:
+	ld	a,(hl)		; Get object byte
+	inc	hl
+	call	Hex8ToObj	; Put to file
+	dec	e
+	jp	nz,putHexItem
+putNoHexItem:
+	xor	a
+	sub	d		; Calculate checksum
+	call	Hex8ToObj	; Put to object file
+	ld	a,cr
+	call	fputobjs	; Close line of object file
+	ld	a,lf
+	call	fputobjs
+	ret
+;
+PrevChar:
+	db	0		; Previous character from source file
+LastChar:
+	db	0		; Last character from source file
+Radix:
+	db	0		; Number base
+;
+; Read character from source file - store in line if room available
+;
+StSrcLine:
+	call	fgetsrc		; Read character from source file
+	push	af		; Save it
+	cp	cr		; Test end of line
+	jp	z,StNoSrcLine
+	cp	lf
+	jp	z,StNoSrcLine
+	ld	a,(SrcLIdx)	; Get source line index
+	cp	SRClen		; Test in range
+	jp	nc,StNoSrcLine	; Out of limit
+	ld	e,a
+	ld	d,0
+	inc	a
+	ld	(SrcLIdx),a	; Update source line index
+	ld	hl,SrcLine	; Init source line
+	add	hl,de		; Build address in line
+	pop	af
+	ld	(hl),a		; Store character in line
+	ret
+StNoSrcLine:
+	pop	af
+	ret
+;
+; Init counters and empty line to list device
+;
+IniList:
+	call	IniLenRad	; Init length and radix
+	ld	(LastChar),a	; Clear character from source file
+	ld	(SrcLIdx),a	; Clear source line index
+	ld	a,lf
+	ld	(PrevChar),a	; Set previous character
+	call	prnline		; Put line to list device
+	ld	a,XPOS
+	ld	(SrcLIdx),a	; Set source line index
+	ret
+;
+; Init length and radix
+;
+IniLenRad:
+	xor	a
+	ld	(ActSymb),a	; Clear length of symbol
+	ld	(Radix),a	; No number base
+	ret
+;
+; Store character into symbol
+;
+StinSymb:
+	ld	hl,ActSymb
+	ld	a,(hl)		; Get length of symbol
+	cp	ITMlen		; Test limit reached
+	jp	c,StinOk	; Nope
+	ld	(hl),0		; Clear length
+	call	OflErr		; Overflow
+StinOk:
+	ld	e,(hl)		; Get index
+	ld	d,0
+	inc	(hl)
+	inc	hl
+	add	hl,de		; Position in item
+	ld	a,(LastChar)	; Get character from source file
+	ld	(hl),a		; Store it
+	ret
+;
+; Test $, map to 00 if so
+;
+MapChar:
+	ld	a,(hl)		; Get character
+	cp	'$'		; Test it
+	ret	nz		; Nope
+	xor	a
+	ld	(hl),a		; Map it
+	ret
+;
+; Test character 0..9
+; EXIT	 Accu 0x01 and NZ flag set indicates yes
+;
+isdigit:
+	ld	a,(LastChar)	; Get character from source file
+	sub	'0'		; Strip off offset
+	cp	'9'-'0'+1	; Test 0..9
+	rla
+	and	1		; Get Z/NZ
+	ret
+;
+; Test character 0..9, A..F
+; EXIT	 Accu 0x01 and NZ flag set indicates yes
+;
+ishexdigit:
+	call	isdigit		; Test character 0..9
+	ret	nz		; Yeap
+	ld	a,(LastChar)	; Get character from source file
+	sub	'A'		; Strip off offset
+	cp	'F'-'A'+1	; Test 0..9
+	rla
+	and	1		; Get Z/NZ
+	ret
+;
+; Test character A..Z
+; EXIT	 Accu 0x01 and NZ flag set indicates yes
+;
+isletter:
+	ld	a,(LastChar)	; Get character from source file
+	sub	'A'		; Strip off offset
+	cp	'Z'-'A'+1	; Test A..Z
+	rla
+	and	1		; Get Z/NZ
+	ret
+;
+; Test character 0..9, A..Z
+; EXIT	 Accu 0x01 and NZ flag set indicates yes
+;
+issymbol:
+	call	isletter	; Test character A..Z
+	ret	nz		; Yeap
+	call	isdigit		; Test character 0..9 - 0x01 (NZ) indicates yes
+	ret
+;
+; Convert character to upper case
+;
+upcase:
+	ld	a,(LastChar)	; Get character from source file
+	cp	'a'		; Test lower case
+	ret	c		; Nope
+	cp	'z'+1
+	ret	nc
+	and	UPPMASK		; Convert it
+	ld	(LastChar),a	; Set character from source file
+	ret
+;
+; Read next character from source file
+;
+rdnxtsrc:
+	call	StSrcLine	; Read character from source file
+	ld	(LastChar),a	; Save it
+	push	af
+	ld	a,(ChrType)	; Get character state
+	cp	_STRING		; Test upper case possible
+	call	nz,upcase	; Yeap, convert it
+	pop	af
+	ret
+;
+; Test end of line
+; EXIT	Z set indicates end
+;
+isEOL:
+	cp	cr		; Filter characters
+	ret	z
+	cp	eof
+	ret	z
+	cp	'!'		; Do not forget multiple statements
+	ret
+;
+; Scan for expression
+;
+Expression:
+	xor	a
+	ld	(ChrType),a	; Reset type
+	call	IniLenRad	; Init length and radix
+ExprLoop:
+	ld	a,(LastChar)	; Get character from source file
+	cp	tab		; Test tab
+	jp	z,ExprSkp	; Skip it
+	cp	';'		; Test comment
+	jp	z,ExprCmnt	; Yeap, skip to end
+	cp	'*'		; Test special prefix
+	jp	nz,ExprIsBlnk
+	ld	a,(PrevChar)	; Get previous character
+	cp	lf
+	jp	nz,ExprIsBlnk
+ExprCmnt:
+	call	rdnxtsrc	; Read next character from source file
+	call	isEOL		; Test end of line 
+	jp	z,ExprEOL	; Yeap
+	jp	ExprCmnt
+ExprIsBlnk:
+	or	' '		; Make ASCII
+	cp	' '		; Test blank
+	jp	nz,ExprEOL	; Nope
+ExprSkp:
+	call	rdnxtsrc	; Read next character from source file
+	jp	ExprLoop
+ExprEOL:
+	call	isletter	; Test character A..Z
+	jp	z,ExprIsDigit	; Nope
+	ld	a,_LETTER
+	jp	ExprType
+ExprIsDigit:
+	call	isdigit		; Test character 0..9
+	jp	z,ExprIsStrg	; Nope
+	ld	a,_DIGIT
+	jp	ExprType
+ExprIsStrg:
+	ld	a,(LastChar)	; Get character from source file
+	cp	''''
+	jp	nz,ExprIsEOL
+	xor	a
+	ld	(LastChar),a	; Clear character from source file
+	ld	a,_STRING
+	jp	ExprType
+ExprIsEOL:
+	cp	lf
+	jp	nz,ExprOther
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	call	nz,prnline	; Nope, put line to list device
+	ld	hl,SrcLine	; Init source line
+	ld	(hl),' '
+	ld	a,YPOS
+	ld	(SrcLIdx),a	; Set source line index
+ExprOther:
+	ld	a,_OTHER
+ExprType:
+	ld	(ChrType),a	; Set type
+ExprNext:
+	ld	a,(LastChar)	; Get character from source file
+	ld	(PrevChar),a	; Set as previous character
+	or	a		; Test any character input
+	call	nz,StinSymb	; Yeap, store into symbol
+	call	rdnxtsrc	; Read next character from source file
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	ret	z		; Yeap
+	cp	_STRING		; Test string constant
+	call	nz,upcase	; Nope, convert to upper case
+	ld	hl,LastChar	; Point to character from source file
+	ld	a,(ChrType)	; Get type of character
+	cp	_LETTER		; Test letter
+	jp	nz,isExprDig	; Nope
+	call	MapChar		; Test $
+	jp	z,ExprNext	; Yeap
+	call	issymbol	; Test character 0..9, A..Z
+	ret	z		; Nope
+	jp	ExprNext
+isExprDig:
+	cp	_DIGIT		; Test digit
+	jp	nz,ExprNoDig	; Nope
+	call	MapChar		; Test $
+	jp	z,ExprNext	; Yeap
+	call	ishexdigit	; Test character 0..9, A..F
+	jp	nz,ExprNext	; Yeap
+	ld	a,(LastChar)	; Get character from source file
+	cp	'O'		; Test octal
+	jp	z,ExprOctal
+	cp	'Q'
+	jp	nz,isExprHex
+ExprOctal:
+	ld	a,8		; Load radix
+	jp	ExprSetRad
+isExprHex:
+	cp	'H'		; Test hex
+	jp	nz,NoExprHex
+	ld	a,16		; Load radix
+ExprSetRad:
+	ld	(Radix),a	; Set number base
+	xor	a
+	ld	(LastChar),a	; Clear character from source file
+	jp	ExprDoValue
+NoExprHex:
+	ld	a,(PrevChar)	; Get previous character
+	cp	'B'		; Test binary
+	jp	nz,isExprDec
+	ld	a,2		; Load radix
+	jp	ExprLenfix
+isExprDec:
+	cp	'D'		; Test decimal
+	ld	a,10		; Load radix
+	jp	nz,ExprSetNum
+ExprLenfix:
+	ld	hl,ActSymb
+	dec	(hl)		; Fix length of symbol
+ExprSetNum:
+	ld	(Radix),a	; Set number base
+ExprDoValue:
+	ld	hl,0
+	ld	(ExprVal),hl	; Init result
+	ld	hl,ActSymb
+	ld	c,(hl)		; Get length of symbol
+	inc	hl
+ExprNxtDig:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	'A'		; Test hex
+	jp	nc,ExprFixHexDig; Maybe
+	sub	'0'		; Strip off decimal offset
+	jp	ExprNoHexDig
+ExprFixHexDig:
+	sub	'A'-10		; Strip off hexadecimal offset
+ExprNoHexDig:
+	push	hl
+	push	bc
+	ld	c,a		; Save digit
+	ld	hl,Radix	; Point to number base
+	cp	(hl)		; Verify in valid range
+	call	nc,ValErr	; Error
+	ld	b,0		; Make digit 16 bit
+	ld	a,(hl)		; Get base
+	ld	hl,(ExprVal)	; Get current value
+	ex	de,hl
+	ld	hl,0
+;
+; Now multiply value DE by base in Accu
+;
+MultRadix:
+	or	a		; Test done
+	jp	z,MultRadixRdy	; Yeap
+	rra			; Get bit
+	jp	nc,MultRadixnoCY
+	add	hl,de		; Multiply
+MultRadixnoCY:
+	ex	de,hl
+	add	hl,hl		; Shift value
+	ex	de,hl
+	jp	MultRadix
+MultRadixRdy:
+	add	hl,bc		; Insert digit
+	ld	(ExprVal),hl	; Save new value
+	pop	bc
+	pop	hl
+	dec	c		; Test all done
+	jp	nz,ExprNxtDig	; Nope
+	ret
+ExprNoDig:
+	ld	a,(LastChar)	; Get character from source file
+	cp	cr		; Test end of line
+	jp	z,OflErr	; Invalid
+	cp	''''		; Test string delimiter
+	jp	nz,ExprNext	; Nope
+	call	rdnxtsrc	; Read next character from source file
+	cp	''''		; Test second one
+	ret	nz		; Nope, end
+	jp	ExprNext
+;
+; Value error
+;
+ValErr:
+	push	af
+	ld	a,'V'
+	jp	SetERRs
+;
+; Expresson overflow
+;
+OflErr:
+	push	af
+	ld	a,'O'
+	jp	SetERRs
+;
+; Error routine
+;
+SetERRs:
+	push	bc
+	push	hl
+	call	SetERR		; Insert error
+	pop	hl
+	pop	bc
+	pop	af
+	ret
+;
+HashVal:
+	db	0		; Hash of symbol characters
+;
+; Init hash table
+;
+IniHash:
+	ld	hl,HashTab	; Point to hash table
+	ld	b,HashLen / 2
+	xor	a
+IniHashLoop:
+	ld	(hl),a		; Clear all
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	dec	b
+	jp	nz,IniHashLoop
+	ld	hl,0
+	ld	(CurrSymb),hl	; Clear current symbol pointer
+	ret
+;
+; Build hash value of symbol
+;
+SymbHash:
+	ld	hl,ActSymb
+	ld	b,(hl)		; Get length of symbol
+	xor	a
+SymbHashLoop:
+	inc	hl
+	add	a,(hl)		; Add characters
+	dec	b
+	jp	nz,SymbHashLoop
+	and	NOMSB
+	ld	(HashVal),a	; Save hash value
+	ret
+;
+; NEVER CALLED
+;
+Never1:
+	ld	b,a
+	ld	hl,(CurrSymb)	; Get current symbol pointer
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	and	HIMASK
+	or	b
+	ld	(hl),a
+	ret
+;
+; Get length of symbol
+;
+SymbLen:
+	ld	hl,(CurrSymb)	; Fetch current symbol pointer
+	inc	hl		; Skip link
+	inc	hl
+	ld	a,(hl)		; Get length
+	and	LOMASK		; Mask bits
+	inc	a
+	ret
+;
+; Test hash entry defined - Z set says no
+;
+isSymb:
+	ld	hl,(CurrSymb)	; Get symbol pointer
+	ld	a,l
+	or	h
+	ret
+;
+; Find symbol
+;
+FindSymb:
+	call	SymbHash	; Build hash value of symbol
+	ld	hl,ActSymb
+	ld	a,(hl)		; Get length of symbol
+	cp	SYMlen+1	; Test in range
+	jp	c,TrncLen	; Yeap
+	ld	(hl),SYMlen	; Truncate it
+TrncLen:
+	ld	hl,HashVal
+	ld	e,(hl)		; Get hash value
+	ld	d,0
+	ld	hl,HashTab	; Point to hash table
+	add	hl,de		; Position in table
+	add	hl,de
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	h,(hl)
+	ld	l,e
+SymbNext:
+	ld	(CurrSymb),hl	; Save symbol pointer
+	call	isSymb		; Test hash entry defined
+	ret	z		; Nope
+	call	SymbLen		; Get length of symbol
+	ld	hl,ActSymb
+	cp	(hl)		; Compare to length of symbol searched
+	jp	nz,SymbnoMatch	; No match
+	ld	b,a
+	inc	hl
+	ex	de,hl
+	ld	hl,(CurrSymb)	; Get symbol pointer
+	inc	hl		; Advance to name of symbol
+	inc	hl
+	inc	hl
+SymbCmp:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jp	nz,SymbnoMatch	; No match
+	inc	de
+	inc	hl
+	dec	b
+	jp	nz,SymbCmp
+	ret
+SymbnoMatch:
+	ld	hl,(CurrSymb)	; Get symbol pointer
+	ld	e,(hl)		; Fetch link to next symbol
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	SymbNext	; Try next
+;
+; Put symbol to table
+;
+StoreSymb:
+	ld	hl,ActSymb
+	ld	e,(hl)		; Get length of symbol
+	ld	d,0
+	ld	hl,(HeapPtr)	; Get heap pointer
+	ld	(CurrSymb),hl	; Save it for current symbol pointer
+	add	hl,de		; Add new top
+	ld	de,SYMman
+	add	hl,de		; Do not forget length of symbol
+	ex	de,hl
+	ld	hl,(TPATOP)	; Get top of memory
+	ld	a,e
+	sub	l		; Test room in memory
+	ld	a,d
+	sbc	a,h
+	ex	de,hl
+	jp	nc,SymTabOfl	; Nope, tell symbol table overflow
+	ld	(HeapPtr),hl	; Set new heap pointer
+	ld	hl,(CurrSymb)	; Get current symbol pointer
+	ex	de,hl
+	ld	hl,HashVal
+	ld	c,(hl)		; Get hash value
+	ld	b,0
+	ld	hl,HashTab	; Point to hash table
+	add	hl,bc		; Build index into hash table
+	add	hl,bc
+	ld	c,(hl)		; Get current pointer
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),d		; Change against new pointer
+	dec	hl
+	ld	(hl),e
+	ex	de,hl
+	ld	(hl),c		; Set old pointer into new one
+	inc	hl
+	ld	(hl),b
+	ld	de,ActSymb
+	ld	a,(de)		; Get length of symbol
+	cp	SYMlen+1	; Verify valid range
+	jp	c,StTrunc
+	ld	a,SYMlen	; Truncate
+StTrunc:
+	ld	b,a
+	dec	a
+	inc	hl
+	ld	(hl),a		; Save length of label
+StSymLoop:
+	inc	hl
+	inc	de
+	ld	a,(de)
+	ld	(hl),a		; Unpack name of symbol
+	dec	b
+	jp	nz,StSymLoop
+	xor	a
+	inc	hl
+	ld	(hl),a		; Clear next entries
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	ret
+SymTabOfl:
+	ld	hl,SYM$OFL
+	call	String		; Tell symbol table overflow
+	jp	Flush		; Flush buffers
+;
+SYM$OFL:
+	db	'Symbol table overflow',cr
+;
+; Insert control bits into symbol
+;
+StSymCtrl:
+	rla			; Put bits into upper ones
+	rla
+	rla
+	rla
+	and	HIMASK		; Mask them
+	ld	b,a
+	ld	hl,(CurrSymb)	; Get current symbol pointer
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Fetch length
+	and	LOMASK
+	or	b		; Insert bits
+	ld	(hl),a		; Store combination
+	ret
+;
+; Extract control bits from symbol
+;
+LdSymCtrl:
+	ld	hl,(CurrSymb)	; Get current symbol pointer
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Load control bits
+	rra			; Shift into lower position
+	rra
+	rra
+	rra
+	and	LOMASK		; Extract bits
+	ret
+;
+; Position symbol to its value
+;
+PosSymVal:
+	call	SymbLen		; Get length of symbol
+	ld	hl,(CurrSymb)	; Get current symbol pointer
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Point behind name
+	inc	hl		; Skip administrative bytes
+	inc	hl
+	inc	hl
+	ret
+;
+; Insert value and ref line number into symbol
+; ENTRY	Reg HL holds value
+;
+StSymVal:
+	push	hl
+	call	PosSymVal	; Position symbol to its value
+	pop	de
+	ld	(hl),e		; Insert value
+	inc	hl
+	ld	(hl),d
+	push	hl
+	push	bc
+	inc	hl
+	ld	bc,BCDline	; Point to BCD line number
+	ld	a,(bc)		; Get line number
+	ld	(hl),a		; Store it
+	inc	hl
+	inc	bc
+	ld	a,(bc)
+	ld	(hl),a
+	pop	bc
+	pop	hl
+	ret
+;
+; Load value of symbol
+; EXIT	Reg HL holds value
+;
+LdSymVal:
+	call	PosSymVal	; Position symbol to its value
+	ld	e,(hl)		; Load value
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ret
+;
+; Pointer to mnemonics
+;
+MnemoPtr:
+	dw	OP$ONE		; One byte mnemonic
+	dw	OP$TWO		; Two bytes mnemonic
+	dw	OP$THR		; Three bytes mnemonic
+	dw	OP$FOU		; Four bytes mnemonic
+	dw	OP$FIV		; Five bytes mnemonic
+;
+	dw	OpcTab1
+MnemoLen:
+	db	OP1len / 1
+	db	OP2len / 2
+	db	OP3len / 3
+	db	OP4len / 4
+	db	OP5len / 5
+MnemoCod:
+	dw	OpcTab1
+	dw	OpcTab2
+	dw	OpcTab3
+	dw	OpcTab4
+	dw	OpcTab5
+OP$ONE:
+	db	cr,'()*+,-/ABCDEHLM'
+OP1len	equ	$-OP$ONE
+OP$TWO:
+	db	'DB','DI','DS','DW','EI','IF','IN','OR','SP'
+OP2len	equ	$-OP$TWO
+OP$THR:
+	db	'ACI','ADC','ADD','ADI','ANA','AND'
+	db	'ANI','CMA','CMC','CMP','CPI','DAA'
+	db	'DAD','DCR','DCX','END','EQU','HLT'
+	db	'INR','INX','JMP','LDA','LXI','MOD'
+	db	'MOV','MVI','NOP','NOT','ORA','ORG'
+	db	'ORI','OUT','POP','PSW','RAL','RAR'
+	db	'RET','RLC','RRC','RST','SBB','SBI'
+	db	'SET','SHL','SHR','STA','STC','SUB'
+	db	'SUI','SYM','XOR','XRA','XRI'
+OP3len	equ	$-OP$THR
+OP$FOU:
+	db	'CALL','LDAX','LHLD','LINK','PCHL','PUSH'
+	db	'SHLD','SPHL','STAX','XCHG','XREF','XTHL'
+OP4len	equ	$-OP$FOU
+OP$FIV:
+	db	'ENDIF','MACRO','TITLE'
+OP5len	equ	$-OP$FIV
+;
+; Type and opcode table
+;
+; TYPES
+;
+;  0	*
+;  1	/
+;  2	MOD
+;  3	SHL
+;  4	SHR
+;  5	+
+;  6	-
+;  7	N.C.
+;  8	NOT
+;  9	AND
+; 10	OR
+; 11	XOR
+; 12	Open parenthesis
+; 13	Close parenthesis
+; 14	Comma
+; 15	End of line
+; 16	Register
+; 17	Pseudo opcodes
+; 18	N.C.
+; 19	One byte opcodes
+; 20	Load register pair with word
+; 21	DAD
+; 22	POP, PUSH
+; 23	JMP, CALL
+; 24	MOV
+; 25	MVI
+; 26	Opcode with immediate byte
+; 27	LDAX, STAX
+; 28	Load and store direct
+; 29	Opcode with register
+; 30	Opcode with register (DCR, INR)
+; 31	Opcode with register pair (DCX, INX)
+; 32	RST
+; 33	I/O opcode
+;
+OpcTab1:
+	db	_eol,00ah
+	db	_lftpar,014h
+	db	_rgtpar,01eh
+	db	_mul,050h
+	db	_plus,046h
+	db	_comma,00ah
+	db	_minus,046h
+	db	_div,050h
+	db	_reg,007h
+	db	_reg,000h
+	db	_reg,001h
+	db	_reg,002h
+	db	_reg,003h
+	db	_reg,004h
+	db	_reg,005h
+	db	_reg,006h
+OpcTab2:
+	db	_psopc,@db
+	db	_opc1,0f3h
+	db	_psopc,@ds
+	db	_psopc,@dw
+	db	_opc1,0fbh
+	db	_psopc,@if
+	db	_io,0dbh
+	db	_or,028h
+	db	_reg,006h
+OpcTab3:
+	db	_opcim8,0ceh
+	db	_opcr,088h
+	db	_opcr,080h
+	db	_opcim8,0c6h
+	db	_opcr,0a0h
+	db	_and,032h
+	db	_opcim8,0e6h
+	db	_opc1,02fh
+	db	_opc1,03fh
+	db	_opcr,0b8h
+	db	_opcim8,0feh
+	db	_opc1,027h
+	db	_dad,009h
+	db	_opcri,005h
+	db	_opcrp,00bh
+	db	_psopc,@end
+	db	_psopc,@equ
+	db	_opc1,076h
+	db	_opcri,004h
+	db	_opcrp,003h
+	db	_jmp,0c3h
+	db	_lddir,03ah
+	db	_ld16,001h
+	db	_mod,050h
+	db	_mov,040h
+	db	_mvi,006h
+	db	_opc1,000h
+	db	_not,03ch
+	db	_opcr,0b0h
+	db	_psopc,@org
+	db	_opcim8,0f6h
+	db	_io,0d3h
+	db	_push,0c1h
+	db	_reg,006h
+	db	_opc1,017h
+	db	_opc1,01fh
+	db	_opc1,0c9h
+	db	_opc1,007h
+	db	_opc1,00fh
+	db	_rst,0c7h
+	db	_opcr,098h
+	db	_opcim8,0deh
+	db	_psopc,@set
+	db	_shl,050h
+	db	_shr,050h
+	db	_lddir,032h
+	db	_opc1,037h
+	db	_opcr,090h
+	db	_opcim8,0d6h
+	db	_psopc,@sym
+	db	_xor,028h
+	db	_opcr,0a8h
+	db	_opcim8,0eeh
+OpcTab4:
+	db	_jmp,0cdh
+	db	_ldax,00ah
+	db	_lddir,02ah
+	db	_psopc,@link
+	db	_opc1,0e9h
+	db	_push,0c5h
+	db	_lddir,022h
+	db	_opc1,0f9h
+	db	_ldax,002h
+	db	_opc1,0ebh
+	db	_psopc,@xref
+	db	_opc1,0e3h
+OpcTab5:
+	db	_psopc,@endif
+	db	_psopc,@macro
+	db	_psopc,@title
+;
+; Condition codes
+;
+CCtab:
+	db	'NZ'
+	db	'Z '
+	db	'NC'
+	db	'C '
+	db	'PO'
+	db	'PE'
+	db	'P '
+	db	'M '
+CClen	equ	$-CCtab
+;
+; Find mnemonic
+; ENTRY	Reg HL points to list
+;	Reg B holds number of items in list
+;	Reg D holds length of item
+; EXIT	Zero flag set says match
+;	Accu holds index
+;
+MnemoSrc:
+	ld	e,-1		; Init result
+	inc	b
+	ld	c,0
+MnemoNxt:
+	xor	a
+	ld	a,b
+	add	a,c		; Fix index
+	rra
+	cp	e		; Test end of list
+	jp	z,MnemNoFnd	; Yeap
+	ld	e,a
+	push	hl
+	push	de
+	push	bc
+	push	hl
+	ld	b,d
+	ld	c,b
+	ld	d,0
+	ld	hl,0
+MnemoPos:
+	add	hl,de		; Position in list
+	dec	b
+	jp	nz,MnemoPos
+	pop	de
+	add	hl,de
+	ld	de,ActSymb+1	; Point to item to search
+MnemoCmp:
+	ld	a,(de)
+	cp	(hl)		; Compare
+	inc	de
+	inc	hl
+	jp	nz,MnemNoMtch	; No match
+	dec	c		; Test done
+	jp	nz,MnemoCmp	; Nope
+	pop	bc
+	pop	de
+	pop	hl
+	ld	a,e		; Get back index
+	ret
+MnemNoMtch:
+	pop	bc
+	pop	de
+	pop	hl
+	jp	c,MnemChDir
+	ld	c,e		; Change index
+	jp	MnemoNxt
+MnemChDir:
+	ld	b,e		; Change index
+	jp	MnemoNxt
+MnemNoFnd:
+	xor	a
+	inc	a
+	ret
+;
+; Test conditional JMP, CALL or RET
+; EXIT	Zero flag set says yes
+;
+isJCR:
+	ld	a,(ActSymb+1)	; Get first character
+	ld	bc,256*0c2h+23	; Init JMP
+	cp	'J'		; Test JMP
+	ret	z		; Nope
+	ld	b,0c4h		; Change to CALL
+	cp	'C'
+	ret	z
+	ld	bc,256*0c0h+19	; Change to RET
+	cp	'R'
+	ret
+;
+; Get condition code for JMP, CALL or RET
+; EXIT	Zero flag set says success
+;
+CC_JCR:
+	ld	a,(ActSymb)	; Get length of symbol
+	cp	4
+	jp	nc,noCC_JCR	; Invalid
+	cp	3
+	jp	z,srcCC_JCR
+	cp	2
+	jp	nz,noCC_JCR
+	ld	hl,ActSymb+3	; Point to last letter
+	ld	(hl),' '	; Clear it
+srcCC_JCR:
+	ld	bc,0*256+(CClen / 2)
+	ld	de,CCtab	; Point to condition codes
+CC_JCRLoop:
+	ld	hl,ActSymb+2	; Point to symbol
+	ld	a,(de)
+	cp	(hl)		; Compare
+	inc	de
+	jp	nz,CC_JCRnoMatch; Not found
+	ld	a,(de)
+	inc	hl
+	cp	(hl)
+	ret	z		; Got it
+CC_JCRnoMatch:
+	inc	de
+	inc	b
+	dec	c
+	jp	nz,CC_JCRLoop
+	inc	c		; Indicate no success
+	ret
+noCC_JCR:
+	xor	a
+	inc	a		; Indicate no success
+	ret
+;
+; Find mnemonic
+; EXIT	Zero flag set reflects match
+;	Accu holds function code
+;	Reg B hold operational code
+;
+MnemoFind:
+	ld	a,(ActSymb)	; Get length of symbol
+	ld	c,a
+	dec	a		; Make 0 relative
+	ld	e,a
+	ld	d,0
+	push	de
+	cp	4+1		; Test possible mnemonic
+	jp	nc,MnemoInvalid	; Nope
+	ld	hl,MnemoLen
+	add	hl,de		; Position in count table
+	ld	b,(hl)		; Get number of items
+	ld	hl,MnemoPtr
+	add	hl,de		; Position in table
+	add	hl,de
+	ld	d,(hl)		; Fetch list address
+	inc	hl
+	ld	h,(hl)
+	ld	l,d
+	ld	d,c
+	call	MnemoSrc	; Find mnemonic
+	jp	nz,MnemoNotFnd	; Nope, maybe conditional JMP, CALL or RET
+	pop	de
+	ld	hl,MnemoCod
+	add	hl,de		; Position in code table
+	add	hl,de
+	ld	e,(hl)		; Fetch sub address
+	inc	hl
+	ld	d,(hl)		; Get mnemonic index
+	ld	l,a
+	ld	h,0
+	add	hl,hl
+	add	hl,de
+	ld	a,(hl)		; Get type
+	inc	hl
+	ld	b,(hl)		; Get opcode
+	ret
+MnemoNotFnd:
+	pop	de
+	call	isJCR		; Test conditional JMP, CALL or RET
+	ret	nz		; Nope
+	push	bc
+	call	CC_JCR		; Get condition code for JMP, CALL or RET
+	ld	a,b
+	pop	bc
+	ret	nz		; Not found
+	or	a
+	rla			; Shift into right place
+	rla
+	rla
+	or	b		; Combine with base opcode
+	ld	b,a
+	ld	a,c
+	cp	a		; Set success
+	ret
+;
+; Return here if no success took place
+;
+MnemoInvalid:
+	pop	de
+	xor	a
+	inc	a
+	ret
+;
+LeftPar:
+	db	0		; Indicates left parenthesis if 0xFF
+AESTKfnStk:
+	ds	ALUlen		; ALU function stack
+AESTKopStk:
+	ds	ALUlen		; ALU operand stack
+AESTKStk:
+	ds	ASTlen		; Arithmetic stack
+AESTKmidx:
+	db	0		; Arithmetic stack main index
+AESTKidx:
+	db	0		; Arithmetic stack index
+;
+; Push value on arithmetic stack
+;
+PushAESTK:
+	ex	de,hl
+	ld	hl,AESTKidx	; Point to arithmetic stack index
+	ld	a,(hl)		; Get it
+	cp	ASTlen		; Test room on stack
+	jp	c,AESTKfree	; Yeap
+	call	ExprErr		; Expression error if not
+	ld	(hl),0		; Reset index
+AESTKfree:
+	ld	a,(hl)		; Get current index
+	inc	(hl)		; Advance it
+	inc	(hl)
+	ld	c,a
+	ld	b,0
+	ld	hl,AESTKStk
+	add	hl,bc		; Position in stack
+	ld	(hl),e		; Store value
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Push function code and operational code onto arithmetic stack
+; ENTRY	Accu holds function code
+;	Reg B holds operational code
+;
+PushCode:
+	push	af
+	ld	hl,AESTKmidx	; Point to arithmetic stack index
+	ld	a,(hl)		; Get it
+	cp	ALUlen		; Test room on stack
+	jp	c,PushCodeOk	; Yeap
+	ld	(hl),0		; Clear index
+	call	ExprErr		; Expression error
+PushCodeOk:
+	ld	e,(hl)		; Get current index
+	ld	d,0
+	inc	(hl)		; Advance it
+	pop	af
+	ld	hl,AESTKfnStk
+	add	hl,de		; Point to ALU function stack
+	ld	(hl),a		; Store function
+	ld	hl,AESTKopStk
+	add	hl,de		; Point to ALU operand stack
+	ld	(hl),b		; Store operand
+	ret
+;
+; Pop value from arithmetic stack
+; EXIT	Reg HL holds value
+;
+PopAESTK:
+	ld	hl,AESTKidx	; Point to arithmetic stack index
+	ld	a,(hl)		; Get it
+	or	a		; Verify any on stack
+	jp	nz,AESTKempty	; Yeap
+	call	ExprErr		; Expression error if not
+	ld	hl,0		; Return zero
+	ret
+AESTKempty:
+	dec	(hl)		; Adjust index
+	dec	(hl)
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,AESTKStk
+	add	hl,bc		; Position in stack
+	ld	c,(hl)		; Load value
+	inc	hl
+	ld	h,(hl)
+	ld	l,c
+	ret
+;
+; Pop two values from arithmetic stack
+;
+Pop2AESTK:
+	call	PopAESTK	; Pop 1st value from arithmetic stack
+	ex	de,hl
+	call	PopAESTK	; Pop 2nd value from arithmetic stack
+	ret
+;
+; Do ALU operation
+;
+ALUexec:
+	ld	l,a		; Set index
+	ld	h,0
+	add	hl,hl
+	ld	de,ALUtab
+	add	hl,de		; Position in table
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	h,(hl)
+	ld	l,e
+	jp	(hl)		; Execute it
+;
+ALUtab:
+	dw	ALUmul		; *		0
+	dw	ALUdiv		; /		1
+	dw	ALUmod		; MOD		2
+	dw	ALUshl		; SHL		3
+	dw	ALUshr		; SHR		4
+	dw	ALUadd		; +		5
+	dw	ALUmin		; -		6
+	dw	ALUneg		; Unary -	7
+	dw	ALUnot		; NOT		8
+	dw	ALUand		; AND		9
+	dw	ALUor		; OR		10
+	dw	ALUxor		; XOR		11
+	dw	ExprErr		; Expression error
+;
+; Pop two values from stack and verify range
+;
+Pop2Vrfy:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+	ld	a,d
+	or	a		; Verify byte range
+	jp	nz,Pop2VrfyErr
+	ld	a,e
+	cp	MAXBITS+1	; Verify valid bit range
+	ret	c
+Pop2VrfyErr:
+	call	ExprErr		; Expression error if out of range
+	ld	a,MAXBITS
+	ret
+;
+; HL:=-HL
+;
+negHL:
+	xor	a
+	sub	l		; Negate value
+	ld	l,a
+	ld	a,0
+	sbc	a,h
+	ld	h,a
+	ret
+;
+; Divide values (HL:=DIV, DE:=MOD)
+;
+divAESTK:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+divHLDE:
+	ex	de,hl
+	ld	(divVal),hl	; Save value
+	ld	hl,divCnt
+	ld	(hl),DIVBIT	; Init count
+	ld	bc,0		; Init quotient
+	push	bc
+	xor	a
+divLoop:
+	ld	a,e
+	rla			; Perform division
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	dec	(hl)
+	pop	hl
+	ret	z
+	ld	a,0
+	adc	a,0
+	add	hl,hl
+	ld	b,h
+	add	a,l
+	ld	hl,(divVal)	; Get divisor
+	sub	l
+	ld	c,a
+	ld	a,b
+	sbc	a,h
+	ld	b,a
+	push	bc
+	jp	nc,divCY
+	add	hl,bc
+	ex	(sp),hl
+divCY:
+	ld	hl,divCnt	; Point to bit count
+	ccf
+	jp	divLoop
+;
+divVal:
+	dw	0		; Divisor
+divCnt:
+	db	0		; Bit count
+;
+; Multiply values
+;
+mulHLDE:
+	ld	b,h		; Copy value
+	ld	c,l
+	ld	hl,0		; Init result
+mulLoop:
+	xor	a
+	ld	a,b
+	rra			; Perform multiplication
+	ld	b,a
+	ld	a,c
+	rra
+	ld	c,a
+	jp	c,mulCY
+	or	b
+	ret	z
+	jp	mulnext
+mulCY:
+	add	hl,de
+mulnext:
+	ex	de,hl
+	add	hl,hl
+	ex	de,hl
+	jp	mulLoop
+;
+; Operator *
+;
+ALUmul:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+	call	mulHLDE		; Multiply values
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Operator /
+;
+ALUdiv:
+	call	divAESTK	; Divide values
+	ex	de,hl
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Operator MOD
+;
+ALUmod:
+	call	divAESTK	; Divide values
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Operator SHL
+;
+ALUshl:
+	call	Pop2Vrfy	; Pop two values from stack and verify range
+SHLloop:
+	or	a
+	jp	z,PushAESTK	; Push result on arithmetic stack
+	add	hl,hl		; Shift left
+	dec	a
+	jp	SHLloop
+;
+; Operator SHR
+;
+ALUshr:
+	call	Pop2Vrfy	; Pop two values from stack and verify range
+SHRloop:
+	or	a
+	jp	z,PushAESTK	; Push result on arithmetic stack
+	push	af
+	xor	a
+	ld	a,h
+	rra			; Shift right
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	pop	af
+	dec	a
+	jp	SHRloop
+;
+; Operator +
+;
+ALUadd:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+MinAdd:
+	add	hl,de		; Add values
+	jp	PushAESTK
+;
+; Operator -
+;
+ALUmin:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+	ex	de,hl
+	call	negHL		; HL:=-HL
+	jp	MinAdd		; Then add
+;
+; Operator unary -
+;
+ALUneg:
+	call	PopAESTK	; Pop value from arithmetic stack
+negNOT:
+	call	negHL		; HL:=-HL
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Operator NOT
+;
+ALUnot:
+	call	PopAESTK	; Pop value from arithmetic stack
+	inc	hl		; Prepare complement
+	jp	negNOT
+;
+; Operator AND
+;
+ALUand:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+	ld	a,d
+	and	h		; AND bits
+	ld	h,a
+	ld	a,e
+	and	l
+	ld	l,a
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Operator OR
+;
+ALUor:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+	ld	a,d
+	or	h		; OR bits
+	ld	h,a
+	ld	a,e
+	or	l
+	ld	l,a
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Operator XOR
+;
+ALUxor:
+	call	Pop2AESTK	; Pop two values from arithmetic stack
+	ld	a,d
+	xor	h		; XOR bits
+	ld	h,a
+	ld	a,e
+	xor	l
+	ld	l,a
+	jp	PushAESTK	; Push result on arithmetic stack
+;
+; Test delimiter
+; EXIT	Zero flag set says yes
+;
+isDelim:
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	ret	nz		; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	cr
+	ret	z
+	cp	';'
+	ret	z
+	cp	','
+	ret	z
+	cp	'!'
+	ret
+;
+; Calculate expression
+;
+CalcExpr:
+	xor	a
+	ld	(AESTKmidx),a	; Clear index
+	ld	(AESTKidx),a	; Clear arithmetic stack index
+	dec	a
+	ld	(LeftPar),a	; Indicate left parenthesis
+	ld	hl,0
+	ld	(Exprs),hl	; Init expression
+isCEDelim:
+	call	isDelim		; Test delimiter
+	jp	nz,CEnoDelim	; Nope
+CEexec:
+	ld	hl,AESTKmidx
+	ld	a,(hl)		; Get index
+	or	a
+	jp	z,CEempty
+	dec	(hl)
+	ld	e,a
+	dec	e
+	ld	d,0
+	ld	hl,AESTKfnStk	; Point to ALU function stack
+	add	hl,de
+	ld	a,(hl)		; Get ALU function
+	call	ALUexec		; Do ALU operation
+	jp	CEexec
+CEempty:
+	ld	a,(AESTKidx)	; Get arithmetic stack index
+	cp	2		; Verify value
+	call	nz,ExprErr	; Expression error if not
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '
+	ret	nz
+	ld	hl,(AESTKStk)	; Get first value from stack
+	ld	(Exprs),hl	; Set as expression result
+	ret
+CEnoDelim:
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '
+	jp	nz,CEaddParen
+	ld	a,(ChrType)	; Get type of character
+	cp	_STRING		; Test string constant
+	jp	nz,CEnoStrg	; Nope
+	ld	a,(ActSymb)	; Get length of symbol
+	or	a
+	call	z,ExprErr	; Expression error
+	cp	3
+	call	nc,ExprErr	; Expression error
+	ld	d,0
+	ld	hl,ActSymb+1	; Init line pointer
+	ld	e,(hl)		; Get lo part
+	inc	hl
+	dec	a		; Test hi part required
+	jp	z,CEbyte	; Nope
+	ld	d,(hl)		; Get hi part
+CEbyte:
+	ex	de,hl
+	jp	CEsetTerm
+CEnoStrg:
+	cp	_DIGIT		; Test digit
+	jp	nz,CEnoDig
+	ld	hl,(ExprVal)	; Get result
+	jp	CEsetTerm
+CEnoDig:
+	call	MnemoFind	; Find opcode
+	jp	nz,l1224	; Not found
+	cp	_eol+1		; Test ALU codes
+	jp	nc,CEnoALU	; Nope
+	cp	_lftpar		; Test open parenthesis
+	ld	c,a
+	ld	a,(LeftPar)
+	jp	nz,CEnoOpen	; Nope
+	or	a
+	call	z,ExprErr	; Expression error
+	ld	a,TRUE
+	ld	(LeftPar),a	; Indicate left parenthesis
+	ld	a,c
+	jp	CEsetResult
+CEnoOpen:
+	or	a		; Test previous selection of left parenthesis
+	jp	nz,CEleftOpen	; Yeap
+CEsetALUres:
+	push	bc
+	ld	a,(AESTKmidx)	; Get index
+	or	a		; Test empty
+	jp	z,CEendAESTK	; Yeap
+	ld	e,a
+	dec	e
+	ld	d,0
+	ld	hl,AESTKopStk
+	add	hl,de		; Point to ALU operand stack
+	ld	a,(hl)		; Get operand
+	cp	b
+	jp	c,CEendAESTK
+	ld	hl,AESTKmidx
+	ld	(hl),e		; Set index
+	ld	hl,AESTKfnStk	; Point to ALU function stack
+	add	hl,de
+	ld	a,(hl)		; Get ALU function
+	call	ALUexec		; Do ALU operation
+	pop	bc
+	jp	CEsetALUres
+CEendAESTK:
+	pop	bc
+	ld	a,c
+	cp	_rgtpar		; Test close parenthesis
+	jp	nz,CEsetResult	; Nope
+	ld	hl,AESTKmidx
+	ld	a,(hl)		; Get index
+	or	a
+	jp	z,CEexprErr	; Expression error if empty
+	dec	a
+	ld	(hl),a		; Store new index
+	ld	e,a
+	ld	d,0
+	ld	hl,AESTKfnStk	; Point to ALU function stack
+	add	hl,de
+	ld	a,(hl)		; Get function
+	cp	_lftpar		; Test open parenthesis
+	jp	z,CEopenParen
+CEexprErr:
+	call	ExprErr		; Expression error
+CEopenParen:
+	xor	a
+	jp	CEresetParen
+CEsetResult:
+	call	PushCode	; Save codes onto arithmetic stack
+	ld	a,TRUE
+CEresetParen:
+	ld	(LeftPar),a
+	jp	CEaddParen
+CEleftOpen:
+	ld	a,c
+	cp	_plus		; Test +
+	jp	z,CEaddParen
+	cp	_minus		; Test -
+	jp	nz,CEisNOT
+	inc	a
+	ld	c,a
+	jp	CEsetALUres
+CEisNOT:
+	cp	_not		; Test NOT
+	call	nz,ExprErr	; Expression error not NOT
+	jp	CEsetALUres
+CEnoALU:
+	cp	_psopc		; Test pseudo opcode
+	call	z,ExprErr	; Expression error
+	ld	l,b
+	ld	h,0
+	jp	CEsetTerm
+l1224::
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,l1243	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	'$'
+	jp	z,l123d
+	call	ExprErr		; Expression error
+	ld	hl,0
+	jp	CEsetTerm
+l123d:
+	ld	hl,(BegPrgCtr)	; Get current start address
+	jp	CEsetTerm
+l1243:
+	call	FindSymb	; Find symbol
+	call	isSymb		; Test symbol found
+	jp	nz,CEisUndef	; Yeap
+	ld	a,'P'
+	call	SetERR		; Phase error
+	call	StoreSymb	; Put symbol to table
+	jp	l1261
+CEisUndef:
+	call	LdSymCtrl	; Extract control bits from symbol
+	and	bct1
+	ld	a,'U'
+	call	z,SetERR	; U error ??? - Undefined symbol
+l1261:
+	call	LdSymVal	; Load value of symbol
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	jp	z,CEsetTerm		; Yeap
+	ld	a,(FileMod)	; Get file bits
+	and	_CRF		; Test cross reference file requested
+	jp	z,CEsetTerm		; Nope
+	push	hl
+	push	de
+	inc	de
+	ld	hl,(HeapTop)	; Get top of heap
+	ld	a,(de)		; Get current address
+	ld	(hl),a		; Store it
+	inc	de
+	inc	hl
+	ld	a,(de)
+	ld	(hl),a
+	inc	hl
+	ld	a,(BCDline)	; Get BCD line number
+	ld	(hl),a		; Unpack it
+	inc	hl
+	ld	a,(BCDline+1)
+	ld	(hl),a
+	ld	de,-(2*REFOFFS-1)
+	add	hl,de		; Fix for start of heap
+	ld	(HeapTop),hl	; Set top of heap
+	ex	de,hl
+	ld	hl,(HeapPtr)	; Get heap pointer
+	ld	a,l
+	sub	e
+	ld	a,h
+	sbc	a,d
+	pop	de
+	pop	hl
+	jp	nc,SymTabOfl
+CEsetTerm:
+	ld	a,(LeftPar)
+	or	a
+	call	z,ExprErr	; Expression error
+	xor	a
+	ld	(LeftPar),a
+	call	PushAESTK	; Push result on arithmetic stack
+CEaddParen:
+	call	Expression	; Scan for expression
+	jp	isCEDelim
+;
+; Expression error
+;
+ExprErr:
+	push	hl
+	ld	a,'E'
+	call	SetERR		; Expression error
+	pop	hl
+	ret
+;
+; Start assembler
+;
+StartLASM:
+	xor	a
+	ld	(CurrPass),a	; Init pass
+	ld	hl,(TPATOP)	; Get top of memory
+	ld	de,-HEAPfre
+	add	hl,de		; Build top of heap
+	ld	(HeapTop),hl
+	call	IniHash		; Init hash table
+;
+; Execute a pass
+;
+StartPass:
+	call	IniList		; Init counters and empty line to list device
+	ld	a,(CurrPass)	; Get current pass
+	add	a,'1'		; Make ASCII
+	ld	($PASS+5),a
+	ld	hl,$PASS
+	call	String		; Tell pass
+	ld	hl,SrcFCB
+	call	CopyFN		; Unpack .ASM file name
+	call	ResetSRC	; Reset source file
+	xor	a
+	ld	(HexBuff),a	; Clear object buffer length
+	ld	hl,0
+	ld	(SymbDef),hl	; Clear address of symbol
+	ld	(PrgCtr),hl	; Init program counter
+	ld	(BegPrgCtr),hl	; Init current start address
+	ld	(DelimPtr),hl	; Clear delimiter pointer
+PassNxt:
+	call	Expression	; Scan for expression
+PassTypChk:
+	ld	a,(ChrType)	; Get type of character
+	cp	_DIGIT		; Test digit
+	jp	z,PassNxt	; Yeap
+	cp	_OTHER		; Test any character
+	jp	nz,PassIsLett	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	'*'
+	jp	nz,EndOfLine	; Check end of statement line
+	call	ResSymb		; Reset symbol pointer and test if defined
+	jp	nz,SyntaxErr	; Syntax error if so
+	jp	ScanMoreLine
+PassIsLett:
+	cp	_LETTER		; Test letter
+	jp	nz,SyntaxErr	; Nope
+	call	MnemoFind	; Find opcode
+	jp	z,PassKwnMnemo	; Got it
+	call	FindSymb	; Find symbol
+	call	isSymb		; Test symbol found
+	jp	nz,PassKnownSym	; Yeap
+	call	StoreSymb	; Put symbol to table
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	call	nz,PhasErr	; Nope, phase error
+	jp	PassChkSym
+PassKnownSym:
+	call	LdSymCtrl	; Extract control bits from symbol
+	cp	bct2
+	jp	nz,PassChkSym
+	call	ImplmtErr	; Not implemented
+	jp	ScanMoreLine
+PassChkSym:
+	ld	hl,(SymbDef)	; Get address of symbol
+	ld	a,l
+	or	h
+	call	nz,LabelErr	; Label error if defined
+	ld	hl,(CurrSymb)	; Get current symbol pointer
+	ld	(SymbDef),hl	; Save it
+	call	Expression	; Scan for expression
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,PassTypChk	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	':'
+	jp	nz,PassTypChk
+	jp	PassNxt
+PassKwnMnemo:
+	cp	_psopc		; Test pseudo opcode
+	jp	nz,DoOpcodes	; Nope, process opcodes
+	ld	e,b		; Build index
+	ld	d,0
+	dec	de
+	ld	hl,PseuMnemTab
+	add	hl,de		; Position in table
+	add	hl,de
+	ld	e,(hl)		; Fetch address
+	inc	hl
+	ld	h,(hl)
+	ld	l,e
+	jp	(hl)		; Execute it
+;
+PseuMnemTab:
+	dw	PseudoDB	; DB
+	dw	PseudoDS	; DS
+	dw	PseudoDW	; DW
+	dw	PseudoEND	; END
+	dw	PseudoENDIF	; ENDIF
+	dw	PseudoLINK	; LINK
+	dw	PseudoEQU	; EQU
+	dw	PseudoIF	; IF
+	dw	PseudoMACRO	; MACRO
+	dw	PseudoORG	; ORG
+	dw	PseudoSET	; SET
+	dw	PseudoTITLE	; TITLE
+	dw	PseudoSYM	; SYM
+	dw	PseudoXREF	; XREF
+;
+; Pseudo opcode DB
+;
+PseudoDB:
+	call	ChkSymb		; Check for symbol
+DBnxt:
+	call	Expression	; Scan for expression
+	ld	a,(ChrType)	; Get type of character
+	cp	_STRING		; Test string constant
+	jp	nz,DBnoStrg	; Nope
+	ld	a,(ActSymb)	; Get length of symbol
+	dec	a
+	jp	z,DBnoStrg
+	ld	b,a
+	inc	b
+	inc	b
+	ld	hl,ActSymb+1	; Init item pointer
+DBstStrg:
+	dec	b
+	jp	z,DBendStrg
+	push	bc
+	ld	b,(hl)
+	inc	hl
+	push	hl
+	call	StOPCbyteB	; Store byte into code
+	pop	hl
+	pop	bc
+	jp	DBstStrg
+DBendStrg:
+	call	Expression	; Scan for expression
+	jp	DBtstMore
+DBnoStrg:
+	call	CalcExpr	; Calculate expression
+	ld	hl,(Exprs)	; Get expression
+	ld	a,h
+	or	a		; Verify byte
+	call	nz,DataErr	; Data error if not
+	ld	b,l
+	call	StOPCbyteB	; Store byte into code
+DBtstMore:
+	call	StPrgCtr	; Save program counter
+	call	VrfySyntax	; Verify correct syntax
+	cp	','		; Test more data
+	jp	z,DBnxt		; Yeap
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode DS
+;
+PseudoDS:
+	call	ChkSymb		; Check for symbol
+	call	IniBegLine	; Init line and put start address into beginning of line
+	call	GetOPCword	; Get word value
+	ex	de,hl
+	ld	hl,(BegPrgCtr)	; Get current start address
+	add	hl,de
+	ld	(BegPrgCtr),hl
+	ld	(PrgCtr),hl	; Save program counter
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode DW
+;
+PseudoDW:
+	call	ChkSymb		; Check for symbol
+DWnxt:
+	call	GetOPCword	; Get word value
+	push	hl
+	ld	b,l
+	call	StOPCbyteB	; Store byte into code
+	pop	hl
+	ld	b,h
+	call	StOPCbyteB	; Store byte into code
+	call	StPrgCtr	; Save program counter
+	call	VrfySyntax	; Verify correct syntax
+	cp	','		; Test more data
+	jp	z,DWnxt		; Yeap
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode END
+;
+PseudoEND:
+	call	ChkSymb		; Check for symbol
+	call	IniBegLine	; Init line and put start address into beginning of line
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '
+	jp	nz,EndOfLine	; Check end of statement line
+	call	GetOPCword	; Get word value
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '		; Test blank
+	jp	nz,PSEskp	; Nope
+	ld	(DelimPtr),hl	; Set delimiter pointer
+PSEskp:
+	ld	a,' '
+	ld	(SrcLine),a	; Set first character in source line
+	call	Expression	; Scan for expression
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,SyntaxErr	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	lf		; Test end of line
+	jp	nz,SyntaxErr
+	jp	LASMnext
+;
+; Pseudo opcode ENDIF
+;
+PseudoENDIF:
+	jp	PseudoInvalid	; Invalid here
+;
+; Pseudo opcode LINK
+;
+PseudoLINK:
+	call	Expression	; Scan for expression
+	ld	hl,SrcFCB+.drv
+	ld	de,ActSymb+1	; Init symbol pointer
+	ld	a,(ActSymb)	; Get length of symbol
+	or	a		; Verify correct range
+	jp	z,LinkErr
+	ld	b,a
+	ld	a,.nam+1
+	cp	b		; Verify correct length of name
+	jp	c,LinkErr
+	sub	b		; Build difference to name length
+	ld	c,a
+CpyLINK:
+	ld	a,(de)
+	ld	(hl),a		; Unpack into FCB
+	inc	de
+	inc	hl
+	dec	b
+	jp	nz,CpyLINK
+BlnkLINK:
+	dec	c
+	jp	z,DoLINK
+	ld	(hl),' '	; Blank remainder
+	inc	hl
+	jp	BlnkLINK
+DoLINK:
+	call	Expression	; Scan for expression
+	ld	a,(LastChar)	; Get character from source file
+	cp	eof		; Test end of file
+	jp	z,LinkErr	; Invalid
+	cp	lf		; Test end of line
+	jp	nz,DoLINK
+	call	ResetSRC	; Reset source file
+	call	Expression	; Scan for expression
+	jp	PassNxt
+;
+; NEVER CALLED
+;
+Never2:
+	ld	(hl),b
+	inc	hl
+	dec	c
+	jp	nz,CpyLINK
+	jp	DoLINK
+;
+; Link operand error
+;
+LinkErr:
+	ld	hl,LINK$ERR
+	call	String		; Tell link error
+	call	prnline		; Put line to list device
+	jp	OS		; Exit to CP/M
+;
+LINK$ERR:
+	db	'++ERROR IN LINK OPERAND++',cr
+;
+; Pseudo opcode EQU
+;
+PseudoEQU:
+	call	ResSymb		; Reset symbol pointer and test if defined
+	jp	z,SyntaxErr	; Syntax error if not
+	ld	hl,(BegPrgCtr)	; Get current start address
+	push	hl
+	call	GetOPCword	; Get word value
+	ld	(BegPrgCtr),hl	; Change current start address
+	call	ChkSymb		; Check for symbol
+	call	IniLine		; Init line and put current address into beginning of line
+	ld	hl,SrcLine+6
+	ld	(hl),'='
+	pop	hl
+	ld	(BegPrgCtr),hl	; Reset current start address
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode IF
+;
+PseudoIF:
+	call	ChkSymb		; Check for symbol
+	call	GetOPCword	; Get word value
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '
+	jp	nz,EndOfLine	; Check end of statement line
+	ld	a,l		; Test boolean
+	rra
+	jp	c,EndOfLine	; Check end of statement line
+IFnext:
+	call	Expression	; Scan for expression
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,isIFletter	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	eof
+	ld	a,'B'
+	call	z,SetERR	; Balance error
+	jp	z,LASMnext
+	jp	IFnext
+isIFletter:
+	cp	_LETTER
+	jp	nz,IFnext
+	call	MnemoFind	; Find opcode
+	jp	nz,IFnext	; Nope
+	cp	_psopc		; Test pseudo opcode
+	jp	nz,IFnext	; Nope
+	ld	a,b
+	cp	@endif		; Test ENDIF
+	jp	nz,IFnext	; Nope
+	jp	PseudoInvalid
+;
+; Pseudo opcode MACRO
+;
+PseudoMACRO:
+	call	ImplmtErr	; Not implemented
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode ORG
+;
+PseudoORG:
+	call	GetOPCword	; Get word value
+	ld	a,(SrcLine)	; Get first character in source line
+	cp	' '
+	jp	nz,EndOfLine	; Check end of statement line
+	ld	(BegPrgCtr),hl	; Set current start address
+	ld	(PrgCtr),hl	; Set program counter
+	call	ChkSymb		; Check for symbol
+	call	IniBegLine	; Init line and put start address into beginning of line
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode SET
+;
+PseudoSET:
+	call	ResSymb		; Reset symbol pointer and test if defined
+	jp	z,SyntaxErr	; Syntax error if not
+	call	LdSymCtrl	; Extract control bits from symbol
+	cp	bct3
+	call	nz,LabelErr	; Label error
+	ld	a,bct3
+	call	StSymCtrl	; Insert control bits into symbol
+	call	GetOPCword	; Get word value
+	push	hl
+	call	ResSymb		; Reset symbol pointer and test if defined
+	pop	hl
+	call	StSymVal	; Insert value and ref line number into symbol
+	ld	hl,0
+	ld	(SymbDef),hl	; Reset address of symbol
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode TITLE
+;
+PseudoTITLE:
+	call	Expression	; Scan for expression
+	ld	a,(ChrType)	; Get type of character
+	cp	_STRING		; Test string constant
+	jp	nz,SyntaxErr	; Nope
+	ld	a,(ActSymb)	; Get length of symbol
+	ld	b,a
+	inc	b
+	ld	hl,ActSymb+1	; Init item pointer
+	ld	de,$PRGTTL	; Point to title
+CpyTITLE:
+	dec	b
+	jp	z,PseudoInvalid
+	ld	a,(hl)
+	ld	(de),a		; Unpack title
+	inc	hl
+	inc	de
+	jp	CpyTITLE
+PseudoInvalid:
+	call	Expression	; Skip any expression
+	jp	EndOfLine	; Check end of statement line
+;
+; Pseudo opcode SYM
+;
+PseudoSYM:
+	ld	hl,FileMod
+	ld	a,(hl)
+	or	_SYM		; Enable symbol file
+	ld	(hl),a
+	jp	PseudoInvalid
+;
+; Pseudo opcode XREF
+;
+PseudoXREF:
+	ld	hl,FileMod
+	ld	a,(hl)
+	or	_CRF		; Enable cross reference file
+	ld	(hl),a
+	jp	PseudoInvalid
+;
+; Process opcodes
+;
+DoOpcodes:
+	sub	_opc1		; Strip off offset
+	cp	_maxopc-_opc1	; Verify valid range
+	jp	nc,SyntaxErr
+	ld	e,a
+	ld	d,0
+	ld	hl,MnemoTab
+	add	hl,de
+	add	hl,de
+	ld	e,(hl)		; Fetch opcode address
+	inc	hl
+	ld	h,(hl)
+	ld	l,e
+	jp	(hl)
+;
+MnemoTab:
+	dw	OpcOneByte	; One byte opcodes
+	dw	OpcLXI		; Load register pair with word
+	dw	OpcDAD		; DAD
+	dw	OpcPUSH		; POP, PUSH
+	dw	OpcJMP		; JMP, CALL
+	dw	OpcMOV		; MOV
+	dw	OpcMVI		; MVI
+	dw	OpcImm8		; Opcode with immediate byte
+	dw	OpcLDAX		; LDAX, STAX
+	dw	OpcDir16	; Load and store direct
+	dw	OpcReg		; Opcode with register
+	dw	OpcRegINC	; Opcode with register (DCR, INR)
+	dw	OpcRegp		; Opcode with register pair (DCX, INX)
+	dw	OpcRST		; RST
+	dw	OpcIO		; I/O opcode
+;
+; One byte opcodes
+; Opcodes DI, EI, CMA, CMC, DAA, HLT, NOP, RAL, RAR, RET, RLC, RRC, STC, PCHL, SPHL, XCHG, XTHL
+;
+;
+OpcOneByte:
+	call	StOPCbyteB	; Store byte into code
+	call	Expression	; Scan for expression
+	jp	PrcEnd		; Process end of statement
+;
+; Load register pair with word
+;
+; Opcode LXI val16
+;
+OpcLXI:
+	call	GetRegp		; Get register pair
+	call	VrfyStaDel	; Verify statement delimiter
+	call	GetStWord	; Get and store word value
+	jp	PrcEnd		; Process end of statement
+;
+; Register pair add
+;
+; DAD rp
+;
+OpcDAD:
+	call	GetRegp		; Get register pair
+	jp	PrcEnd		; Process end of statement
+;
+; Push and pop registers
+;
+; POP, PUSH rp
+;
+OpcPUSH:
+	call	GetDstReg	; Get destination register
+	cp	dstbits		; Test Accu
+	jp	z,InsRegp	; Yeap
+	and	rpsel		; Verify not a low register
+	call	nz,RegErr	; Register error
+InsRegp:
+	ld	a,c
+	and	rpbits		; Make reg pair
+	or	b		; Insert code
+	jp	StResult	; Store result
+;
+; Adress reference
+;
+; JMP, CALL addr
+;
+OpcJMP:
+	call	StOPCbyteB	; Store byte into code
+	call	GetStWord	; Get and store word value
+	jp	PrcEnd		; Process end of statement
+;
+; Register to register move
+;
+; MOV r,r
+;
+OpcMOV:
+	call	GetDstReg	; Get destination register
+	or	b		; Build code
+	ld	b,a
+	call	VrfyStaDel	; Verify statement delimiter
+	call	GetRegVal	; Get register
+	or	b		; Insert source register
+	jp	StResult	; Store result
+;
+; Byte to register move
+;
+; MVI r,val8
+;
+OpcMVI:
+	call	GetDstReg	; Get destination register
+	or	b		; Put into code
+	call	StOPCbyte	; Store byte into code
+	call	VrfyStaDel	; Verify statement delimiter
+	call	GetStImm8	; Get and store byte value
+	jp	PrcEnd		; Process end of statement
+;
+; Opcode with immediate byte
+;
+; Opcodes ACI, ADI, ANI, CPI, ORI, SBI, SUI, XRI val8
+;
+OpcImm8:
+	call	StOPCbyteB	; Store byte into code
+	call	GetStImm8	; Get and store byte value
+	jp	PrcEnd		; Process end of statement
+;
+; Indirect Accu load and store
+;
+; LDAX, STAX rp
+;
+OpcLDAX:
+	call	GetDstReg	; Get destination register
+	and	rpxs		; Verify correct pointer register
+	call	nz,RegErr	; Register error if not
+	ld	a,c
+	and	rpx		; Extract bit
+	or	b		; Build opcode
+	jp	StResult	; Store result
+;
+; Load and store direct
+;
+; Opcodes LDA, STA, LHLD, SHLD addr
+;
+OpcDir16:
+	call	StOPCbyteB	; Store byte into code
+	call	GetStWord	; Get and store word value
+	jp	PrcEnd		; Process end of statement
+;
+; Opcode with register
+;
+; Opcodes ADC, ADD, ANA, CMP, ORA, SBB, SUB, XRA r
+;
+OpcReg:
+	call	GetRegVal	; Get register
+	or	b		; Insert opcode
+	jp	StResult	; Store result
+;
+; Opcode with register decrement and increment
+;
+; Opcodes DCR, INR r
+;
+OpcRegINC:
+	call	GetDstReg	; Get destination register
+	or	b		; Insert opcode
+	jp	StResult	; Store result
+;
+; Opcode with register pair decrement and increment
+;
+; Opcodes DCX, INX rp
+;
+OpcRegp:
+	call	GetDstReg	; Get destination register
+	and	rpsel		; Verify pair
+	call	nz,RegErr	; Register error if not
+	ld	a,c
+	and	rpbits		; Get register pair
+	or	b		; Insert opcode
+	jp	StResult	; Store result
+;
+; RST instruction
+;
+; Opcode RST val
+;
+OpcRST:
+	call	GetDstReg	; Get destination register bits
+	or	b
+	jp	StResult	; Store result
+;
+; I/O opcode
+;
+; Opcodes IN, OUT
+;
+OpcIO:
+	call	StOPCbyteB	; Store byte into code
+	call	GetStImm8	; Get and store byte value
+	jp	PrcEnd		; Process end of statement
+;
+; Store result
+;
+StResult:
+	call	StOPCbyte	; Store byte into code
+PrcEnd:
+	call	ChkSymb		; Check for symbol
+	call	StPrgCtr	; Save program counter
+	jp	EndOfLine	; Check end of statement line
+;
+; Verify correct syntax for DB and DW allocation
+;
+VrfySyntax:
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	call	nz,DataErr	; Nope, data error
+	ld	a,(ActSymb+1)	; Get first character
+	cp	','		; Test delimiter
+	ret	z		; End if so
+	cp	';'
+	ret	z
+	cp	cr		; Verify end of line
+	call	nz,DataErr	; Data error if not
+	ret
+;
+; Get word value
+;
+GetOPCword:
+	push	bc
+	call	Expression	; Scan for expression
+	call	CalcExpr	; Calculate expression
+	ld	hl,(Exprs)	; Get expression
+	pop	bc
+	ret
+;
+; Get byte value
+;
+GetOPCbyte:
+	call	GetOPCword	; Get word value
+	ld	a,h		; Verify byte
+	or	a
+	call	nz,ValueErr	; Value error if not
+	ld	a,l
+	ret
+;
+; Get register value
+;
+GetRegVal:
+	call	GetOPCbyte	; Get byte value
+	cp	rbits+1
+	call	nc,ValueErr	; Value error
+	and	rbits
+	ret
+;
+; Get destination register
+;
+GetDstReg:
+	call	GetRegVal	; Get register
+	rla			; Shift into right place
+	rla
+	rla
+	and	dstbits		; Extract bits
+	ld	c,a
+	ret
+;
+; Get register pair
+;
+GetRegp:
+	call	GetDstReg	; Get destination register
+	and	rpsel		; Verify register pair
+	call	nz,RegErr	; Register error if not
+	ld	a,c
+	and	rpbits		; Extract pair
+	or	b		; Combine code
+	jp	StOPCbyte	; Store byte into code
+;
+; Get and store byte value
+;
+GetStImm8:
+	call	GetOPCbyte	; Get byte value
+	jp	StOPCbyte	; Store byte into code
+;
+; Get and store word value
+;
+GetStWord:
+	call	GetOPCword	; Get word value
+	jp	StOPCword	; Store word into code
+;
+; Verify statement delimiter
+;
+VrfyStaDel:
+	push	af
+	push	bc
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,CondErr	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	','
+	jp	z,StaDelOk
+CondErr:
+	ld	a,'C'
+	call	SetERR		; Condition nested error ??
+StaDelOk:
+	pop	bc
+	pop	af
+	ret
+;
+; Check end of statement line
+;
+EndOfLine:
+	call	ChkSymb		; Check for symbol
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,SyntaxErr	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	cr
+	jp	nz,NotYetEnd
+	call	Expression	; Scan for expression
+	jp	PassNxt
+NotYetEnd:
+	cp	';'		; Test comment
+	jp	nz,NotAcomment	; Nope
+	call	ChkSymb		; Check for symbol
+ScanMoreLine:
+	call	Expression	; Scan for expression
+	ld	a,(ChrType)	; Get type of character
+	cp	_OTHER		; Test any character
+	jp	nz,ScanMoreLine	; Nope
+	ld	a,(ActSymb+1)	; Get first character
+	cp	lf		; Test end of line
+	jp	z,PassNxt
+	cp	eof		; Test end of file
+	jp	z,LASMnext
+	cp	'!'		; Test end of statement
+	jp	z,PassNxt
+	jp	ScanMoreLine
+NotAcomment:
+	cp	'!'		; Test end of statement
+	jp	z,PassNxt
+	cp	eof		; Test end of line
+	jp	z,LASMnext
+SyntaxErr:
+	ld	a,'S'
+	call	SetERR		; Syntax error
+	jp	ScanMoreLine
+;
+; HL:=DE-HL
+;
+subDEHL:
+	ld	a,e
+	sub	l		; Subtract
+	ld	l,a
+	ld	a,d
+	sbc	a,h
+	ld	h,a
+	ret
+;
+; Do next pass or final part of assembler
+;
+LASMnext:
+	xor	a
+	ld	(BCDline),a	; Init BCD line number
+	inc	a
+	ld	(BCDline+1),a
+	ld	hl,CurrPass	; Point to current pass
+	ld	a,(hl)
+	inc	(hl)
+	or	a		; Test first pass
+	jp	z,StartPass	; Yeap, do second pass
+;
+; Both passes finished
+;
+	call	Expression	; Scan for expression
+	call	IniBegLine	; Init line and put start address into beginning of line
+	ld	hl,SrcLine+5
+	ld	(hl),cr
+	ld	hl,SrcLine+1
+	call	String
+	ld	hl,(HeapPtr)	; Get heap pointer
+	ex	de,hl
+	ld	hl,(HeapBase)	; Get base of heap
+	call	subDEHL		; HL:=DE-HL
+	push	hl
+	ld	hl,(TPATOP)	; Get top of memory
+	ex	de,hl
+	ld	hl,(HeapBase)	; Get base of heap
+	call	subDEHL		; HL:=DE-HL
+	ld	e,h
+	ld	d,0
+	pop	hl
+	call	divHLDE		; Divide
+	ex	de,hl
+	call	IniLine		; Init line and put current address into beginning of line
+	ld	hl,SrcLine+5
+	ld	de,$USAGE
+CpyUsage:
+	ld	a,(de)
+	or	a
+	jp	z,TellUsage
+	ld	(hl),a		; Copy status message
+	inc	hl
+	inc	de
+	jp	CpyUsage
+;
+$USAGE:
+	db	'H use factor',cr,null
+;
+TellUsage:
+	ld	hl,SrcLine+2
+	call	String		; Give message
+	ld	hl,(DelimPtr)	; Get delimiter pointer
+	ld	(PrgCtr),hl	; Reset program counter
+	ld	hl,LINE$NUM-1	; Point to line number
+SkpUsage:
+	inc	hl
+	ld	a,(hl)
+	cp	' '		; Skip to non blank
+	jp	z,SkpUsage
+	call	String		; Print number of lines read
+	jp	Flush		; Flush buffers
+;
+BCDline:
+	db	0,1		; BCD line number
+LINE$NUM:
+	db	'        input lines read',cr
+;
+; Advance line count
+;
+IncLine:
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	jp	z,IncLineBCD	; Yeap, skip count
+	ld	hl,LINE$NUM+5	; Position to LSB ASCII
+IncLineASCII:
+	ld	a,(hl)
+	or	'0'		; Make digit if previous blank
+	inc	a		; Advance it
+	ld	(hl),a
+	cp	'9'+1		; Test overflow
+	jp	c,IncLineBCD	; Nope, increment BCD
+	ld	(hl),'0'	; Clear digit
+	dec	hl
+	jp	IncLineASCII	; Advance previous
+IncLineBCD:
+	ld	hl,BCDline+1	; Point to BCD line number
+	ld	a,1
+	add	a,(hl)		; Increment by one
+	daa
+	ld	(hl),a
+	dec	hl
+	ld	a,0
+	adc	a,(hl)
+	daa
+	ld	(hl),a
+	ret
+;
+; Save program counter
+;
+StPrgCtr:
+	ld	hl,(PrgCtr)	; Get program counter
+	ld	(BegPrgCtr),hl	; Set as current start address
+	ret
+;
+; Reset symbol pointer and test if defined
+;
+ResSymb:
+	ld	hl,(SymbDef)	; Get address of symbol
+	ld	(CurrSymb),hl	; Reset current symbol pointer
+	call	isSymb		; Test hash entry defined - Z set says no
+	ret
+;
+; Check for symbol
+;
+ChkSymb:
+	call	ResSymb		; Reset symbol pointer and test if defined
+	ret	z		; Nope
+	ld	hl,0
+	ld	(SymbDef),hl	; Reset address of symbol
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	jp	nz,ChkPass2	; Nope
+	call	LdSymCtrl	; Extract control bits from symbol
+	push	af
+	and	bct1
+	call	nz,LabelErr	; Label error
+	pop	af
+	or	bbc1
+	call	StSymCtrl	; Insert control bit into symbol
+	ld	hl,(BegPrgCtr)	; Get current start address
+	call	StSymVal	; Insert value and ref line number into symbol
+	ret
+ChkPass2:
+	call	LdSymCtrl	; Extract control bits from symbol
+	and	bct1
+	call	z,PhasErr	; Phase error
+	call	LdSymVal	; Load value of symbol
+	ex	de,hl
+	ld	hl,(BegPrgCtr)	; Get current start address
+	call	Cmpr		; Verify address match
+	call	nz,PhasErr	; Phase error if not
+	ret
+;
+; Store byte into code
+; ENTRY	Accu holds byte
+;
+StOPCbyte:
+	ld	b,a		; Save byte
+;
+; Store byte into code
+; ENTRY	REg B holds byte
+;
+StOPCbyteB:
+	ld	a,(CurrPass)	; Get current pass
+	or	a		; Test first pass
+	ld	a,b
+	jp	z,IncPrgCtr	; Yeap, advance program counter only
+	push	bc
+	call	stObj		; Put byte to object buffer
+	ld	a,(SrcLine+1)	; Get character
+	cp	' '		; Test blank
+	ld	hl,(BegPrgCtr)	; Get current start address
+	call	z,IniLine	; Init line and put current address into beginning of line if so
+	ld	a,(LineLen)	; Get length of line
+	cp	CODlen		; Test still room in line
+	pop	bc
+	jp	nc,IncPrgCtr	; Advance program counter
+	ld	a,b
+	call	BytetoHEX	; Put hex ASCII byte into line
+IncPrgCtr:
+	ld	hl,(PrgCtr)	; Get program counter
+	inc	hl		; Update it
+	ld	(PrgCtr),hl
+	ret
+;
+; Store word into code
+;
+StOPCword:
+	push	hl
+	ld	b,l
+	call	StOPCbyteB	; Store low byte into code
+	pop	hl
+	ld	b,h
+	jp	StOPCbyteB	; Store high byte into code
+;
+; Get hex ASCII character
+;
+HtoA:
+	add	a,'0'		; Add offset
+	cp	'9'+1		; Test decimal
+	ret	c		; Yeap
+	add	a,'A'-'0'-10	; Fix for hex
+	ret
+;
+; Put hex ASCII digit into line
+;
+HtoHEX:
+	call	HtoA		; Get hex ASCII character
+	ld	hl,LineLen
+	ld	e,(hl)		; Get length of line
+	ld	d,0		; As position
+	inc	(hl)
+	ld	hl,SrcLine	; Init source line
+	add	hl,de
+	ld	(hl),a		; Store character
+	ret
+;
+; Put hex ASCII byte into line
+;
+BytetoHEX:
+	push	af
+	rra			; Get hi bits
+	rra
+	rra
+	rra
+	and	LOMASK
+	call	HtoHEX		; Store ASCII
+	pop	af
+	and	LOMASK		; Get lo bits
+	jp	HtoHEX		; Store them
+;
+; Init line and put start address into beginning of line
+;
+IniBegLine:
+	ld	hl,(BegPrgCtr)	; Get current start address
+;
+; Init line and put current address into beginning of line
+;
+IniLine:
+	ex	de,hl
+	ld	hl,LineLen
+	push	hl
+	ld	(hl),1		; Init length of line
+	ld	a,d
+	push	de
+	call	BytetoHEX	; Put hi hex ASCII address byte into line
+	pop	de
+	ld	a,e
+	call	BytetoHEX	; Put lo hex ASCII address byte into line
+	pop	hl
+	inc	(hl)		; Advance length
+	ret
+;
+; Process register error
+;
+RegErr:
+	push	af
+	push	bc
+	ld	a,'R'
+	call	SetERR		; Register error
+	pop	bc
+	pop	af
+	ret
+;
+; Process value error
+;
+ValueErr:
+	push	af
+	push	hl
+	ld	a,'V'
+	call	SetERR		; Value error
+	pop	hl
+	pop	af
+	ret
+;
+; Process data error
+;
+DataErr:
+	push	af
+	ld	a,'D'
+	jp	SetErrC		; Data error
+;
+; Process phase error
+;
+PhasErr:
+	push	af
+	ld	a,'P'
+	jp	SetErrC		; Phase error
+;
+; Process label error
+;
+LabelErr:
+	push	af
+	ld	a,'L'
+	jp	SetErrC		; Label error
+;
+; Process not implemented error
+;
+ImplmtErr:
+	push	af
+	ld	a,'N'		; Not implemented
+;
+; Process error
+;
+SetErrC:
+	call	SetERR
+	pop	af
+	ret
+;
+SymbDef:
+	dw	0		; Symbol address
+DelimPtr:
+	dw	0		; Delimiter pointer
+LineLen:
+	db	0		; Length of line
+	db	0
+;
+; Source line
+;
+SrcLine	equ	$
+TmpAdr	equ	SrcLine+SRClen
+LocStk	equ	TmpAdr+2*STKLEV
+SrcBuff	equ	LocStk			; Source file buffer
+PrnBuff	equ	SrcBuff+ASMrec*reclng	; Print file buffer
+ObjBuff	equ	PrnBuff+PRNrec*reclng	; Object file buffer
+HashTab	equ	ObjBuff+OBJrec*reclng	; Hash table
+DynData	equ	HashTab+HashLen
+SymbBas	equ	DynData+2		; Start of symbol table
+
+	end
+

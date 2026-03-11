@@ -1,0 +1,1034 @@
+	title	ARCHIVE Executor
+	name	('PMEXE')
+
+; DASMed version of PMEXE.COM
+; By W. Cirsovius
+
+; This is a module which you can only use in combination with
+; PMARC. It is used to make executable compressed COMfiles
+; (just like LZEXE or PKLITE for MSDOS). To make such a file,
+; type:
+;
+;	PMARC <archive>.COM=PMEXE2.COM <filename> [options]
+;
+; The archive-name must be .COM, offcourse, not .PMA.
+;
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+
+.conout	equ	2
+.string	equ	9
+
+bell	equ	07h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+MSB	equ	10000000b
+NOMSB	equ	01111111b
+
+l0003	equ	03h
+l0009	equ	09h
+
+l1000	equ	1000h
+
+l011e	equ	l0100+30
+l0120	equ	l011e+2
+l0140	equ	l0120+32
+l0148	equ	l0140+8
+
+la001	equ	0a001h		; 1010000000000001b
+
+l0100:
+	jr	l0154
+
+	db	'-pms-',0ceh,5,0,0,'G'
+l010c:
+	db	cr,lf,'PMexe Version 2.00'
+	db	' for CP/M'
+	db	cr,lf
+	db	'Copyright(C) 1990 by Yoshihiko Mino.'
+	db	cr,lf,cr,lf,eot
+;
+; Start module
+;
+l0154:
+	ld	de,l010c
+	call	l020c		; Give initial message
+	call	l0678		; Get byte
+	or	a		; Test data installed
+	ret	z		; Nope
+	ld	b,a		; Set length
+l0160:
+	call	l0678		; Get byte
+	ld	c,a		; Set checksum
+	ld	hl,(l067a)	; Get pointer
+	xor	a		; Init checksum
+l0168:
+	ld	d,a		; Save checksum
+	call	l0678		; Get byte
+	add	a,d		; Build checksum
+	djnz	l0168
+	cp	c		; Verify match
+	ld	de,l023a	; Invalid header
+	jp	nz,l020c
+	ld	a,(hl)
+	xor	'-'		; Find valid ID
+	ld	c,a
+	inc	hl
+	ld	a,(hl)
+	xor	'p'
+	or	c
+	ld	c,a
+	inc	hl
+	ld	a,(hl)
+	xor	'm'
+	or	c
+	ld	c,a
+	inc	hl
+	ld	a,(hl)
+	xor	'2'
+	or	c
+	ld	c,a
+	inc	hl
+	ld	a,(hl)
+	xor	'-'
+	or	c
+	inc	hl
+	ld	de,l0223	; Not supported
+	jr	nz,l020c
+	ld	e,(hl)		; Fetch compressed length
+	inc	hl
+	ld	d,(hl)
+	push	de
+	ld	de,l0003
+	add	hl,de
+	ld	e,(hl)		; Fetch original length
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l0620),hl	; Save it
+	ld	(l0661),hl
+	ld	hl,l0009
+	add	hl,de		; Point to name of file
+	ld	b,0
+	ld	c,(hl)		; Get length
+	inc	hl
+	ld	(l02d6),hl	; Store address
+	add	hl,bc		; Position to end
+	ld	e,(hl)		; Get CRC
+	ld	(hl),eot	; Overwrite for end of string
+	inc	hl
+	ld	d,(hl)
+	dec	hl
+	dec	hl		; Position to last character of type
+	ld	a,(hl)		; Get character
+	and	NOMSB
+	xor	'M'		; Test .COM
+	ld	c,a
+	dec	hl
+	ld	a,(hl)
+	and	NOMSB
+	xor	'O'
+	or	c
+	ld	c,a
+	dec	hl
+	ld	a,(hl)
+	and	NOMSB
+	xor	'C'
+	or	c
+	ld	c,a
+	dec	hl
+	ld	a,(hl)
+	xor	'.'
+	or	c		; Test result
+	jr	z,l01db
+	ld	a,1
+l01db:
+	ld	(l060a),a	; Set .COM flag
+	ex	de,hl
+	ld	(l062f),hl	; Store CRC
+	ld	hl,(l067a)	; Get pointer
+	pop	de		; Get back compressed length
+	add	hl,de		; Build address behind code
+	ld	a,l
+	or	a		; Test page boundary
+	jr	z,l01ee		; Yeap
+	inc	h		; Next page
+	ld	l,0		; At boundary
+l01ee:
+	ld	a,h		; Get page
+	ld	(l05db),a	; Save page
+	add	a,2
+	ld	(l029b),a
+	inc	a
+	ld	(l029f),a
+	inc	a
+	ld	h,a
+	ld	(l065b),hl	; Save code base
+	ld	(l05cd),hl
+	ld	a,(TPATOP+1)	; Get top of memory
+	cp	h		; Test enough space
+	jr	nc,l0269	; Yeap
+	ld	de,l0211	; Tell out of memory
+;
+; Print string on console
+; ENTRY	Reg DE points to string
+;
+l020c:
+	ld	c,.string
+	jp	BDOS		; Print message
+;
+l0211:
+	db	bell,'Out of memory.'
+	db	cr,lf,eot
+l0223:
+	db	bell,'Unsupported method.'
+	db	cr,lf,eot
+l023a:
+	db	bell,'Header is broken.'
+	db	cr,lf,eot
+l024f:
+	db	' Displaying'
+	db	cr,lf,eot
+l025d:
+	db	' Restoring ',eot
+;
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; %%% DECOMPRESSING STARTS %%%
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+;
+l0269:
+	pop	af		; Clean stack
+	ld	hl,0
+	push	hl
+	add	hl,sp		; Copy stack
+	ld	(l0664),hl	; Save it
+	ld	sp,l011e	; Get local stack
+	ld	a,(l05db)	; Get page
+	ld	h,a		; Init address
+	ld	l,0
+l027b:
+	ld	d,0		; Init pattern
+	ld	e,l
+	ld	b,8
+l0280:
+	or	a
+	ld	a,d
+	rra			; Build table
+	ld	d,a
+	ld	a,e
+	rra
+	ld	e,a
+	jr	nc,l0291
+	ld	a,LOW la001
+	xor	e
+	ld	e,a
+	ld	a,HIGH la001
+	xor	d
+	ld	d,a
+l0291:
+	djnz	l0280
+	ld	(hl),d		; Save value
+	inc	h
+	ld	(hl),e
+	dec	h
+	inc	l
+	jr	nz,l027b
+l029b	equ	$+1
+	ld	h,0		; Load page
+	ld	l,0ffh		; Init p1FF
+l029f	equ	$+1
+	ld	d,0		; Load page
+	ld	e,1		; Init p201
+	xor	a
+l02a3:
+	ld	(hl),a		; Store p1FF:=00, p100:=01..p1FE:=FF
+	inc	l
+	ld	(de),a		; Store p201:=00, p202:=01..p2FF:=FF
+	inc	e
+	inc	a
+	jr	nz,l02a3
+;
+	ld	l,07fh
+	ld	(hl),a		; p17F:=00
+	dec	a
+	ld	e,020h
+	ld	(de),a		; p220:=FF
+	ld	a,020h
+	ld	l,0ffh
+	ld	(hl),a		; p1FF:=20
+	dec	a
+	ld	e,0a0h
+	ld	(de),a		; p2A0:=1F
+	ld	a,080h
+	ld	l,0dfh
+	ld	(hl),a		; p1DF:=80
+	dec	a
+	ld	e,000h
+	ld	(de),a		; p200:=7F
+	ld	a,0a0h
+	ld	l,01fh
+	ld	(hl),a		; p11F:=A0
+	dec	a
+	ld	e,0e0h
+	ld	(de),a		; p2E0:=9F
+	ld	a,0e0h
+	ld	l,09fh
+	ld	(hl),a		; p19F:=E0
+	dec	a
+	ld	e,080h
+	ld	(de),a		; p280:=DF
+;
+l02d6	equ	$+1
+	ld	de,$-$		; Load address of name of file
+	call	l020c		; Tell name
+	ld	de,l025d
+	ld	a,(l060a)	; Get .COM flag
+	or	a		; Test .COM
+	jr	z,l02e7		; Yeap, restore it
+	ld	de,l024f	; Display it
+l02e7:
+	call	l020c		; Tell action
+	call	l0689		; Get one bit
+	call	l0413
+	ld	b,5
+	call	l0468
+l02f5:
+	ld	hl,l0160
+	call	l0556
+	cp	8
+	jr	nc,l035c
+	cp	1
+	jr	c,l0321
+	jr	z,l0326
+	cp	3
+	jr	c,l032d
+	ld	d,20h
+	jr	z,l0334
+	cp	5
+	ld	d,40h
+	jr	c,l0334
+	ld	d,60h
+	jr	z,l0334
+	cp	7
+	ld	e,80h
+	jr	c,l0343
+	ld	e,40h
+	jr	l0343
+l0321:
+	call	l068f		; Read three bits
+	jr	l0338
+l0326:
+	call	l068f		; Read three bits
+	add	a,8		; Add offset
+	jr	l0338
+l032d:
+	call	l0692		; Read four bits
+	add	a,10h		; Add offset
+	jr	l0338
+l0334:
+	call	l0695		; Read five bits
+	add	a,d
+l0338:
+	ld	d,a
+	ld	a,(l029b)	; Get control page
+	ld	h,a
+	ld	a,(l05e7)
+	inc	d
+	jr	l0353
+l0343:
+	call	l0698		; Read six bits
+	ld	d,a
+	ld	a,e
+	sub	d
+	ld	d,a
+	ld	a,(l029f)	; Get top page
+	ld	h,a
+	ld	a,(l05e7)
+l0351:
+	ld	l,a
+	ld	a,(hl)
+l0353:
+	dec	d
+	jr	nz,l0351
+	call	l0589
+	jp	l02f5
+l035c:
+	jr	nz,l0368
+	call	l0698		; Read six bits
+	ld	d,0
+	ld	b,2
+	jp	l03fe
+l0368:
+	cp	17h
+	jr	c,l03a4
+	jr	z,l039d
+	cp	19h
+	jr	c,l0396
+	jr	z,l0388
+	cp	1bh
+	jr	c,l038f
+	jr	z,l0381
+	ld	b,0
+	ld	de,0
+	jr	l03ff
+l0381:
+	call	l069b		; Read seven bits
+	add	a,81h		; Add offset
+	jr	l03a6
+l0388:
+	call	l0695		; Read five bits
+	add	a,21h		; Add offset
+	jr	l03a6
+l038f:
+	call	l0698		; Read six bits
+	add	a,41h		; Add offset
+	jr	l03a6
+l0396:
+	call	l068f		; Read three bits
+	add	a,19h		; Add offset
+	jr	l03a6
+l039d:
+	call	l068f		; Read three bits
+	add	a,11h		; Add offset
+	jr	l03a6
+l03a4:
+	sub	6
+l03a6:
+	ld	b,a
+	ld	hl,l0148
+	call	l0556
+	cp	1
+	jr	c,l03ca
+	jr	z,l03d1
+	cp	3
+	jr	c,l03da
+	jr	z,l03e3
+	cp	5
+	jr	c,l03e7
+	jr	z,l03ee
+	cp	7
+	jr	c,l03f5
+	call	l0692		; Read four bits
+	add	a,10h		; Add offset
+	jr	l03fa
+l03ca:
+	call	l0698		; Read six bits
+	ld	d,0
+	jr	l03fe
+l03d1:
+	call	l0698		; Read six bits
+	add	a,40h		; Add offset
+	ld	d,0
+	jr	l03fe
+l03da:
+	call	l069b		; Read seven bits
+	add	a,80h		; Add offset
+	ld	d,0
+	jr	l03fe
+l03e3:
+	ld	d,1
+	jr	l03fb
+l03e7:
+	call	l0689		; Get one bit
+	add	a,2		; Add offset
+	jr	l03fa
+l03ee:
+	call	l068c		; Read two bits
+	add	a,4		; Add offset
+	jr	l03fa
+l03f5:
+	call	l068f		; Read three bits
+	add	a,8		; Add offset
+l03fa:
+	ld	d,a
+l03fb:
+	call	l069e		; Read eight bits
+l03fe:
+	ld	e,a
+l03ff:
+	ld	hl,(l05cd)	; Load current code address
+	inc	de
+	ld	a,l
+	sub	e
+	ld	l,a
+	ld	a,h
+	sbc	a,d
+	ld	h,a
+l0409:
+	ld	a,(hl)
+	call	l0589
+	inc	hl
+	djnz	l0409
+	jp	l02f5
+;
+;
+;
+l0413:
+	call	l0695		; Read five bits
+	ld	(l0469),a
+	ld	hl,l0120
+	ld	b,l0140-l0120
+	call	l0672		; Clear memory
+	call	l068f		; Read three bits
+	ld	(l0472),a
+	or	a
+	jr	nz,l0432
+	ld	a,(l0469)
+	dec	a
+	ld	(l0160),a
+	ret
+l0432:
+	call	l068f		; Read three bits
+	dec	a		; Fix for index
+	add	a,a
+	ld	d,0
+	ld	e,a
+	ld	hl,l057f
+	add	hl,de		; Position in bit read table
+	ld	e,(hl)		; Fetch adrress
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l0451),hl	; Store it
+	ld	de,l0120
+	ld	a,(l0469)
+	ld	b,a
+	ld	a,(l0472)
+	ld	c,a
+l0450:
+l0451	equ	$+1
+	call	l0692		; Read number of bits
+	or	a
+	jr	z,l0458
+	dec	a
+	add	a,c
+l0458:
+	ld	(de),a
+	inc	de
+	djnz	l0450
+	ld	hl,l0160
+	ld	de,l0120
+	ld	a,(l0469)
+	jp	l04b5
+;
+;
+;
+l0468:
+l0469	equ	$+1
+	ld	a,0
+	cp	0ah
+	ret	c
+	cp	1dh
+	jr	nz,l0475
+l0472	equ	$+1
+	ld	a,0
+	or	a
+	ret	z
+l0475:
+	push	bc
+	ld	hl,l0140
+	ld	b,l0148-l0140
+	call	l0672		; Clear memory
+	pop	bc
+	ld	de,l0140
+l0482:
+	call	l068f		; Read three bits
+	ld	(de),a
+	inc	de
+	djnz	l0482
+	ld	hl,l0140
+	ld	de,0
+	ld	c,0
+	ld	b,8
+l0493:
+	ld	a,(hl)
+	or	a
+	jr	z,l0499
+	inc	d
+	ld	e,c
+l0499:
+	inc	hl
+	inc	c
+	djnz	l0493
+	ld	a,d
+	cp	1
+	ret	c
+	jr	nz,l04a8
+	ld	a,e
+	ld	(l0148),a
+	ret
+l04a8:
+	ld	a,1
+	ld	(l0472),a
+	ld	hl,l0148
+	ld	de,l0140
+	ld	a,8
+l04b5:
+	ld	(l056e),hl
+	ex	de,hl
+	ld	(l04e3),hl
+	ld	(l0535),a
+	ld	b,a
+	xor	a
+	push	de
+l04c2:
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	djnz	l04c2
+	pop	hl
+	ld	a,(l0472)
+	ld	(l04ec),a
+	ld	bc,1
+	ld	(hl),-1
+l04d6:
+	dec	a
+	jr	z,l04e2
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	inc	hl
+	ld	(hl),b
+	inc	c
+	inc	b
+	jr	l04d6
+l04e2:
+l04e3	equ	$+1
+	ld	de,$-$
+	xor	a
+l04e6:
+	ld	(l0532),a
+	ld	a,(de)
+	inc	de
+l04ec	equ	$+1
+	cp	0
+	jr	nz,l0531
+	inc	hl
+	ld	a,(hl)
+	or	a
+	ld	a,(l0532)
+	jr	nz,l04fd
+	or	MSB
+	ld	(hl),a
+	dec	hl
+	jr	l0531
+l04fd:
+	inc	hl
+	or	MSB
+	ld	(hl),a
+	push	de
+	ld	b,0
+l0504:
+	inc	b
+	dec	hl
+	dec	hl
+	ld	a,(hl)
+	cp	-1
+	jr	nz,l050e
+	pop	de
+	ret
+l050e:
+	ld	d,0
+	ld	e,a
+	ld	hl,(l056e)
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	nz,l0504
+l051d:
+	ld	(hl),c
+	ld	a,e
+	ld	d,0
+	ld	e,c
+	inc	c
+	ld	hl,(l056e)
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ld	(hl),a
+	inc	hl
+	dec	b
+	jr	nz,l051d
+	dec	hl
+	ld	b,e
+	pop	de
+l0531:
+l0532	equ	$+1
+	ld	a,0
+	inc	a
+l0535	equ	$+1
+	cp	0
+	jp	nz,l04e6
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	z,l053f
+	inc	hl
+l053f:
+	ld	(hl),c
+	ld	d,0
+	ld	e,c
+	inc	c
+	ld	hl,(l056e)
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ld	(hl),b
+	ld	b,e
+	ld	a,(l04ec)
+	inc	a
+	ld	(l04ec),a
+	jp	l04e2
+;
+;
+;
+l0556:
+	ld	a,(hl)
+	cp	-1
+	ret	nz
+	ld	(l056e),hl
+	push	de
+	ex	de,hl
+	inc	de
+l0560:
+	call	l0689		; Get one bit
+	or	a		; Test set
+	jr	z,l0567		; Nope
+	inc	de
+l0567:
+	ld	a,(de)
+	cp	80h
+	jp	nc,l057b
+l056e	equ	$+1
+	ld	hl,$-$
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	add	hl,de
+	add	hl,de
+	ex	de,hl
+	inc	de
+	jp	l0560
+l057b:
+	and	NoMSB
+	pop	de
+	ret
+;
+l057f:
+	dw	l0689		; Get one bit
+	dw	l068c		; Read two bits
+	dw	l068f		; Read three bits
+	dw	l0692		; Read four bits
+	dw	l0695		; Read five bits
+;
+;
+;
+l0589:
+	push	hl
+	push	bc
+	push	af
+l058d	equ	$+1
+	ld	hl,$-$
+	inc	hl
+	ld	(l058d),hl
+	ld	a,l
+	or	a
+	jr	nz,l05ca
+	ld	a,h
+	cp	20h
+	jr	z,l05b6
+	cp	10h
+	jr	z,l05ad
+	ld	b,7
+	cp	8
+	jr	z,l05c7
+	dec	b
+	cp	4
+	jr	z,l05c7
+	jr	l05ca
+l05ad:
+	call	l0689		; Get one bit
+	or	a		; Test set
+	call	nz,l0413	; Yeap
+	jr	l05c5
+l05b6:
+	ld	hl,l1000
+	ld	(l058d),hl
+	call	l0689		; Get one bit
+	or	a		; Test set
+	jr	z,l05ca		; Nope
+	call	l0413
+l05c5:
+	ld	b,8
+l05c7:
+	call	l0468
+l05ca:
+	pop	af
+	ld	c,a
+l05cd	equ	$+1
+	ld	hl,$-$		; Load current code address
+	ld	(hl),c
+	inc	hl
+	ld	(l05cd),hl	; Update code address
+	ld	hl,(l062c)	; Get current CRC
+	ex	de,hl
+	ld	a,c
+	xor	e		; Calculate new one
+l05db	equ	$+1
+	ld	h,0
+	ld	l,a
+	ld	a,d
+	ld	d,(hl)
+	inc	h
+	xor	(hl)
+	ld	e,a
+	ex	de,hl
+	ld	(l062c),hl	; Save current CRC
+l05e7	equ	$+1
+	ld	a,' '
+	cp	c
+	jr	z,l0609
+	ld	l,a
+	ld	a,(l029f)	; Get top page
+	ld	h,a
+	ld	a,(hl)
+	ld	(hl),c
+	ld	l,c
+	ld	d,(hl)
+	ld	(hl),a
+	ld	l,a
+	dec	h
+	ld	(hl),c
+	ld	l,c
+	ld	a,(hl)
+	ld	l,d
+	ld	(hl),a
+	ld	l,a
+	inc	h
+	ld	(hl),d
+	dec	h
+	ld	l,c
+	ld	a,(l05e7)
+	ld	(hl),a
+	ld	a,c
+	ld	(l05e7),a
+l0609:
+l060a	equ	$+1
+	ld	a,0		; Get .COM flag
+	cp	1		; Test .COM
+	jr	nz,l061f	; Yeap
+	ld	a,c
+	cp	eof		; Test end of file
+	jr	nz,l0619
+	ld	(l060a),a	; Reset .COM flag
+	jr	l061f
+l0619:
+	ld	e,c
+	ld	c,.conout
+	call	BDOS		; Echo character
+l061f:
+l0620	equ	$+1
+	ld	hl,$-$		; Get original length
+	dec	hl		; Count down
+	ld	(l0620),hl
+	ld	a,h
+	or	l		; Test all done
+	pop	bc
+	pop	hl
+	ret	nz		; Nope, still more to do
+;
+; ++++++++++++++++++++++++++++
+;; >> End of compressed file <<
+; ++++++++++++++++++++++++++++
+;
+l062c	equ	$+1
+	ld	hl,$-$		; Get current CRC
+l062f	equ	$+1
+	ld	de,$-$		; Get CRC
+	ld	a,h
+	xor	d
+	ld	c,a
+	ld	a,l
+	xor	e
+	or	c		; Verify match
+	jr	z,l0640
+	ld	de,l06d1
+	call	l020c		; Tell CRC error detected
+l063f:
+	rst	0		; Exit to CP/M
+l0640:
+	ld	de,l06cc
+	call	l020c		; Tell ok
+	ld	a,(l060a)	; Set .COM flag
+	or	a		; Test .COM
+	jr	nz,l063f	; Nope, exit
+	ld	hl,l0669	; Init source of code
+	ld	de,l0100-LdLen
+	ld	b,LdLen		; Get length of code to be executed for loading
+l0654:
+	ld	a,(hl)
+	ld	(de),a		; Put loader below TPA
+	inc	hl
+	inc	de
+	djnz	l0654
+l065b	equ	$+1
+	ld	hl,$-$		; Load code base
+	ld	de,l0100	; Load destination
+l0661	equ	$+1
+	ld	bc,$-$		; Get original length
+l0664	equ	$+1
+	ld	sp,$-$		; Load entry stack
+	jp	l0100-LdLen	; Move code where it belongs
+;
+; Loader moved below regular TPA
+;
+l0669:
+	ld	a,(hl)		; Get code
+	ld	(de),a		; Unpack
+	inc	hl
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jr	nz,l0669
+;				; <<- Code at TPA begins
+LdLen	equ	$-l0669
+;
+; Clear memory
+; ENTRY	Reg HL points to memory to be cleared
+;	Reg B holds length of memory
+;
+l0672:
+	xor	a
+l0673:
+	ld	(hl),a		; Simple one
+	inc	hl
+	djnz	l0673
+	ret
+;
+; Get byte from data installed
+; EXIT	Accu holds byte
+;
+l0678:
+	push	hl
+l067a	equ	$+1
+	ld	hl,l06e8	; Get pointer
+	ld	a,(hl)
+	inc	hl
+	ld	(l067a),hl	; Set pointer
+	pop	hl
+	ret
+;;l0683:
+	ld	a,1
+	ret
+;;l0686:
+	xor	a
+	ret
+;;l0688:
+	db	0
+;
+; Get one bit
+;
+l0689:
+	xor	a
+	jr	l06b3
+;
+; Read two bits
+;
+l068c:
+	xor	a
+	jr	l06b0
+;
+; Read three bits
+;
+l068f:
+	xor	a
+	jr	l06ad
+;
+; Read four bits
+;
+l0692:
+	xor	a
+	jr	l06aa
+;
+; Read five bits
+;
+l0695:
+	xor	a
+	jr	l06a7
+;
+; Read six bits
+;
+l0698:
+	xor	a
+	jr	l06a4
+;
+; Read seven bits
+;
+l069b:
+	xor	a
+	jr	l06a1
+;
+; Read eight bits
+;
+l069e:
+	call	l06b3
+l06a1:
+	call	l06b3
+l06a4:
+	call	l06b3
+l06a7:
+	call	l06b3
+l06aa:
+	call	l06b3
+l06ad:
+	call	l06b3
+l06b0:
+	call	l06b3
+l06b3:
+	ld	h,a
+l06b5	equ	$+1
+	ld	a,1
+	rrca
+	ld	(l06b5),a
+	ld	l,a
+l06bc	equ	$+1
+	ld	a,0
+	jr	nc,l06c5
+	call	l0678		; Get byte
+	ld	(l06bc),a
+l06c5:
+	and	l
+	jr	z,l06c9
+	scf
+l06c9:
+	ld	a,h
+	rla
+	ret
+;
+l06cc:
+	db	'OK'
+	db	cr,lf,eot
+l06d1:
+	db	bell,'CRC error detected.'
+	db	cr,lf,eot
+l06e8:
+	ds	24,0
+
+l0700::
+	end
+

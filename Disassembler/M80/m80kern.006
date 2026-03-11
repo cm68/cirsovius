@@ -1,0 +1,1122 @@
+;
+;
+;
+l3892:
+	push	hl
+	scf
+	call	CrossSym	; Mark ENTRY in cross-ref
+	call	check.stack
+	ld	(hl),0
+	dec	hl
+	ld	(hl),1
+	ld	(l400b),hl
+	dec	hl
+	ld	c,0
+l38a5:
+	call	l328c
+	ld	b,a
+	inc	c
+	call	pred.ptr	; .. pointer-1
+	call	white.space	; Skip spaces
+	cp	cr
+	jr	z,l38cd
+	cp	';'
+	jr	z,l38cd
+	cp	','
+	jr	z,l38a5
+	ld	a,b
+	cp	' '
+	jr	z,l38a5
+	cp	tab
+	call	nz,Q.err
+	jr	l38a5
+l38cd:
+	ex	(sp),hl
+	inc	hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	call	l3a88
+	ex	(sp),hl
+	or	a
+	jr	z,l38ea
+l38dc:
+	cp	c
+	jr	z,l38ea
+	jr	c,l38ea
+	ld	(hl),0
+	dec	hl
+	inc	c
+	jr	l38dc
+l38ea:
+	ld	(hl),0
+	dec	hl
+	call	l302e
+	pop	hl
+	pop	bc
+	call	l3a88
+	push	hl
+	ld	hl,(l4016)
+	push	hl
+	push	bc
+	ld	c,a
+	ld	b,0
+	add	hl,bc
+	ld	(l4016),hl
+	pop	bc
+	ld	hl,(l400b)
+	push	hl
+	ld	hl,scan.line
+	push	hl
+	ld	de,l3911
+	push	de
+	push	bc
+	ret
+;
+;
+;
+l3911:
+	call	l34f9
+	pop	hl
+	ld	(l400b),hl
+	pop	hl
+	ld	(l4018),hl
+	pop	hl
+	xor	a
+	ld	(l4010),a
+	call	l3a72
+	or	a
+	jr	z,l3949
+	ld	de,src.line
+l392b:
+	call	l3a72
+	or	a
+	call	m,l31ee
+	call	l3aed
+	call	l33d8
+	cp	cr
+	jr	nz,l392b
+	push	hl
+	ld	hl,(l4018)
+	push	hl
+	ld	hl,(l400b)
+	push	hl
+	jp	l34ed
+l3949:
+	ld	hl,(l400b)
+	inc	hl
+	xor	a
+	ld	(l4006),a
+	jp	l34c6
+;
+; Subtract registers
+; ENTRY	Reg HL and DE hold values
+; EXIT	Reg DE holds difference HL-DE
+;
+sub.HL.DE:
+	ld	a,l
+	sub	e		; .. subtract 16 bit
+	ld	e,a
+	ld	a,h
+	sbc	a,d
+	ld	d,a
+	ret
+;
+; Pseudocode .PHASE
+;
+.PHASE.code:
+	ld	a,(phase.flag)	; Test .PHASE flag
+	or	a
+	jp	nz,P.err	; .. already set
+	call	Function	; Get value
+	ld	a,(out.line)
+	cp	' '
+	ret	nz
+	ld	(phase.flag),a
+	ld	a,b
+	and	80h
+	jp	nz,A.err
+	ld	a,b
+	and	3
+	ld	(l3de7),a
+	ld	hl,(CurPtr)	; Get current pointer
+	ex	de,hl
+	call	sub.HL.DE	; .. get difference
+	ex	de,hl
+	ld	(PhaseDiff),hl	; .. store
+	ret
+;
+; Pseudocode .DEPHASE
+;
+.DEPHASE.code:
+	ld	a,(phase.flag)	; Test .PHASE
+	or	a
+	call	z,Q.err		; .. no, error
+	xor	a
+	ld	(phase.flag),a	; Reset flag
+	jp	succ.ptr
+;
+;
+;
+l3994:
+	ld	hl,l4021
+	ld	c,(hl)		; Get old
+	ld	(hl),e		; .. save new
+	inc	hl
+	ld	b,(hl)
+	ld	(hl),d
+	call	l39a6
+	call	l39af
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ret
+;
+;
+;
+l39a6:
+	ld	hl,(LastMem)	; Get address
+	add	hl,de		; Add index
+	ld	e,(hl)		; .. get chain
+	inc	hl
+	ld	d,(hl)
+	dec	hl
+	ret
+;
+;
+;
+l39af:
+	ld	hl,(LastMem)	; Get address
+	add	hl,de		; Add index
+	inc	hl		; .. fix
+	inc	hl
+	ld	e,(hl)		; Get value
+	inc	hl
+	ld	d,(hl)
+	dec	hl
+	ret
+;
+;
+;
+l39ba:
+	ld	hl,(l4021)
+	ld	a,l
+	or	h
+	jp	z,l39cf
+	ex	de,hl
+	push	de
+	call	l39af
+	ex	de,hl
+	ld	(l4021),hl
+	pop	de
+	jr	l39fb
+l39cf:
+	ld	de,(l401f)
+	ld	hl,32
+	add	hl,de
+	ld	(l401f),hl
+	push	de
+	ex	de,hl
+	ld	hl,(top.data)
+	call	cmp.HL.DE
+	pop	de
+	jp	c,l3b49
+	ld	hl,(l3ff8)
+	dec	h
+	ld	a,(l3ffa)
+	or	a
+	call	cmp.HL.DE
+	jp	c,l3b49
+	ld	hl,(LastMem)	; Get address
+	ex	de,hl
+	call	sub.HL.DE
+l39fb:
+	push	de
+	call	l39a6
+	ld	de,(l4025)
+	ld	a,e
+	and	0e0h
+	ld	e,a
+	ld	a,e
+	or	d
+	jr	nz,l3a0f
+	pop	de
+	push	de
+l3a0f:
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	a,0
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	call	l39af
+	pop	de
+	jr	z,l3a25
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jr	l3a2a
+l3a25:
+	ld	(l4023),de
+l3a2a:
+	ld	hl,(l4023)
+	push	de
+	ex	de,hl
+	call	l39a6
+	pop	de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	a,e
+	or	4
+	ld	e,a
+	ret
+;
+;
+;
+l3a3b:
+	push	de
+	push	af
+l3a3d:
+	ld	hl,(l4025)
+	ex	de,hl
+	ld	a,e
+	and	00011111b
+	call	z,l39ba
+	ld	hl,(LastMem)	; Get address
+	add	hl,de
+	pop	af
+	push	af
+	ld	(hl),a
+	ld	a,e
+	and	00011111b
+	cp	00011111b
+	jr	z,l3a57
+	inc	de
+l3a57:
+	call	z,l3a61
+	ex	de,hl
+	ld	(l4025),hl
+	pop	af
+	pop	de
+	ret
+;
+;
+;
+l3a61:
+	ld	a,e
+	and	11100000b
+	ld	e,a
+	call	l39af
+	ld	a,d
+	or	e
+	jp	z,l39ba
+	inc	de
+	inc	de
+	inc	de
+	inc	de
+	ret
+;
+;
+;
+l3a72:
+	push	de
+	ld	de,(LastMem)	; Get address
+	ld	a,l
+	and	00011111b
+	jr	nz,l3a82
+	ld	a,l
+	or	00000100b
+	ld	l,a
+l3a82:
+	ex	de,hl
+	add	hl,de
+	ld	a,(hl)
+	ex	de,hl
+	pop	de
+	ret
+;
+;
+;
+l3a88:
+	call	l3a72
+	push	af
+	push	de
+	ex	de,hl
+	ld	a,e
+	and	00011111b
+	cp	00011111b
+	jr	z,l3a97
+	inc	de
+l3a97:
+	call	z,l3a61
+	ex	de,hl
+	pop	de
+	pop	af
+	ret
+;
+;
+;
+l3a9e:
+	ex	de,hl
+	ld	a,e
+	and	11100000b
+	ld	e,a
+	push	de
+	call	l39af
+	ld	a,e
+	or	d
+	pop	bc
+	ret	z
+	xor	a
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	ld	hl,(LastMem)	; Get address
+	add	hl,de
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	push	bc
+	call	l3994
+	pop	bc
+	ld	hl,(l4023)
+	ex	de,hl
+	call	l39a6
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	ret
+;
+;
+;
+l3ac6:
+	ld	hl,(l4025)
+	push	de
+	ex	de,hl
+	ld	a,e
+	and	00011111b
+	dec	de
+	cp	00000100b
+	call	z,l3ae1
+	ld	hl,(LastMem)	; Get address
+	ld	(l4025),de
+	add	hl,de
+	ld	a,(hl)
+	ex	de,hl
+	pop	de
+	ret
+;
+;
+;
+l3ae1:
+	ld	a,e
+	and	11100000b
+	ld	e,a
+	call	l39a6
+	ld	a,e
+	or	00011111b
+	ld	e,a
+	ret
+;
+;
+;
+l3aed:
+	push	de
+	push	af
+	ex	de,hl
+	ld	a,e
+	and	00011111b
+	cp	00011111b
+	jr	z,l3af9
+	inc	de
+l3af9:
+	call	z,l3a61
+	ex	de,hl
+	pop	af
+	pop	de
+	ret
+;
+; Allocate memory for symbol table
+;
+mem.alloc:
+	ld	de,(l401f)	; Fetch pointers
+	ld	hl,(l3ff8)
+	ld	a,(l3ffa)
+	or	a		; Test flag
+	jr	nz,l3b12
+	ld	hl,(top.data)
+	dec	h		; .. change to TPA top
+l3b12:
+	call	sub.HL.DE	; Get difference
+	jp	c,sym.full	; .. exhausted
+	ld	a,d
+	or	a		; .. should be at least a page
+	jp	z,sym.full
+	rr	d		; .. divide by two
+	rr	e
+	push	de
+	ld	de,(LastMem)	; Get address
+	ld	hl,(l401f)
+	call	sub.HL.DE	; Get gap
+	ld	b,d
+	ld	c,e
+	pop	hl
+	ld	de,(l401f)
+	add	hl,de		; .. new top
+	ld	(l401f),hl
+l3b38:
+	ld	a,b		; Test zero
+	or	c
+	jr	z,l3b45
+	dec	hl
+	dec	de
+	ld	a,(de)		; Move down
+	ld	(hl),a
+	dec	bc
+	jr	l3b38
+l3b45:
+	ld	(LastMem),hl	; Set new address
+	ret
+;
+;
+;
+l3b49:
+	call	l3b4f
+	jp	l39cf
+;
+;
+;
+l3b4f:
+	push	de
+	ld	de,(SymPtr)	; Get symbol base
+	ld	hl,(LastMem)	; Get top
+	call	sub.HL.DE	; .. test room
+	jp	c,sym.full
+	ld	a,d
+	cp	HIGH 0300h
+	jp	c,sym.full
+	srl	d		; Divide by two
+	rr	e
+	pop	hl
+	push	bc
+	push	hl
+	ld	hl,(LastMem)	; Get top
+	ex	de,hl
+	ex	(sp),hl
+	call	sub.HL.DE	; Get difference
+	ld	b,d		; .. save
+	ld	c,e
+	pop	de
+	ld	hl,(LastMem)
+	push	hl
+	ld	hl,(SymPtr)	; Get symbol base
+	add	hl,de
+	push	hl
+	ld	(LastMem),hl	; .. set new
+	add	hl,bc
+	ld	(l401f),hl
+	pop	hl
+	pop	de
+l3b88:
+	ld	a,b
+	or	c
+	jr	z,l3b95
+	dec	bc
+	ld	a,(de)		; .. unpack
+	ld	(hl),a
+	inc	hl
+	inc	de
+	jr	l3b88
+l3b95:
+	pop	bc
+	ret
+;
+; ?????????????????????????????????
+; ENTRY	Accu holds address mode
+;	Reg HL points to chain field
+;
+l3b97:
+	ld	(AdrMod),a
+	ld	(Func.Err),a
+	ld	c,a
+	ld	b,Chn.Len	; Get length
+l3ba0:
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	hl
+	push	bc
+	call	l3bb7
+	pop	bc
+	pop	hl
+	djnz	l3ba0
+	ld	a,(AdrMod)
+	cp	c
+	call	nz,crlf.dev
+	ret
+;
+; ENTRY	Reg DE holds start of chain
+;
+l3bb7:
+	ld	bc,0
+	push	bc
+	ld	a,d		; Test empty
+	or	e
+	jp	z,pop.flag
+l3bc0:
+	ex	de,hl
+	push	hl		; Push chain onto stack
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,e
+	or	d
+	jr	nz,l3bc0
+l3bca:
+	pop	hl		; .. get back
+	ld	a,l
+	or	h
+	ret	z		; .. till zero
+	call	l3be6
+	dec	hl
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ld	a,e
+	or	d
+	jr	z,l3bca
+	xor	a
+	ld	(hl),a
+	inc	hl
+	ld	(hl),a
+	dec	hl
+	dec	hl
+	dec	hl
+	push	hl
+	jr	l3bc0
+;
+; ENTRY	Reg HL points to start of symbol
+;
+l3be6:
+	ld	bc,4
+	add	hl,bc		; .. point to length
+	ld	b,(hl)		; .. and get it
+	inc	hl
+	ld	(BField),hl	; .. save base
+	ld	a,(hl)		; Get 1st control
+	and	_PUB		; Test attached
+	ret	nz		; .. yes, skip
+	inc	hl
+	ld	a,(hl)		; Get next control
+	and	_DEF		; Test defined
+	call	nz,l3cd4	; .. nope, set chain external
+	ld	a,(hl)
+	inc	hl
+	ld	e,(hl)		; Get chain address
+	inc	hl
+	ld	d,(hl)
+	push	bc
+	push	hl
+	ld	b,a		; Get control
+	and	00001000b	; Test bit
+	jr	nz,l3c35	; .. skip
+	push	bc
+	call	l3cc0
+	pop	af		; Get back code
+	ld	e,a
+	and	_DEF		; Test external
+	jr	nz,l3c7f	; .. yeap, indicate it
+	ld	a,e
+	and	_COMM		; Test COMMON
+	jr	nz,l3c85	; .. yeap
+	ld	a,e
+	and	_PUB		; Test public
+	call	nz,l3c90	; .. yeap
+	ld	a,e
+	and	_DEF+_KNOW	; Test known
+	jr	z,l3c88
+	ld	a,e
+	and	@@mod		; Extract address mode
+	ld	e,a
+	ld	d,0
+	ld	hl,$ADR.CH
+	add	hl,de
+	ld	a,(hl)		; Get address indicator
+	call	putPRN		; .. to file
+l3c32:
+	ld	a,tab
+	call	putPRN
+l3c35:
+	pop	hl
+	pop	bc
+	inc	hl
+	inc	hl
+	inc	hl
+	push	bc		; Get length
+l3c3b:
+	ld	a,(hl)
+	inc	hl
+	call	putPRN		; Print label
+	djnz	l3c3b
+	pop	bc
+	ld	a,16		; Get gap
+	sub	b
+	jr	nz,l3c4c
+	inc	a		; .. set 1
+l3c4c:
+	ld	b,a
+l3c4d:
+	ld	a,' '
+	call	putPRN		; Print delimiter
+	djnz	l3c4d
+	ld	hl,AdrMod
+	dec	(hl)
+	jr	nz,l3c6d
+	ld	a,(Func.Err)
+	ld	(hl),a
+	call	crlf.dev
+	ld	hl,page.count
+	inc	(hl)
+	ld	a,(page.length)
+	cp	(hl)
+	call	z,new.page
+l3c6d:
+	ld	hl,(BField)	; Get label address
+	ld	a,(hl)
+	or	_PUB		; .. set attached
+	ld	(hl),a
+	ret
+l3c7f:
+	ld	a,'*'		; Indicate external
+	jr	l3c8a
+;;
+;;  *** NEVER CALLED ***
+;;
+;;l3c82:
+;;	ld	a,'M'		; Indicate macro
+;;	jr	l3c8a
+l3c85:
+	ld	a,'C'		; Indicate COMMON
+	jr	l3c8a
+l3c88:
+	ld	a,'U'		; Indicate unknown
+l3c8a:
+	call	putPRN		; .. put to file
+	jr	l3c32
+l3c90:
+	push	de
+	push	bc
+	ld	hl,(BField)
+	push	hl
+	inc	hl
+	ld	a,e
+	and	@@mod		; Isolate address field
+	ld	b,a
+	ld	c,0111b		; Set entry point
+	inc	hl
+	ld	e,(hl)		; Get address
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	push	de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l3dde),hl
+	pop	de
+	call	rel.spec	; Output code
+	pop	hl
+	ld	(BField),hl
+	inc	hl
+	ld	a,(hl)
+	and	_KNOW
+	call	nz,rel.code	; Output entry point
+	pop	bc
+	pop	de
+	ld	a,'I'
+	jp	putPRN
+;
+;
+;
+l3cc0:
+	ld	hl,out.line
+	ld	(code.ptr),hl
+	call	l18c9
+	ld	hl,(code.ptr)
+	ld	(hl),0
+	ld	hl,out.line
+	jp	str.PRN
+;
+;
+;
+l3cd4:
+	push	bc
+	push	hl
+	ld	a,(hl)
+	and	@@mod		; Isolate address field
+	ld	b,a
+	ld	c,0110b		; Set chain external
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	call	rel.code	; Output chain
+	pop	hl
+	pop	bc
+	ret
+;
+; Data field
+;
+last.read:
+	db	0
+Func.Res:
+	db	0
+Func.Val:
+	db	0
+ParenFlg:
+	db	0
+CPU.flag:
+	db	0
+l3ceb:
+	db	0
+.EOF:
+	db	0
+;
+; ############# Start for initialization to zero #############
+;
+pass:
+	db	0
+fatal:			; Assembler error count
+	dw	0
+warning:		; Assembler warning count
+	dw	0
+radix:			; Hold radix 8, 10 or 16
+	db	0
+l3cf2:
+	db	0
+IF.level.1:
+	db	0
+IF.level.2:
+	db	0
+l3cf5:
+	db	0
+l3cf6:
+	ds	_iflev
+l3d28:
+	db	0
+l3d29:
+	db	0
+cond.flag:
+	db	0
+emp.src:		; 0=any in line, else empty
+	db	0
+INC.flag:		; 0=source, else include
+	db	0
+cref.flag:
+	db	0
+all.flag:
+	db	0
+list.flag:
+	db	0
+l3d30:
+	db	0
+l3d31:
+	db	0
+page.length:		; Page length
+	db	0
+page.count:		; Current page position
+	db	0
+pag.cnt:		; Current page
+	dw	0
+page.flag:
+	dw	0
+BField:			; Pointer to rel BFIELD
+	dw	0
+SymPtr:
+	dw	0
+CurSym:
+	dw	0
+spec.read:
+	db	0
+actptr:
+	dw	0	; Actual MAC file line pointer
+src.line:		; Source line
+	ds	SrcLen+7
+code.flag:		; xSEG indicator
+	db	0
+CurPtr:
+	dw	0
+l3dd4:
+	dw	0
+prg.size:
+	dw	0	; Size of CSEG/ASEG
+data.size:
+	dw	0	; Size of DSEG
+l3dda:
+	dw	0
+l3ddc:
+	dw	0
+l3dde:
+	dw	0
+oper.1:
+	dw	0
+l3de2:
+	db	0
+l3de3:
+	db	0
+phase.flag:
+	db	0
+PhaseDiff:
+	dw	0
+l3de7:
+	db	0
+l3de8:
+	db	0
+actbuf:			; Current operand
+	ds	LabLen+3
+actswap:		; Copy of operand
+	ds	LabLen+3
+code.ptr:		; Pointer to code output
+	dw	0
+;
+; Prolog of output line
+;  0000'   21 0005         +     	lxi	h,5
+;
+;         111111111122222222223333333333
+;123456789012345678901234567890123456789
+;
+out.line:		; Error code
+	ds	2
+out.l.PC:		; PC starts here
+	ds	8
+out.l.code:		; Code starts here
+	ds	8
+;l3e23:
+	ds	4
+;l3e27:
+	ds	4
+out.l.macro:		; Macro indicator
+	ds	6
+prf.lin	equ	$-out.line
+file.line:		; File line to be copied
+	ds	80
+_F.len	equ	$-file.line
+SUBTTL.line:		; Line holding SUBTTL
+	ds	60
+_S.len	equ	$-SUBTTL.line
+l3ebd:
+	db	0
+l3ebe:
+	db	0
+l3ebf:
+	dw	0
+AdrMod:
+	db	0
+Func.Err:
+	db	0
+bits:
+	db	0	; Holds .REL bits
+bitcnt:
+	db	0	; Holds .REL bit count
+MS.len:
+	db	0
+MS.Field:		;;;; !!!!! Length of 6 !!!!!
+			;;;; !!!!! Till MS.ID  !!!!!
+	db	0
+DualReg:
+	db	0	; Flag for 8080 MOV r1,r2
+rek.stack:
+	dw	0	; Rekursive stack (??)
+oper.2:
+	dw	0
+MS.ID:
+	db	0	; Special MS-LINK identifier
+l3ecd:
+	db	0
+l3ece:
+	ds	5
+l3ed3:
+	db	0
+line.flag:
+	ds	LinLen	; Main print line
+LineCpy:
+	ds	LinLen	; .. copy of line
+l3f56:
+	db	0
+l3f57:
+	db	0
+l3f58:
+	db	0
+rek.PC:			; Rekursive PC (??)
+	dw	0
+dev.flag:		; Output device flag (0=.PRN)
+	db	0
+code.seg:
+	db	0
+ModName:		; Name of module
+	ds	10
+;
+TmpChn:
+	ds	3
+l3f6a:
+	ds	3
+l3f6d:
+	ds	1
+l3f6e:
+	ds	2
+ChnLen	equ	$-TmpChn
+;
+CurChn:
+	dw	0
+;
+; Symbol chain arrays
+; Indices :	0	$
+;		1	.
+;		2	?
+;		3	_
+;		4	<Blank>
+;		5	@
+;		6 .. 31	A .. Z
+;
+F.Arr.1:
+	ds	2*Chn.Len
+SymbChn:
+	ds	2*Chn.Len
+l3ff6:
+	dw	0
+l3ff8:
+	dw	0
+l3ffa:
+	db	0
+l3ffb:
+	db	0
+l3ffc:
+	db	0
+l3ffd:
+	dw	0
+l3fff:
+	dw	0
+l4001:
+	dw	0
+l4003:
+	dw	0
+MacroLev:
+	db	0
+l4006:
+	db	0
+l4007:
+	dw	0
+l4009:
+	dw	0
+l400b:
+	dw	0
+comm.sync:
+	db	0
+l400e:
+	db	0
+l400f:
+	db	0
+l4010:
+	db	0
+l4011:
+	dw	0
+l4013:
+	dw	0
+l4015:
+	db	0
+l4016:
+	dw	0
+l4018:
+	dw	0
+l401a:
+	db	0
+TmpSymPtr:
+	dw	0
+LastMem:
+	dw	0
+l401f:
+	dw	0
+l4021:
+	dw	0
+l4023:
+	dw	0
+l4025:
+	dw	0
+errmode:
+	db	0	; Error mode in line
+;
+; ############## End of initialization to zero ###############
+;
+top.mem:		; Pointer to top of memory
+	dw	0
+top.data:		; Pointer to top of data
+	dw	0
+;
+; Register and condition code table
+; Byte 1 coded as ccccclll with ccccc code bits
+;				llll  length of ASCII
+; Next bytes ASCII name
+; Last byte register code
+;
+; Macro building following register and condition code entries
+;
+; R.CODE Entry code
+; STRING Mnemonic string
+; VAL	 Register map
+;
+r.cc	macro	r.code,string,val
+local	part,len
+shf	aset	r.code  shl 3
+
+part:	db	shf+len,string,val
+
+len	aset	$-part-2
+	endm
+r.cc.table:
+;
+; Part 1 : 8 bit registers
+;
+	r.cc	10,'A',111b
+	r.cc	10,'B',000b
+	r.cc	10,'C',001b
+	r.cc	10,'D',010b
+	r.cc	10,'E',011b
+	r.cc	10,'H',100b
+	r.cc	10,'L',101b
+	r.cc	10,'M',110b
+;
+; Part 2 : Register pairs
+;
+	r.cc	12,'SP',11b*2
+	r.cc	12,'PSW',110b
+	r.cc	10,'I',1000b
+	r.cc	10,'R',1001b
+	r.cc	12,'BC',00b*2
+	r.cc	12,'DE',01b*2
+	r.cc	12,'HL',10b*2
+	r.cc	12,'AF',110b
+	r.cc	13,'IX',044h
+	r.cc	13,'IY',064h
+;
+; Part 3 : Condition codes
+;
+	r.cc	14,'NZ',000b
+	r.cc	14,'Z',001b
+	r.cc	14,'NC',010b
+	r.cc	14,'P',110b
+	r.cc	14,'PO',100b
+	r.cc	14,'PE',101b
+;
+; END
+;
+@@TOP::
+	db	0
+

@@ -1,0 +1,680 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-5.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="GENERATOR" content="Mozilla/4.5 [en] (X11; I; Linux 2.0.29 i686) [Netscape]">
+   <title>PL/I-80 Runtime Subroutines</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999">DE / EN</label>
+<div>
+
+<center><b><u><font size=+2>5. PL/I-80 RUNTIME SUBROUTINES</font></u></b></center>
+
+<p><br>
+<br>
+<p>The PL/I-80 Runtime Subroutine Library (PLILIB.IRL) is discussed
+in this section, along with the optional subroutines for direct CP/M Input
+Output. The information given here is useful when PL/I-80 is used as
+a "systems language," rather than an application language, since direct
+access to implementation dependent CP/M functions is allowed. Note that
+the use of these features makes your program very machine and operating
+system dependent.
+<br>&nbsp;
+<p><a NAME="5.1"></a><b><u><font size=+1>5.1. Stack and Dynamic Storage
+Subroutines</font></u></b>
+<p>A number of implementation-dependent functions are included in the
+PL/I-80 Runtime Library which provide access to stack and dynamic storage
+structures. The functions are discussed below, with sample programs which
+illustrate their use. The stack is placed above the code and data area,
+and below the dynamic storage area. The default value of the stack size
+is 512 bytes, but can be changed using the STACK(n) option in the OPTIONS
+portion of the main program procedure heading. In general, the PL/I-80
+dynamic storage mechanism maintains a list of all unallocated storage.
+Upon each request for storage, a search is made to find the first memory
+segment which satisfies the request size. If no storage is found, the ERROR(7)
+condition is signaled (Free Space Exhausted) otherwise, the requested segment
+is taken from the free area, and the remaining portion goes back to the
+free space list. In version 1.0 of PL/I-80, storage is dynamically
+allocated only upon entry to RECURSIVE procedures, upon explicit or implicit
+OPENS for files which access the disk, or upon executing an ALLOCATE statement.
+In any case, an even number of bytes, or whole words, is always allocated,
+no matter what the request size.
+<br>&nbsp;
+<p><a NAME="5.1.1"></a><b><u>5.1.1. The TOTWDS and MAXWDS Functions</u></b>
+<p>It is often useful to find the amount of storage available at any given
+point in the execution of a particular program. The TOTWDS (Total Words)
+and MAXWDS (Max Words) functions can be used to obtain this information.
+The functions must be declared in the calling program as
+<br>&nbsp;
+<blockquote><tt>dcl totwds returns(fixed(15));</tt>
+<br><tt>dcl maxwds returns(fixed(15));</tt></blockquote>
+
+<p><br>When invoked, the TOTWDS subroutine scans the free storage list
+and returns the total number of words (double bytes) available in the free
+list. The MAXWDS subroutine performs a similar function, but returns the
+size of the largest segment in the free list, again in words. A subsequent
+ALLOCATE statement which specifies a segment size not exceeding MAXWDS
+will not cause the ERROR(7) signal to be raised, since at least that much
+storage is available. Note that since both TOTWDS and MAXWDS count in word
+units, the values can be held by FIXED BINARY(15) counters. If, during
+the scan of free memory, invalid link words are encountered (usually due
+to a out-of-bounds subscript or pointer store operation), both
+TOTWDS and MAXWDS return the value -1. Otherwise, the returned value
+will be a non-negative integer value.
+<br>&nbsp;
+<p><a NAME="5.1.2"></a><b><u>5.1.2. The ALLWDS Subroutine</u></b>
+<p>The PL/I-80 Runtime Library contains a subroutine, called ALLWDS,
+which is useful in controlling the dynamic allocation size. The subroutine
+must be declared in the calling program as
+<br>
+<blockquote><tt>dcl allwds entry(fixed(15)) returns(ptr);</tt></blockquote>
+
+<p><br>The ALLWDS subroutine allocates a segment of memory of the size
+given by the input parameter, in words (double bytes). If no segment is
+available, the ERROR(7) condition is raised. Further, the input value must
+be a non-negative integer value. The ALLWDS function returns a pointer
+to the allocated segment.
+<p>An example of the use of TOTWDS, MAXWDS, and ALLWDS functions is given
+in the ALLTST program on the next page. A sample program interaction is
+given following the program listing.
+<br>&nbsp;
+<p><a NAME="5.1.3"></a><b><u>5.1.3. The STKSIZ Function</u></b>
+<p>The function STKSIZ (Stack Size) returns the current stack size in bytes
+whenever it is called. This function is particularly useful for checking
+possible stack overflow conditions, or in determining the maximum stack
+depth during program testing. The STKSIZ function is declared in the calling
+program as
+<br>&nbsp;
+<blockquote><tt>dcl stksiz returns(fixed(15));</tt></blockquote>
+
+<p><br>A Sample use of the STKSIZ function appears in the listing of the
+recursive <a href="acktst-pli.txt">Ackermann test</a>. In this case, it is
+used to check the maximum stack depth during the recursive function processing.
+An <a href="#ACKTST">interaction</a> with this program is given following
+the program listing.
+<br>
+<br>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: ALLTST
+
+L: List Source Program
+
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+PL/I-80 V1.0, COMPILATION OF: ALLTST
+
+   1 a 0000 alltst:
+   2 a 0006     proc options(main);
+   3 a 0006     /* assembly language interface to
+   4 a 0006     dynamic storage allocation module */
+   5 c 0006     dcl
+   6 c 0006         totwds returns(fixed(15)),
+   7 c 0006         maxwds returns(fixed(15)),
+   8 c 0006         allwds entry(fixed(15)) returns(ptr);
+   9 c 0006 
+  10 c 0006     dcl
+  11 c 0006         allreq fixed(15),
+  12 c 0006         memptr ptr,
+  13 c 0006         meminx fixed(15),
+  14 c 0006         memory (0:0) bit(16) based(memptr);
+  15 c 0006 
+  16 c 0006         do while('1'b);
+  17 c 0006         put edit (totwds(),' Total Words Available',
+  18 c 004F             maxwds(),' Maximum Segment Size',
+  19 c 004F             'Allocation Size? ')
+  20 c 004F             (2(skip,f(6),a),skip,a);
+  21 c 004F         get list(allreq);
+  22 c 0067         memptr = allwds(allreq);
+  23 c 0070         put edit('Allocated',allreq,
+  24 c 00B2             ' Words at ',unspec(memptr))
+  25 c 00B2             (skip,a,f(6),a,b4);
+  26 c 00B2 
+  27 c 00B2             /* clear memory as example */
+  28 c 00B2             do meminx = 0 to allreq-1;
+  29 c 00CC             memory(meminx) = '0000'b4;
+  30 c 00E7             end;
+  31 c 00E7         end;
+  32 a 00E7     end alltst;
+
+CODE SIZE = 00E7
+DATA AREA = 0078
+END  COMPILATION
+
+
+A>b:alltst
+
+ 25596 Total Words Available
+ 25596 Maximum Segment Size
+Allocation Size? 0
+
+Allocated     0 Words at 250A
+ 25594 Total Words Available
+ 25594 Maximum Segment Size
+Allocation Size? 100
+
+Allocated   100 Words at 250E
+ 25492 Total Words Available
+ 25492 Maximum Segment Size
+Allocation Size? 25000
+
+Allocated 25000 Words at 25DA
+   490 Total Words Available
+   490 Maximum Segment Size
+Allocation Size? 490
+
+Allocated   490 Words at E92E
+     0 Total Words Available
+     0 Maximum Segment Size
+Allocation Size? 1
+
+ERROR (7), Free Space Exhausted
+Traceback: 016D
+End of Execution
+
+</pre>
+<br>
+<br>
+<p>
+<pre>
+PL/I-80 V1.0, COMPILATION OF: ACKTST
+
+L: List Source Program
+
+   NO ERROR(S) IN PASS 1
+
+   NO ERROR(S) IN PASS 2
+
+
+PL/I-80 V1.0, COMPILATION OF: ACKTST
+
+   1 a 0000 ack:
+   2 a 0006     procedure options(main,stack(2000));
+   3 c 0006     dcl
+   4 c 0006         (m,n) fixed,
+   5 c 0006         (maxm,maxn) fixed,
+   6 c 0006         ncalls decimal(6),
+   7 c 0006         (curstack, stacksize) fixed,
+   8 c 0006         stksiz entry returns(fixed);
+   9 c 0006 
+  10 c 0006     put skip list('Type max m,n: ');
+  11 c 0022     get list(maxm,maxn);
+  12 c 0046         do m = 0 to maxm;
+  13 c 005F             do n = 0 to maxn;
+  14 c 0078             ncalls    = 0;
+  15 c 0088             curstack  = 0;
+  16 c 008E             stacksize = 0;
+  17 c 0091             put edit
+  18 c 012F                 ('Ack(',m,',',n,')=',ackermann(m,n),
+  19 c 012F                  ncalls,' Calls,',stacksize,' Stack Bytes')
+  20 c 012F                 (skip,a,2(f(2),a),f(6),f(7),a,f(4),a);
+  21 c 012F             end;
+  22 c 012F         end;
+  23 c 012F     stop;
+  24 c 0132 
+  25 c 0132     ackermann:
+  26 c 0132         procedure(m,n) returns(fixed) recursive;
+  27 e 0132         dcl
+  28 e 015C             (m,n) fixed;
+  29 e 015C         ncalls = ncalls + 1;
+  30 e 0177         curstack = stksiz();
+  31 e 017D         if curstack > stacksize then
+  32 e 018A             stacksize = curstack;
+  33 e 0190         if m = 0 then
+  34 e 0199            return(n+1);
+  35 e 01A1         if n = 0 then
+  36 e 01AA             return(ackermann(m-1,1));
+  37 e 01C1         return(ackermann(m-1,ackermann(m,n-1)));
+  38 c 01E8         end ackermann;
+  39 a 01E8     end ack;
+
+CODE SIZE = 01E8
+DATA AREA = 0084
+END  COMPILATION
+
+</pre>
+<a name="ACKTST"></a>
+<pre>
+A>b:acktst
+
+Type max m,n: 6,6
+
+Ack( 0, 0)=     1      1 Calls,   4 Stack Bytes
+Ack( 0, 1)=     2      1 Calls,   4 Stack Bytes
+Ack( 0, 2)=     3      1 Calls,   4 Stack Bytes
+Ack( 0, 3)=     4      1 Calls,   4 Stack Bytes
+Ack( 0, 4)=     5      1 Calls,   4 Stack Bytes
+Ack( 0, 5)=     6      1 Calls,   4 Stack Bytes
+Ack( 0, 6)=     7      1 Calls,   4 Stack Bytes
+Ack( 1, 0)=     2      2 Calls,   6 Stack Bytes
+Ack( 1, 1)=     3      4 Calls,   8 Stack Bytes
+Ack( 1, 2)=     4      6 Calls,  10 Stack Bytes
+Ack( 1, 3)=     5      8 Calls,  12 Stack Bytes
+Ack( 1, 4)=     6     10 Calls,  14 Stack Bytes
+Ack( 1, 5)=     7     12 Calls,  16 Stack Bytes
+Ack( 1, 6)=     8     14 Calls,  18 Stack Bytes
+Ack( 2, 0)=     3      5 Calls,  10 Stack Bytes
+Ack( 2, 1)=     5     14 Calls,  14 Stack Bytes
+Ack( 2, 2)=     7     27 Calls,  18 Stack Bytes
+Ack( 2, 3)=     9     44 Calls,  22 Stack Bytes
+Ack( 2, 4)=    11     65 Calls,  26 Stack Bytes
+Ack( 2, 5)=    13     90 Calls,  30 Stack Bytes
+Ack( 2, 6)=    15    119 Calls,  34 Stack Bytes
+Ack( 3, 0)=     5     15 Calls,  16 Stack Bytes
+Ack( 3, 1)=    13    106 Calls,  32 Stack Bytes
+Ack( 3, 2)=    29    541 Calls,  64 Stack Bytes
+Ack( 3, 3)=    61   2432 Calls, 128 Stack Bytes
+Ack( 3, 4)=   125  10307 Calls, 256 Stack Bytes
+Ack( 3, 5)=
+</pre>
+<br>
+<br>
+<p>
+<p><a NAME="5.2"></a><b><u><font size=+2>5.2. PL/I-80 Runtime Subroutine
+Entry Points</font></u></b>
+<p>The standard PL/I-80 Runtime Library entry points are listed below.
+The entry point name is shown to the left, followed by the input value
+registers and the result registers. A short explanation is given on the
+right. Note that this list does not include the environmental or I/O operators
+since these entry points may vary from version to version. Further, the
+definitions shown below are for general information purposes only, and
+are subject to change without notice. The register names are given in capital
+letters, M(r) denotes memory addressed by the register pair r, and ST represents
+a stacked value.
+<p>
+<br>
+<blockquote>
+<pre>
+name     parameters   result   comment or definition
+----     ----------   ------   ---------------------
+im22n    DE     HL     HL      word*word integer multiply
+id22n    DE     HL     HL      word/word integer divide
+is22n    DE     HL     HL      word-word integer subtract
+in20n    HL            HL      -word
+fl40m    HL            ST      fp load from M(HL) to stack
+fx44s    ST     HL     M(HL)   fp xfer from stack to M(HL)
+fx44m    DE     HL     M(HL)   fp xfer from M(HL) to M(DE)
+fa44s    ST     ST     ST      fp add stack+stack to stack
+fa44m    DE     HL     ST      fp add M(DE)+M(HL) to stack
+fa44l    ST     HL     ST      fp add stack+M(HL) to stack
+fa44r    HL     ST     ST      fp add M(HL)+stack to stack
+fs44s    ST     ST     ST      fp sub stack-stack to stack
+fs44m    DE     HL     ST      fp sub M(DE)-M(HL) to stack
+fs44l    ST     HL     ST      fp sub stack-M(HL) to stack
+fs44r    HL     ST     ST      fp sub M(HL)-stack to stack
+fm44s    ST     ST     ST      fp mul stack*stack to stack
+fm44m    DE     HL     ST      fp mul M(DE)*M(HL) to stack
+fm44l    ST     HL     ST      fp mul stack*M(HL) to stack
+fm44r    HL     ST     ST      fp mul M(HL)*stack to stack
+fd44s    ST     ST     ST      fp div stack/stack to stack
+fd44m    DE     HL     ST      fp div M(DE)/M(HL) to stack
+fd44l    ST     HL     ST      fp div stack/M(HL) to stack
+fd44r    HL     ST     ST      fp div M(HL)/stack to stack
+fc44s    ST     ST     ST      fp comp stack:stack to stack
+fc44m    DE     HL     ST      fp comp M(DE):M(HL) to stack
+fc44l    ST     HL     ST      fp comp stack:M(HL) to stack
+fc44r    HL     ST     ST      fp comp M(HL):stack to stack
+fn40s    ST            ST      fp negate stack
+fn40m    HL            ST      fp load from M(HL) and negate
+fe40s    ST            A       float p extract sign from stack
+fe40m    HL            A       float p extract sign from memory
+                                1 => positive sign (non zero set)
+                                0 => zero result (zero flag set)
+                               -1 => negative sign (minus set)
+fmodf    ST     ST     ST      floating point mod(x,y)
+fabsf    ST            ST      floating point abs(x)
+fmaxf    ST     ST     ST      floating point max(x,y)
+fminf    ST     ST     ST      floating point min(x,y)
+froun    ST     A      ST      floating point round(x,k)
+ftrnc    ST            ST      floating point trunc(x)
+fflor    ST            ST      floating point floor(x)
+fceil    ST            ST      floating point ceil(x)
+fexop    ST     A      ST      fp ** k (k pos constant)
+ffxop    ST     ST     ST      x ** y (exp(y*log(x))
+bc12n    D      HL     HL      8/16 bit concatenate, where
+                               B=length of d, C=mask
+bc22n    DE     HL     HL      16/16 bit concatenate, where
+                               B=length of d, C=mask
+bsl16    B      HL     HL      bit shift left 16, size in b
+bsl08    A      B      A       bit shift left 8, size in b
+bst08    A B C  HL     M(HL)   bit substring store bit(8) in
+                               A to bit(8) in memory at HL,
+                               B = index, C=length
+bst16    B C DE HL     M(HL)   bit substring store bit(16) in
+                               DE to bit(16) in memory at HL
+bix08    A B D H       A/HL    bit index, A=source, B=search
+                               D=len(source), E=len(search)
+bix16    B C DE HL     A/HL    bit index, B=len(source),
+                               C=len(search), DE=source,
+                               HL=search
+boolf    B      DE HL  HL      bool(x,y,b), B=4-bit mask
+                               x,y operands in DE and HL
+ie12n    A             HL      sign extend A to HL
+ie10n    A             A       integer extract sign (8-bit)
+ie20n    HL            A       integer extract sign (16-bit)
+imdop    DE     HL     HL      integer mod(x,y)
+iab07    A             A       integer 7 abs(i)
+iab15    HL            HL      integer 15 abs(i)
+imaxf    DE     HL     HL      integer max(x,y)
+iminf    DE     HL     HL      integer min(x,y)
+iroun    HL     A      HL      integer round(i,k)
+iexop    HL     A      HL      integer ** k (k pos constant)
+slvts    HL            A       string load varying to stack
+                               A=length of string on return
+slcts    A             HL      string load char to stack
+                               A=length of char string
+ssvfs    A      B      HL      string store varying from stack
+                               A=current len, B=max length
+sscfs    A      B      HL      string store char from stack
+smvvm    A      DE     HL      string move vary to vary in memory
+                               A=max target len, DE=source, HL=target
+smvcm    A      DE     HL      string move vary to char in memory
+                               A=target length
+smcvm    A    B DE     HL      string move char to vary in memory
+                               A=max target len, B=source len
+smccm    A    B DE     HL      A=target len, B=source len
+sjsts    A      ST     ST'     string juxtapose (catenate) stack
+                               A=length of left, ST=chars of left
+                               ST'=pushed psw with length of right
+                               followed by chars of right
+sjscm    A      B      HL      string juxtapose stack with char memory
+                               A=stacked len, B=char len, HL=.char
+sjsvm    A             HL      string juxtapose stack with vary memory
+savvm    A      B      HL      string append vary to vary in memory
+                               A=char len, B=max target length
+sasvm    A      B      HL      string append stack to vary in memory
+                               A=stacked length, B=max target length
+sacvm    A      B      HL      string append char to vary in memory
+                               A=char len, B=max target length
+scccm    A   B  DE     HL      string compare char to char in memory
+                               A=len right, B=len left,
+                               DE=char left, HL=char right
+sccvm        B  DE     HL      string compare char to vary in memory
+                               B=len left, DE=.char, HL=.vary
+scvcm    A      DE     HL      string compare vary to char in memory
+                               A=len right char, DE=.vary, HL=.char
+scvvm           DE     HL      string compare vary to vary in memory
+                               DE=.vary left, HL=.vary right
+scscm    A B           HL      string compare stack to char in memory
+                               A=len stk, B=len char, HL=.char
+scsvm    A             HL      string compare stack to vary in memory
+                               A=len stk, HL=.vary
+sccms    A B           HL      string compare char in mem to stack
+                               A=len stk, B=len char, HL=.char
+scvms    A             HL      string compare vary in mem to stack
+                               A=Ien stk, HL=.vary
+scsts    A                     string compare stack to stack
+                               A=len right element on stack,
+                               ST is stack right string, next is
+                               pushed psw with len left string,
+                               followed by left string, result:
+                               sign value &amp; cond if 1 &lt; r,
+                               zero value &amp; cond if 1 = r,
+                               pos  value &amp; cond if 1 >= r,
+                               nzer value &amp; cond if 1 > r.
+cs2ad    A      E      HL      char substr(ex,ei) address
+                               A=length, E=ei, HL=ex
+                               A=result length on return
+cs3ad    A   C  E      HL      char substr(ex,ei,el) address
+                               C=el
+                               A=result length on return
+vs2ad           E      HL      vary substr(ex,ei) address
+                               E=ei, HL=ex
+                               A=result length on return
+vs3ad        C  E      HL      vary substr(ex,ei,el) address
+                               C=el
+                               A=result length on return
+cxccm    A  B   DE     A/HL    str index char to char in memory
+                               A=len right, B=len left,
+                               DE=char left, HL=char right
+cxcvm       B   DE     A/HL    str index char to vary in memory
+                               B=len left, DE=.char, HL=.vary
+cxvcm    A      DE     A/HL    str index vary to char in memory
+                               A=.len right char, DE=.vary, HL=.char
+cxvvm           DE     A/HL    str index vary to vary in memory
+                               DE=.vary left, HL=.vary right
+cxscm    A  B          A/HL    str index stack to char in memory
+                               A=len stk, B=len char, HL=.char
+cxsvm    A             A/HL    str index stack to vary in memory
+                               A=len stk, HL=.vary
+cxcms    A  B          A/HL    str index char in mem to stack
+                               A=len stk, B=len char, HL=.char
+cxvms    A             A/HL    str index vary in mem to stack
+                               A=len stk, HL=.vary
+cxsts    A                     str index stack to stack
+                               A=len right element on stack,
+                               ST is stack right string, next is
+                               pushed psw with len left string,
+                               followed by left string, result:
+                               A/HL=0 if right not found in
+                               left, otherwise index returned
+verop    A   ST ST     A/A/HL  verify(s,c), A=len(c), st
+                               has chars(c) len(s) chars(s)
+colop                  A/ST    collateo, A=128, stack has
+xl2op    A   ST ST     A/ST    translate(s,t), A=len(t),
+                               stack has chars(t), s
+xl3op    A   ST ST ST  A/ST    translate(s,t,x) A=len(x),
+                               stack has chars(x), t, s
+                               0, 1, ..., 127 (ascii chars)
+dldop    A      HL     ST      decimal load to stack, A=prec
+dasop    A      ST     HL      decimal assign, stack to memory
+dadop    ST     ST     ST      decimal add to stack
+dsuop    ST     ST     ST      decimal subtract to stack
+dngop    ST            ST      decimal negate to stack
+dcmop    ST            A       decimal compare operator
+dexop    ST     ST     ST      decimal exponentiate to stack
+dmuop    ST     ST     ST      decimal multiply to stack
+ddvop    ST     ST     ST      decimal divide to stack
+dsiop    ST            A       decimal sign extract
+dmodf    ST     ST     ST      decimal mod(x,y)
+dabsf    ST            ST      decimal abs(x)
+dmaxf    ST     ST     ST      decimal max(x,y)
+dminf    ST     ST     ST      decimal min(x,y)
+droun    ST     A      ST      decimal round(x,k)
+dtrnc    ST            ST      decimal trunc(x)
+dflor    ST            ST      decimal floor(x)
+dceil    ST            ST      decimal ceil(x)
+dexop    ST     A      ST      decimal ** k (k pos constant)
+qcdop    A B    ST     ST      convert character to decimal
+                               A string length, B=scale
+                               ST character string, returns
+                               ST decimal number
+qddsl    A      ST     ST      decimal/decimal left shift
+                               A=shift count
+qddsr    A      ST     ST      decimal/decimal right shift
+                               A=shift count
+qicop    A             HL      convert integer to char in stack
+                               A=string size, HL=integer value
+qvcop    A/ST          A/ST    convert varying to char
+qi07d    A             ST      convert fix(7) to decimal
+qi15d    HL            ST      convert fix(15) to decimal
+qi07f    A             ST      convert fix(7) to float
+qi15f    HL            ST      convert fix(15) to float
+qfi07    ST            A       convert float to fix(7)
+qfi15    ST            HL      convert float to fix(15)
+qfcss    A      ST     A/ST    convert float-char stack to stack
+                               A=target length, ST=fp number
+qfcms    A      M(HL)  A/ST    convert float-char memory to stack
+qb08c    A      B      ST      convert bit(8) in a, to string
+                               in stack, with precision b
+qb16c    HL     B      ST      convert bit(16) in HL to string
+qb08i    A      B      HL      convert bit(8) in A to fixed
+                               with precision B in HL
+qb16i    HL     B      HL      convert bit(16) to fixed
+qi07b    A      B      A       convert fix(&lt;8) to bit(8)
+                               fixed precision in b
+qi15b    HL     B      HL      convert fix(&lt;16) to bit(16)
+qdi07    ST            A       convert dec in stack to fix(7)
+qdi15    ST            HL      convert dec in stack to fix(15)
+qciop    A/ST          HL      convert char in stack to integer
+qcfop    A/ST          ST      convert char in stack to float
+qccop    A B    ST     A/ST    convert char to char on stack
+                               A=len(s), B=converted length
+                               return A=b, ST trunc or extend
+nstop    BC DE HL      M(HL)   non-computational store, move
+                               M(DE) to M(HL) for BC bytes
+nc22n    DE     HL     A       double byte non-computational
+                               compare: zero flag set if
+                               DE=HL, non-zero otherwise
+ncomp    BC DE HL      M(HL)   non-computational compare,
+                               M(DE)-M(HL), set flags
+</pre>
+</blockquote>
+<br>
+<br>
+<p><a NAME="5.3"></a><b><u><font size=+2>5.3. Direct CP/M Function Calls</font></u></b>
+<p>Access to all CP/M version 1 and 2 functions, and equivalent MP/M calls,
+is accomplished through the optional subroutines included in <a href="plidio-asm.txt">PLIDIO.ASM</a>,
+given in the listing of <a href="link80-a.html">Appendix A</a>, and included
+in source form on the PL/I-80 diskette.
+<p>The <a href="plidio-asm.txt">PLIDIO.ASM</a> subroutines are not included
+as a part of the standard PLILIB.IRL file because specific applications
+may require various changes to the direct CP/M functions which either remove
+operations to decrease space, or alter the manner in which the interface
+to a specific function takes place. Note that if the interface to a function
+is changed, it is imperative that the name of the entry point is also changed
+to avoid confusion when the program is read by another programmer.
+<p>The relocatable file, PLIDIO.REL, is created by assembling the source
+program using RMAC:
+<br>&nbsp;
+<blockquote><tt>rmac plidio $pz+s</tt></blockquote>
+
+<p><br>(the $pz+s option avoids production of the listing and symbol files).
+Given that a PL/I-80 program, such as <a href="diocopy-pli.txt">DIOCOPY.PLI</a>,
+is present on the disk, the DIOCOPY.REL file is produced by typing:
+<br>&nbsp;
+<blockquote><tt>pli diocopy</tt></blockquote>
+
+<p><br>(a listing of the DIOCOPY program is given in <a href="link80-c.html">Appendix
+C</a>). These two programs are then linked with the PLILIB.IRL file by
+typing:
+<br>&nbsp;
+<blockquote><tt>link diocopy,plidio</tt></blockquote>
+
+<p><br>resulting in the file DIOCOPY.COM which is a program that directly
+executes under CP/M.
+<p>The file <a href="diomod-dcl.txt">DIOMOD.DCL</a> is a source file containing
+the standard PLIDIO entry point declarations so that they can be conveniently
+copied into the source program during compilation using the "include" statement
+<br>&nbsp;
+<blockquote><tt>%include `x:diomod.dcl';</tt></blockquote>
+
+<p><br>where the optional "x:" drive prefix indicates the drive name (A:
+through P:) containing the <a href="diomod-dcl.txt">DIOMOD.DCL</a> file. The
+drive prefix need not be present if the DIOMOD.DCL file is on the same
+drive as the PLI source file. The contents of the DIOMOD.DCL file is shown
+below, and in the listing of <a href="link80-c.html">Appendix C</a>.
+<br>
+<br>
+<pre>
+	dcl
+		memptr entry         returns (ptr),
+		memsiz entry         returns (fixed(15)),
+		memwds entry         returns (fixed(15)),
+		dfcb0  entry         returns (ptr),
+		dfcb1  entry         returns (ptr),
+		dbuff  entry         returns (ptr),
+		reboot entry,
+		rdcon  entry         returns (char(1)),
+		wrcon  entry         (char(1)),
+		rdrdr  entry         returns (char(1)),
+		wrpun  entry         (char(1)),
+		wrlst  entry         (char(1)),
+		coninp entry         returns (char(1)),
+		conout entry         (char(1)),
+		rdstat entry         returns (bit(1)),
+		getio  entry         returns (bit(8)),
+		setio  entry         (bit(8)),
+		wrstr  entry         (ptr),
+		rdbuf  entry         (ptr),
+		break  entry         returns (bit(1)),
+		vers   entry         returns (bit(16)),
+		reset  entry,
+		select entry         (fixed(7)),
+		open   entry   (ptr) returns (fixed(7)),
+		close  entry   (ptr) returns (fixed(7)),
+		sear   entry   (ptr) returns (fixed(7)),
+		searn  entry         returns (fixed(7)),
+		delete entry   (ptr),
+		rdseq  entry   (ptr) returns (fixed(7)),
+		wrseq  entry   (ptr) returns (fixed(7)),
+		make   entry   (ptr) returns (fixed(7)),
+		rename entry   (ptr),
+		logvec entry         returns (bit(16)),
+		curdsk entry         returns (fixed(7)),
+		setdma entry         (ptr),
+		allvec entry         returns (ptr),
+		wpdisk entry,
+		rovec  entry         returns (bit(16)),
+		filatt entry         (ptr),
+		getdpb entry         returns (ptr),
+		getusr entry         returns (fixed(7)),
+		setusr entry   (fixed(7)),
+		rdran  entry   (ptr) returns (fixed(7)),
+		wrran  entry   (ptr) returns (fixed(7)),
+		filsiz entry   (ptr),
+		setrec entry   (ptr),
+		resdrv entry         (bit(16)),
+		wrranz entry   (ptr) returns (fixed(7));
+</pre>
+<br>
+<br>
+<p>Three programs are included which illustrate the use of the PLIDIO calls.
+<a href="link80-b.html">Appendix
+B</a> lists the DIOCALLS program that gives examples of all the basic functions,
+while <a href="link80-c.html">Appendix C</a> shows how the fundamental
+disk I/O operations take place, in a program called DIOCOPY which performs
+a fast file-to-file copy function. The last program, given in <a href="link80-d.html">Appendix
+D</a>, illustrates the operation of the random access primitives. These
+programs are designed to demonstrate all of the PLIDIO entry points, and
+show various additional PL/I-80 programming facilities in the process.
+<p>The file <a href="fcb-dcl.txt">FCB.DCL</a> is used throughout DIOCOPY and
+DIORAND to define the body of each File Control Block declaration. This
+file is copied into the source program during compilation using the statement:
+<br>&nbsp;
+<blockquote><tt>%include 'x:fcb.dcl';</tt></blockquote>
+
+<p><br>where, again, "x:" denotes the optional drive prefix for the drive
+containing the <a href="fcb-dcl.txt">FCB.DCL</a> file.
+<p>Note that the use of these entry points generally precludes the use
+of some PL/I-80 facilities. In particular, the dynamic storage area
+is used by the PL/I-80 system for recursive procedures and file I/O
+buffering. (Be aware that there are no guarantees that the dynamic storage
+area will not be used for other purposes as additional facilities are added
+to PL/I-80.) Thus, the use of the MEMPTR function as shown in <a href="link80-b.html">Appendix
+B</a> disallows the use of dynamic storage allocation functions. Further,
+you must ensure that the various file maintenance functions, such as delete
+and rename do not access a file which is currently open in the PL/I-80
+file system. Simple peripheral access, as shown in these examples, is generally
+safe since no buffering takes place in this case.
+<br>
+<p>
+<hr WIDTH="100%">
+<i>
+<span lang="de"><a href="link80-a.html">Weiter</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Inhalt</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-4.html">Zur&uuml;ck</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC.html">Zur&uuml;ck zur RMAC Seite</a></span>
+<span lang="en"><a href="link80-a.html">Next</a>
+&nbsp;&nbsp;&nbsp; <a href="index.html#TOC">Contents</a>
+&nbsp;&nbsp;&nbsp; <a href="link80-4.html">Previous</a>
+&nbsp;&nbsp;&nbsp; <a href="../../RMAC-en.html">Back to RMAC Page</a></span>
+</i>
+<p>
+</div>
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/RMAC/Link80/link80-5.htm by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:08:19 GMT -->
+</html>

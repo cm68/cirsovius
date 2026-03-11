@@ -1,0 +1,6076 @@
+	title	MODEM program
+	name	('MDM709')
+
+; DASMed version of MDM709 - from SIG/M, Volume 121
+
+; DASMed by W. Cirsovius, just for curiosity
+
+	.z80
+	aseg
+	org	0100h
+
+NO	equ	0
+YES	equ	NOT NO
+
+OS	equ	0000h
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+FCB	equ	005ch
+FCB2	equ	FCB+_DIR
+DMA	equ	0080h
+
+RcvFNs	equ	FCB+.drv	; Start of receive file name
+RcvFNe	equ	DMA-1		; Max end of receive file name
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.consta	equ	11
+.vers	equ	12
+.resdsk	equ	13
+.seldsk	equ	14
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.rename	equ	23
+.getdsk	equ	25
+.setdma	equ	26
+.getalv	equ	27
+.setatt	equ	30
+.getdpb	equ	31
+.usrcod	equ	32
+.filsiz	equ	35
+
+_CST	equ	 2		; BIOS CONST number
+_COT	equ	 4		; BIOS CONOUT number
+_LST	equ	15		; BIOS LISTST number
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_RO	equ	 9
+_SYS	equ	10
+_EX	equ	12
+_DIR	equ	16
+_CR	equ	32
+_RRN	equ	33
+
+FCBlen	equ	33
+
+IOerr	equ	-1
+
+_get	equ	-1
+
+reclng	equ	0080h
+
+MAXUSR	equ	15
+
+CCPpage	equ	8		; Pages used by CCP
+
+RdRec	equ	128		; Records used for reading
+
+Cmdin	equ	128		; Length of command line
+
+null	equ	00h
+bell	equ	07h
+bs	equ	08h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+esc	equ	1bh
+eot	equ	'$'
+RUBOUT	equ	7fh
+;
+; XMODEM control
+;
+SOH	equ	'A'-'@'
+EOTM	equ	'D'-'@'
+ACK	equ	'F'-'@'
+NAK	equ	'U'-'@'
+CAN	equ	'X'-'@'
+;
+; MODEM control
+;
+XON	equ	'Q'-'@'
+XOFF	equ	'S'-'@'
+
+MSB	equ	10000000b
+NOMSB	equ	01111111b
+LOMASK	equ	00001111b
+UPPMASK	equ	01011111b
+
+TRMCOL	equ	24
+
+MAXFIL	equ	64
+
+Delay1	equ	7500		; Delay value
+Delay2	equ	8192		; Delay value
+Delay3	equ	  20		; Delay value clock dependent
+Delay4	equ	  25		; Delay value clock dependent
+
+baudval	equ	3d09h		; Baud rate value
+;
+; PMMI Ports
+;
+PMMI	equ	0c0h		; Base port
+;					In	Out
+UARTCTL	equ	PMMI+0		; UART status	control
+PMMIDAT	equ	PMMI+1		;           Data
+PMMICTL	equ	PMMI+2		; MODEM state	Timer rate
+MDMCTL	equ	PMMI+3		;  -----	MODEM control
+;
+; Bits for UARTCTL:
+;
+; Out:
+;
+TBS	equ	01000000b	; Number of stop bits
+EPS	equ	00100000b	; Even/odd parity
+NP	equ	00010000b	; No parity
+NB2	equ	00001000b	; 00 - 5, 10 - 6
+NB1	equ	00000100b	; 01 - 7, 11 - 8 bits
+RI	equ	00000010b	; Ring indicator
+ORIG	equ	00000001b	; Switch hook
+;
+; In:
+;
+TBMT	equ	00000001b	; Transmit buffer empty
+DAV	equ	00000010b	; Data available
+;
+; Bits for MDMCTL:
+;
+; Out:
+;
+MCTL	equ	00011011b
+TBRK	equ	00000100b	; Transmission break
+RXR	equ	00100000b	; Receive data rate
+DTR	equ	01000000b	; Data terminal ready
+;
+; In:
+;
+DT	equ	00000001b	; Dial tone
+CTS	equ	00000100b	; Clear to send
+TP	equ	10000000b	; Timer pulses
+;
+Bd60	equ	250
+Bd120	equ	125
+Bd300	equ	52
+
+	jp	l0d75		; Jump to start
+;
+l0103:
+	db	YES		; PMMI Modem
+l0104:
+	db	40		; Clock speed
+l0105:
+	db	1		; Modem speed - 1=300 Bd
+l0106:
+	db	5		; Send delay - 5=50 ms
+l0107:
+	db	5		; Extra wait for new line
+l0108:
+	db	5		; Number of dir columns shown
+l0109:
+	db	NO		; User added setup routine
+l010a:
+	db	NO		; Cursor control routine
+l010b:
+	db	YES		; Resend only after NAK
+l010c:
+	db	NO		; Change any file name to .BAK
+l010d:
+	db	YES		; Default to CRC checking
+l010e:
+	db	YES		; Allow toggling of CRC to checksum
+l010f:
+	db	NO		; Convert backspace to rub
+l0110:
+	db	YES		; Allow toggling of backspace to rub
+l0111:
+	db	NO		; Add LF after CR
+l0112:
+	db	YES		; Allow toggling of LF after CR
+l0113:
+	db	NO		; Allow transmission of logon
+l0114:
+	db	YES		; Do not overwrite CCP
+l0115:
+	db	NO		; Local command if EXTCHR precedes
+l0116:
+	db	YES		; Allow toggling of LOCONEXTCHR
+l0117:
+	db	YES		; Allow toggling of printer on/off
+l0118:
+	db	NO		; Check for XOFF from remote
+l0119:
+	db	NO		; Wait for XON after CR
+l011a:
+	db	YES		; Allow toggling of XOFF checking
+l011b:
+	db	YES		; CTL-characters above ^M not display
+	db	NO		; Future extension
+	db	NO		; Future extension
+	db	NO		; Future extension
+	db	NO		; Future extension
+l0120:
+	db	'D'-'@'		; Send BYE and disconnect
+l0121:
+	db	'O'-'@'		; Send logon
+l0122:
+	db	'P'-'@'		; Toggle printer
+l0123:
+	db	'R'-'@'		; Close input text buffer
+l0124:
+	db	'T'-'@'		; Transmit file to remote
+l0125:
+	db	'Y'-'@'		; Open input text buffer
+l0126:
+	db	'^'-'@'		; Send next character
+l0127:
+	db	Bd120		; Default Baud rate
+l0128:
+	db	'@'-'@'		; BREAK character
+l0129:
+	db	'B'-'@'		; Input Baud rate
+;
+; Input UART control
+;
+l012a:
+	in	a,(UARTCTL)
+	ret
+;
+	ds	7
+;
+; Output MODEM data
+;
+l0134:
+	out	(PMMIDAT),a
+	ret
+;
+	ds	7
+;
+; Input MODEM data
+;
+l013e:
+	in	a,(PMMIDAT)
+	ret
+;
+	ds	7
+;
+; Extract receive ready
+;
+l0148:
+	and	DAV
+	ret
+;
+; Test receive done
+;
+l014b:
+	cp	DAV
+	ret
+;
+; Extract send ready
+;
+l014e:
+	and	TBMT
+	ret
+;
+; Test send done
+;
+l0151:
+	cp	TBMT
+	ret
+;
+; Input MODEM status
+;
+l0154:
+	in	a,(PMMICTL)
+	ret
+;
+; Output timer rate
+;
+; The value is determined by:
+;
+; Value:= 250 000 / (Baud rate) * 16
+;
+l0157:
+	out	(PMMICTL),a
+	ret
+;
+; Out UART control port
+;
+l015a:
+	out	(UARTCTL),a
+	ret
+;
+; Out modem status port
+;
+l015d:
+	out	(MDMCTL),a
+	ret
+;
+l0160:
+	dw	l020d		; Logon message
+l0162:
+	jp	l0346		; Connect
+l0165:
+	jp	l064d		; Disconnect
+l0168:
+	jp	l064d		; Good bye
+l016b:
+	jp	l0287		; User written init routine
+l016e:
+	jp	l0288		; User written set up
+l0171:
+	jp	l06dd		; Do special menue
+l0174:
+	jp	l01a4		; Give system info
+;
+	db	0,0,0
+	db	0,0,0
+	db	0,0,0
+	db	0,0,0
+;
+	jp	l242d		; Print immediate string
+	jp	l278e		; Read line from console
+	jp	l2868		; Compare
+	jp	l18c2		; Get data from modem
+l018f:
+	jp	l3f63		; Go to next screen
+;
+; Clear to end of screen
+;
+l0192:
+	call	l242d
+	db	esc,'y',null
+	nop
+	nop
+	ret
+;
+; Clear screen
+;
+l019b:
+	call	l242d
+	db	esc,':',null
+	nop
+	nop
+	ret
+;
+; Give system info
+;
+l01a4:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	z,l01ec		; Nope
+	call	l242d
+	db	'Version for PMMI S-100 modem starting at port: ',null
+	ld	a,(l012a+1)	; Get port numner
+	call	l2404		; Print hex byte
+	call	l242d
+	db	'H'
+	db	cr,lf,null
+	ret
+l01ec:
+	call	l242d
+	db	'Version for Non-PMMI modem'
+	db	cr,lf,null
+	ret
+l020d:
+	dw	-1
+;
+	db	000h,0ffh,000h,0ffh,000h,0ffh,000h
+	db	0ffh,0ffh,000h,000h,0ffh,0ffh,000h
+	db	000h,000h,000h,004h,00fh,010h,012h
+	db	014h,019h,01eh,07dh,000h,002h,0dbh
+	db	0c0h,0c9h,000h,000h,000h,000h,000h
+	db	000h,000h,0d3h,0c1h,0c9h,000h,000h
+	db	000h,000h,000h,000h,000h,0dbh,0c1h
+	db	0c9h,000h,000h,000h,000h,000h,000h
+	db	000h,0e6h,002h,0c9h,0feh,002h,0c9h
+	db	0e6h,001h,0c9h,0feh,001h,0c9h,0dbh
+	db	0c2h,0c9h,0d3h,0c2h,0c9h,0d3h,0c0h
+	db	0c9h,0d3h,0c3h,0c9h,00dh,002h,0c3h
+	db	046h,003h,0c3h,04dh,006h,0c3h,04dh
+	db	006h,0c3h,087h,002h,0c3h,088h,002h
+	db	0c3h,0ddh,006h,0c3h,0a4h,001h,000h
+	db	000h,000h,000h,000h,000h,000h,000h
+	db	000h,000h,000h,000h,0c3h,02dh,024h
+	db	000h
+;
+; User written init routine
+;
+l0287:
+	ret
+l0288:
+	ret
+;
+;
+;
+l0289:
+	ld	a,(l4080)
+	or	a
+	jp	z,l0295
+	ld	a,(l4084)
+	or	a
+	ret	nz
+l0295:
+	call	l02c4
+	call	l0333
+	call	l0157		; Output timer rate
+	cp	Bd300		; Test less 300 Baud
+	ld	a,MCTL+DTR+TBRK
+	jp	c,l02a7		; Yeap
+	ld	a,MCTL+DTR+RXR+TBRK
+l02a7:
+	call	l015d		; Put to modem status port
+	ld	(l40cb),a
+	ld	hl,Delay1
+l02b0:
+	dec	l
+	jp	nz,l02b0
+	dec	h
+	jp	nz,l02b0
+	ld	a,(l40d2)
+	call	l015a		; Output modem control
+	ld	a,c
+	ld	(l0105),a	; Set modem speed
+	xor	a
+	ret
+;
+;
+;
+l02c4:
+	ld	a,(FCB+.drv+.nam)
+	cp	' '
+	ld	a,(l40c2)	; Get Baud rate
+	ret	z
+	ld	a,(FCB+.drv+.nam)
+	or	a
+	ld	a,(l40c2)
+	ret	z
+	ld	de,FCB+.drv+.nam
+	ld	hl,0		; Init result
+l02db:
+	ld	a,(de)
+	inc	de
+	cp	' '
+	jp	z,l02db
+	cp	'0'
+	jp	c,l0319
+	cp	'9'+1
+	jp	nc,l0319
+	sub	'0'
+	ld	b,h
+	ld	c,l
+	add	hl,hl
+	add	hl,hl
+	add	hl,bc
+	add	hl,hl
+	add	a,l
+	ld	l,a
+	jp	nz,l02fa
+	inc	h
+l02fa:
+	ld	a,e
+	cp	FCB+.drv+.nam+.ext
+	jp	nz,l02db
+	ld	a,h
+	cpl
+	ld	d,a
+	ld	a,l
+	cpl
+	ld	e,a
+	inc	de
+	ld	hl,baudval
+	ld	bc,-1
+l030d:
+	inc	bc
+	add	hl,de
+	jp	c,l030d
+	ld	a,b
+	or	a
+	ld	a,c
+	ld	(l40c2),a	; Set Baud rate
+	ret	z
+l0319:
+	call	l2455
+	db	'++ INVALID BAUDRATE ++',eot
+;
+; Map Accu
+;
+;   Accu	Return C
+; ========	========
+; 100..255	   0
+;  40.. 99	   1
+;  30.. 39	   2
+;  24.. 29	   3
+;   0.. 23	   4
+;
+l0333:
+	ld	c,0
+	cp	100
+	ret	nc
+	inc	c
+	cp	40
+	ret	nc
+	inc	c
+	cp	30
+	ret	nc
+	inc	c
+	cp	24
+	ret	nc
+	inc	c
+	ret
+;
+; Connect modem
+;
+l0346:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	ret	z		; Nope
+	xor	a
+	ld	(l40c1),a
+	ld	(l40d0),a
+	ld	hl,0
+	ld	(l40b6),hl	; Clear try count
+	ld	hl,l40d4+1
+	ld	a,(hl)		; Get characters read
+	cp	4
+	jp	c,l0372
+	ld	c,a
+	ld	b,0
+	sub	4
+	ld	(hl),a
+	inc	hl
+	ex	de,hl
+	ld	hl,LINE+4	; Position to argument
+	call	l2937		; Unpack
+	jp	l0400
+l0372:
+	ld	c,ll0axx / 2
+	ld	hl,l0a00
+	ld	de,l4500
+	call	l3f30		; Init line
+	ld	(de),a
+	inc	de
+l037f:
+	ld	b,l0022
+	call	l24ae		; Copy 1st phone entry
+	call	l3f39		; Set blanks between phone entries
+	ld	b,l0022
+	call	l24ae		; Copy 2nd phone entry
+	call	l3f30		; Close phone entry
+	dec	c
+	jp	nz,l037f
+	ld	a,eot
+	ld	(de),a
+	call	l3f93		; Go to next screen
+	ld	c,.string
+	ld	de,l4500
+	call	BDOS		; Tell phone lirary
+	call	l242d
+	db	cr,lf
+	db	'Enter number or library letter - <CR> when finished,'
+	db	cr,lf
+	db	'CTL-X cancels while dialing: ',null
+	ld	de,l40d4
+	call	l278e		; Read line from console
+l0400:
+	ld	hl,l40d4+1
+	ld	a,(hl)		; Get characters read
+	or	a
+	jp	z,l05f8
+	inc	hl
+	call	l0601		; Wait for dial tone
+	jp	c,l05f8		; No dial tone
+	ld	b,'A'
+	ld	e,0
+	ld	c,ll0axx
+	ld	a,(hl)
+l0416:
+	cp	b
+	jp	z,l0423
+	inc	b
+	inc	e
+	dec	c
+	jp	z,l0444
+	jp	l0416
+l0423:
+	ld	hl,l0a00
+	ld	bc,l0022
+	ld	a,e
+	or	a
+	jp	z,l0438
+l042e:
+	ld	a,(hl)
+	or	a
+	jp	z,l05d1
+	add	hl,bc
+	dec	e
+	jp	nz,l042e
+l0438:
+	ld	b,l0022
+	ld	de,l40d4+1
+	ex	de,hl
+	ld	(hl),b		; Force characters read
+	ex	de,hl
+	inc	de
+	call	l24ae		; Copy phone entry
+l0444:
+	ld	hl,l40d4+1
+	ld	e,(hl)		; Get characters read
+	inc	hl
+l0449:
+	ld	a,(hl)
+	or	a
+	jp	z,l05d1
+	call	l0575
+	call	l2394		; Get console state
+	call	nz,l239f	; Get character if available
+	cp	CAN		; Test cancel
+	jp	z,l05f8
+	inc	hl
+	push	de
+	push	hl
+	ld	b,1
+	call	l069f
+	pop	hl
+	pop	de
+	dec	e
+	jp	nz,l0449
+	call	l242d
+	db	'  try #',null
+	ld	hl,(l40b6)	; Advance try count
+	inc	hl
+	ld	(l40b6),hl
+	call	l23d3		; Print decimal
+	call	l2387		; Close line on console
+	ld	a,MCTL+DTR+RXR+TBRK
+	call	l015d		; Put to modem status port
+	ld	b,1
+	call	l069f
+	ld	a,TBS+NP+NB1+NB2+ORIG
+	call	l015a		; Output modem control
+	ld	d,CTS
+	ld	c,150
+	call	l06b9
+	jp	nc,l0504
+	call	l064d
+l049e:
+	ld	a,(l40c1)
+	or	a
+	jp	nz,l04f2
+	call	l242d
+	db	cr,lf
+	db	'No answer after time-out.  Redial? (Y/N/C): '
+	db	bell,null
+	call	l23c0		; Get and echo character as upper case
+	call	l2387		; Close line on console
+	cp	'N'
+	jp	z,l2b3a
+	cp	'Y'
+	jp	z,l04f2
+	cp	'C'
+	jp	nz,l049e
+	ld	a,1
+	ld	(l40c1),a
+l04f2:
+	ld	b,50
+	call	l069f
+	ld	a,(l40d0)
+	or	a
+	jp	z,l0400
+	ld	(l40d4+1),a	; Set characters read
+	jp	l0400
+l0504:
+	ld	a,(l40c2)	; Get Baud rate
+	call	l0157		; Output timer rate
+	call	l242d
+	db	cr,lf
+	db	'Connected, originate mode, default baudrate, '
+	db	cr,lf
+	db	'any key to stop bell'
+	db	cr,lf,bell,null
+	ld	a,(l40c2)	; Get Baud rate
+	call	l0157		; Output timer rate
+l055c:
+	call	l2394		; Get console state
+	jp	nz,l2b3a	; Any available
+	ld	a,bell
+	call	l23b3		; Put character to console
+	ld	bc,Delay2	; Set delay
+l056a:
+	dec	c
+	jp	nz,l056a
+	dec	b
+	jp	nz,l056a
+	jp	l055c
+l0575:
+	call	l23b3		; Put character to console
+	cp	'R'
+	jp	nz,l0585
+	push	af
+	ld	a,e
+	cp	1
+	jp	z,l0666
+	pop	af
+l0585:
+	cp	'0'
+	ret	c
+	cp	'9'+1
+	ret	nc
+	sub	'0'
+	jp	nz,l0592
+	ld	a,10
+l0592:
+	ld	c,a
+	ld	a,(l0127)	; Get default Baud rate
+	call	l0157		; Output timer rate
+l0599:
+	call	l0154		; Input MODEM status
+	and	TP		; Do timing thru pulse toggling
+	jp	nz,l0599
+l05a1:
+	call	l0154
+	and	TP
+	jp	z,l05a1
+l05a9:
+	ld	a,ORIG
+	call	l015a		; Output modem control
+l05ae:
+	call	l0154
+	and	TP
+	jp	nz,l05ae
+	ld	a,NULL
+	call	l015a		; Output modem control
+l05bb:
+	call	l0154
+	and	TP
+	jp	z,l05bb
+	dec	c
+	jp	nz,l05a9
+;
+	ld	a,ORIG
+	call	l015a		; Output modem control
+	ld	b,2
+	jp	l069f
+l05d1:
+	call	l242d
+	db	cr,lf
+	db	'++ Bad library number called ++'
+	db	cr,lf,null
+l05f8:
+	call	l064d
+	call	l2387		; Close line on console
+	jp	l2b3a
+;
+; Wait for dial tone
+;
+l0601:
+	call	l064d
+	call	l242d
+	db	cr,lf
+	db	'Waiting for dial tone'
+	db	cr,lf,null
+	ld	a,ORIG
+	call	l015a		; Output modem control
+	ld	d,DT
+	ld	c,50
+	call	l06b9
+	ret	nc
+	call	l242d
+	db	cr,lf
+	db	'++ NO DIAL TONE ++'
+	db	cr,lf,null
+	call	l064d
+	scf
+	ret
+;
+;
+;
+l064d:
+	xor	a
+	call	l015a		; Output modem control
+	call	l015d		; Put to modem status port
+	push	bc
+	ld	b,8
+	call	l069f
+	pop	bc
+	ret
+;
+;
+;
+l065c:
+	ld	a,MCTL+RXR+TBRK
+	call	l015d		; Put to modem status port
+	xor	a
+	call	l015a		; Output modem control
+	ret
+;
+;
+;
+l0666:
+	pop	af
+	ld	a,(l40d4+1)	; Get characters read
+	ld	(l40d0),a
+	sub	1
+	ld	(l40d4+1),a	; Fix characters read
+	ld	d,DT
+	ld	c,35
+	call	l06b9
+	jp	c,l0699
+	ld	b,25
+	call	l069f
+	call	l0154		; Input MODEM status
+	and	d		; Test dial tone
+	jp	z,l049e		; Yeap
+l0688:
+	call	l065c
+	ld	b,50
+	call	l069f
+	call	l0601		; Wait for dial tone
+	jp	nc,l0444	; Ok
+	jp	l049e
+l0699:
+	call	l2387		; Close line on console
+	jp	l0688
+;
+;
+;
+l069f:
+	ld	a,Bd60
+	call	l0157		; Output timer rate
+l06a4:
+	call	l0154		; Input MODEM status
+	and	TP
+	jp	z,l06a4
+l06ac:
+	call	l0154		; Input MODEM status
+	and	TP
+	jp	nz,l06ac
+	dec	b
+	jp	nz,l06a4
+	ret
+;
+; Test modem signal DTS or DT C-times
+;
+l06b9:
+	ld	b,2
+	call	l069f
+	call	l0154		; Input MODEM status
+	and	d		; Test  bit
+	ret	z		; Yeap
+	push	bc
+	push	de
+	call	l2394		; Get console state
+	call	nz,l239f	; Get character if available
+	cp	CAN		; Test user intervention
+	jp	z,l06d8		; Yeap, so disconnect
+	pop	de
+	pop	bc
+	dec	c
+	jp	nz,l06b9
+	scf
+	ret
+l06d8:
+	pop	de
+	pop	bc
+	jp	l231e		; Process disconnection
+;
+; Do special PMMI menue
+;
+l06dd:
+	call	l018f		; Go to next screen
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	ret	z		; Nope
+	call	l242d
+	db	'            Additional Subcommands for PMMI Modem'
+	db	cr,lf,lf
+	db	'  Modem control:'
+	db	cr,lf
+	db	'    A - Answer tone for send or receive'
+	db	cr,lf
+	db	'    O - Originate tone for send or receive'
+	db	cr,lf
+	db	'    D - Disconnect from the phone line'
+	db	cr,lf
+	db	'    X - Disconnect, then reboot to CP/M'
+	db	cr,lf,lf
+	db	'  Parity option:'
+	db	cr,lf
+	db	'    1 - Set and check for odd parity'
+	db	cr,lf
+	db	'    0 - Set and check for even parity'
+	db	cr,lf
+	db	'           Both ends must be capable of these options'
+	db	cr,lf
+	db	'           which are available only in R and S modes.'
+	db	cr,lf
+	db	'           The parity checking will be part of the'
+	db	cr,lf
+	db	'           file transfer protocol.'
+	db	cr,lf,lf
+	db	'  Speed Options:'
+	db	cr,lf
+	db	'        After entering your primary and secondary options,'
+	db	cr,lf
+	db	'        you can set the modem speed by placing a  "." after'
+	db	cr,lf
+	db	'        the options followed by the speed e.g., 300, 600.'
+	db	cr,lf,lf
+	db	'        EXAMPLE:  SBOT.600 will set the modem for 600 baud'
+	db	cr,lf,null
+	ret
+;
+; Phone table
+;
+l0a00:
+	db	'A=Al Mehr...........1-408-238-9621'
+l0022	equ	$-l0a00
+	db	'B=Byron McKay.......1-415-965-4097'
+	db	'C=Tim Cannon........1-312-359-8080'
+	db	'D=Dave Morgan.......1-503-641-7276'
+	db	'E=Bill Ernest.......1-215-398-3937'
+	db	'F=Chuck Fosberg.....1-503-621-7276'
+	db	'G=Thomas Hill.......1-907-337-1984'
+	db	'H=Dave Hardy........1-313-846-6127'
+	db	'I=Wayne Hammerly....1-301-953-3753'
+	db	'J=RBBS Pasadena.....1-213-577-9947'
+	db	'K=Brian Kamor.......1-619-541-2503'
+	db	'L=Sigi Kluger.......1-915-598-1668'
+	db	'M=Dick Mead.........1-213-799-1632'
+	db	'N=Arnie McGall......1-716-425-1785'
+	db	'O=Jud Newell........1-416-231-9538'
+	db	'P=Keith Petersen...1-313-759-6569R'
+	db	'Q=Mark Pulver.......1-312-789-0499'
+	db	'R=Bruce Ratoff......1-201-272-1874'
+	db	'S=Ken Stritzel......1-201-584-9227'
+	db	'T=TCBBS, Dearborn...1-313-846-6127'
+	db	'U=Paul Traina.......1-408-867-1243'
+	db	'V=Edward Svoboda....1-408-732-9190'
+	db	'W=Ward Christensen..1-312-545-8086'
+	db	'X=Ron Fowler........1-414-563-9932'
+	db	'Y=                                '
+	db	'Z=                                '
+l0axx	equ	$-l0a00
+ll0axx	equ	l0axx / l0022
+	db	null
+;
+; #####################
+; ### Enter MDM 709 ###
+; #####################
+;
+l0d75:
+	ld	hl,0
+	add	hl,sp		; Copy stack
+	ld	(l42fe),hl	; Save it
+	ld	sp,l42fe	; Get local stack
+	call	l242d		; Give initial message
+	db	cr,lf
+	db	'MDM709 - (type M for Menu)'
+	db	cr,lf,null
+	call	l0174		; Tell system version
+	call	l2aaa		; Build CRC table
+	call	l0e0f		; Init BIOS vectors and environment
+	call	l0e38		; Test option in command line
+	ld	a,(l40ce)	; Get option character
+	cp	' '+1		; Test option given
+	jp	c,l2b3a		; Nope
+l0db5:
+	ld	sp,l42fe	; Reset local stack
+	call	l0f0c		; Skip pending modem data
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	z,l0dd2		; Nope
+	ld	a,(l40ce)	; Get option character
+	cp	'C'
+	jp	z,l0162
+	cp	'D'
+	jp	z,l231e		; Process disconnection
+	call	l0289
+l0dd2:
+	call	l233f		; Unpack FCB
+	xor	a
+	ld	(l40c4),a	; Clear echo mode
+	ld	(l40c9),a	; Clear local modem
+	ld	a,(l40ce)	; Get option character
+	cp	'M'
+	jp	z,l2b5e
+	cp	'R'
+	jp	z,l110c
+	cp	'S'
+	jp	z,l1048
+	cp	'T'
+	jp	z,l0f16
+	cp	'E'		; Test echo mode
+	jp	nz,l0dfe
+	ld	(l40c4),a	; Set echo mode
+	jp	l0f16
+l0dfe:
+	cp	'L'		; Test local modem
+	jp	nz,l0e09
+	ld	(l40c9),a	; Set local modem
+	jp	l0f16
+l0e09:
+	call	l37ac		; Invalid command
+	jp	l2b3a
+;
+; Init BIOS vectors and environment
+;
+l0e0f:
+	ld	hl,(OS+1)	; Get warm start vector
+	ld	de,3*(_CST-1)
+	add	hl,de		; Position to vector
+	ld	(l2398),hl	; CONST
+	add	hl,de
+	ld	(l23a3),hl	; CONIN
+	add	hl,de
+	ld	(l23b9),hl	; CONOUT
+	add	hl,de
+	ld	(l23ad),hl	; LIST
+	ld	de,3*(_LST-1-_COT)
+	add	hl,de
+	ld	(l1880),hl	; LISTST
+	call	l38e4		; Get current user area
+	ld	(l4161),a	; Save user
+	call	l18b2		; Set top page of memory
+	jp	l016b		; Do user written init routine
+;
+; Test option in command line
+;
+l0e38:
+	ld	de,FCB+.drv
+	ld	a,(de)		; Get option character
+	ld	(l40ce),a	; Save it
+	cp	' '		; Test any
+	ret	z		; Nope
+l0e42:
+	inc	de
+	ld	a,(de)
+	cp	' '
+	jp	z,l0e76
+	ld	hl,l4080
+	ld	b,l408d-l4080
+l0e4e:
+	cp	(hl)
+	jp	nz,l0e6a
+	cp	'O'
+	ld	b,a
+	ld	a,NP+NB1+NB2+ORIG
+	jp	z,l0e62
+	ld	a,b
+	cp	'A'
+	jp	nz,l0e65
+	ld	a,NP+NB1+NB2+RI
+l0e62:
+	ld	(l40d2),a	; Set modem control
+l0e65:
+	ld	(hl),0
+	jp	l0e42
+l0e6a:
+	inc	hl
+	dec	b
+	jp	nz,l0e4e
+	call	l37ac		; Invalid command
+	pop	hl
+	jp	l2b3a
+l0e76:
+	ld	a,(l4089)
+	or	a
+	jp	nz,l0e80
+	ld	(l4085),a	; Disable verbose
+l0e80:
+	ld	a,(l40ce)	; Get option character
+	cp	'E'
+	ret	z
+	cp	'M'
+	ret	z
+	cp	'L'
+	ret	z
+	cp	'T'
+	ret	z
+	ld	b,a
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	ld	a,b
+	jp	z,l0e9e		; Nope
+	cp	'C'
+	ret	z
+	cp	'D'
+	ret	z
+l0e9e:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l0ea9		; Nope
+	pop	hl
+	jp	l2af3		; Prepare file environment
+l0ea9:
+	ld	a,b
+	cp	'S'
+	jp	z,l0eb9
+	cp	'R'
+	jp	nz,l0ef3
+	ld	a,(l4081)
+	or	a
+	ret	z
+l0eb9:
+	ld	a,(FCB2+.drv)
+	cp	' '
+	ret	nz
+	call	l242d
+	db	'++ Enter primary option plus file name ++'
+	db	cr,lf,bell,null
+	pop	hl
+	jp	l2b3a
+l0ef3:
+	call	l242d
+	db	cr,lf
+	db	'++ Bad option ++'
+	db	cr,lf,lf,null
+;
+; Skip pending modem data
+;
+l0f0c:
+	call	l1675		; Input modem control
+	ret	nz		; Nothing pending
+	call	l013e		; Input modem data
+	jp	l0f0c
+;
+; Command T - Terminal mode
+;
+l0f16:
+	ld	a,(l4081)
+	or	a
+	jp	nz,l0f25
+	ld	a,'B'
+	ld	(l4081),a
+	jp	l37a6
+l0f25:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l0f32		; Nope
+	call	l1607
+	jp	l0f76
+l0f32:
+	ld	a,(FCB+.drv)
+	cp	' '
+	jp	nz,l0f44
+	xor	a
+	ld	(l40cc),a	; Indicate no memory open
+	ld	(l40d1),a	; Close memory buffer
+	jp	l0f76
+l0f44:
+	call	l1eca		; Verify no wildcard in FCB
+	ld	hl,l4164
+	call	l19b7		; Init FCB
+	ld	hl,FCB
+	ld	de,l4164
+	ld	b,.drv+.nam+.ext
+	call	l24ae		; Copy file name
+	ld	de,l4164
+	ld	c,.make
+	call	BDOS		; Create file
+	ld	de,l4164
+	ld	c,.open
+	call	BDOS		; Open file
+	ld	hl,l4500
+	ld	(l40b8),hl	; Init write buffer
+	ld	a,1
+	ld	(l40cc),a	; Indicate meory open
+	call	l1646		; Tell memory buffer available
+l0f76:
+	call	l187f		; Put character printer
+	call	l2394		; Get console state
+	jp	z,l1738		; No character available
+	call	l239f		; Get it from console
+	ld	b,a
+	cp	bs
+	jp	nz,l0f94
+	ld	a,(l010f)
+	or	a		; Test convert backspace to rub
+	jp	z,l0f94		; Nope
+	ld	b,RUBOUT
+	jp	l1700
+l0f94:
+	ld	a,(l40c5)
+	or	a
+	ld	a,0
+	ld	(l40c5),a
+	jp	z,l0fb1
+	ld	a,(l0115)
+	or	a		; Test local command if EXTCHR precedes
+	jp	z,l1700		; Nope
+	ld	a,(l0126)
+	cp	b		; Test send next character
+	jp	z,l1700		; Yeap
+	jp	l0fc7
+l0fb1:
+	ld	a,(l0126)
+	cp	b		; Test send next character
+	jp	nz,l0fc0	; Nope
+	ld	a,1
+	ld	(l40c5),a
+	jp	l0f76
+l0fc0:
+	ld	a,(l0115)
+	or	a		; Test local command if EXTCHR precedes
+	jp	nz,l1700	; Yeap
+l0fc7:
+	call	l16c8		; Test stop activity
+	ld	a,(l0120)
+	cp	b		; Test send BYE and disconnect
+	jp	z,l37d7		; Yeap
+	ld	a,(l0124)
+	cp	b		; Test transmit file to remote
+	jp	z,l11dd		; Yeap
+	ld	a,(l0113)
+	or	a		; Test transmission of logon allowed
+	jp	z,l0fe6		; Nope
+	ld	a,(l0121)
+	cp	b		; Test send logon
+	jp	z,l1691		; Yeap
+l0fe6:
+	ld	a,(l0117)
+	or	a		; Test toggling of printer on/off allowed
+	jp	z,l100a		; Nope
+	ld	a,(l0122)
+	cp	b		; Test toggle printer
+	jp	nz,l100a	; Yeap
+	ld	a,(l40c8)	; Get printer flag
+	cpl			; Toggle it
+	ld	(l40c8),a
+	call	l2387		; Close line on console
+	call	l2387		; One empty line
+	call	l16d0		; Tell state of printer buffer
+	call	l2387		; Close line on console
+	jp	l1738
+;
+; Toggle printer
+;
+l100a:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	z,l1026		; Nope
+	ld	a,(l0128)
+	cp	b		; Test BREAK character
+	jp	z,l18da
+	ld	a,(l0129)
+	cp	b		; Test input Baud rate
+	push	af
+	push	hl
+	call	z,l24c0		; Input baudrate
+	pop	hl
+	pop	af
+	jp	z,l1738
+l1026:
+	ld	a,(l0123)
+	cp	b		; Test close input text buffer
+	jp	z,l103e		; Yeap
+	ld	a,(l0125)
+	cp	b		; Test open input text buffer
+	jp	nz,l1700	; Nope
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l1738		; Nope
+	jp	l103f
+l103e:
+	xor	a
+l103f:
+	ld	(l40d1),a	; Open/close memory buffer
+	call	l1607
+	jp	l1700
+;
+; Command S - Send a file
+;
+l1048:
+	xor	a
+	ld	(l40c0),a	; Init for checksum
+	call	l0f0c		; Skip pending modem data
+	ld	a,(l4081)
+	or	a
+	jp	nz,l10be
+	call	l242d
+	db	'Ready to send in the batch mode'
+	db	cr,lf
+	db	'(Use RBT when ready to receive)'
+	db	cr,lf,null
+l109c:
+	call	l21e2
+	ld	a,1
+	ld	(l4162),a	; Indicate send
+	ld	a,(l40c7)
+	or	a		; Test file list attached
+	call	z,l15ab		; Nope, fill list
+	call	l13f1
+	jp	nc,l10c6
+	ld	a,'B'
+	ld	(l4081),a
+	ld	a,EOTM
+	call	l2126		; Put to modem
+	jp	l2215
+l10be:
+	ld	a,(FCB+.drv)
+	cp	' '		; Verify name given
+	jp	z,l1f54		; No file specified
+l10c6:
+	call	l1fc2		; Get size of file
+	call	l1fd7		; Open file
+	ld	e,100
+	call	l2152		; Wait for ready signal
+l10d1:
+	call	l1e5e		; Test user abort
+	call	l200c		; Get record from file
+	jp	c,l10fe		; End of file
+	call	l1ebf		; Update packet number
+	ld	a,1
+	ld	(l40aa),a
+l10e2:
+	call	l1e5e		; Test user abort
+	call	l1d4b
+	call	l1d8b
+	ld	a,(l40c0)
+	or	a		; Test checksum
+	call	z,l1da8		; Yeap
+	call	nz,l1dac
+	call	l1dbb
+	jp	c,l10e2
+	jp	l10d1
+l10fe:
+	ld	a,EOTM
+	call	l2126		; Put to modem
+	call	l1dbb
+	jp	c,l10fe
+	jp	l2215
+;
+; Command R - Receive a file
+;
+l110c:
+	ld	a,(l010d)	; Get checksum or CRC mode
+	ld	(l40c0),a	; Init it
+	call	l0f0c		; Skip pending modem data
+l1115:
+	call	l21e2
+	ld	a,(l4081)
+	or	a
+	jp	nz,l1131
+	xor	a
+	ld	(l4162),a	; Indicate receive
+	call	l14b1		; Receive file name
+	jp	nc,l113c
+	ld	a,'B'
+	ld	(l4081),a
+	jp	l2215
+l1131:
+	ld	a,(FCB+.drv)
+	cp	' '		; Verify name given
+	jp	nz,l1142
+	jp	l1f54		; No file specified
+l113c:
+	call	l1a48		; Set up backup file
+	call	l1ac0		; Rename file
+l1142:
+	call	l1eca		; Verify no wildcard in FCB
+	call	l1f75		; Create file
+	ld	a,(l4081)
+	or	a
+	jp	z,l116f
+	call	l242d
+	db	'File open - ready to receive',null
+l116f:
+	call	l2387		; Close line on console
+	ld	a,(l40c0)
+	push	af
+	or	a		; Test checksum
+	jp	nz,l1195	; Nope
+	call	l242d
+	db	'CHECKSUM in effect'
+	db	cr,lf,null
+	jp	l11af
+l1195:
+	call	l242d
+	db	'CRC in effect'
+	db	cr,lf,null
+	ld	a,(l4085)
+	or	a		; Test verbose
+	call	z,l2387		; Close line on console if not
+l11af:
+	pop	af
+	or	a		; Test mode
+	ld	a,'C'
+	jp	nz,l11b8	; Got CRC
+	ld	a,NAK
+l11b8:
+	ld	(l40bf),a	; Set control character
+l11bb:
+	call	l1ad2
+	jp	c,l11cf
+	call	l208a		; Write buffer to file
+	call	l1ebf		; Update packet number
+	ld	a,ACK
+	ld	(l40bf),a	; Set control character
+	jp	l11bb
+l11cf:
+	call	l20a2
+	call	l1fff		; Close file
+	ld	a,ACK
+	call	l2126		; Put to modem
+	jp	l2215
+l11dd:
+	ld	hl,l4185
+	call	l19b7		; Init FCB
+	ld	hl,FCB2
+	call	l19b7		; Init FCB
+l11e9:
+	call	l242d
+	db	cr,lf
+	db	'File name to send?   (RET to quit): ',null
+	ld	de,l40d4
+	call	l278e		; Read line from console
+	ld	a,(LINE)	; Get 1st character read
+	cp	' '
+	jp	z,l12ac
+	ld	de,l40d4
+	ld	hl,l4185
+	call	l2511		; Parse files
+	ld	de,l4185
+	ld	c,.open
+	call	BDOS		; Open file
+	cp	IOErr		; Test found
+	jp	z,l12f8		; Nope
+	call	l242d
+	db	'Want to include time delays? (Y/N): ',null
+	call	l23c0		; Get and echo character as upper case
+	cp	'N'
+	jp	z,l1268
+	xor	a
+l1268:
+	ld	(l40c3),a
+	call	l2387		; Close line on console
+	ld	de,l40d4
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+l1276:
+	ld	de,l4185
+	ld	c,.rdseq
+	call	BDOS		; Read record
+	or	a		; Test success
+	jp	z,l129f		; Yeap
+	dec	a		; Verify end of file
+	jp	z,l12db		; Yeap
+	call	l2455
+	db	'++ DISK READ ERROR ++',eot
+;
+;
+;
+l129f:
+	call	l131a
+	cp	eof
+	jp	z,l12db
+	cp	CAN		; Test cancel
+	jp	nz,l1276
+l12ac:
+	call	l242d
+	db	cr,lf,lf
+	db	'(now in Terminal-mode again)'
+	db	cr,lf,lf,null
+	call	l1687		; Wait for modem ready to receive data
+	call	l0f0c		; Skip pending modem data
+	jp	l0f76
+l12db:
+	call	l242d
+	db	cr,lf
+	db	'[Transfer completed]',null
+	jp	l12ac
+l12f8:
+	call	l242d
+	db	cr,lf,bell
+	db	'++ FILE NAME ERROR ++ '
+	db	cr,lf,null
+	jp	l11e9
+;
+;
+;
+l131a:
+	ld	b,reclng
+	ld	hl,l40d4
+l131f:
+	push	de
+	call	l137a
+	pop	de
+	ld	a,(hl)
+	cp	eof
+	ret	z
+	call	l133e
+	call	l2394		; Get console state
+	or	a
+	jp	z,l1338		; No character available
+	call	l239f		; Get it from console
+	cp	CAN		; Test cancel
+	ret	z
+l1338:
+	inc	hl
+	dec	b
+	jp	nz,l131f
+	ret
+;
+;
+;
+l133e:
+	push	af
+	cp	lf
+	jp	nz,l1350
+	ld	a,(l0111)
+	or	a		; Test add LF after CR
+	jp	nz,l1350	; Yeap
+	pop	af
+	call	l23b3		; Put character to console
+	ret
+l1350:
+	ld	a,(l0118)
+	or	a		; Check for XOFF from remote
+	call	nz,l13c5	; Get modem data if so
+	call	l167e		; Test modem ready for data
+	jp	nz,l1350	; Nope
+	pop	af
+	call	l23b3		; Put character to console
+	call	l0134		; Put to modem
+	cp	cr
+	ret	nz
+	ld	a,(l0119)
+	or	a		; Test wait for XON after CR
+	jp	nz,l13d4	; Yeap
+	ld	d,10
+l1370:
+	push	de
+	call	l1380
+	pop	de
+	dec	d
+	jp	nz,l1370
+	ret
+;
+;
+;
+l137a:
+	ld	a,(l0106)	; Load send delay
+	jp	l1383
+l1380:
+	ld	a,(l0107)	; Load extra delay
+l1383:
+	or	a
+	ret	z
+	ld	c,a
+	ld	a,(l40c3)
+	or	a
+	ret	nz
+l138b:
+	call	l1393
+	dec	c
+	jp	nz,l138b
+	ret
+;
+;
+;
+l1393:
+	push	hl
+	ld	hl,Delay3
+	ld	a,(l0118)
+	or	a		; Check for XOFF from remote
+	jp	z,l13b2		; Nope
+	ld	hl,Delay3
+	ld	a,(l40c4)
+	or	a		; Test echo mode
+	jp	z,l13b2		; Nope
+	ld	a,(l40c9)
+	or	a		; Test local modem
+	jp	z,l13b2		; Nope
+	ld	hl,Delay4
+l13b2:
+	call	l2504		; Convert delay value
+	ex	de,hl
+	pop	hl
+l13b7:
+	dec	de
+	ld	a,(l0118)
+	or	a		; Check for XOFF from remote
+	call	nz,l13c5	; Get modem data if so
+	ld	a,e
+	or	d
+	jp	nz,l13b7
+	ret
+;
+; Get modem data, process XOFF
+;
+l13c5:
+	call	l1675		; Input modem control
+	ret	nz		; Nothing pending
+	call	l013e		; Input modem data
+	and	NOMSB		; Strip off parity bit
+	cp	XOFF		; Test XOFF
+	call	z,l13d4		; Yeap
+	ret
+;
+;
+;
+l13d4:
+	call	l1675		; Input modem control
+	jp	nz,l13e2	; Nothing pending
+	call	l013e		; Input modem data
+	and	NOMSB		; Strip off parity bit
+	cp	XON		; Test XON
+	ret	z		; Yeap
+l13e2:
+	call	l2394		; Get console state
+	jp	z,l13d4		; No character available
+	call	l239f		; Get it from console
+	cp	CAN		; Test cancel
+	jp	nz,l13d4
+	ret	z		; ### ALWAYS RET ###
+;
+;
+;
+l13f1:
+	call	l243c
+	db	'Awaiting name NAK'
+	db	cr,lf,null
+	ld	e,100
+	call	l216c
+	ld	a,ACK
+	call	l2126		; Put to modem
+	ld	hl,l415b
+	dec	(hl)		; Count down file count
+	jp	m,l142c		; End reached
+	ld	hl,(l415f)	; Get file list pointer
+	ld	de,FCB
+	ld	b,.drv+.nam+.ext
+	call	l24ae		; Copy file name
+	ld	(l415f),hl	; Update file list pointer
+	call	l1433		; Send file name
+	or	a
+	ret
+l142c:
+	ld	a,EOTM
+	call	l2126		; Put to modem
+	scf
+	ret
+;
+; Send file name thru modem
+;
+l1433:
+	push	hl
+l1434:
+	ld	d,.nam+.ext
+	ld	c,0
+	ld	a,c
+	ld	(l415c),a	; Clear name counter
+	ld	hl,FCB+.drv
+l143f:
+	ld	a,(hl)
+	and	NOMSB
+	call	l2126		; Put to modem
+	ld	a,(l4085)
+	or	a		; Test verbose
+	ld	a,(hl)
+	call	nz,l1534	; Yeap, echo filename
+l144d:
+	push	bc
+	ld	b,1
+	call	l20d9		; Get modem data
+	pop	bc
+	jp	c,l1477		; Timeout
+	cp	ACK		; Test acknowledge
+	jp	nz,l144d	; No, wait
+	inc	hl
+	dec	d
+	jp	nz,l143f
+	ld	a,eof
+	call	l2126		; Put to modem
+	ld	a,(l4085)
+	or	a		; Test verbose
+	call	nz,l2387	; Close line on console if so
+	ld	d,c
+	ld	b,1
+	call	l20d9		; Get modem data
+	cp	d
+	jp	z,l14aa
+l1477:
+	ld	a,'u'
+	call	l2126		; Put to modem
+	call	l242d
+	db	cr,lf
+	db	'++ ERROR sending name  ++'
+	db	cr,lf,null
+	ld	e,100
+	call	l216c
+	ld	a,ACK
+	call	l2126		; Put to modem
+	jp	l1434
+l14aa:
+	ld	a,ACK
+	call	l2126		; Put to modem
+	pop	hl
+	ret
+;
+; Receive file name
+;
+l14b1:
+	ld	hl,FCB
+	call	l19b9		; Init FCB
+	call	l242d
+	db	'Awaiting FILENAME'
+	db	cr,lf,null
+	call	l1592		; Wait for ACK after sending NAK
+	call	l14dd		; Receive file name
+	cp	4
+	jp	z,l14db
+	or	a
+	ret
+l14db:
+	scf
+	ret
+;
+; Receive file name
+;
+l14dd:
+	push	hl
+l14de:
+	ld	c,0
+	ld	a,c
+	ld	(l415c),a	; Clear name counter
+	ld	hl,RcvFNs
+l14e7:
+	ld	b,5
+	call	l20d9		; Get modem data
+	jp	nc,l1515	; No timeout
+	call	l242d
+	db	cr,lf
+	db	'Time out receiving FILENAME'
+	db	cr,lf,null
+	jp	l1568
+l1515:
+	cp	EOTM		; Test end of text
+	jp	z,l1590		; Yeap, done
+	cp	eof		; Test end of file
+	jp	z,l1553
+	ld	(hl),a		; Store character
+	call	l1534		; Echo filename
+	push	bc
+	ld	a,ACK
+	call	l2126		; Put to modem
+	pop	bc
+	inc	hl
+	ld	a,l
+	cp	RcvFNe		; Test end reached
+	jp	z,l1568
+	jp	l14e7
+;
+; Echo filename
+;
+l1534:
+	ld	a,(l415c)	; Get name counter
+	inc	a		; Update it
+	ld	(l415c),a
+	cp	.nam+1		; Test name filled
+	jp	z,l1547		; Yeap
+l1540:
+	ld	a,(hl)
+	cp	' '		; Test blank
+	call	nz,l23b3	; Put to console if not
+	ret
+l1547:
+	ld	a,(hl)
+	cp	' '		; Test blank
+	ret	z		; Ignore
+	ld	a,'.'
+	call	l23b3		; Put delimiter to console
+	jp	l1540
+;
+; End of file during receive
+;
+l1553:
+	ld	a,(l4085)
+	or	a		; Test verbose
+	call	nz,l2387	; Close line on console if so
+	ld	a,c
+	call	l2126		; Put to modem
+	ld	b,1
+	call	l20d9		; Get modem data
+	cp	ACK		; Verify acknowledge
+	jp	z,l1590
+l1568:
+	ld	hl,FCB
+	call	l19b9		; Init FCB
+	call	l242d
+	db	cr,lf
+	db	'++ CHECKSUM error ++'
+	db	cr,lf,null
+	call	l1592		; Wait for ACK after sending NAK
+	jp	l14de
+l1590:
+	pop	hl
+	ret
+;
+; Wait for ACK after sending NAK
+;
+l1592:
+	ld	e,180
+l1594:
+	call	l1e5e		; Test user abort
+	ld	a,NAK
+	call	l2126		; Put to modem
+	ld	b,1
+	call	l20d9		; Get modem data
+	cp	ACK		; Test acknowledge
+	ret	z
+	dec	e
+	jp	nz,l1594
+	jp	l1e6d		; Cancel
+;
+; Create file list
+;
+l15ab:
+	ld	a,1
+	ld	(l40c7),a	; Indicate file list attached
+	xor	a
+	ld	(l415b),a	; Init file count
+	call	l19cd
+	ld	hl,l8600
+	ld	(l415f),hl	; Init file list
+l15bd:
+	call	l1a24		; Sample name of file
+	ld	hl,FCB
+	ld	de,l41a6
+	call	l2511		; Parse files
+l15c9:
+	call	l2884
+	jp	c,l15ee
+	ld	a,(FCB+_SYS)	; Get system bit
+	and	MSB		; Test set
+	jp	nz,l15c9	; Yeap, ignore file
+	ld	hl,(l415f)	; Get file list pointer
+	ld	de,FCB
+	ex	de,hl
+	ld	b,.drv+.nam+.ext
+	call	l24ae		; Copy file name
+	ex	de,hl
+	ld	(l415f),hl	; Update file list pointer
+	ld	hl,l415b
+	inc	(hl)		; Bump file count
+	jp	l15c9
+l15ee:
+	ld	hl,l415e
+	dec	(hl)		; Count down number of dir columns
+	jp	nz,l15bd
+	ld	hl,l8600
+	ld	(l415f),hl	; Get file list pointer
+	ld	a,(l415b)	; Get file count
+	cp	MAXFIL+1	; Test in range
+	ret	c		; Yeap
+	ld	a,MAXFIL
+	ld	(l415b),a	; Truncate it
+	ret
+;
+; Tell state of memory buffer
+;
+l1607:
+	call	l242d
+	db	cr,lf
+	db	'** Memory buffer ',null
+	ld	a,(l40d1)	; Get state of memory buffer
+	or	a
+	jp	z,l1635
+	call	l242d
+	db	'open **'
+	db	cr,lf,lf,';',null
+	ret
+l1635:
+	call	l242d
+	db	'closed **'
+	db	cr,lf,lf,null
+	ret
+;
+; Tell memory buffer available
+;
+l1646:
+	call	l242d
+	db	cr,lf
+	db	'** Memory buffer available **'
+	db	cr,lf,null
+	ret
+;
+; Close screen and prepare file environment
+;
+l166c:
+	call	l2387		; Close line on console
+	call	l0192		; Clear to end of screen
+	jp	l2af3		; Prepare file environment
+;
+; Test modem data pending, Z set says yes
+;
+l1675:
+	call	l012a		; Input modem control
+	call	l0148		; Extract receive ready
+	jp	l014b		; Test receive done
+;
+; Test modem ready for data, Z set says yes
+;
+l167e:
+	call	l012a		; Input modem control
+	call	l014e		; Extract send ready
+	jp	l0151		; Test send done
+;
+; Wait for modem ready to receive data
+;
+l1687:
+	call	l167e		; Test modem ready for data
+	ret	z		; Yeap
+	call	l16c0		; Test user intervention
+	jp	l1687
+;
+; Send logon
+;
+l1691:
+	ld	hl,(l0160)	; Fetch pointer to logon message
+	call	l169a		; Print message
+	jp	l1738
+;
+; Put message to modem
+;
+l169a:
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,(hl)		; Get character
+	or	a		; Test end
+	ret	z		; Yeap
+	call	l0134		; Put to modem
+	ld	b,a
+	call	l16ab		; Echo if in T.erminal mode
+	inc	hl
+	jp	l169a
+;
+; Echo chracter if in T.erminal mode
+;
+l16ab:
+	ld	a,(l40ce)	; Get option character
+	cp	'T'
+	jp	z,l16b7		; Test T.erminal mode
+	ld	a,b
+	jp	l23b3		; Put character to console if so
+l16b7:
+	push	de
+	call	l18c2		; Get data from modem
+	pop	de
+	ret	c		; None there
+	jp	l23b3		; Put it to console
+;
+; Test stop activity
+;
+l16c0:
+	call	l2394		; Get console state
+	ret	z		; No character available
+	call	l239f		; Get it from console
+	ld	b,a
+l16c8:
+	ld	a,'E'-'@'
+	cp	b		; Test stop activity
+	ret	nz		; Nope
+	pop	hl
+	jp	l166c		; Close screen and prepare file environment
+;
+; Tell state of printer buffer
+;
+l16d0:
+	call	l242d
+	db	'Printer buffer is ',null
+	ld	a,(l40c8)	; Get printer flag
+	or	a		; Test state
+	jp	z,l16f6
+	call	l242d
+	db	'ON'
+	db	cr,lf,null
+	ret
+l16f6:
+	call	l242d
+	db	'OFF'
+	db	cr,lf,null
+	ret
+;
+;
+;
+l1700:
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,b
+	call	l0134		; Put to modem
+	ld	a,(l40c9)
+	or	a		; Test local modem
+	jp	nz,l1715	; Yeap
+	ld	a,(l40c4)
+	or	a		; Test echo mode
+	jp	z,l1738		; Nope
+l1715:
+	ld	a,b
+	call	l23b3		; Put character to console
+	call	l178b		; Put to memory buffer
+	call	l181b		; Put to printer buffer
+	ld	a,cr
+	cp	b		; Test end of line
+	jp	nz,l1738	; Nope
+	ld	a,(l40c4)
+	or	a		; Test echo mode
+	jp	nz,l1733	; Yeap
+	ld	a,(l40c9)
+	or	a		; Test local modem
+	jp	z,l0f76		; Nope
+l1733:
+	ld	b,lf
+	jp	l1700		; Give new line, too
+l1738:
+	call	l1675		; Input modem control
+	jp	nz,l0f76	; Nothing pending
+	call	l013e		; Input modem data
+	and	NOMSB		; Strip off parity
+	jp	z,l0f76		; Got NULL
+	ld	b,a
+	ld	a,(l011b)	; Test display CTL-characters above ^M
+	or	a
+	jp	z,l175e		; Nope
+	ld	a,b
+	cp	' '		; Test control
+	jp	nc,l175e	; Nope
+	cp	bell		; Test CTL-range
+	jp	c,l0f76
+	cp	cr+1
+	jp	nc,l0f76
+l175e:
+	ld	a,b
+	call	l23b3		; Put character to console
+	call	l178b		; Put to memory buffer
+	call	l181b		; Put to printer buffer
+	ld	a,(l40c4)
+	or	a		; Test echo mode
+	jp	z,l1776		; Nope
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,b
+	call	l0134		; Put to modem
+l1776:
+	ld	a,cr
+	cp	b
+	jp	nz,l0f76
+	ld	a,(l40c4)
+	or	a		; Test echo mode
+	jp	z,l0f76		; Nope
+	call	l1687		; Wait for modem ready to receive data
+	ld	b,lf
+	jp	l175e
+;
+; Put character to memory buffer
+;
+l178b:
+	ld	a,(l40d1)	; Get state of memory buffer
+	or	a		; Test open
+	ret	z		; Nope
+	ld	hl,(l40b8)	; Get current write buffer
+	ld	(hl),b		; Store character
+	inc	hl		; Update pointer
+	ld	(l40b8),hl
+	ld	a,lf
+	cp	b		; Test new line
+	jp	nz,l17a6	; Nope
+	ld	a,cr
+	call	l23b3		; Put character to console
+	call	l19a8		; Indicate new line
+l17a6:
+	ld	a,h
+	ld	hl,l4500+RdRec*reclng
+	cp	h		; Test buffer filled
+	call	z,l17af
+	ret
+;
+;
+;
+l17af:
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,XOFF
+	call	l0134		; Put XOFF to modem
+	call	l181b		; Put to printer buffer
+	ld	hl,l8500
+	call	l1801		; Read line from modem
+	push	de		; Save length of line
+	ld	a,1
+	ld	(l40d3),a	; Indicate data in buffer
+	ld	hl,(l40b8)	; Get write buffer
+	call	l18fa
+	pop	de		; Get back length
+	ld	hl,l4500
+	xor	a
+	cp	d		; Test any in line
+	jp	z,l17f6		; Nope, empty line
+	ld	bc,l8500
+l17d8:
+	ld	a,(bc)		; Get from line
+	ld	(hl),a		; Unpack it
+	call	l23b3		; Put character to console
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	b,a
+	call	l181b		; Put to printer buffer
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	cp	lf
+	call	z,l19a8		; Indicate new line
+	inc	hl
+	inc	bc
+	dec	d
+	jp	nz,l17d8
+	ld	b,0
+l17f6:
+	ld	(l40b8),hl	; Save write buffer
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,XON
+	jp	l0134		; Put XON to modem
+;
+; Read line from modem
+;
+l1801:
+	ld	d,0		; Init character count
+	ld	e,reclng	; Init max length
+l1805:
+	call	l18c2		; Get data from modem
+	ret	c		; None there
+	cp	' '		; Test range
+	jp	nc,l1813
+	cp	cr+1
+	jp	nc,l1805
+l1813:
+	ld	(hl),a		; Store character
+	inc	hl
+	inc	d		; Update counter
+	dec	e
+	jp	nz,l1805
+	ret
+;
+; Put character to printer buffer
+;
+l181b:
+	ld	a,(l40c8)	; Get printer flag
+	or	a		; Test on
+	ret	z		; Nope
+	ld	hl,(l40ba)	; Get input pointer
+	ld	(hl),b		; Store character
+	inc	hl		; Update pointer
+	ld	(l40ba),hl
+	ld	a,(l415d)	; Get top page of available memory
+	cp	h
+	call	z,l1830
+	ret
+;
+;
+;
+l1830:
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,XOFF
+	call	l0134		; Put XOFF to modem
+	ld	hl,l8580
+	call	l1801		; Read line from modem
+	ld	a,d
+	ld	(l415a),a	; Save lenght of line
+	ret
+;
+;
+;
+l1843:
+	ld	a,(l415a)	; Get lenght of line	
+	ld	d,a
+	xor	a
+	cp	d		; Test empty
+	ld	hl,l8700
+	jp	z,l186e		; Yeap
+	ld	bc,l8580
+l1852:
+	ld	a,(bc)
+	ld	(hl),a
+	call	l23b3		; Put character to console
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	b,a
+	call	l178b		; Put to memory buffer
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	cp	lf
+	call	z,l19a8		; Indicate new line
+	inc	hl
+	inc	bc
+	dec	d
+	jp	nz,l1852
+l186e:
+	ld	(l40ba),hl	; Save input pointer
+	ld	hl,l8700
+	ld	(l40bc),hl	; Init queue output pointer
+	call	l1687		; Wait for modem ready to receive data
+	ld	a,XON
+	jp	l0134		; Put XON to modem
+;
+; Put character printer
+;
+l187f:
+l1880	equ	$+1
+	call	$-$		; Test printer ready
+	or	a
+	ret	z		; Nope
+	call	l18a5		; Test character in queue
+	ret	z		; Nope
+	ld	c,(hl)		; Get character
+	inc	hl		; Update output pointer
+	ld	(l40bc),hl
+	call	l23a9		; Put character to printer
+	ld	a,(l415d)	; Get top page of available memory
+	cp	h
+	jp	z,l1843
+	call	l18a5		; Test character in queue
+	ret	nz		; Yeap
+	ld	hl,l8700
+	ld	(l40ba),hl	; Init queue input pointer
+	ld	(l40bc),hl	; Init queue output pointer
+	ret
+;
+; Test character in queue - Z set says no
+;
+l18a5:
+	ld	hl,(l40ba)	; Get queue input pointer
+	ex	de,hl
+	ld	hl,(l40bc)	; Get queue output pointer
+	ld	a,h
+	cp	d		; Test same address
+	ret	nz
+	ld	a,l
+	cp	e
+	ret
+;
+; Set top page of memory
+;
+l18b2:
+	ld	a,(l0114)	; Get CCP flag
+	or	a		; Test overwrite CCP
+	ld	a,(TPATOP+1)	; Get top of memory page
+	jp	z,l18be		; Overwrite allowed
+	sbc	a,CCPpage	; Let some room if not
+l18be:
+	ld	(l415d),a	; Set top page of available memory
+	ret
+;
+; Get data from modem - C set says time out
+;
+l18c2:
+	push	hl
+	ld	hl,100
+	call	l2504		; Convert delay value
+	ld	b,h
+	ld	c,l
+	pop	hl
+l18cc:
+	call	l1675		; Input modem control
+	jp	z,l013e		; Input modem data if pending
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l18cc
+	scf			; Indicate no data
+	ret
+;
+; BREAK character detected
+;
+l18da:
+	ld	a,(l40cb)
+	and	NOT TBRK
+	call	l015d		; Put to modem status port
+l18e2:
+	call	l18c2		; Get data from modem
+	jp	nc,l18e2	; Clear pending
+	ld	a,(l40cb)
+	call	l015d		; Put to modem status port
+	jp	l0f76
+;
+; Write buffer to file
+;
+l18f1:
+	ld	hl,(l40b8)	; Get write buffer
+	ld	(hl),eof	; Close it
+	ld	de,reclng-1
+	add	hl,de		; Fix pointer
+l18fa:
+	ld	de,-l4500
+	add	hl,de		; Calculate length of bytes
+;
+	ld	a,l
+	or	a
+	rla			; Calculate record count from length
+	ld	l,h
+	ld	h,0
+	push	af
+	add	hl,hl
+	pop	af
+	ld	a,0
+	adc	a,l
+	ld	l,a
+;
+	ld	de,l4500
+	ld	a,(de)		; Get 1st character from buffer
+	cp	eof		; Test end of file
+	jp	nz,l191c	; Nope, so write buffer
+	ld	a,(l40d3)
+	or	a		; Test data in buffer
+	jp	z,l1971		; Nope
+	ret
+l191c:
+	ld	c,.setdma
+	call	l19ad		; Set disk buffer
+	push	de
+	ld	c,.wrseq
+	ld	de,l4164
+	call	l19ad		; Write record
+	pop	de
+	or	a		; Test write successfull
+	jp	nz,l193e	; Nope, write error
+	ex	de,hl
+	push	de
+	ld	de,reclng
+	add	hl,de		; Update buffer address
+	pop	de
+	ex	de,hl
+	dec	hl		; Count down records
+	ld	a,h
+	or	l
+	jp	nz,l191c	; Still more
+	ret
+l193e:
+	ld	c,CAN
+	call	l2126		; Put to modem
+	call	l1fff		; Close file
+	call	l2455
+	db	'++ DISK IS FULL, SAVING PARTIAL FILE ++',eot
+;
+l1971:
+	call	l1fff		; Close file
+	call	l1f18		; Delete file
+	call	l242d
+	db	'++ Nothing to save, erasing the file ++'
+	db	cr,lf,bell,null
+	jp	l22d1
+;
+; Indicate new line
+;
+l19a8:
+	ld	a,';'
+	jp	l23b3		; Put character to console
+;
+; Do file I/O preserving regs
+;
+l19ad:
+	push	bc
+	push	de
+	push	hl
+	call	BDOS		; Do I/O
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Init FCB
+;
+l19b7:
+	ld	(hl),0		; Set default drive
+;
+; Entry point for fefined drive
+;
+l19b9:
+	inc	hl
+	ld	b,.nam+.ext
+l19bc:
+	ld	(hl),' '	; Blank name and type
+	inc	hl
+	dec	b
+	jp	nz,l19bc
+	ld	b,_DIR+_DIR-_EX+.drv
+l19c5:
+	ld	(hl),0		; Clear control
+	inc	hl
+	dec	b
+	jp	nz,l19c5
+	ret
+;
+;
+;
+l19cd:
+	push	hl
+	ld	hl,l415e
+	ld	(hl),0		; Clear number of dir columns
+	ld	hl,l40d4+1
+	ld	c,(hl)		; Get characters read
+	ld	b,0
+	ld	hl,LINE		; Point to 1st character read
+	add	hl,bc
+	ld	(hl),' '
+	ld	hl,l40d4+1
+	ld	b,(hl)		; Get characters read
+	inc	b
+	inc	b
+l19e5:
+	inc	hl
+	dec	b
+	jp	z,l1a20
+	ld	a,(hl)
+	cp	' '
+	jp	nz,l19e5
+l19f0:
+	inc	hl
+	dec	b
+	jp	z,l1a20
+	ld	a,(hl)
+	cp	' '
+	jp	z,l19f0
+	ld	(l4156),hl	; Save pointer
+	inc	b
+	dec	hl
+l1a00:
+	inc	hl
+	dec	b
+	jp	z,l1a20
+	ld	a,(hl)
+	cp	' '
+	jp	nz,l1a00
+	ld	a,(l415e)	; Update number of dir columns
+	inc	a
+	ld	(l415e),a
+l1a12:
+	inc	hl
+	dec	b
+	jp	z,l1a20
+	ld	a,(hl)
+	cp	' '
+	jp	z,l1a12
+	jp	l1a00
+l1a20:
+	ld	(hl),' '
+	pop	hl
+	ret
+;
+; Sample name of file
+;
+l1a24:
+	ld	hl,(l4156)	; Get pointer
+	ld	b,0		; Init counter
+	ld	de,l41a6+2	; Init destination pointer
+l1a2c:
+	ld	a,(hl)		; Get character
+	cp	' '		; Test delimiter
+	jp	z,l1a39		; Yeap
+	ld	(de),a		; Unpack character
+	inc	hl
+	inc	de
+	inc	b		; Update counter
+	jp	l1a2c
+l1a39:
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	jp	z,l1a39		; Skip next blanks
+	ld	(l4156),hl	; Set pointer
+	ld	hl,l41a6+1
+	ld	(hl),b		; Save length
+	ret
+;
+; Set up backup file
+;
+l1a48:
+	ld	c,.vers
+	call	BDOS		; Get version
+	or	a		; Test CP/M 1.x
+	ret	z		; Yeap
+	ld	c,.setdma
+	ld	de,DMA
+	call	BDOS		; Set disk buffer
+	ld	c,.srcfrs
+	ld	de,FCB
+	call	BDOS		; Search file
+	cp	IOerr		; Test any found
+	ret	z		; Nope
+;
+; !!!!!!!!!!!!!!!!!!!!!!!! ERROR !!!!!!!!!!!!!!!!!!!!!!!!
+;
+; Should be:
+;	call	l273c+1		; Position to entry
+;
+	call	l273c		; Position to entry
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	de,_RO
+	add	hl,de
+	ld	a,(hl)
+	and	MSB		; Test R/O
+	jp	nz,l1a75	; Yeap
+	inc	hl
+	ld	a,(hl)
+	and	MSB		; Test system file
+	ret	z		; Nope
+	dec	hl
+l1a75:
+	ld	de,-.nam		;;lfff8
+	add	hl,de
+	ld	de,FCB+.drv
+	ld	b,.nam+.ext
+	call	l24ae		; Copy file name
+	ld	hl,FCB+_RO
+	ld	a,(hl)
+	and	NOMSB
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	and	NOMSB
+	ld	(hl),a
+	ld	de,FCB
+	ld	c,.setatt
+	call	BDOS		; Set attribute
+l1a95:
+	ld	hl,FCB
+	ld	de,FCB2
+	ld	b,.drv+.nam
+	call	l24ae		; Copy file name
+	ld	hl,FCB2+.drv+.nam
+	ld	(hl),'B'	; Set type .BAK
+	inc	hl
+	ld	(hl),'A'
+	inc	hl
+	ld	(hl),'K'
+	ld	de,FCB2
+	ld	c,.delete
+	call	BDOS		; Delete file
+	ld	hl,FCB2
+	ld	(hl),0
+	ld	de,FCB
+	ld	c,.rename
+	jp	BDOS		; Rename it
+;
+; Rename file
+;
+l1ac0:
+	ld	a,(l010c)
+	or	a		; Test backup requested
+	ret	z		; Nope
+	ld	c,.srcfrs
+	ld	de,FCB
+	call	BDOS		; Search for file
+	inc	a		; Test any found
+	ret	z		; Nope
+	jp	l1a95		; Rename
+;
+;
+;
+l1ad2:
+	ld	a,1
+	ld	(l40aa),a
+	xor	a
+	ld	(l40cd),a
+l1adb:
+	xor	a
+	ld	(l40ab),a
+	call	l1e5e		; Test user abort
+	ld	a,(l4085)
+	or	a		; Test verbose
+	jp	z,l1b13		; Nope
+	call	l242d
+	db	cr
+	db	'Awaiting # ',null
+	push	hl
+	ld	hl,(l40a8)	; Get packet number
+	inc	hl
+	call	l23d3		; Print decimal
+	call	l242d
+	db	' (',null
+	call	l23f7		; Print hex word
+	call	l242d
+	db	'H) ',null
+	ld	a,l
+	pop	hl
+l1b13:
+	ld	a,(l40bf)	; Get control character
+	call	l2126		; Put to modem
+l1b19:
+	ld	b,9
+	call	l20d9		; Get modem data
+	jp	c,l1c00		; Timeout
+	cp	SOH		; Test start of header
+	jp	z,l1c7e
+	or	a
+	jp	z,l1b19
+	cp	'C'		; Test CRC checksum request
+	jp	z,l1b19
+	cp	NAK
+	jp	z,l1b19
+	cp	EOTM		; Test end of text
+	scf
+	ret	z
+	ld	b,a
+	ld	a,(l4081)
+	or	a
+	jp	nz,l1b51
+	ld	a,(l40cd)
+	or	a
+	jp	nz,l1b51
+	ld	(l40aa),a
+	cpl
+	ld	(l40cd),a
+	jp	l1b74
+l1b51:
+	call	l1bf7
+	ld	a,b
+	call	l2404		; Print hex byte
+	call	l242d
+	db	'H received not SOH - ',null
+l1b71:
+	call	l1c62
+l1b74:
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	nc,l1b74	; No timeout
+	call	l1e5e		; Test user abort
+	ld	a,(l40c0)
+	or	a		; Test checksum
+	ld	a,NAK
+	jp	z,l1b93		; Yeap
+	ld	a,(l40c6)
+	or	a
+	ld	a,NAK
+	jp	nz,l1b93
+	ld	a,'C'
+l1b93:
+	ld	(l40bf),a	; Set control character
+	ld	a,(l40aa)
+	inc	a
+	ld	(l40aa),a
+	cp	10+1
+	jp	c,l1adb
+	jp	l1e6d		; Cancel
+;
+;
+;
+l1ba5:
+	ld	sp,l42fe	; Reset local stack
+	call	l1fff		; Close file
+	call	l1f18		; Delete file
+	call	l242d
+	db	cr,lf,lf
+	db	'++ RECEIVED FILE CANCELLED ++'
+	db	cr,lf,bell
+	db	'++ UNFINISHED FILE DELETED ++'
+	db	cr,lf,null
+	jp	l22d1
+;
+;
+;
+l1bf7:
+	ld	a,(l4085)
+	or	a		; Test verbose
+	ret	nz		; Yeap
+	pop	hl
+	jp	l1b74
+;
+;
+;
+l1c00:
+	ld	a,1
+	ld	(l40cd),a
+	ld	a,(l4085)
+	or	a		; Test verbose
+	jp	z,l1c1e		; Nope
+	call	l242d
+	db	'++ Timeout ',null
+	call	l1c62
+l1c1e:
+	ld	a,(l40aa)
+	cp	5+1
+	jp	c,l1c5f
+	ld	a,(l40c6)
+	or	a
+	jp	nz,l1c5f
+	ld	a,(l40c0)
+	or	a		; Test checksum
+	jp	z,l1c5f		; Yeap
+	xor	a
+	ld	(l40c0),a	; Switch to checksum
+	call	l242d
+	db	'++ Switching to CHECKSUM mode ++'
+	db	cr,lf,bell,null
+l1c5f:
+	jp	l1b74
+;
+;
+;
+l1c62:
+	push	hl
+	ld	hl,(l40aa)
+	ld	h,0
+	call	l23d3		; Print decimal
+	pop	hl
+	call	l242d
+	db	' ++'
+	db	cr,lf,null
+	ld	a,(l40aa)
+	cp	10+1
+	jp	nc,l1e6d	; Cancel
+	ret
+;
+;
+;
+l1c7e:
+	ld	a,1
+	ld	(l40c6),a
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	c,l1c00		; Timeout
+	ld	d,a
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	c,l1c00		; Timeout
+	cpl
+	cp	d
+	jp	z,l1cb1
+	call	l1bf7
+	call	l242d
+	db	'++  Bad header',null
+	jp	l1b71
+l1cb1:
+	ld	a,d
+	ld	(l40a7),a
+	ld	a,1
+	ld	(l40b3),a
+	ld	c,0
+	ld	hl,0
+	ld	(l40b4),hl	; Init CRC
+	ld	hl,DMA
+l1cc5:
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	c,l1c00		; Timeout
+	ld	(hl),a
+	inc	l
+	jp	nz,l1cc5
+	xor	a
+	ld	(l40b3),a
+	ld	a,(l40c0)
+	or	a		; Test checksum
+	jp	nz,l1cfb	; Nope, CRC
+	ld	d,c
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	c,l1c00		; Timeout
+	cp	d
+	jp	nz,l1d27
+l1cea:
+	ld	a,(l40a7)
+	ld	b,a
+	ld	a,(l40a8)	; Get packet number
+	cp	b
+	jp	z,l1d43
+	inc	a
+	cp	b
+	jp	nz,l1e6d	; Cancel
+	ret
+l1cfb:
+	ld	e,2
+l1cfd:
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	c,l1c00		; Timeout
+	dec	e
+	jp	nz,l1cfd
+	call	l2a9f
+	or	a
+	jp	z,l1cea
+	call	l1bf7
+	call	l242d
+	db	'++ CRC error ',null
+	jp	l1b71
+l1d27:
+	call	l1bf7
+	call	l242d
+	db	'++ CHECKSUM error ',null
+	jp	l1b71
+l1d43:
+	ld	a,ACK
+	ld	(l40bf),a	; Set control character
+	jp	l1ad2
+;
+;
+;
+l1d4b:
+	ld	a,(l4085)
+	or	a		; Test verbose
+	jp	z,l1d79		; Nope
+	call	l242d
+	db	cr,'Sending # ',null
+	push	hl
+	ld	hl,(l40a8)	; Get packet number
+	call	l23d3		; Print decimal
+	call	l242d
+	db	' ('
+	db	null
+	call	l23f7		; Print hex word
+	call	l242d
+	db	'H) '
+	db	null
+	pop	hl
+l1d79:
+	ld	a,SOH
+	call	l2126		; Put to modem
+	ld	a,(l40a8)	; Get packet number
+	call	l2126		; Put to modem
+	ld	a,(l40a8)	; Get packet number agin
+	cpl			; Build complement
+	jp	l2126		; Put to modem
+;
+;
+;
+l1d8b:
+	ld	a,1
+	ld	(l40b3),a
+	ld	c,0
+	ld	hl,0
+	ld	(l40b4),hl	; Init CRC
+	ld	hl,DMA
+l1d9b:
+	ld	a,(hl)
+	call	l2126		; Put to modem
+	inc	l
+	jp	nz,l1d9b
+	xor	a
+	ld	(l40b3),a
+	ret
+;
+;
+;
+l1da8:
+	ld	a,c
+	jp	l2126		; Put to modem
+;
+;
+;
+l1dac:
+	push	hl
+	ld	hl,(l40b4)	; Get CRC
+	ld	a,h
+	call	l2126		; Put to modem
+	ld	a,l
+	call	l2126
+	pop	hl
+	xor	a
+	ret
+;
+;
+;
+l1dbb:
+	ld	b,0ch
+	call	l20d6		; Get modem data
+	jp	c,l1e3d		; Timeout
+	cp	ACK
+	ret	z
+	ld	b,a
+	ld	a,(l010b)
+	or	a		; Test resend only after NAK
+	jp	z,l1dd3		; Nope
+	cp	NAK
+	jp	nz,l1dbb
+l1dd3:
+	ld	a,(l4085)
+	or	a		; Test verbose
+	jp	z,l1e14		; Nope
+	call	l242d
+	db	'++ ',null
+	ld	a,b
+	cp	NAK
+	jp	z,l1df2
+	call	l2404		; Print hex byte
+	call	l242d
+	db	'H',null
+	jp	l1df9
+l1df2:
+	call	l242d
+	db	'NAK',null
+l1df9:
+	call	l242d
+	db	' received not ACK - ',null
+	call	l1c62
+l1e14:
+	ld	a,(l40aa)
+	inc	a
+	ld	(l40aa),a
+	cp	10+1
+	ret	c
+	call	l2455
+	db	cr,lf,'++ SEND-FILE CANCELLED ++',eot
+;
+;
+;
+l1e3d:
+	call	l242d
+	db	cr,'++ TIMEOUT - no ACK - ',null
+	call	l1c62
+	jp	l1e14
+;
+; Test user abort
+;
+l1e5e:
+	ld	a,(l4085)
+	or	a		; Test verbose
+	ret	z		; Nope
+	call	l2394		; Get console state
+	ret	z		; No character available
+	call	l239f		; Get it from console
+	cp	CAN		; Test cancel
+	ret	nz
+l1e6d:
+	ld	sp,l42fe	; Reset local stack
+l1e70:
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	nc,l1e70	; No timeout
+	ld	a,CAN
+	call	l2126		; Put to modem
+l1e7d:
+	ld	b,1
+	call	l20d9		; Get modem data
+	jp	nc,l1e7d	; No timeout
+	ld	a,' '
+	call	l2126		; Put to modem
+	ld	a,'B'
+	ld	(l4081),a
+	ld	(l40be),a
+	xor	a
+	ld	(l40cc),a	; Indicate no memory open
+	ld	a,(l40ce)	; Get option character
+	cp	'R'
+	jp	z,l1ba5
+	call	l242d
+	db	cr,lf,lf
+	db	'++ FILE CANCELLED ++'
+	db	cr,lf,bell,null
+	jp	l22d1
+;
+; Update packet number
+;
+l1ebf:
+	push	hl
+	ld	hl,(l40a8)	; Get packet number
+	inc	hl		; Update it
+	ld	(l40a8),hl
+	ld	a,l
+	pop	hl
+	ret
+;
+; Verify no wildcard in FCB
+;
+l1eca:
+	ld	hl,FCB
+	ld	b,.nam+.ext
+l1ecf:
+	inc	hl
+	ld	a,(hl)
+	cp	'?'
+	jp	z,l1f20
+	dec	b
+	jp	nz,l1ecf
+	ld	a,(l4081)
+	or	a
+	jp	z,l1f18		; Delete file
+	ld	de,FCB
+	ld	c,.srcfrs
+	call	BDOS		; Search for file
+	inc	a		; Test any found
+	ret	z		; Nope
+	call	l242d
+	db	'File exists - erase?  (Y/N): '
+	db	bell,null
+	call	l23c0		; Get and echo character as upper case
+	cp	'Y'
+	jp	nz,l2b3a
+	call	l2387		; Close line on console
+l1f18:
+	ld	de,FCB
+	ld	c,.delete
+	jp	BDOS		; Delete file
+l1f20:
+	pop	hl
+	call	l242d
+	db	'++ NO WILDCARDS ALLOWED FOR '
+	db	'TEXT FILES ++'
+	db	cr,lf,bell,null
+	jp	l2b3a
+;
+; No file specified
+;
+l1f54:
+	call	l242d
+	db	'++ NO FILE SPECIFIED ++'
+	db	cr,lf,bell,null
+	jp	l2b3a
+;
+; Create file
+;
+l1f75:
+	ld	de,FCB
+	ld	c,.make
+	call	BDOS		; Create file
+	inc	a		; Verify success
+	ret	nz		; Yeap
+	call	l2455
+	db	'++ ERROR -- Can''t open file ++'
+	db	cr,lf
+	db	'++ Directory is perhaps full ++',eot
+;
+; Get size of file
+;
+l1fc2:
+	ld	c,.filsiz
+	ld	de,FCB
+	call	BDOS		; Get size of file
+	ld	hl,(FCB+_RRN)
+	ld	(l40b1),hl	; Save it
+	ld	hl,0
+	ld	(FCB+_RRN),hl	; Reset random record
+	ret
+;
+; Open file
+;
+l1fd7:
+	xor	a
+	ld	(FCB+_EX),a	; Init extent
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Test found
+	jp	nz,l294b	; Yeap, tell transfer statistic
+	call	l2455
+	db	'++ FILE NOT FOUND ++',eot
+;
+; Close file
+;
+l1fff:
+	ld	de,FCB
+	ld	c,.close
+	call	BDOS		; Close file
+	inc	a		; Test success
+	ret	nz		; Yeap
+	jp	l2461
+;
+; Get record from file - C set on end of file
+;
+l200c:
+	ld	a,(l40af)	; Get record count
+	dec	a		; Count down
+	ld	(l40af),a
+	jp	m,l2023		; All data read, get new buffer
+	ld	hl,(l40ad)	; Get current read buffer
+	ld	de,DMA
+	call	l24ac		; Copy record
+	ld	(l40ad),hl	; Update read buffer
+	ret
+l2023:
+	ld	a,(l40ac)	; Get end of file marker
+	cp	1		; Test end
+	scf
+	ret	z		; Yeap
+	ld	c,0		; Clear record count
+	ld	de,l4500	; Init read buffer
+l202f:
+	push	bc
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rdseq
+	call	BDOS		; Read record
+	pop	de
+	pop	bc
+	or	a		; Test success
+	jp	z,l2061
+	dec	a		; Verify end of file
+	jp	z,l2070
+	call	l2455
+	db	'++ FILE READ ERROR ++',eot
+;
+l2061:
+	ld	hl,reclng
+	add	hl,de		; Advance buffer address
+	ex	de,hl
+	inc	c		; Advance record count
+	ld	a,c
+	cp	RdRec		; Test entire buffer filled
+	jp	z,l2076		; Yeap
+	jp	l202f		; Read next
+l2070:
+	ld	a,1
+	ld	(l40ac),a	; Set end of file marker
+	ld	a,c		; Get records read
+l2076:
+	ld	(l40af),a	; Set record count
+	ld	hl,l4500
+	ld	(l40ad),hl	; Reset read buffer
+	ld	c,.setdma
+	ld	de,DMA
+	call	BDOS		; Set disk buffer
+	jp	l200c		; Unpack record
+;
+; Write buffer to file
+;
+l208a:
+	ld	hl,(l40ad)	; Get read buffer
+	ex	de,hl
+	ld	hl,DMA
+	call	l24ac		; Copy record to buffer
+	ex	de,hl
+	ld	(l40ad),hl	; Update read buffer
+	ld	a,(l40af)	; Get record count
+	inc	a		; Update it
+	ld	(l40af),a
+	cp	RdRec		; Test records filled
+	ret	nz		; Nope
+l20a2:
+	ld	a,(l40af)	; Get record count
+	or	a		; Test any record
+	ret	z		; Nope
+	ld	c,a		; Get count
+	ld	de,l4500	; Init buffer address
+l20ab:
+	push	bc
+	push	de
+	push	hl
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	c,.wrseq
+	ld	de,FCB
+	call	BDOS		; Write record
+	pop	hl
+	pop	de
+	pop	bc
+	or	a		; Verify success
+	jp	nz,l193e	; Nope
+	ld	hl,reclng
+	add	hl,de		; Point to next record
+	ex	de,hl
+	dec	c		; Test all written
+	jp	nz,l20ab	; Nope
+	xor	a
+	ld	(l40af),a	; Clear record count
+	ld	hl,l4500
+	ld	(l40ad),hl	; Reset read buffer
+	ret
+;
+; Get modem data - C set on timeout
+;
+l20d6:
+	call	l0f0c		; Skip pending modem data
+l20d9:
+	push	de
+	ld	a,b		; Get calue
+	rla			; * 4
+	rla
+	ld	b,a
+l20de:
+	call	l1e5e		; Test user abort
+	push	hl
+	ld	hl,175
+	call	l2504		; Convert delay value
+	ex	de,hl
+	pop	hl
+l20ea:
+	call	l1675		; Input modem control
+	jp	z,l20ff		; Input modem data if pending
+	dec	e
+	jp	nz,l20ea
+	dec	d
+	jp	nz,l20ea
+	dec	b
+	jp	nz,l20de
+	pop	de
+	scf
+	ret
+l20ff:
+	call	l013e		; Input modem data
+	pop	de
+	push	af
+	call	l2ad5		; Update CRC
+	add	a,c
+	ld	c,a
+	ld	a,(l4086)
+	or	a
+	jp	z,l211e
+	ld	a,(l4089)
+	or	a
+	jp	nz,l2123
+	ld	a,(l40b3)
+	or	a
+	jp	z,l2123
+l211e:
+	pop	af
+	push	af
+	call	l2352		; Put character to console
+l2123:
+	pop	af
+	or	a
+	ret
+;
+; Put character to modem
+;
+l2126:
+	push	af
+	ld	a,(l4087)
+	or	a
+	jp	z,l213c
+	ld	a,(l4089)
+	or	a
+	jp	nz,l2141
+	ld	a,(l40b3)
+	or	a
+	jp	z,l2141
+l213c:
+	pop	af
+	push	af
+	call	l2352		; Put character to console
+l2141:
+	pop	af
+	push	af
+	call	l2ad5		; Update CRC
+	add	a,c
+	ld	c,a
+l2148:
+	call	l167e		; Test modem ready for data
+	jp	nz,l2148	; Nope, wait
+	pop	af
+	jp	l0134		; Put to modem
+;
+; Wait for ready signal
+;
+l2152:
+	call	l242d
+	db	'Waiting ready signal'
+	db	cr,lf,null
+l216c:
+	call	l1e5e		; Test user abort
+	ld	b,1
+	call	l20d9		; Get modem data
+	cp	CAN		; Test cancel
+	jp	z,l1e6d
+	cp	'C'		; Test CRC
+	jp	z,l218a
+	cp	NAK
+	jp	z,l21aa
+	dec	e
+	jp	nz,l216c	; Retry
+	jp	l1e6d		; Cancel on timeout
+l218a:
+	call	l243c
+	db	'CRC request received'
+	db	cr,lf,null
+	ld	a,1
+	ld	(l40c0),a	; Set CRC
+	ret
+l21aa:
+	ld	a,(l4081)
+	or	a
+	ret	z
+	call	l243c
+	db	'Got checksum request'
+	db	cr,lf,null
+	ret
+l21ca:	;; NO REFERENCE
+	call	l243c
+	db	'Name NAK received'
+	db	cr,lf,null
+	ret
+;
+;
+;
+l21e2:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	ret	z		; Nope
+	ld	a,(l408c)
+	or	a
+	jp	nz,l21f6
+	ld	a,(l40d2)	; Get modem control
+	and	NOT EPS+NP
+	jp	l2202
+l21f6:
+	ld	a,(l408b)
+	or	a
+	ret	nz
+	ld	a,(l40d2)	; Get modem control
+	and	NOT EPS+NP
+	or	EPS		; Set even parity
+l2202:
+	ld	(l40d2),a	; Set modem control
+	jp	l015a		; Output modem control
+;
+; Set no parity on PMMI Modem
+;
+l2208:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	ret	z		; Nope
+	ld	a,(l40d2)	; Get modem control
+	or	NP		; Set no parity
+	jp	l015a		; Output modem control
+;
+;
+;
+l2215:
+	ld	a,(l4081)
+	or	a
+	jp	nz,l22b1	; End of transfer
+	ld	a,(l4085)
+	or	a		; Test verbose
+	jp	z,l2284		; Nope
+	ld	b,.nam+1+.ext
+	ld	hl,l2263
+	ld	a,0
+l222a:
+	ld	(hl),a
+	inc	hl
+	dec	b
+	jp	nz,l222a
+	ld	b,.nam+1+.ext
+	ld	hl,FCB+.drv
+	ld	de,l2263
+l2238:
+	ld	a,.ext+1
+	cp	b
+	jp	z,l2250
+	ld	a,(hl)
+	cp	' '
+	jp	z,l2246
+	ld	(de),a
+	inc	de
+l2246:
+	inc	hl
+	dec	b
+	ld	a,b
+	or	a
+	jp	z,l225e
+	jp	l2238
+l2250:
+	ld	a,(hl)
+	cp	' '
+	jp	z,l225e
+	ld	a,'.'
+	ld	(de),a
+	inc	de
+	dec	b
+	jp	l2238
+l225e:
+	call	l242d
+	db	cr,lf
+;
+; Next 12 bytes will be overwritten
+; >>>>>>>>>>>>>>>>.<<<<<<<<<<<<<<<<
+;
+l2263:
+	db	'signal'
+	db	cr,lf,null
+	call	l1e5e
+;
+; >>>>>>>>>>>>>>>>.<<<<<<<<<<<<<<<<
+;
+	db	null
+	call	l242d
+	db	' Transferred'
+	db	cr,lf,lf,bell,null
+l2284:
+	ld	a,(FCB)		; Get drive
+	ld	(l4158),a	; Save it
+	ld	hl,FCB
+	call	l19b7		; Init FCB
+	ld	a,(l4158)
+	ld	(FCB),a		; Restore drive
+	ld	hl,l409a
+	ld	de,l40a7
+	ld	b,l40a7-l409a
+	call	l24ae		; Initialize file environment
+	call	l1687		; Wait for modem ready to receive data
+	call	l0f0c		; Skip pending modem data
+	ld	a,(l4162)
+	or	a		; Test transfer mode
+	jp	nz,l109c	; Send
+	jp	l1115		; Receive
+;
+; Process end of transfer
+;
+l22b1:
+	call	l1e5e		; Test user abort
+	call	l242d
+	db	cr,lf
+	db	'[Transfer Completed]'
+	db	cr,lf,bell,null
+l22d1:
+	ld	a,(l408a)
+	or	a
+	jp	z,l37c9		; Display pending modem characters and exit to CP/M
+	ld	a,(l4082)
+	or	a
+	jp	z,l231e		; Process disconnection
+l22df:
+	call	l2208		; Set no parity on PMMI Modem
+	xor	a
+	ld	(l40c0),a	; Init checksum
+	ld	(l40c6),a
+	ld	(l40c7),a	; Indicate file list attached not yet
+	ld	(l40cc),a	; Indicate no memory open
+	ld	(l40d1),a	; Close memory buffer
+	ld	a,(l4089)
+	or	a
+	jp	nz,l2300
+	cpl
+	ld	(l4085),a	; Set/reset verbose
+	ld	(l4089),a
+l2300:
+	ld	hl,l4085
+	ld	a,(hl)
+	or	a		; Test verbose
+	ld	(hl),'Q'
+	jp	z,l2b3a		; Nope
+	ld	a,(l40be)
+	or	a
+	jp	nz,l2b3a
+	ld	a,(l4088)
+	or	a
+	jp	nz,l2b3a
+	call	l2387		; Close line on console
+	jp	l0f76
+;
+; Comamnd DSC - Disconnect PMMI Modem
+;
+l231e:
+	call	l242d
+	db	cr,lf
+	db	'<< DISCONNECTED >>'
+	db	bell,cr,lf,null
+	call	l0165		; Disconnect PMMI
+	jp	l2af3		; Prepare file environment
+;
+; Unpack FCB
+;
+l233f:
+	ld	hl,FCB2
+	ld	de,FCB
+	ld	b,_DIR
+	call	l24ae		; Unpack FCB
+	xor	a
+	ld	(FCB+_CR),a	; Prepare file I/O
+	ld	(FCB+_EX),a
+	ret
+;
+; Put character to console
+;
+l2352:
+	cp	lf		; Filter printable control
+	jp	z,l237a
+	cp	cr
+	jp	z,l237a
+	cp	tab
+	jp	z,l237a
+	cp	' '		; Test prontable characters
+	jp	c,l236b
+	cp	'~'+1
+	jp	c,l237a
+l236b:
+	push	af
+	ld	a,'('
+	call	l237a		; Indicate hex follows
+	pop	af
+	call	l2404		; Print hex byte
+	ld	a,')'
+	jp	l237a
+;
+; Put character to console thru BDOS
+;
+l237a:
+	push	bc
+	push	de
+	push	hl
+	ld	e,a		; Unpack character
+	ld	c,.conout
+	call	BDOS		; Put to console
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Close line on console
+;
+l2387:
+	push	af
+	ld	a,cr
+	call	l23b3		; Put character to console
+	ld	a,lf
+	call	l23b3		; Put character to console
+	pop	af
+	ret
+;
+; Get console state thru BIOS - Z set says none available
+;
+l2394:
+	push	bc
+	push	de
+	push	hl
+l2398	equ	$+1
+	call	$-$		; Get state
+	pop	hl
+	pop	de
+	pop	bc
+	or	a		; Test character pending
+	ret
+;
+; Get console character thru BIOS
+;
+l239f:
+	push	bc
+	push	de
+	push	hl
+l23a3	equ	$+1
+	call	$-$		; Get character
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Put character to printer thru BIOS
+;
+l23a9:
+	push	bc
+	push	de
+	push	hl
+l23ad	equ	$+1
+	call	$-$		; Put to printer
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Put character to console thru BIOS
+;
+l23b3:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	c,a		; Unpack character
+l23b9	equ	$+1
+	call	$-$		; Put to console
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Get and echo character as upper case
+;
+l23c0:
+	call	l239f		; Get character from console
+	call	l23ca		; Convert character to upper case
+	call	l23b3		; Put character to console
+	ret
+;
+; Convert character to upper case
+;
+l23ca:
+	cp	'a'		; Test lower case
+	ret	c
+	cp	'z'+1
+	ret	nc		; Nope
+	and	UPPMASK		; Convert to upper case
+	ret
+;
+; Print value in HL as decimal
+;
+l23d3:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	bc,-10		; Init divisor
+	ld	de,-1		; Init quotient
+l23dd:
+	add	hl,bc		; Divide by 10
+	inc	de
+	jp	c,l23dd
+	ld	bc,10
+	add	hl,bc		; Make GTE 0
+	ex	de,hl
+	ld	a,h
+	or	l		; Test remainder
+	call	nz,l23d3	; Yeap, recursive division
+	ld	a,e		; Get quotient
+	add	a,'0'		; Make ASCII
+	call	l237a		; Put to console
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Print value in HL as hexadecimal
+;
+l23f7:
+	push	hl
+	push	af
+	ld	a,h		; Get hi part
+	call	l2404		; Print it
+	ld	a,l		; Then lo part
+	call	l2404
+	pop	af
+	pop	hl
+	ret
+;
+; Print hex byte
+;
+l2404:
+	push	af
+	rra			; Extract hi nybble
+	rra
+	rra
+	rra
+	call	l240d
+	pop	af
+;
+; Put hex nybble to console
+;
+l240d:
+	and	LOMASK		; Mask for 0..F
+	cp	9+1		; Test 0..9
+	jp	c,l2416		; Yeap
+	add	a,'A'-'0'-10	; Map for A..F
+l2416:
+	add	a,'0'
+	jp	l237a		; Put character to console
+;
+; Print control character as "CTL-xx" followed by immediate sting
+;
+l241b:
+	push	af
+	call	l242d		; Give prefix
+	db	'CTL-'
+	db	null
+	pop	af
+	add	a,'@'
+	call	l23b3		; Put character to console
+	jp	l242d
+;
+; Print immediate string closed by NULL
+;
+l242d:
+	ex	(sp),hl		; Get pointer
+l242e:
+	ld	a,(hl)		; Get character
+	or	a		; Test end
+	jp	z,l243a		; Yeap
+	call	l237a		; Put character to console
+	inc	hl
+	jp	l242e
+l243a:
+	ex	(sp),hl		; Reset pointer
+	ret
+;
+; Print immediate string closed by NULL if enabled
+;
+l243c:
+	ex	(sp),hl		; Get pointer
+l243d:
+	ld	a,(hl)		; Get character
+	or	a		; Test end
+	jp	z,l244e		; Yeap
+	ld	a,(l4085)
+	or	a		; Test verbose
+	ld	a,(hl)
+	call	nz,l237a	; Put character to console if so
+	inc	hl
+	jp	l243d
+l244e:
+	ex	(sp),hl		; Reset pointer
+	ret
+;
+; Print string ^DE closed by CP/M delimiter
+;
+l2450:
+	ld	c,.string
+	jp	BDOS		; Put to console
+;
+; Print immediate string closed by CP/M delimiter
+;
+l2455:
+	pop	de
+	call	l2450		; Print string
+	ld	a,bell
+	call	l23b3		; Put character to console
+	call	l2387		; Close line on console
+l2461:
+	ld	a,1
+	ld	(l40be),a
+	ld	a,(l4081)
+	or	a
+	jp	nz,l22df
+	jp	l1e6d		; Cancel
+;
+; Command CPM - Return to CP/M
+;
+l2470:
+	ld	a,(l4161)	; Get entry user area
+	ld	e,a
+	call	l38e6		; Set user area
+	ld	c,.setdma
+	ld	de,DMA
+	call	BDOS		; Set disk buffer
+	call	l1687		; Wait for modem ready to receive data
+	call	l0f0c		; Skip pending modem data
+	call	l249c		; Skip pending console characters
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	call	nz,l3e99	; Yeap, close file
+	ld	a,(l0114)	; Get CCP flag
+	or	a		; Test overwrite CCP
+	jp	z,OS		; Do warm start if allowed
+	xor	a
+	ld	hl,(l42fe)	; Reset entry stack
+	ld	sp,hl
+	ret
+;
+; Skip pending console characters
+;
+l249c:
+	ld	c,.consta
+	call	BDOS		; Test character pending
+	or	a
+	ret	z		; Nope
+	ld	c,.conin
+	call	BDOS		; Read it
+	xor	a
+	jp	l249c
+;
+; Copy record from ^HL to ^DE
+;
+l24ac:
+	ld	b,reclng	; Set length
+;
+; Copy B bytes from ^HL to ^DE
+;
+l24ae:
+	ld	a,(hl)
+	ld	(de),a		; Unpack
+	inc	hl
+	inc	de
+	dec	b
+	jp	nz,l24ae
+	ret
+;
+; Parse files
+;
+l24b7:
+	ld	de,l40d4
+	ld	hl,FCB
+	jp	l2511		; Parse files
+;
+; Input baudrate
+;
+l24c0:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	ret	z		; Nope
+	call	l242d
+	db	cr,lf,'Enter new Baudrate: ',null
+	ld	hl,FCB+.drv+.nam
+	ld	(hl),0
+l24e4:
+	call	l239f		; Get character from console
+	cp	cr
+	jp	nz,l24f2
+	call	l2387		; Close line on console
+	jp	l0295		; Put to controller
+l24f2:
+	cp	'0'
+	jp	c,l24e4
+	cp	'9'+1
+	jp	nc,l24e4
+	ld	(hl),a
+	call	l23b3		; Put character to console
+	inc	hl
+	jp	l24e4
+;
+; Convert delay value in reg HL to real delay
+;
+l2504:
+	ld	a,(l0104)	; Get clock speed as multiplier
+	push	de
+	push	hl
+	pop	de
+l250a:
+	add	hl,de		; Multiply HL by speed
+	dec	a
+	jp	nz,l250a
+	pop	de
+	ret
+;
+; Parse FCBs ^HL from ^DE
+;
+l2511:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	call	l2585		; Init FCBs
+	ex	de,hl
+	inc	hl
+	ld	e,(hl)		; Fetch length of line
+	ld	d,0
+	inc	hl
+	add	hl,de		; Postion to end
+	ld	(hl),cr		; Close line
+	pop	hl
+	pop	de
+	push	de
+	push	hl
+	inc	de
+	inc	de
+	call	l25ae		; Get drive if defined
+	ld	c,.nam
+	call	l25c0		; Unpack name
+	cp	cr		; Test more
+	jp	z,l2571		; Nope
+	cp	' '		; Test separator for 2nd FCB
+	jp	z,l2549		; Nope
+	pop	hl
+	push	hl
+	ld	bc,.drv+.nam
+	add	hl,bc		; Position to type
+	ld	c,.ext
+	call	l25c0		; Unpack type
+	cp	cr		; Test more
+	jp	z,l2571		; Nope
+l2549:
+	ld	a,(de)
+	cp	' '		; Skip blanks
+	jp	nz,l2553
+	inc	de
+	jp	l2549
+l2553:
+	pop	hl
+	push	hl
+	ld	bc,_DIR
+	add	hl,bc		; Position to 2nd FCB
+	call	l25ae		; Get drive if defined
+	ld	c,.nam
+	call	l25c0		; Unpack name
+	cp	cr		; Test more
+	jp	z,l2571		; Nope
+	pop	hl
+	push	hl
+	ld	bc,_DIR+.drv+.nam
+	add	hl,bc
+	ld	c,.ext
+	call	l25c0		; Unpack type
+l2571:
+	pop	hl
+	push	hl
+	inc	hl
+	call	l25d4		; Test wildcard in 1st FCB
+	pop	hl
+	push	hl
+	ld	bc,_DIR+.drv
+	add	hl,bc
+	call	l25d4		; Test wildcard in 1st FCB
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Init FCBs
+;
+l2585:
+	push	hl
+	push	bc
+	ld	(hl),0		; Set default drive
+	inc	hl
+	ld	b,.nam+.ext
+	ld	a,' '
+	call	l25a7		; Blank 1st FCB
+	ld	b,_DIR-_EX+.drv
+	xor	a
+	call	l25a7		; Zero control
+	ld	b,.nam+.ext
+	ld	a,' '
+	call	l25a7		; Blank 2nd FCB
+	ld	b,_DIR-_EX
+	xor	a
+	call	l25a7		; Zero control
+	pop	bc
+	pop	hl
+	ret
+;
+; Fill ^HL with Accu B-times
+;
+l25a7:
+	ld	(hl),a		; Just fill it
+	inc	hl
+	dec	b
+	jp	nz,l25a7
+	ret
+;
+; Get drive if defined
+;
+l25ae:
+	inc	de		; Advance to delimiter
+	ld	a,(de)		; Get it
+	dec	de
+	cp	':'		; Test drive possible
+	jp	nz,l25be	; Nope
+	ld	a,(de)		; Get drive
+	and	UPPMASK		; Make upper case
+	sub	'A'-1		; Make binary
+	ld	(hl),a		; Store it
+	inc	de		; Skip characters
+	inc	de
+l25be:
+	inc	hl		; Position in FCB
+	ret
+;
+; Unpack file name or type
+;
+l25c0:
+	ld	a,(de)		; Get character
+	inc	de
+	cp	cr		; Test end of line
+	ret	z
+	cp	'.'		; Test type indicator
+	ret	z
+	cp	' '		; Test separator
+	ret	z
+	dec	c		; Test still room
+	jp	m,l25c0		; Nope, truncate
+	ld	(hl),a		; Unpack into FCB
+	inc	hl
+	jp	l25c0
+;
+; Test wildcard in FCB
+;
+l25d4:
+	ld	b,.nam		; Start with name
+l25d6:
+	ld	a,(hl)		; Get character
+	cp	'*'		; Test wildccard
+	jp	z,l25e4		; Yeap
+	inc	hl
+	dec	b
+	jp	nz,l25d6
+	jp	l25e7
+l25e4:
+	call	l25f9		; Map to single wildcard
+l25e7:
+	ld	b,.ext		; Continue with type
+l25e9:
+	ld	a,(hl)		; Get character
+	cp	'*'		; Test wildccard
+	jp	z,l25f5		; Yeap
+	inc	hl
+	dec	b
+	jp	nz,l25e9
+	ret
+l25f5:
+	call	l25f9		; Map to single wildcard
+	ret
+;
+; Fill wildcard characters
+;
+l25f9:
+	ld	(hl),'?'	; Fill it
+	inc	hl
+	dec	b
+	jp	nz,l25f9
+	ret
+;
+; Get current ASCII drive
+;
+l2601:
+	call	l38eb		; Get logged disk
+	add	a,'A'		; Make ASCII
+	ld	(l2769),a	; Save into message
+	ld	(l2785),a
+	jp	l2614
+;
+;
+;
+l260f:	;; NO REFERENCE
+	ld	c,.resdsk
+	call	BDOS		; Reset disk system
+;
+;
+;
+l2614:
+	ld	de,l40d4
+	ld	hl,FCB
+	call	l2511		; Parse files
+	ld	hl,l4185
+	call	l19b7		; Init FCB
+	ld	a,(FCB2)	; Get drive
+	ld	(l4185),a	; Unpack it
+	ld	a,(FCB2+.drv)
+	cp	' '		; Test 2nd name given
+	push	af
+	call	z,l2721		; Nope, wildcard it
+	pop	af
+	call	nz,l272f	; Yeap, unpack it
+	call	l2748		; Tell drive
+	ld	c,.setdma
+	ld	de,DMA
+	call	BDOS		; Set disk buffer
+	ld	a,(l0108)	; Get number of dir columns shown
+	ld	(l415e),a	; Init count
+	ld	de,l4185
+	ld	c,.srcfrs
+	call	BDOS		; Search for file
+	inc	a		; Test any found
+	jp	nz,l266e	; Yeap
+	call	l242d
+	db	'++ FILE NOT FOUND ++',null
+	jp	l26c5
+l266e:
+	call	l273c		; Position to entry
+	inc	hl		; Skip user area
+	ld	de,l2685
+	ld	bc,.nam
+	call	l2937		; Unpack name
+	inc	de
+	ld	bc,.ext
+	call	l2937		; Unpack type
+	call	l242d		; Tell name of file
+l2685:
+	db	'        .   ',null
+	ld	de,l4185
+	ld	c,.srcnxt
+	call	BDOS		; Search for next file
+	inc	a		; Test more
+	jp	z,l26c5		; Nope
+	push	af
+	push	de
+	push	hl
+	ld	a,(l415e)	; Count down number of dir columns
+	dec	a
+	ld	(l415e),a
+	or	a
+	call	z,l2387		; Close line on console
+	jp	nz,l26b8	; Still more in line
+	ld	a,(l0108)	; Get number of dir columns shown
+	ld	(l415e),a	; Reset count
+	jp	l26bf
+l26b8:
+	call	l242d		; Give delimiter
+	db	' : ',null
+l26bf:
+	pop	hl
+	pop	de
+	pop	af
+	jp	l266e
+l26c5:
+	call	l2387		; Close line on console
+;
+; Calculate free disk space
+;
+; !!!!!!!!!!!!!!!!!!! ERROR FOR CP/M 3 !!!!!!!!!!!!!!!!!!
+;
+; The address of allocation vector is stored
+; in a different memory bank
+;
+; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+;
+	ld	c,.getdpb
+	call	BDOS		; Get disk parameter block
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get block shift BSH
+	ld	(l278d),a
+	inc	hl
+	ld	a,(hl)		; Get block mask BLM
+	ld	(l278c),a
+	inc	hl
+	inc	hl
+	ld	e,(hl)		; Get number of blocks on disk DSM
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l278a),hl
+	ld	c,.getalv
+	call	BDOS		; Get allocation vector
+	ex	de,hl
+	ld	hl,(l278a)	; Get number of blocks on disk DSM
+	inc	hl
+	ld	bc,0		; Init result
+l26ee:
+	push	de
+	ld	a,(de)		; Get allocation byte
+	ld	e,8		; Set bit count
+l26f2:
+	rla			; Test allocated
+	jp	c,l26f7
+	inc	bc		; Update free count
+l26f7:
+	ld	d,a
+	dec	hl
+	ld	a,l
+	or	h		; Test all blocks checked
+	jp	z,l2708		; Yeap
+	ld	a,d
+	dec	e		; Test all bits checked
+	jp	nz,l26f2	; Nope
+	pop	de
+	inc	de		; Get next byte
+	jp	l26ee
+l2708:
+	pop	de
+	ld	l,c		; Get free block count
+	ld	h,b
+	ld	a,(l278d)	; Get block shift BSH
+	sub	3		; Strip off 1k value
+	jp	z,l2718		; Was 1k
+l2713:
+	add	hl,hl		; Calculate free size
+	dec	a
+	jp	nz,l2713
+l2718:
+	call	l23d3		; Print decimal
+	ld	de,l276f
+	jp	l2450
+;
+; Set wildcard to 2nd FCB
+;
+l2721:
+	ld	a,'?'
+	ld	b,.nam+.ext
+	ld	hl,l4185+.drv
+l2728:
+	ld	(hl),a		; Fill it
+	inc	hl
+	dec	b
+	jp	nz,l2728
+	ret
+;
+; Unpack 2nd FCB
+;
+l272f:
+	ld	hl,FCB2+.drv
+	ld	de,l4185+.drv
+	ld	bc,.nam+.ext
+	call	l2937		; Unpack
+	ret
+;
+; Map directory code to address
+;
+l273c:
+	dec	a		; Fix it
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,a		; *16
+	add	a,a		; *32
+	add	a,DMA		; Poition it
+	ld	l,a		; Make address
+	ld	h,0
+	ret
+;
+; Tell drive
+;
+l2748:
+	ld	a,(l4185)	; Get drive
+	or	a		; Test default
+	jp	z,l2760		; Yeap
+	push	af
+	dec	a
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Select drive
+	pop	af
+	add	a,'A'-1		; Make ASCII
+	ld	(l2769),a	; Save into message
+	ld	(l2785),a
+l2760:
+	call	l242d		; Tell drive
+	db	'Drive '
+l2769:
+	db	' :',cr,lf,null
+	ret
+;
+l276f:
+	db	'k bytes free on drive '
+l2785:
+	db	' :',cr,lf,eot
+l278a:
+	dw	2020h
+l278c:
+	db	20h
+l278d:
+	db	2eh
+;
+; Read line ^DE from console
+;
+; Compatible to BDOS line input
+; E.g. 1st byte is max length on input
+; 2nd byte is current lenght on exit
+;
+l278e:
+	push	af
+	push	hl
+	push	bc
+	push	de
+l2792:
+	call	l2858		; Blank line
+	pop	de
+	push	de
+	xor	a
+	inc	de
+	ld	(de),a
+	inc	de
+	ex	de,hl
+l279c:
+	call	l239f		; Get character from console
+	call	l23ca		; Convert to upper case
+	cp	cr		; Test end of input
+	jp	z,l2850
+	cp	bs		; Test backspace
+	jp	z,l27e1
+	cp	RUBOUT		; Or rubout
+	jp	z,l27e1
+	cp	'U'-'@'		; Filter control
+	jp	z,l2817
+	cp	'R'-'@'
+	jp	z,l2822
+	cp	'E'-'@'
+	jp	z,l27c5
+	cp	' '
+	jp	c,l279c		; Ignore other control
+l27c5:
+	ld	b,a		; Save character
+	ex	de,hl
+	pop	hl
+	push	hl
+	inc	hl
+	inc	(hl)		; Update count
+	dec	hl
+	ld	a,(hl)
+	inc	hl
+	cp	(hl)		; Test in range
+	jp	c,l2840		; Line too long
+	ex	de,hl
+	ld	(hl),b		; Store character
+	ld	a,b
+	cp	'E'-'@'		; Filter valid control
+	jp	z,l2850		; Treat as end
+	call	l23b3		; Put character to console
+	inc	hl
+	jp	l279c		; Get next
+;
+; Backspace or rubout detected
+;
+l27e1:
+	ex	de,hl
+	pop	hl
+	push	hl
+	inc	hl
+	ld	b,a
+	ld	a,(hl)
+	sub	1		; Fix count
+	ld	(hl),a
+	jp	c,l2800		; Was already at left position
+	ex	de,hl
+	dec	hl
+	ld	a,b		; Get back character
+	ld	b,(hl)
+	ld	(hl),' '	; Blank location
+	cp	bs
+	jp	z,l2807
+	cp	RUBOUT
+	jp	z,l2805		; Map rubout
+	jp	l279c
+l2800:
+	inc	(hl)
+	ex	de,hl
+	jp	l279c
+l2805:
+	ld	a,bs
+l2807:
+	call	l23b3		; Delete character on screen
+	ld	a,' '
+	call	l23b3
+	ld	a,bs
+	call	l23b3
+	jp	l279c
+;
+; CTL-U
+;
+l2817:
+	ld	a,'#'
+	call	l23b3		; Put character to console
+	call	l2387		; Close line on console
+	jp	l2792		; Reset line and restart input
+;
+; CTL-R
+;
+l2822:
+	pop	de
+	push	de
+	inc	de
+	ld	a,(de)		; Get length of line
+	ld	b,a
+	ld	a,'#'
+	call	l23b3		; Put character to console
+	call	l2387		; Close line on console
+	ld	a,b
+	or	a		; Test any in line
+	jp	z,l279c		; Nope, no echo
+l2834:
+	inc	de
+	ld	a,(de)
+	call	l23b3		; Echo line on console
+	dec	b
+	jp	nz,l2834
+	jp	l279c
+;
+; Line too long
+;
+l2840:
+	ld	a,bell
+	call	l23b3		; Put character to console
+	dec	(hl)		; Truncate length
+	ex	de,hl
+	jp	l279c
+;
+l284a:	;; NO REFERENCE
+	call	l2387		; Close line on console
+	jp	l279c
+;
+; End of input
+;
+l2850:
+	call	l2387		; Close line on console
+	pop	de
+	pop	bc
+	pop	hl
+	pop	af
+	ret
+;
+; Init input line
+;
+l2858:
+	pop	de
+	pop	hl		; Get pointer to line
+	push	hl
+	push	de
+	ld	b,(hl)		; Get length
+	inc	hl		; Skip counter
+	inc	hl
+	ld	a,' '
+l2861:
+	ld	(hl),a		; Blank entire line
+	inc	hl
+	dec	b
+	jp	nz,l2861
+	ret
+;
+; Compare immediate:^DE
+; Carry set on no match
+;
+l2868:
+	ex	(sp),hl
+	push	de
+l286a:
+	ld	a,(hl)		; Get character
+	or	a		; Test end of item
+	jp	z,l2880		; Yeap, got a match
+	ld	a,(de)
+	cp	(hl)		; Compare
+	jp	nz,l2879	; No match
+	inc	hl
+	inc	de
+	jp	l286a
+l2879:
+	xor	a
+l287a:
+	inc	hl
+	cp	(hl)		; Position to end of item
+	jp	nz,l287a
+	scf			; Indicate no match
+l2880:
+	pop	de
+	inc	hl
+	ex	(sp),hl
+	ret
+;
+;
+;
+l2884:
+	push	bc
+	push	de
+	push	hl
+	ld	c,.setdma
+	ld	de,DMA
+	call	BDOS		; Set disk buffer
+	pop	hl
+	pop	de
+	pop	bc
+	xor	a
+	ld	(FCB+_EX),a
+	ld	a,(l40ca)
+	or	a
+	jp	nz,l28d1
+	ld	a,1
+	ld	(l40ca),a
+	ld	hl,FCB
+	ld	de,l41b5
+	ld	bc,.drv+.nam+.ext
+	call	l2937		; Unpack
+	ld	a,(FCB)
+	ld	(l41c1),a
+	ld	hl,l41b5
+	ld	de,FCB
+	ld	bc,.drv+.nam+.ext
+	call	l2937		; Unpack
+	push	bc
+	push	de
+	push	hl
+	ld	c,.srcfrs
+	ld	de,FCB
+	call	BDOS		; Search for file
+	pop	hl
+	pop	de
+	pop	bc
+	jp	l2905
+l28d1:
+	ld	hl,l41c1
+	ld	de,FCB
+	ld	bc,.drv+.nam+.ext
+	call	l2937		; Unpack
+	push	bc
+	push	de
+	push	hl
+	ld	c,.srcfrs
+	ld	de,FCB
+	call	BDOS		; Search for file
+	pop	hl
+	pop	de
+	pop	bc
+	ld	hl,l41b5
+	ld	de,FCB
+	ld	bc,.drv+.nam+.ext
+	call	l2937		; Unpack
+	push	bc
+	push	de
+	push	hl
+	ld	c,.srcnxt
+	ld	de,FCB
+	call	BDOS		; Search for next file
+	pop	hl
+	pop	de
+	pop	bc
+l2905:
+	inc	a
+	scf
+	jp	nz,l290e
+	ld	(l40ca),a
+	ret
+l290e:
+	dec	a
+	and	00000011b	; Mask directory code
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,a
+	add	a,DMA+1		; Position in directory entry
+	ld	l,a
+	ld	h,0
+	push	hl
+	ld	de,l41c1+.drv
+	ld	bc,.nam+.ext
+	call	l2937		; Unpack
+	pop	hl
+	ld	de,FCB+.drv
+	ld	bc,.nam+.ext
+	call	l2937		; Unpack
+	xor	a
+	ld	(FCB+_EX),a
+	ld	(FCB+_CR),a
+	ret
+;
+; Move BC bytes ^HL to ^DE
+;
+l2937:
+	ld	a,2
+	inc	a		; Test Z80 CPU
+	jp	pe,l2940	; Nope, simulate LDIR
+	ldir
+	ret
+l2940:
+	ld	a,(hl)
+	ld	(de),a		; Unpack
+	inc	hl
+	inc	de
+	dec	bc
+	ld	a,b
+	or	c
+	jp	nz,l2940
+	ret
+;
+; Tell transfer statistic
+;
+l294b:
+	call	l242d
+	db	'File open: ',null
+	ld	hl,(l40b1)	; Get size of file
+	call	l23d3		; Print decimal
+	call	l242d
+	db	' ('
+	db	null
+	call	l23f7		; Print hex word
+	call	l242d
+	db	'H) records'
+	db	cr,lf
+	db	'Send time: ',null
+	ld	a,(l0105)	; Get modem speed
+	ld	d,0
+	ld	e,a
+	ld	hl,l29f5
+	add	hl,de
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	hl,(l40b1)	; Get size of file
+	call	l2a73		; BC:=HL DIV DE
+	push	hl		; Save remainder
+	ld	l,c
+	ld	h,b
+	call	l23d3		; Print decimal
+	call	l242d
+	db	' mins, ',null
+	ld	hl,l2a0b
+	ld	de,0
+	ld	a,(l0105)	; Get modem speed
+	ld	e,a
+	add	hl,de
+	ld	a,(hl)
+	pop	hl
+	call	l2a87		; HL:=HL * ACCU
+	call	l2a92		; Divide by 2
+	call	l2a92		; Divide by 4
+	call	l2a92		; Divide by 8
+	call	l2a92		; Divide by 16
+	ld	h,0
+	call	l23d3		; Print decimal
+	call	l242d
+	db	' secs at ',null
+	call	l2a16		; Tell modem speed
+	call	l243c
+	db	'To cancel: use CTL-X'
+	db	cr,lf,null
+	ret
+;
+l29f5:
+	dw	  5
+	dw	 13
+	dw	 20
+	dw	 24
+	dw	 30
+	dw	 48
+	dw	 96
+	dw	192
+	dw	320
+	dw	480
+	dw	0
+l2a0b:
+	db	192
+	db	 74
+	db	 48
+	db	 40
+	db	 32
+	db	 20
+	db	 10
+	db	  5
+	db	  3
+	db	  2
+	db	0
+;
+; Tell modem speed
+;
+l2a16:
+	ld	hl,l2a37	; Init table
+	ld	d,0
+	ld	a,(l0105)	; Get modem speed for index
+	ld	e,a
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,e		; * 5
+	add	a,e		; * 6
+	ld	e,a
+	add	hl,de
+	ex	de,hl
+	ld	c,.string
+	call	BDOS		; Tell modem speed
+	call	l242d
+	db	' baud'
+	db	cr,lf,null
+	ret
+;
+l2a37:
+	db	'110',eot,0,0	; 0 - 142
+	db	'300',eot,0,0	; 1 -  52
+	db	'450',eot,0,0	; 2 -  34
+	db	'600',eot,0,0	; 3 -  26
+	db	'710',eot,0,0	; 4 -  22
+	db	'1200',eot,0	; 5 -  13
+	db	'2400',eot,0	; 6 -   6
+	db	'4800',eot,0	; 7 -   3
+	db	'9600',eot,0	; 8 -   1
+	db	'19200',eot	; 9 -   0
+;
+; BC:=HL DIV DE
+; HL:=HL MOD DE
+;
+l2a73:
+	push	de
+	ld	a,e
+	cpl
+	ld	e,a
+	ld	a,d
+	cpl
+	ld	d,a
+	inc	de
+	ld	bc,0
+l2a7e:
+	add	hl,de
+	inc	bc
+	jp	c,l2a7e
+	dec	bc
+	pop	de
+	add	hl,de
+	ret
+;
+; HL:=HL * ACCU
+;
+l2a87:
+	ex	de,hl
+	ld	hl,0
+	inc	a
+l2a8c:
+	dec	a
+	ret	z
+	add	hl,de
+	jp	l2a8c
+;
+; Divide HL by 2
+;
+; *** WHY SHIFT LOWER PART FIRST??? ***
+;
+l2a92:
+	ld	a,l		; Get low
+	rra			; Shift one bit right
+	ld	l,a
+	or	a
+	ld	a,h		; Get high
+	rra			; Shift one bit right
+	ld	h,a
+	ret	nc		; Take care of carry
+	ld	a,MSB		; Insert it into low
+	or	l
+	ld	l,a
+	ret
+;
+;
+;
+l2a9f:
+	push	hl
+	ld	hl,(l40b4)	; Get CRC
+	ld	a,h
+	or	l
+	pop	hl
+	ret	z
+	ld	a,0ffh
+	ret
+;
+; Build CRC table
+;
+l2aaa:
+	ld	hl,l4300	; Point to CRC table
+	ld	c,0
+l2aaf:
+	ex	de,hl
+	ld	hl,0
+	ld	a,c
+	push	bc
+	ld	b,8
+	xor	h
+	ld	h,a
+l2ab9:
+	add	hl,hl
+	jp	nc,l2ac5
+	ld	a,10h
+	xor	h
+	ld	h,a
+	ld	a,21h
+	xor	l
+	ld	l,a
+l2ac5:
+	dec	b
+	jp	nz,l2ab9
+	pop	bc
+	ex	de,hl
+	ld	(hl),d
+	inc	h
+	ld	(hl),e
+	dec	h
+	inc	hl
+	inc	c
+	jp	nz,l2aaf
+	ret
+;
+; Update CRC
+;
+l2ad5:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	ld	hl,(l40b4)	; Get CRC
+	ex	de,hl
+	ld	b,0
+	xor	d
+	ld	c,a
+	ld	hl,l4300	; Point to CRC table
+	add	hl,bc
+	ld	a,(hl)
+	xor	e
+	ld	d,a
+	inc	h
+	ld	e,(hl)
+	ex	de,hl
+	ld	(l40b4),hl	; Update CRC
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+; Prepare file environment
+;
+l2af3:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l2b3a		; Nope
+	call	l242d
+	db	cr,lf
+	db	'** File still open, use DEL, DIR, WRT, E, L or T ** '
+	db	cr,lf,bell,null
+	jp	l2b3e
+l2b3a:
+	xor	a
+	ld	(l40be),a
+l2b3e:
+	ld	hl,l409a
+	ld	de,l40a7
+	ld	b,l40a7-l409a
+	call	l24ae		; Initialize file environment
+	ld	hl,l408d
+	ld	de,l4080
+	ld	b,l408d-l4080
+	call	l24ae		; Initialize control characters
+	xor	a
+	ld	(l40c7),a	; Indicate file list attached not yet
+	ld	(l40ca),a
+	jp	l3640
+;
+; Command M - Give help screens
+;
+l2b5e:
+	call	l3f93		; Go to next screen
+	call	l242d
+	db	'                  Single Letter Commands'
+	db	cr,lf,lf
+	db	' ?  - Display current settings'
+	db	cr,lf
+	DB	' M  - Display this information'
+	db	cr,lf
+	DB	' E  - Terminal mode with echo'
+	db	cr,lf
+	DB	' L  - Terminal mode with local echo'
+	db	cr,lf
+	DB	' T  - Terminal mode'
+	db	cr,lf
+	DB	'         For copying text to disk use T (E or L) FILENAME.TYP'
+	db	cr,lf
+	DB	'         Start or Stop toggles described on subsequent screen.'
+	db	cr,lf
+	db	' R  - Receive CP/M file using Christensen Protocol'
+	db	cr,lf
+	db	' S  - Send CP/M file using Christensen Protocol'
+	db	cr,lf
+	db	'         COMMAND: R (or S) FILENAME.TYP'
+	db	cr,lf
+	DB	'         R and S can use the following subcommands:'
+	db	cr,lf
+	db	'            B  - Bulk transfer using wildcards (e.g., *.*)'
+	db	cr,lf
+	db	'            Q  - Quiet mode (no messages to console)'
+	db	cr,lf
+	db	'            T  - Return to terminal mode after transfer'
+	db	cr,lf
+	db	'            V  - View bytes transferred on console'
+	db	cr,lf
+	db	'            X  - When done, send ''BYE'' and disconnect'
+	db	cr,lf,lf
+	DB	'      The single letter commands may also be used on the'
+	db	cr,lf
+	db	'      command line when the program is initially executed.'
+	db	cr,lf,lf,null
+	call	l018f		; Go to next screen
+	call	l242d
+	DB	'                Three Letter Commands'
+	db	cr,lf,lf
+	DB	'CPM - Exit from this program to CP/M'
+	db	cr,lf
+	db	'DIR - List directory and space free (may specify drive)'
+	db	cr,lf
+	db	'ERA - Erase file (may specify drive)'
+	db	cr,lf
+	DB	'LOG - Change default drive/user no. (specify drive/user)'
+	db	cr,lf
+	db	'      and reset disks.  e.g. LOG A0: or LOG B:  (user # unchanged)'
+	db	cr,lf
+	db	'SPD - Set speed of file output in terminal mode'
+	db	cr,lf,null
+	call	l3bbb
+	jp	nz,l3096
+	call	l242d
+	db	'TIM - Select Baud rate for "time-to-send" msg.'
+	db	cr,lf,null
+l3096:
+	ld	a,(l010e)
+	or	a		; Test toggling of CRC to checksum allowed
+	jp	z,l30cc		; Nope
+	call	l242d
+	DB	'TCC - Toggle CRC/Checksum mode on receive'
+	db	cr,lf,null
+l30cc:
+	ld	a,(l0110)
+	or	a		; Test toggling of backspace to rub allowed
+	jp	z,l3104		; Nope
+	call	l242d
+	db	'TBR - Toggle backspace to rubout conversion'
+	db	cr,lf,null
+l3104:
+	ld	a,(l0116)
+	or	a		; Test toggling of LOCONEXTCHR allowed
+	jp	z,l3167		; Nope
+	call	l242d
+	db	'TLC - Toggle  1) local command immediate'
+	db	cr,lf
+	db	'              2) local command after ',null
+l315e:
+	ld	a,(l0126)	; Get send next character control
+	call	l241b		; Print CTL-xx
+	db	cr,lf,null
+l3167:
+	ld	a,(l0112)
+	or	a		; Test toggling of LF after CR sllowed
+	jp	z,l31af		; Nope
+	call	l242d
+	DB	'TLF - Toggle LF after CR when sending disk file in "T" mode'
+	db	cr,lf,null
+l31af:
+	ld	a,(l011a)
+	or	a		; Test toggling of XOFF checking allowed
+	jp	z,l31f2		; Nope
+	call	l242d
+	db	'TXO - Toggle XOFF testing in terminal mode file output'
+	db	cr,lf,null
+l31f2:
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	nz,l3242	; Yeap
+	call	l242d
+	db	'NUM - List remote systems'
+	db	cr,lf,null
+	ld	a,(l0109)	; Test user added setup routine
+	or	a
+	jp	z,l3242		; Nope
+	call	l242d
+	db	'SET - Set communication ports'
+	db	cr,lf,null
+l3242:
+	call	l242d
+	db	'BYE - Disconnect, then return to CP/M'
+	db	cr,lf,null
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	z,l32b1		; Nope
+	call	l242d
+	db	'CAL - Dial number'
+	db	cr,lf
+	db	'DSC - Disconnect from the phone line'
+	db	cr,lf,null
+l32b1:
+	call	l242d
+	db	cr,lf
+	db	'          The following are terminal text buffer commands:'
+	db	cr,lf,lf,null
+	call	l242d
+	db	'DEL - '
+	db	'Delete memory buffer and file'
+	db	cr,lf
+	db	'WRT - Write memory buffer to disk file'
+	db	cr,lf,lf,null
+	call	l3f63		; Go to next screen
+	call	l242d
+	db	'      Local Commands while in Terminal Mode'
+	db	cr,lf,lf,null
+	ld	a,'E'-'@'
+	call	l241b		; Indicate control character
+	db	'  - Exit to command mode'
+	db	cr,lf,null
+	ld	a,(l0120)	; Get BYE and disconnect control
+	call	l241b		; Indicate control character
+	db	'  - Send ''BYE'', disconnect and return to CP/M'
+	db	cr,lf,null
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	z,l340c		; Nope
+	ld	a,(l0128)	; Get BREAK character
+	call	l241b		; Indicate control character
+	db	'  - Send break'
+	db	cr,lf,null
+	ld	a,(l0129)	; Get Baud rate control
+	call	l241b		; Indicate control character
+	db	'  - Change baud rate'
+	db	cr,lf,null
+l340c:
+	ld	a,(l0113)
+	or	a		; Test transmission of logon allowed
+	jp	z,l3433		; Nope
+	ld	a,(l0121)	; Get send logon control
+	call	l241b		; Indicate control character
+	db	'  - Send log-on message'
+	db	cr,lf,null
+l3433:
+	ld	a,(l0117)
+	or	a		; Test toggling of printer on/off allowed
+	jp	z,l3455		; Nope
+	ld	a,(l0122)	; Get toggle printer control
+	call	l241b		; Indicate control character
+	db	'  - Toggle printer'
+	db	cr,lf,null
+l3455:
+	ld	a,lf
+	call	l23b3		; Go to next line
+	ld	a,(l0125)	; Get open input text buffer control
+	call	l241b		; Indicate control character
+	db	'  - Start copy into buffer'
+	db	cr,lf,null
+	ld	a,(l0123)	; Get close input text buffer control
+	call	l241b		; Indicate control character
+	db	'  - Stop copy into buffer'
+	db	cr,lf,lf
+	db	'             Start & Stop may be toggled as often as desired.'
+	db	cr,lf
+	db	'             A ":" at start of line indicates buffer is copying.'
+	db	cr,lf
+	db	'             XOFF automatically used to stop input when writing'
+	db	cr,lf
+	db	'                full buffer to disk, XON sent to resume.'
+	db	cr,lf,lf,null
+	ld	a,(l0124)	; Get transmit file to remote control
+	call	l241b		; Indicate control character
+	db	'  - Transfer ASCII file to remote'
+	db	cr,lf,lf,null
+	ld	a,(l0115)
+	or	a		; Test local command if EXTCHR precedes
+	ld	a,(l0126)
+	jp	nz,l3606	; Yeap, print send next character control
+	call	l241b		; Indicate control character
+	db	'  - Send local control character to remote'
+	db	cr,lf,lf,null
+	jp	l363d
+l3606:
+	call	l241b		; Indicate control character
+	db	'  - Next character will be used for local control'
+	db	cr,lf,null
+l363d:
+	call	l0171		; Do special menue
+l3640:
+	call	l2387		; Close line on console
+l3643:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l3669		; Nope
+	call	l4068		; Tell unused buffer size
+	call	l242d
+	db	' Bytes of buffer free'
+	db	cr,lf,lf,null
+l3669:
+	ld	c,.getdsk
+	call	BDOS		; Get logged disk
+	add	a,'A'
+	call	l23b3		; Tell it
+	call	l38e4
+	or	a
+	jp	z,l3680
+	ld	h,0
+	ld	l,a
+	call	l23d3		; Print decimal
+l3680:
+	ld	a,'>'
+	call	l23b3		; Indicate input requested
+	ld	a,'>'
+	call	l23b3
+	call	l242d
+	db	'COMMAND: ',null
+	ld	de,l40d4
+	call	l278e		; Read line from console
+	ld	a,(LINE)	; Get 1st character read
+	cp	'E'-'@'		; Test exit to command mode
+	jp	z,l3669
+	cp	' '		; Test empty line
+	jp	z,l3643		; Restart if so
+	ld	a,(LINE+1)
+	cp	':'		; Test pssible drive
+	jp	z,l3a68		; Yeap
+	ld	de,LINE	; Point to start of line
+	call	l2868		; Find commands
+	db	'CPM',null
+	jp	nc,l2470
+	call	l2387		; Close line on console
+	call	l2868
+	db	'LOG',null
+	jp	nc,l385a
+	call	l2868
+	db	'DIR',null
+	jp	nc,l37e9
+	call	l2868
+	db	'ERA',null
+	jp	nc,l3800
+	call	l2868
+	db	'?',null
+	jp	nc,l3fab
+	call	l2868
+	db	'SPD',null
+	jp	nc,l394d
+	call	l2868
+	db	'TIM',null
+	jp	nc,l3aa2
+	call	l2868
+	db	'TCC',null
+	jp	nc,l3bc4
+	call	l2868
+	db	'TBR',null
+	jp	nc,l3c02
+	call	l2868
+	db	'TLC',null
+	jp	nc,l3c51
+	call	l2868
+	db	'TLF',null
+	jp	nc,l3cba
+	call	l2868
+	db	'TXO',null
+	jp	nc,l3d16
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	nz,l373f	; Yeap
+	call	l2868
+	db	'NUM',null
+	jp	nc,l3ecb
+l373f:
+	ld	a,(l0109)
+	or	a		; Test user added setup routine
+	jp	z,l3750		; Nope
+	call	l2868
+	db	'SET',null
+	jp	nc,l3e3d
+l3750:
+	call	l2868
+	db	'WRT',null
+	jp	nc,l3e7a
+	call	l2868
+	db	'DEL',null
+	jp	nc,l3e4d
+	call	l2868
+	db	'BYE',null
+	jp	nc,l37d7
+	ld	a,(l0103)	; Test PMMI Modem
+	or	a
+	jp	z,l3791		; Nope
+	call	l2868
+	db	'DSC',null
+	jp	nc,l231e	; Process disconnection
+	call	l2868
+	db	'CAL',null
+	jp	c,l3791
+	ld	a,' '
+	ld	(LINE+2),a	; Clear character
+	jp	l379d
+l3791:
+	ld	a,(LINE)	; Get 1st character read
+	ld	hl,l4079
+	call	l3f57		; Find primary option in list
+	jp	c,l37a6		; Not found
+l379d:
+	call	l24b7		; Parse files
+	call	l0e38		; Test option in command line
+	jp	l0db5
+l37a6:
+	call	l37ac		; Invalid command
+	jp	l3640
+;
+; Tell invalid command
+;
+l37ac:
+	call	l242d
+	db	'++ Invalid command ++'
+	db	cr,lf,bell,null
+	ret
+;
+; Display pending modem characters and exit to CP/M
+;
+l37c9:
+	ld	b,5
+	call	l20d9		; Get modem data
+	jp	c,l37d7		; Timeout
+	call	l23b3		; Put character to console
+	jp	l37c9
+;
+; Comamnd BYE - Disconnect and exit to CP/M
+;
+l37d7:
+	ld	hl,l37e3
+	call	l169a		; Tell bye
+	call	l0168
+	jp	l2470		; Return to CP/M
+;
+l37e3:
+	db	'BYE'
+	db	cr,lf,null
+;
+; Command DIR - See library
+;
+l37e9:
+	ld	c,.getdsk
+	call	BDOS		; Get current disk
+l37ee:
+	ld	(l4159),a	; Save drive
+	call	l2601		; Get current ASCII drive
+	ld	a,(l4159)	; Get disk
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Select disk
+	jp	l3640
+;
+; Command ERA - Erase file(s)
+;
+l3800:
+	ld	de,l40d4
+	ld	hl,FCB
+	call	l2511		; Parse files
+	call	l233f		; Unpack FCB
+	ld	a,(FCB+.drv)
+	cp	' '		; Verify name of file
+	jp	z,l37a6
+	ld	de,FCB
+	ld	c,.srcfrs
+	call	BDOS		; Search for file
+	inc	a		; Test found
+	jp	nz,l383e	; Yeap
+	call	l242d
+	db	'++ File not found ++'
+	db	cr,lf,bell,null
+	jp	l3640
+l383e:
+	ld	de,FCB
+	ld	c,.delete
+	call	BDOS		; Delete file
+	call	l242d
+	db	'File erased'
+	db	cr,lf,null
+	jp	l3640
+;
+; Command LOG - Log new disk
+;
+l385a:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	nz,l38f0	; Yeap
+	ld	a,(LINE+4)
+	cp	' '		; Test drive given
+	jp	nz,l386e	; Yeap
+	call	l38eb		; Get logged disk
+	add	a,'A'		; Make ASCII
+l386e:
+	sub	'A'		; Make binary
+	cp	'P'-'A'+1	; Verify correct range
+	jp	nc,l37a6
+	ld	(l4159),a	; Save drive
+	call	l38e4		; Get current user area
+	ld	b,a		; Save it
+	ld	a,(LINE+5)	; Get possible 1st area digit
+	call	l38a9		; Check digit
+	call	l38b5		; Build user area
+	ld	a,(LINE+6)	; Get possible 2nd area digit
+	call	l38a9		; Check digit
+	call	l38b7		; Append to user area
+l388e:
+	call	l38c4		; Verify valid range
+	ld	c,.resdsk
+	call	BDOS		; Reset disk system
+	ld	a,(l4159)	; Get disk
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Log disk
+	ld	a,(l4163)	; Get user area
+	ld	e,a
+	call	l38e6		; Set user area
+	jp	l3640
+;
+; Check digit, return to previous call level if not
+;
+l38a9:
+	cp	' '		; Test delimiter
+	jp	z,l38b1		; Exit to previous call
+	cp	':'
+	ret	nz
+l38b1:
+	pop	af
+	jp	l388e		; Skip original follower
+;
+; Build user area
+;
+l38b5:
+	ld	b,0		; Init result
+l38b7:
+	call	l38da		; Get digit
+	ld	c,a
+	ld	a,b
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,b		; * 9
+	add	a,b		; *10
+	add	a,c		; Add new digt
+	ld	b,a
+	ret
+;
+; Verify valid user area
+;
+l38c4:
+	ld	a,b		; Get user
+	cp	MAXUSR+1	; Test range
+	jp	nc,l37a6	; Invalid
+	ld	(l4163),a	; Save result
+	ret
+;
+; Test 1st character a digit
+;
+l38ce:
+	ld	de,l40d4
+	call	l278e		; Read line from console
+	ld	a,(LINE)	; Get 1st character read
+	cp	' '		; Test blank
+	ret	z		; Ok
+;
+; Verify digit
+;
+l38da:
+	sub	'0'		; Strip off offset
+	cp	9+1		; Verify range
+	ret	c
+	pop	hl		; Clean stack
+	pop	hl
+	jp	l37a6		; Tell invalid
+;
+; Get current user area
+;
+l38e4:
+	ld	e,_get
+;
+; Set user area
+;
+l38e6:
+	ld	c,.usrcod
+	jp	BDOS		; Get or set user
+;
+; Get logged disk
+;
+l38eb:
+	ld	c,.getdsk
+	jp	BDOS		; Get logged disk
+;
+; Tell file open
+;
+l38f0:
+	call	l242d
+	db	'++      Terminal mode file open      ++'
+	db	cr,lf
+	db	'++ Use WRT or DEL before LOG command ++'
+	db	cr,lf,cr,lf,bell,null
+	xor	a
+	jp	l3640
+;
+; Comamnd SPD - Set speed of file output in terminal mode
+;
+l394d:
+	call	l242d
+	db	'Delay between chars. (0-9): ',null
+l396d:
+	call	l2394		; Get console state
+	jp	z,l396d		; No character available
+	call	l239f		; Get character from console
+	call	l23b3		; Echo it
+	call	l3a5f		; Give new line
+	sub	'0'		; Strip off offset
+	cp	9+1		; Verify range
+	jp	nc,l37a6
+	ld	(l0106),a	; Save delay
+	call	l242d
+	db	'Delay at end of line (0-9): ',null
+l39a6:
+	call	l2394		; Get console state
+	jp	z,l39a6		; No character available
+	call	l239f		; Get character from console
+	call	l23b3		; Echo it
+	call	l3a5f		; Give new line
+	sub	'0'		; Strip off offset
+	cp	9+1		; Verify range
+	jp	nc,l37a6
+	ld	(l0107),a	; Save delay
+;
+; Tell state of delays
+;
+l39bf:
+	call	l242d
+	db	cr,lf
+	db	'Char. delay (terminal file mode) is:  ',null
+	ld	a,(l0106)	; Load send delay
+	ld	b,a
+	ld	a,b
+	push	hl
+	ld	l,a
+	ld	h,0
+	call	l23d3		; Print decimal
+	pop	hl
+	call	l242d
+	db	'0 ms. per character'
+	db	cr,lf
+	db	'Line  delay (terminal file mode) is: ',null
+	ld	a,(l0107)	; Load extra delay
+	ld	b,a
+	push	hl
+	ld	l,a
+	ld	h,0
+	call	l23d3		; Print decimal
+	pop	hl
+	call	l242d
+	db	'00 ms. per character'
+	db	cr,lf,null
+	jp	l3640
+;
+; Give new line
+;
+l3a5f:
+	push	af
+	call	l242d
+	db	cr,lf,null
+	pop	af
+	ret
+;
+; Drive delimter found in command line - process drive and optional user
+;
+l3a68:
+	ld	a,(LINE)	; Get 1st character
+	sub	'A'		; Make binary
+	cp	'P'-'A'+1	; Verify valid range
+	jp	nc,l37a6
+	ld	e,a
+	ld	c,.seldsk
+	call	BDOS		; Select disk
+	ld	a,(LINE+3)	; Get possible user
+	cp	' '		; Test defined
+	jp	z,l3640		; Nope
+	sub	'0'		; Strip off ASCII offset
+	cp	1		; Test range
+	jp	nz,l3a91	; Area 0..9
+	ld	a,(LINE+4)
+	cp	'0'		; Test digit
+	jp	c,l3a9d		; Nope, get area 1
+	sub	'0'-10		; Map unit to result
+l3a91:
+	cp	MAXUSR+1	; Verify in range
+	jp	nc,l37a6	; Error
+	ld	e,a
+	call	l38e6		; Set user area
+	jp	l3640
+l3a9d:
+	ld	a,1		; Force area 1
+	jp	l3a91
+;
+; Comamnd TIM - Select Baud rate for "time-to-send" message
+;
+l3aa2:
+	call	l3bbb
+	jp	nz,l37a6
+	call	l242d
+	db	'Use 0-8 to give baud rate for ''S'' mode time-to-send message,'
+	db	cr,lf
+	db	'where 0=110, 1=300, 2=450, 3=600, 4=710, 5=1200, 6=2400, '
+	db	cr,lf
+	db	'7=4800 8=9600 and 9=19200 Baud.'
+	db	cr,lf,lf
+	db	'Enter value: ',null
+	call	l38ce		; Test 1st character a digit
+	cp	9+1		; Test digit
+	jp	nc,l37a6	; Nope, error
+	ld	(l0105),a	; Set modem speed
+	call	l3b65
+	jp	l3640
+;
+;
+;
+l3b65:
+	call	l3bbb
+	jp	nz,l3ba5
+	call	l242d
+	db	'Rate for the S mode time-to-send message is set to ',null
+	jp	l3bb8
+l3ba5:
+	call	l242d
+	db	'Modem speed is ',null
+l3bb8:
+	jp	l2a16		; Tell modem speed
+;
+;
+;
+l3bbb:
+	ld	a,(l0109)	; Get user added setup routine
+	ld	b,a
+	ld	a,(l0103)	; Get PMMI Modem [00 is not]
+	or	b
+	ret
+;
+; Comamnd TCC - Toggle CRC/Checksum mode on receive
+;
+l3bc4:
+	ld	a,(l010e)
+	or	a		; Test toggling of CRC to checksum allowed
+	jp	z,l37a6		; Nope
+	ld	a,(l010d)
+	cpl			; Toggle checksum or CRC mode
+	ld	(l010d),a
+	call	l3bd8		; Tell checksum or CRC mode
+	jp	l3640
+;
+; Tell checksum or CRC mode
+;
+l3bd8:
+	call	l242d
+	db	'Mode: ',null
+	ld	a,(l010d)
+	or	a		; Test checksum mode
+	jp	z,l3bf3		; Yeap
+	call	l242d
+	db	'CRC',cr,lf,null
+	ret
+l3bf3:
+	call	l242d
+	db	'CHECKSUM',cr,lf,null
+	ret
+;
+; Comamnd TBR - Toggle backspace to rubout conversion
+;
+l3c02:
+	ld	a,(l0110)
+	or	a		; Test toggling of backspace to rub allowed
+	jp	z,l37a6		; Nope
+	ld	a,(l010f)
+	cpl			; Toggle it
+	ld	(l010f),a
+	call	l3c16
+	jp	l3640
+;
+;
+;
+l3c16:
+	ld	a,(l010f)
+	or	a		; Test convert backspace to rub
+	jp	z,l3c34		; Nope
+	call	l242d
+	db	'Backspace is rub',cr,lf,null
+	ret
+l3c34:
+	call	l242d
+	db	'Backspace is backspace',cr,lf,null
+	ret
+;
+; Comamnd TLC - Toggle local command mode
+;
+l3c51:
+	ld	a,(l0116)
+	or	a		; Test toggling of LOCONEXTCHR allowed
+	jp	z,l37a6		; Nope
+	ld	a,(l0115)
+	cpl			; Toggle local command
+	ld	(l0115),a
+	call	l3c65		; Tell state of local command
+	jp	l3640
+;
+; Tell state of local command
+;
+l3c65:
+	call	l242d
+	db	'Use ',null
+	ld	a,(l0115)
+	or	a		; Test local command if EXTCHR precedes
+	ld	a,(l0126)
+	jp	z,l3c93		; Nope, print send next character control
+	call	l241b		; Indicate control character
+	db	' before local command'
+	db	cr,lf,null
+	ret
+l3c93:
+	call	l241b		; Indicate control character
+	db	' to send local command to remote'
+	db	cr,lf,null
+	ret
+;
+; Comamnd TLF - Toggle send linefeed after carriage return in "T" mode
+;
+l3cba:
+	ld	a,(l0112)
+	or	a		; Test toggling of LF after CR sllowed
+	jp	z,l37a6		; Nope
+	ld	a,(l0111)
+	cpl			; Toggle add LF after CR
+	ld	(l0111),a
+	call	l3cce		; Tell state of LF after CR
+	jp	l3640
+;
+; Tell state of LF after CR
+;
+l3cce:
+	call	l242d
+	db	'Linefeed ',null
+	ld	a,(l0111)
+	or	a		; Test add LF after CR
+	jp	nz,l3cea	; Yeap
+	call	l242d
+	db	'NOT ',null
+l3cea:
+	call	l242d
+	db	'sent after CR for disk file in T-mode'
+	db	cr,lf,null
+	ret
+;
+; Comamnd TXO - Toggle XOFF testing in terminal mode file output
+;
+l3d16:
+	ld	a,(l011a)
+	or	a		; Test toggling of XOFF checking allowed
+	jp	z,l37a6		; Nope
+	call	l242d
+	db	'Use XOFF testing? (Y/N): ',null
+	call	l3d99		; Test Y.es or N.o
+	jp	c,l3d43		; Nothing to do
+	ld	(l0118),a	; Re/Set check for XOFF from remote
+l3d43:
+	call	l3db6		; Tell state of XOFF testing
+	call	l242d
+	db	cr,lf,'Use XON waiting after <CR> (Y/N): ',null
+	call	l3d99		; Test Y.es or N.o
+	jp	c,l3d77		; Nothing to do
+	ld	(l0119),a	; Re/Set test wait for XON after CR
+l3d77:
+	call	l3e02		; Tell state of XON testing
+	ld	a,(l0119)
+	or	a		; Test wait for XON after CR
+	jp	z,l3640		; Nope
+	cpl
+	ld	(l0118),a	; Re/Set check for XOFF from remote
+	call	l242d
+	db	'Therefore ',null
+	call	l3db6		; Tell state of XOFF testing
+	jp	l3640
+;
+; Input Y.es or N.o (or blank)
+;
+; C set indicates blank
+; Accu=00 if N else 01
+;
+l3d99:
+	ld	de,l40d4
+	call	l278e		; Read line from console
+	ld	a,(LINE)	; Get 1st character read
+	cp	' '		; Test result
+	ccf
+	ret	z
+	ld	b,a
+	cp	'N'
+	ld	a,0
+	ret	z
+	ld	a,b
+	cp	'Y'
+	ld	a,1
+	ret	z
+	pop	af
+	jp	l37a6
+;
+; Tell state of XOFF testing
+;
+l3db6:
+	call	l242d
+	db	'XOFF testing ',null
+	ld	a,(l0118)
+	or	a		; Check for XOFF from remote
+	jp	nz,l3dd6	; Yeap
+	call	l242d
+	db	'NOT ',null
+l3dd6:
+	call	l242d
+	db	'used',null
+l3dde:
+	call	l242d
+	db	' in terminal mode file output'
+	db	cr,lf,null
+	ret
+;
+; Tell state of XON testing
+;
+l3e02:
+	call	l242d
+	db	'XON ',null
+	ld	a,(l0119)
+	or	a		; Test wait for XON after CR
+	jp	nz,l3e19	; Yeap
+	call	l242d
+	db	'NOT ',null
+l3e19:
+	call	l242d
+	db	'automatically tested after CR',null
+	jp	l3dde
+;
+; Comamnd SET - ????
+;
+l3e3d:
+	ld	a,(l0109)
+	or	a		; Test user added setup routine
+	jp	z,l37a6		; Nope
+	ld	de,l40d4+1	; Point to characters read
+	call	l016e		; Do user written set up
+	jp	l3640
+;
+; Comamnd DEL - Delete file
+;
+l3e4d:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l3eaf		; Nope, tell it
+	ld	a,(l4164+.drv)
+	cp	' '
+	jp	z,l3eaf		; Nope, tell it
+	ld	de,l4164
+	ld	c,.delete
+	call	BDOS		; Delete file
+	xor	a
+	ld	(l40cc),a	; Indicate no memory open
+	ld	(l40d1),a	; Close memory buffer
+	ld	hl,l4164
+	call	l19b7		; Init FCB
+	ld	hl,l4500
+	ld	(l40b8),hl	; Set write buffer
+	jp	l3640
+;
+; Comamnd WRT - Save data to disk
+;
+l3e7a:
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	z,l3eaf		; Nope, tell it
+	call	l3e99		; Close open file
+	ld	(l40d1),a	; Close memory buffer
+	ld	(l40d3),a	; Indicate no data in buffer
+	ld	hl,l4164
+	call	l19b7		; Init FCB
+	ld	hl,l4500
+	ld	(l40b8),hl	; Set write buffer
+	jp	l3640
+;
+; Close open file
+;
+l3e99:
+	ld	a,(l4164+.drv)	; Get name
+	cp	' '		; Test file defined
+	ret	z		; Nope, ignore
+	call	l18f1		; Write buffer to file
+	ld	de,l4164
+	ld	c,.close
+	call	BDOS		; Close file
+	xor	a
+	ld	(l40cc),a	; Indicate no memory open
+	ret
+;
+; Tell file not opened
+;
+l3eaf:
+	call	l242d
+	db	'++ No File Open ++'
+	db	cr,lf,bell,null
+	jp	l3640
+;
+; Comamnd NUM - Show phone library numbers (non-PMMI user)
+;
+l3ecb:
+	push	hl
+	call	l3f93		; Go to next screen
+	call	l242d
+	db	'           Library of Phone Numbers of Remote Systems',null
+	ld	c,ll0axx / 2
+	ld	hl,l0a00
+	ld	de,l4500
+	call	l3f30		; Init line
+	ld	(de),a
+	inc	de
+l3f15:
+	inc	hl		; Skip index "x="
+	inc	hl
+	ld	b,l0022-2
+	call	l24ae		; Copy 1st phone entry
+	call	l3f39		; Set blanks between phone entries
+	inc	hl
+	inc	hl
+	ld	b,l0022-2
+	call	l24ae		; Copy 2nd phone entry
+	call	l3f30		; Close phone entry
+	dec	c		; Test libray copied
+	jp	z,l3f42		; Yeap, print it
+	jp	l3f15
+;
+; Close phone entry
+;
+l3f30:
+	ld	a,cr
+	ld	(de),a		; Simple new line
+	ld	a,lf
+	inc	de
+	ld	(de),a
+	inc	de
+	ret
+;
+; Set blanks between phone entries
+;
+l3f39:
+	ld	a,' '
+	ld	(de),a		; Simple blanks
+	inc	de
+	ld	(de),a
+	inc	de
+	ld	(de),a
+	inc	de
+	ret
+;
+; Display phone library
+;
+l3f42:
+	ld	a,eot
+	ld	(de),a		; Set final end
+	ld	c,.string
+	ld	de,l4500
+	call	BDOS		; Tell phone library
+	call	l2387		; Close line on console
+	call	l2387		; One empty line
+	pop	hl
+	jp	l3640
+;
+; Find character in list, C set if not found
+;
+l3f57:
+	ld	b,(hl)		; Get length of list
+l3f58:
+	inc	hl
+	cp	(hl)		; Compare
+	jp	z,l3f62		; Found it
+	dec	b
+	jp	nz,l3f58
+	scf			; Indicate no match
+l3f62:
+	ret
+;
+; Go to next screen
+;
+l3f63:
+	call	l242d
+	db	'HIT any KEY to CONTINUE',null
+l3f7e:
+	call	l2394		; Get console state
+	jp	z,l3f7e		; No character available
+	call	l239f		; Get character from console
+	cp	'C'-'@'		; Test abort
+	jp	nz,l3f93	; Go to next screen if so
+	pop	hl
+	call	l2387		; Close line on console
+	jp	l3640
+l3f93:
+	ld	a,(l010a)	; Test cursor control routine
+	or	a
+	jp	nz,l019b	; Got one, clear screen
+	ld	a,cr
+	call	l23b3		; Position to first column
+	ld	b,TRMCOL / 2
+	ld	a,lf
+l3fa3:
+	call	l23b3		; Advance to middle of screen
+	dec	b
+	jp	nz,l3fa3
+	ret
+;
+; Comamnd ? - Display current settings
+;
+l3fab:
+	call	l3f93		; Go to next screen
+	call	l242d
+	db	'                Current Settings'
+	db	cr,lf,lf,null
+	call	l3bd8		; Tell checksum or CRC mode
+	ld	a,(l0117)
+	or	a		; Test toggling of printer on/off allowed
+	jp	z,l3fe2		; Nope
+	call	l16d0		; Tell state of printer buffer
+l3fe2:
+	call	l3c16
+	call	l3b65
+	call	l242d
+	db	'Terminal mode file buffer is ',null
+	ld	a,(l40cc)
+	or	a		; Test memory open
+	jp	nz,l4016	; Yeap
+	call	l242d
+	db	'in',null
+l4016:
+	call	l242d
+	db	'active'
+	db	cr,lf
+	db	'Unused portion of buffer is ',null
+	call	l4068		; Tell unused buffer size
+	call	l242d
+	db	' bytes',cr,lf,null
+	call	l3c65		; Tell state of local command
+	call	l3cce		; Tell state of LF after CR
+	call	l3db6		; Tell state of XOFF testing
+	call	l3e02		; Tell state of XON testing
+	call	l39bf		; Tell state of delays
+	call	l2387		; Close line on console
+	call	l2387		; Empty lines
+	call	l2387
+	jp	l3640
+;
+; Tell unused buffer size
+;
+l4068:
+	ld	de,l4500+RdRec*reclng
+	ld	hl,(l40b8)	; Get write buffer
+	ex	de,hl
+	xor	a
+	sub	e		; Get difference to top
+	ld	l,a
+	ld 	a,h
+	sbc	a,d
+	ld	h,a
+	call	l23d3		; Print decimal
+	ret
+;
+l4079:
+	db	CmdLen
+ll4079:
+	db	'S','R','T','E','L','M'
+CmdLen	equ	$-ll4079
+;
+;
+;
+l4080:
+	db	'A'
+l4081:
+	db	'B'
+l4082:
+	db	'D'
+	db	'L'
+l4084:
+	db	'O'
+l4085:
+	db	'Q'		; Verbose if not 00
+l4086:
+	db	'R'
+l4087:
+	db	'S'
+l4088:
+	db	'T'
+l4089:
+	db	'V'
+l408a:
+	db	'X'
+l408b:
+	db	'0'
+l408c:
+	db	'1'
+;
+;
+;
+l408d:
+	db	'ABDLOQRSTVX01'
+;
+; Area copied to following area
+; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+;
+l409a:
+	db	0
+	dw	0
+	db	0
+	db	0
+	db	0		; End of file marker [00 ist not EOF]
+	dw	l4500		; Read buffer pointer
+	db	0		; Record count in read buffer
+	db	0
+	dw	0
+	db	0
+;
+; Area initialized by previous area
+; >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+;
+l40a7:
+	db	0
+l40a8:
+	dw	0		; Packet number
+l40aa:
+	db	0
+l40ab:
+	db	0
+l40ac:
+	db	0		; End of file marker [00 ist not EOF]
+l40ad:
+	dw	l4500		; Read buffer pointer
+l40af:
+	db	0		; Record count in read buffer
+	db	0
+l40b1:
+	dw	0		; Size of file
+l40b3:
+	db	0
+;
+; ---------------------------------------------------
+;
+l40b4:
+	dw	0		; Value of CRC
+l40b6:
+	dw	0		; Try count
+l40b8:
+	dw	l4500		; Write buffer
+l40ba:
+	dw	l8700		; Queue input pointer
+l40bc:
+	dw	l8700		; Queue output pointer
+l40be:
+	db	0
+l40bf:
+	db	0		; Modem control character
+l40c0:
+	db	0		; Checksum mode if 00
+l40c1:
+	db	0
+l40c2:
+	db	Bd300		; Baud rate
+l40c3:
+	db	0
+l40c4:
+	db	0		; Echo mode - not if 00
+l40c5:
+	db	0
+l40c6:
+	db	0
+l40c7:
+	db	0		; Indicator if file list attached
+l40c8:
+	db	NO		; Printer mode [00 buffer off]
+l40c9:
+	db	0		; Local modem - not if 00
+l40ca:
+	db	0
+l40cb:
+	db	MCTL+DTR+RXR+TBRK
+l40cc:
+	db	0		; Memory open flag [00 is vlosed]
+l40cd:
+	db	0
+l40ce:
+	db	0		; Option character
+	db	0
+l40d0:
+	db	0
+l40d1:
+	db	0		; State of memory buffer [00 is closed]
+l40d2:
+	db	NP+NB1+NB2+ORIG
+l40d3:
+	db	0		; Indicate data in buffer [00 no data]
+;
+; Read disk buffer and line buffer
+;
+l40d4:
+	db	Cmdin		; Max length for input
+	db	0		; Length of line
+LINE	equ	$
+	ds	42,0		; Start of line character
+l4156	equ	LINE+Cmdin	; Command pointer
+l4158	equ	l4156+2		; Temporary drive
+l4159	equ	l4158+1		; Logged drive
+l415a	equ	l4159+1		; Lenght of modem line
+l415b	equ	l415a+1		; File count
+l415c	equ	l415b+1		; Name counter
+l415d	equ	l415c+1		; Top page of available memory
+l415e	equ	l415d+1		; Number of dir columns shown
+l415f	equ	l415e+1		; File list pointer
+l4161	equ	l415f+2		; Entry user area
+l4162	equ	l4161+1		; Transfer mode [1 is send]
+l4163	equ	l4162+1		; Selected user area
+l4164	equ	l4163+1		; Write FCB
+l4185	equ	l4164+FCBlen	; Read FCB
+l41a6	equ	l4185+FCBlen	; File name buffer
+l41b5	equ	l41a6+.drv+1+.nam+1+.ext+1
+l41c1	equ	l41b5+.drv+.nam+.ext
+l41c2	equ	l41c1+.drv
+				; ^^^^^ Local stack
+l42fe	equ	l41c2+2*158	; Entry stack save location
+l4300	equ	l42fe+2		; CRC table [256*2]
+l4500	equ	l4300+2*256	; Write disk buffer
+l8500	equ	l4500+RdRec*reclng
+l8580	equ	l8500+reclng
+l8600	equ	l8580+reclng	; Start of file list
+l8700	equ	l8600+256
+
+	end
+

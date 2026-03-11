@@ -1,0 +1,4121 @@
+	title	CP/M  Debugger
+	name	('MON80')
+
+; DASMed version of debugger kernel MON80.MON
+; DASMed by W.Cirsovius
+
+	.z80
+	cseg
+	.phase	1100h
+
+BDOS	equ	0005h
+
+.lstout	equ	 5
+.condir	equ	 6
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.setdma	equ	26
+
+_get	equ	0ffh
+
+_nam	equ	 1
+_Fnam	equ	 8
+_Fext	equ	 3
+_ext	equ	_nam+_Fnam
+
+null	equ	00h
+eot	equ	00h
+bs	equ	08h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+esc	equ	1bh
+DEL	equ	7fh
+
+_EX	equ	12
+_CR	equ	32
+
+.JP	equ	0c3h		; JP code
+.RST	equ	0c7h		; Base .RST code
+
+_RST	equ	6		; RST selection
+
+LINLEN	equ	14		; Length of command line
+ROWCON	equ	24		; Console page length
+
+_SGN	equ	7		; Set if number negative
+_DEC	equ	6		; Set if decimal request
+_HEXlen	equ	4		; Length of hex number
+
+l0000	equ	00h
+l0001	equ	01h
+l0003	equ	03h
+l0008	equ	08h
+l000a	equ	0ah
+l000b	equ	0bh
+l000e	equ	0eh
+l0010	equ	10h
+l0014	equ	14h
+l0015	equ	15h
+l0016	equ	16h
+l0019	equ	19h
+l0028	equ	28h
+l0080	equ	80h
+l0100	equ	0100h
+l0900	equ	0900h
+l0c00	equ	0c00h
+l107f	equ	107fh
+l10fd	equ	10fdh
+l4246	equ	4246h
+l4544	equ	4544h
+lbe00	equ	0be00h
+lffe0	equ	0ffe0h
+lfff0	equ	0fff0h
+lfff8	equ	0fff8h
+lffff	equ	0ffffh
+
+	jp	lbe00
+
+	jp	l1bfc
+
+	db	60h,2dh
+
+	db	'MON80 (C) HISOFT 1985. PLEASE BUY, DON''T STEAL'
+;
+; Command 'D'-'@' : Block disassembly
+;
+l1136:
+	call	l2557
+	ld	hl,l2c2b
+	ld	(l2b2a),hl
+	call	l25af
+	ret	z
+	ld	(l2b2c),de
+	ld	(l2bc8),de
+	inc	bc
+	ld	(l2bca),bc
+	ld	hl,l2cab
+	ld	(hl),'0'
+	push	hl
+	ld	hl,l2a8a
+	call	l1bf1		; Test to disc
+	pop	hl
+	jr	nz,l117e	; Nope
+	push	hl
+	ld	hl,l2ade+_ext
+	ld	(hl),'G'
+	inc	hl
+	ld	(hl),'E'
+	inc	hl
+	ld	(hl),'N'
+l116b:
+	call	l208d		; Get line
+	pop	hl
+	ret	c		; Empty
+	push	hl
+	call	l2890		; Parse FCB
+	jr	z,l116b
+	call	l274a		; Create file
+	pop	hl
+	jr	z,l117e		; No success
+	set	7,(hl)
+l117e:
+	push	hl
+	ld	hl,l2a81
+	call	l1bf1		; Test to printer
+	pop	hl
+	jr	nz,l118a	; Nope
+	set	1,(hl)
+l118a:
+	ld	hl,l2aa3
+	call	l25d1
+	ld	a,h
+	or	l
+	jr	nz,l1197
+	ld	hl,l0900
+l1197:
+	ld	(l2bd9),hl
+	ld	(l2bce),hl
+	ld	hl,l2cac
+	ld	(l2bd7),hl
+l11a3:
+	push	hl
+	call	l25af
+	pop	hl
+	ret	z
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	a,b
+	or	c
+	or	d
+	or	e
+	jr	nz,l11a3
+	call	l2531
+	call	l2885
+l11bd:
+	ld	hl,l2cab
+	bit	6,(hl)
+	ret	nz
+l11c3:
+	ld	hl,l2bf5
+	ld	(l2bcc),hl
+	ld	hl,l2cab
+	ld	a,(hl)
+	and	0f2h
+	ld	(hl),a
+	ld	hl,l2bdb
+	push	hl
+	call	l16f3
+	ld	hl,l2c05
+	ld	(hl),';'
+	inc	hl
+	ld	(l2b2e),hl
+	ld	hl,(l2b2c)
+	ld	(l2bd2),hl
+	ex	de,hl
+	pop	hl
+	call	l25fa
+	inc	hl
+	ld	(l2bc6),hl
+	push	hl
+	push	de
+	ld	hl,(l2bd7)
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	a,d
+	or	e
+	jr	z,l1271
+	pop	hl
+	push	hl
+	or	a
+	sbc	hl,de
+	jr	c,l1271
+	ld	b,4
+	ld	hl,l4544
+	ld	(l2bf0),hl
+	ld	hl,l4246
+	ld	(l2bf2),hl
+l1210:
+	ld	hl,l2cab
+	bit	5,(hl)
+	pop	hl
+	jr	z,l1222
+	push	hl
+	inc	hl
+	call	l1718
+	pop	hl
+	jr	nc,l1222
+	ld	b,1
+l1222:
+	ld	a,(hl)
+	inc	hl
+	push	hl
+	call	l16cc
+	ld	hl,(l2bcc)
+	cp	' '
+	jr	c,l123d
+	cp	7fh
+	jr	nc,l123d
+	ld	(hl),'"'
+	inc	hl
+	ld	(hl),a
+	inc	hl
+	ld	(hl),'"'
+	inc	hl
+	jr	l1243
+l123d:
+	ld	(hl),'#'
+	inc	hl
+	call	l260a
+l1243:
+	call	l16ec
+	ld	hl,(l2bd7)
+	inc	hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	push	hl
+	inc	de
+	or	a
+	sbc	hl,de
+	jr	z,l125a
+	djnz	l1210
+	jr	l1264
+l125a:
+	ld	hl,(l2bd7)
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	(l2bd7),hl
+l1264:
+	pop	hl
+	ld	(l2b2c),hl
+	ld	hl,(l2bcc)
+	dec	hl
+	ld	(hl),' '
+	pop	hl
+	jr	l12ca
+l1271:
+	pop	de
+	pop	hl
+l1273:
+	ld	a,(de)
+	call	l16cf
+	ex	de,hl
+	ld	a,(hl)
+	inc	hl
+	ld	(l2b2c),hl
+	cp	0fdh
+	jr	z,l1283
+	cp	0ddh
+l1283:
+	jp	z,l147d
+	cp	0edh
+	jp	z,l14b5
+	cp	0cbh
+	jp	z,l14d3
+l1290:
+	ld	hl,l1858
+	ld	b,a
+	call	l1519
+l1297:
+	ld	a,d
+	and	3
+	rlca
+	rlca
+	rlca
+	ld	d,a
+	ld	a,e
+	and	0e0h
+	rlca
+	rlca
+	rlca
+	or	d
+	ld	d,a
+	ld	a,e
+	and	1fh
+	ld	e,a
+	ld	a,d
+	or	a
+	jr	nz,l12ba
+	ld	a,e
+	or	a
+	jr	z,l12ca
+	ld	hl,l1b59
+	call	l155c
+	jr	l12ca
+l12ba:
+	call	l1559
+	ld	a,e
+	or	a
+	jr	z,l12ca
+	ld	hl,(l2bcc)
+	call	l16ec
+	call	l1559
+l12ca:
+	ld	hl,l2cab
+	ld	a,(hl)
+	and	0ch
+	cp	4
+	jr	nz,l12df
+	res	2,(hl)
+	ld	hl,(l2bd0)
+	ld	(l2b2c),hl
+	jp	l1b85
+l12df:
+	bit	5,(hl)
+	jr	z,l12fa
+	bit	4,(hl)
+	jr	nz,l1305
+	ld	hl,(l2bd2)
+	call	l1718
+	jr	nc,l12fa
+	push	hl
+	ld	hl,l2be9
+	ld	(hl),'L'
+	inc	hl
+	pop	de
+	call	l25fa
+l12fa:
+	call	l13ae
+	ld	hl,l2cab
+	bit	6,(hl)
+	jp	nz,l11bd
+l1305:
+	ld	hl,(l2b2c)
+	ld	de,(l2bca)
+	or	a
+	sbc	hl,de
+	jp	c,l11bd
+	ld	hl,l2cab
+	bit	5,(hl)
+	jp	z,l1375
+	bit	4,(hl)
+	jr	nz,l1343
+	push	hl
+	ld	hl,(l2bd9)
+	ld	bc,lffff
+l1325:
+	ld	de,(l2bce)
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	nc,l1340
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	push	hl
+	ld	hl,(l2bca)
+	sbc	hl,de
+	pop	hl
+	inc	bc
+	call	c,l176e
+	jr	l1325
+l1340:
+	pop	hl
+	jr	l1375
+l1343:
+	res	4,(hl)
+	ld	hl,(l2bc8)
+	ld	(l2b2c),hl
+	ld	hl,l2cac
+	ld	(l2bd7),hl
+	call	l1738
+	ld	hl,(l2bd9)
+	ld	bc,l0000
+l135a:
+	ld	de,(l2bce)
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jp	nc,l11bd
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	push	hl
+	ld	hl,(l2bc8)
+	sbc	hl,de
+	call	nc,l176e
+	pop	hl
+	jr	l135a
+l1375:
+	ld	hl,l2cab
+	bit	7,(hl)
+	jr	z,l1395
+	ld	hl,(l2b2a)
+	ld	de,l2cab
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	nz,l138b
+	ld	hl,l2c2b
+l138b:
+	ld	(hl),eof	; Set end of file
+	call	l1457		; Write record to file
+	ld	c,.close
+	call	l1b92		; Close it
+l1395:
+	call	l1bc2		; Get quit
+l1398:
+	jp	l1c30
+l139b:
+	call	l1bd6		; Test character
+	ret	nc		; None
+	call	l1bc2		; Get character
+	call	l25ea		; Test ESCape character
+	jr	z,l1398		; Yeap
+	ret
+l13a8:
+	ld	(hl),cr
+	inc	hl
+	ld	(hl),eot
+	ret
+l13ae:
+	ld	a,(l2aff)
+	and	'!'
+	ret	nz
+	ld	hl,l2cab
+	push	hl
+	bit	6,(hl)
+	ld	hl,l2bdb
+	jr	nz,l13d1
+	push	hl
+	ld	hl,(l2b2e)
+	call	l13a8
+	pop	hl
+l13c7:
+	ld	a,(hl)
+	or	a
+	jr	z,l13ed
+	inc	hl
+	call	l1bb5		; Put to console
+	jr	l13c7
+l13d1:
+	ld	b,4
+l13d3:
+	ld	a,(hl)
+	call	l1bb5		; Put to console
+	inc	hl
+	djnz	l13d3
+	ld	hl,l2c01
+	call	l13a8
+	ld	hl,l2bef
+l13e3:
+	ld	a,(hl)
+	or	a
+	jr	z,l13ed
+	call	l1bb5		; Put to console
+	inc	hl
+	jr	l13e3
+l13ed:
+	ld	a,lf
+	call	l1bb5		; Put new line to console
+	pop	hl
+	bit	1,(hl)
+	jr	z,l140e
+	push	hl
+	ld	hl,l2bdb
+l13fb:
+	ld	a,(hl)
+	or	a
+	jr	z,l1408
+	call	l1bc8
+	call	l139b
+	inc	hl
+	jr	l13fb
+l1408:
+	ld	a,0ah
+	call	l1bc8
+	pop	hl
+l140e:
+	bit	6,(hl)
+	ret	nz
+	bit	7,(hl)
+	jp	z,l139b
+	ld	hl,(l2b2e)
+	call	l13a8
+	ld	(hl),0ah
+	inc	hl
+	ld	(hl),0
+	ld	hl,l2be9
+l1424:
+	push	hl
+	ld	hl,(l2b2a)
+	ld	bc,l2cab
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	call	z,l1457		; Write record to file
+	ex	(sp),hl
+	ld	a,(hl)
+	cp	' '
+	jr	nz,l144b
+l1438:
+	inc	hl
+	ld	a,(hl)
+	cp	' '
+	jr	z,l1438
+	cp	';'
+	jr	nz,l1449
+l1442:
+	inc	hl
+	ld	a,(hl)
+	cp	0dh
+	jr	nz,l1442
+	inc	hl
+l1449:
+	dec	hl
+	ld	a,(hl)
+l144b:
+	pop	de
+	or	a
+	ret	z
+	ld	(de),a
+	inc	hl
+	inc	de
+	ld	(l2b2a),de
+	jr	l1424
+;
+; Write record to file
+;
+l1457:
+	ld	de,l2c2b
+	ld	c,.setdma
+	call	l1b92		; Set disk buffer
+	ld	de,l2ade
+	ld	c,.wrseq
+	call	l1b92		; Write to disk
+	or	a		; Test success
+	ld	hl,l2c2b
+	ld	(l2b2a),hl	; Store buffer
+	ret	z
+	ld	hl,l2a90
+	call	l1be5		; Tell write error
+	ld	c,.close
+	call	l1b92		; Close file
+	jp	l1c30
+;
+;
+;
+l147d:
+	ld	hl,l2cab
+	set	2,(hl)
+	bit	5,a
+	jr	z,l1488
+	set	0,(hl)
+l1488:
+	ld	hl,(l2b2c)
+	ld	(l2bd0),hl
+	ld	a,(hl)
+	cp	0cbh
+	ex	de,hl
+	jr	nz,l14b2
+	push	hl
+	ld	hl,l2cab
+	set	3,(hl)
+	ex	de,hl
+	ld	de,l2bd4
+	ld	(de),a
+	inc	hl
+	ld	a,(hl)
+	inc	de
+	inc	de
+	ld	(de),a
+	dec	de
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	(l2b10),hl
+	ld	(de),a
+	dec	de
+	ld	(l2b2c),de
+	pop	hl
+l14b2:
+	jp	l1273
+l14b5:
+	ld	a,(hl)
+	push	hl
+	ld	hl,l1a94
+	ld	b,'8'
+l14bc:
+	cp	(hl)
+	jr	z,l14c7
+	inc	hl
+	inc	hl
+	inc	hl
+	djnz	l14bc
+	jp	l1b84
+l14c7:
+	ex	(sp),hl
+	call	l1614
+	pop	hl
+	inc	hl
+	ld	de,l1297
+	push	de
+	jr	l1521
+l14d3:
+	ld	a,(hl)
+	push	hl
+	srl	a
+	srl	a
+	srl	a
+	ld	b,a
+	srl	a
+	srl	a
+	srl	a
+	or	a
+	jr	z,l14e8
+	add	a,7
+	ld	b,a
+l14e8:
+	ld	hl,l1b3c
+	call	l1532
+	pop	hl
+	ld	a,(hl)
+	cp	'@'
+	jr	c,l1509
+	and	'?'
+	srl	a
+	srl	a
+	srl	a
+	push	hl
+	ld	hl,(l2bcc)
+	or	'0'
+	ld	(hl),a
+	inc	hl
+	call	l16ec
+	pop	hl
+	ld	a,(hl)
+l1509:
+	inc	hl
+	ld	(l2b2c),hl
+	call	l16cc
+	and	7
+	inc	a
+	call	l1559
+	jp	l12ca
+l1519:
+	inc	b
+	dec	b
+	jr	z,l1521
+l151d:
+	inc	hl
+	inc	hl
+	djnz	l151d
+l1521:
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	ld	a,d
+	srl	a
+	srl	a
+	cp	'<'
+	jp	nc,l1b84
+	ld	b,a
+	ld	hl,l179b
+l1532:
+	push	de
+	inc	b
+	dec	b
+	jr	z,l153e
+l1537:
+	bit	7,(hl)
+	inc	hl
+	jr	z,l1537
+	djnz	l1537
+l153e:
+	ld	de,l2bf0
+l1541:
+	ld	a,(hl)
+	cp	80h
+	jr	nz,l154b
+	pop	hl
+	pop	hl
+	jp	l1b7f
+l154b:
+	bit	7,a
+	jr	nz,l1554
+	ld	(de),a
+	inc	de
+	inc	hl
+	jr	l1541
+l1554:
+	res	7,a
+	ld	(de),a
+	pop	de
+	ret
+l1559:
+	ld	hl,l1a58
+l155c:
+	push	de
+	ld	de,(l2bcc)
+	dec	a
+	ld	b,a
+	jr	z,l156c
+l1565:
+	bit	7,(hl)
+	inc	hl
+	jr	z,l1565
+	djnz	l1565
+l156c:
+	ld	b,a
+	push	hl
+	ld	hl,l2cab
+	ld	c,(hl)
+	bit	2,c
+	jp	z,l161c
+	cp	6
+	jr	z,l1584
+	cp	0bh
+	jr	z,l1584
+	cp	13h
+	jp	nz,l161c
+l1584:
+	pop	hl
+	ld	a,(hl)
+	cp	'('
+	jr	nz,l158f
+	ld	(de),a
+	inc	de
+	inc	hl
+	inc	hl
+	inc	hl
+l158f:
+	ld	a,'I'
+	ld	(de),a
+	inc	de
+	ld	a,c
+	and	1
+	ld	c,'X'
+	or	c
+	ld	(de),a
+	inc	de
+	ld	a,(hl)
+	cp	0a9h
+	jr	nz,l15a6
+	res	7,a
+	ld	(de),a
+	inc	de
+l15a4:
+	jr	l160b
+l15a6:
+	cp	3
+	jr	nz,l15a4
+	ld	hl,(l2b2c)
+	call	l1614
+	ex	de,hl
+	ld	(hl),'+'
+	bit	7,a
+	jr	z,l15bb
+	ld	(hl),'-'
+	neg
+l15bb:
+	inc	hl
+	cp	64h
+	jr	c,l15c7
+	ld	(hl),'1'
+	inc	hl
+	sub	64h
+	set	7,(hl)
+l15c7:
+	cp	0ah
+	jr	nc,l15d4
+	bit	7,(hl)
+	jr	z,l15d2
+	ld	(hl),'0'
+	inc	hl
+l15d2:
+	jr	l15e3
+l15d4:
+	ld	b,0ffh
+l15d6:
+	inc	b
+	sub	0ah
+	jr	nc,l15d6
+	add	a,0ah
+	set	4,b
+	set	5,b
+	ld	(hl),b
+	inc	hl
+l15e3:
+	or	'0'
+	ld	(hl),a
+	inc	hl
+	ld	(hl),')'
+	inc	hl
+	push	hl
+	ld	hl,l2cab
+	bit	3,(hl)
+	jr	z,l160a
+	ld	hl,(l2b10)
+	ld	(l2b2c),hl
+	ld	hl,(l2bc6)
+	dec	hl
+	ld	c,(hl)
+	dec	hl
+	ld	b,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	ld	d,(hl)
+	ld	(hl),b
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+l160a:
+	pop	de
+l160b:
+	push	hl
+	ld	hl,l2cab
+	set	3,(hl)
+	pop	hl
+	jr	l164e
+l1614:
+	ld	a,(hl)
+	inc	hl
+	ld	(l2b2c),hl
+	jp	l16cc
+l161c:
+	pop	hl
+l161d:
+	ld	a,(hl)
+	ld	c,a
+	res	7,a
+	cp	3
+	jr	c,l1630
+	jr	z,l1629
+	ld	(de),a
+	inc	de
+l1629:
+	inc	hl
+l162a:
+	bit	7,c
+	jr	z,l161d
+	jr	l164e
+l1630:
+	push	hl
+	push	af
+	ld	a,'#'
+	ld	(de),a
+	inc	de
+	pop	af
+	or	a
+	ld	hl,(l2b2c)
+	jr	nz,l165d
+	ld	a,(hl)
+	inc	hl
+	ld	(l2b2c),hl
+	ex	de,hl
+	push	af
+	call	l260a
+	pop	af
+	ex	de,hl
+	call	l16cc
+	jr	l16af
+l164e:
+	ld	(l2bcc),de
+	pop	de
+	ret
+l1654:
+	ld	hl,l2aa3
+	call	l1be5
+	jp	l1375
+l165d:
+	dec	a
+	jr	nz,l16b4
+	push	de
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	(l2b2c),hl
+	ld	a,d
+	call	l16cc
+	ld	a,e
+	call	l16cc
+	ld	b,d
+	ld	d,e
+	ld	e,b
+l1673:
+	ld	hl,l2cab
+	bit	5,(hl)
+	jr	z,l16aa
+	bit	4,(hl)
+	ld	h,d
+	ld	l,e
+	jr	z,l169e
+	push	de
+	call	l1718
+	jr	c,l169b
+	ld	hl,(l2bce)
+	push	de
+	ld	de,l10fd
+	or	a
+	sbc	hl,de
+	add	hl,de
+	pop	de
+	jr	nc,l1654
+	ld	(hl),d
+	inc	hl
+	ld	(hl),e
+	inc	hl
+	ld	(l2bce),hl
+l169b:
+	pop	de
+	jr	l16aa
+l169e:
+	call	l1718
+	jr	nc,l16aa
+	ex	(sp),hl
+	dec	hl
+	ld	(hl),'L'
+	inc	hl
+	ex	(sp),hl
+	ex	de,hl
+l16aa:
+	pop	hl
+	call	l25fa
+	ex	de,hl
+l16af:
+	pop	hl
+	inc	hl
+	jp	l162a
+l16b4:
+	ld	a,(hl)
+	push	de
+	push	hl
+	call	l16cc
+	pop	hl
+	ld	a,(hl)
+	inc	hl
+	ld	(l2b2c),hl
+	ld	d,0
+	bit	7,a
+	jr	z,l16c7
+	dec	d
+l16c7:
+	ld	e,a
+	add	hl,de
+	ex	de,hl
+	jr	l1673
+l16cc:
+	ld	hl,(l2bc6)
+l16cf:
+	push	af
+	call	l260a
+	ld	(l2bc6),hl
+	pop	af
+	push	hl
+	push	af
+	res	7,a
+	cp	' '
+	jr	nc,l16e1
+	ld	a,' '
+l16e1:
+	ld	hl,(l2b2e)
+	ld	(hl),a
+	inc	hl
+	ld	(l2b2e),hl
+	pop	af
+	pop	hl
+	ret
+l16ec:
+	ld	(hl),','
+	inc	hl
+	ld	(l2bcc),hl
+	ret
+l16f3:
+	ld	b,'0'
+l16f5:
+	ld	(hl),' '
+	inc	hl
+	djnz	l16f5
+	ret
+l16fb:
+	ld	hl,l2cab
+	xor	a
+	ld	(hl),a
+	set	6,(hl)
+	inc	hl
+	ld	(l2bd7),hl
+	ld	h,a
+	ld	l,a
+	ld	(l2cac),hl
+	dec	hl
+	ld	(l2bca),hl
+	ld	hl,(l2b01)
+	ld	(l2b2c),hl
+	jp	l11c3
+l1718:
+	push	de
+	ld	de,(l2bd9)
+	ex	de,hl
+l171e:
+	push	de
+	ld	de,(l2bce)
+	or	a
+	sbc	hl,de
+	add	hl,de
+	pop	de
+	jr	nc,l1736
+	ld	a,d
+	cp	(hl)
+	ld	a,e
+	inc	hl
+	jr	nz,l1731
+	cp	(hl)
+l1731:
+	inc	hl
+	jr	nz,l171e
+	scf
+	ex	de,hl
+l1736:
+	pop	de
+	ret
+l1738:
+	ld	a,1
+	ld	hl,(l2bd9)
+	ld	b,(hl)
+	inc	hl
+	ld	c,(hl)
+l1740:
+	inc	hl
+l1741:
+	ld	de,(l2bce)
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	nc,l175b
+	ld	d,(hl)
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ex	de,hl
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	jr	c,l175f
+	ld	b,h
+	ld	c,l
+	ex	de,hl
+	jr	l1741
+l175b:
+	or	a
+	jr	z,l1738
+	ret
+l175f:
+	ex	de,hl
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),d
+	inc	hl
+	inc	hl
+	inc	hl
+	xor	a
+	jr	l1740
+l176e:
+	push	hl
+	ld	hl,l2bdb
+	push	bc
+	call	l16f3
+	ld	hl,l2bf0
+	ld	(hl),'E'
+	inc	hl
+	ld	(hl),'Q'
+	inc	hl
+	ld	(hl),'U'
+	inc	hl
+	inc	hl
+	ld	(hl),'#'
+	inc	hl
+	call	l25fa
+	ld	(l2b2e),hl
+	ld	hl,l2be9
+	ld	(hl),'L'
+	inc	hl
+	call	l25fa
+	call	l13ae
+	pop	bc
+	pop	hl
+	ret
+l179b::
+	db	'L',0c4h
+	db	'CAL',0cch
+	db	'J',0d0h
+	dc	'JR'
+	db	'RE',0d4h,'PUS',0c8h,'PO'
+	db	0d0h,'C',0d0h,'IN',0c3h,'DE',0c3h
+	db	'AN',0c4h,'O',0d2h,'XO',0d2h,'AD'
+	db	0c4h,'SU',0c2h,'AD',0c3h,'SB'
+	db	0c3h,'SY',0d3h,'DJN',0dah,'LDI'
+	db	0d2h,'CPI',0d2h,'NE',0c7h,'CP'
+	db	0cch,'SC',0c6h,'CC',0c6h,'I',0ceh
+	db	'OU',0d4h,'RCA',0cch,'RS',0d4h
+	db	'CP',0c4h,'CPD',0d2h,'CP',0c9h
+	db	'DA',0c1h,'NO',0d0h,'BR',0cbh
+	db	'D',0c9h,'E',0c9h,'HAL',0d4h,'I'
+	db	0cdh,'RL',0c1h,'RLC',0c1h,'RL'
+	db	0c4h,'RR',0c1h,'RRC',0c1h,'RR'
+	db	0c4h,'RET',0c9h,'RET',0ceh,'E'
+	db	0d8h,'EX',0d8h,'IN',0c4h,'IND'
+	db	0d2h,'IN',0c9h,'INI',0d2h,'LD'
+	db	0c4h,'LDD',0d2h,'LD',0c9h,'OTD'
+	db	0d2h,'OTI',0d2h,'OUT',0c4h,'OUT'
+	db	0c9h
+l1858::
+	db	84h,0,1,0d2h,2,0e8h,'!',0c0h,' '
+	db	' $ ',0,'1',0a0h,0,0bch,8,'5'
+	db	8eh,1,17h,'%',0c0h,' @$@',0
+	db	'Q',0ach,0,'J',0,1,0b2h,2,0c8h
+	db	'!',0a0h,' `$`',0,'q',9ch,0
+	db	0eh,0,'5',8dh,1,16h,'%',0a0h
+	db	' ',80h,'$',80h,0,91h,0a8h,0
+	db	0dh,'P',1,92h,2,'l!',80h,' '
+	db	0a0h,'$',0a0h,0,0b1h,80h,0,0dh
+	db	'05',8ch,1,93h,'%',80h,' '
+	db	0c0h,'$',0c0h,0,0d1h,'X',0,0dh
+	db	'p',2,0b2h,2,'h"',0a0h,' ',0e0h
+	db	'$',0e0h,0,0f1h,'\',0,0ch,'P5'
+	db	95h,1,13h,'&',0a0h,'!',0,'%'
+	db	0,1,11h,'`',0,0,'!',0,'"',0
+	db	'#',0,'$',0,'%',0,'&',0,''''
+	db	0,'(',0,'A',0,'B',0,'C',0,'D'
+	db	0,'E',0,'F',0,'G',0,'H',0,'a'
+	db	0,'b',0,'c',0,'d',0,'e',0,'f'
+	db	0,'g',0,'h',0,81h,0,82h,0,83h
+	db	0,84h,0,85h,0,86h,0,87h,0,88h
+	db	0,0a1h,0,0a2h,0,0a3h,0,0a4h,0,0a5h
+	db	0,0a6h,0,0a7h,0,0a8h,0,0c1h,0,0c2h
+	db	0,0c3h,0,0c4h,0,0c5h,0,0c6h,0,0c7h
+	db	0,0c8h,0,0e1h,0,0e2h,0,0e3h,0,0e4h
+	db	0,0e5h,0,0e6h,94h,0,0,0e8h,1,1
+	db	1,2,1,3,1,4,1,5,1,6,1,7,1,8
+	db	'5',1,'5',2,'5',3,'5',4,'5'
+	db	5,'5',6,'5',7,'5',8,'=',1,'='
+	db	2,'=',3,'=',4,'=',5,'=',6,'='
+	db	7,'=',8,'8 8@8`8',80h,'8',0a0h
+	db	'8',0c0h,'8',0e0h,'9',0,'A',1
+	db	'A',2,'A',3,'A',4,'A',5,'A'
+	db	6,'A',7,'A',8,'( (@(`(',80h
+	db	'(',0a0h,'(',0c0h,'(',0e0h,')'
+	db	0,'0 0@0`0',80h,'0',0a0h,'0'
+	db	0c0h,'0',0e0h,'1',0,', ,@,`,'
+	db	80h,',',0a0h,',',0c0h,',',0e0h
+	db	'-',0,1ch,' ',1ch,'@',1ch,'`'
+	db	1ch,80h,1ch,0a0h,1ch,0c0h,1ch
+	db	0e0h,1dh,0,11h,'@',19h,0c0h,9
+	db	'R',0ah,'@',5,'R',15h,0c0h,'5'
+	db	11h,'p',1,11h,' ',10h,0,9,'2'
+	db	0f0h,0,5,'2',6,'@=',11h,'p'
+	db	2,11h,'`',19h,0a0h,9,'rh',9
+	db	5,'r',15h,0a0h,': p',3,10h,'@'
+	db	0c0h,0,8,'Rd',0ah,4,'R',0f0h
+	db	0,'A',11h,'p',4,13h,'`',19h
+	db	80h,0bh,'r',0bfh,0ch,7,'r',15h
+	db	80h,'* p',5,13h,'@',0ah,80h
+	db	0bh,'R',0bdh,0ach,7,'R',0f0h,0
+	db	'2 p',0bh,13h,' ',19h,0e0h,0bh
+	db	'2',8ch,0,7,'2',15h,0e0h,'. '
+	db	'p',0ch,13h,80h,2,0ach,0bh,92h
+	db	90h,0,7,92h,0f0h,0,1eh,' p'
+	db	0dh
+l1a58::
+	db	0c2h,0c3h,0c4h,0c5h,0c8h,0cch,'(HL'
+	db	3,0a9h,0c1h,0dah,'N',0dah,'N',0c3h
+	db	'H',0cch,'D',0c5h,'B',0c3h,'A'
+	db	0c6h,82h,80h,81h,'(',1,0a9h,'(HL'
+	db	0a9h,'S',0d0h,'(DE',0a9h,'(BC'
+	db	0a9h,'(SP',0a9h,0d0h,'P',0c5h,'P'
+	db	0cfh,0cdh,0c9h,0d2h,'(C',0a9h
+l1a94::	; Troples
+	db	'@d?'
+	db	'Ak',0e1h
+	db	'BA',8eh,'C',2
+	db	'nDT',0,'E',0b8h,0,'F',98h,1
+	db	'G',3,0a8h,'Hd_Ik',0e2h,'J='
+	db	8eh,'K',1,0d3h,'M',0b4h,0,'O'
+	db	3,0c8h,'Pd',7fh,'Qk',0e3h,'RA'
+	db	8dh,'S',2,'mV',98h,6,'W',1
+	db	1dh,'Xd',9fh,'Yk',0e4h,'Z='
+	db	8dh,'[',1,0b3h,'^',98h,7,'_'
+	db	1,1eh,'`d',0bfh,'ak',0e5h,'bA'
+	db	8ch,'g',0b0h,0,'hd',0dfh,'ik'
+	db	0e6h,'j=',8ch,'o',0a4h,0,'rA'
+	db	95h,'s',2,'uxe',1fh,'yk',0e8h
+	db	'z=',95h,'{',2,0b3h,0a0h,0dch
+	db	0,0a1h,'|',0,0a2h,0cch,0,0a3h,0ech
+	db	0,0a8h,0d4h,0,0a9h,'t',0,0aah,0c4h
+	db	0,0abh,0e8h,0,0b0h,'L',0,0b1h,'P'
+	db	0,0b2h,0d0h,0,0b3h,0e4h,0,0b8h,0d8h
+	db	0,0b9h,'x',0,0bah,0c8h,0,0bbh,0e0h
+	db	0
+l1b3c:
+	db	'RL',0c3h,'RR',0c3h,'R',0cch,'R'
+	db	0d2h,'SL',0c1h,'SR',0c1h,80h,'SR'
+	db	0cch,'BI',0d4h,'RE',0d3h,'SE'
+	db	0d4h
+l1b59:
+	db	0b0h,0b8h,'#1',0b0h,'#1',0b8h,'#2'
+	db	0b0h,0b1h,0b2h,'AF,AF',0a7h,'('
+	db	0,'),',0c1h,'A,(',0,0a9h,'#2'
+	db	0b8h,'#3',0b0h,'#3',0b8h
+l1b7f:
+	ld	hl,l2cab
+	res	3,(hl)
+l1b84:
+	pop	hl
+l1b85:
+	ld	hl,l2be2
+	ld	(hl),'*'
+	inc	hl
+	call	l16f3
+	xor	a
+	jp	l1290
+;
+; Internal BDOS call preserving all regs
+; ENTRY	Reg C holds function code
+;	All other regs depending on Reg C
+; EXIT	Depends on Reg C
+;
+l1b92:
+	push	hl
+	push	de
+	push	bc
+	push	ix
+	push	iy
+	call	BDOS		; Do OS call
+	pop	iy
+	pop	ix
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+;
+;
+l1ba4:
+	call	l1ba9		; Save refresh register
+	di
+	ret
+;
+; Save refresh register
+;
+l1ba9:
+	push	af
+	push	hl
+	ld	a,r
+	push	af
+	pop	hl
+	ld	(l2b30),hl	; Save
+	pop	hl
+	pop	af
+	ret
+;
+; Print character on console
+; ENTRY	Accu holds character
+;
+l1bb5:
+	push	af
+	push	de
+	push	bc
+	ld	c,.condir
+l1bba:
+	ld	e,a		; Get character
+	call	l1b92		; Put to console/printer
+	pop	bc
+	pop	de
+	pop	af
+	ret
+;
+; Get character from console
+; EXIT	Accu holds character
+;
+l1bc2:
+	call	l1bd6		; Test character
+	jr	nc,l1bc2	; Wait for any
+	ret
+l1bc8:
+	push	af
+	push	de
+	push	bc
+	ld	c,.lstout
+	jr	l1bba
+;
+; Abort character found
+;
+l1bcf:
+	call	l2885
+	call	l29c3
+	rst	0
+;
+; Get character from console
+; EXIT	Accu holds character
+;	Carry flag set indicates character available
+;
+l1bd6:
+	push	de
+	push	bc
+	ld	c,.condir
+	ld	e,_get
+	call	l1b92		; Get state/character from console
+	pop	bc
+	pop	de
+	or	a
+	ret	z
+	scf
+	ret
+;
+;
+;
+l1be5:
+	call	l24e5
+;
+; Print string on console
+; ENTRY	Reg HL points to zero closed string
+;
+l1be8:
+	ld	a,(hl)		; Get character
+	or	a
+	ret	z		; Test end
+	call	l1bb5		; Put to console
+	inc	hl
+	jr	l1be8
+;
+; Print string and check YES NO
+; ENTRY	Reg HL points to string
+; EXIT	Zero flag set if YES
+;
+l1bf1:
+	call	l1be5		; ??? and print string
+	call	l1bc2		; Get answer
+	and	NOT ('a'-'A')	; Force upper case
+	cp	'Y'		; Test YES
+	ret
+;
+; ######################
+; ### DEBUGGER ENTRY ###
+; ######################
+;
+l1bfc:
+	ld	(l2b15),sp	; Save stack
+	ld	(l2b70),sp
+	ld	sp,l2d60	; Set local stack
+	call	l1ba9		; Save refresh register
+	ld	hl,(l2dd7)	; Get RST vector
+	ld	(hl),.JP	; Set jump into
+	inc	hl
+	ld	de,l1c68
+	ld	(hl),e		; Change address
+	inc	hl
+	ld	(hl),d
+	ld	hl,l2b5c
+	ld	(l2b32),hl
+	call	l29b8
+	xor	a
+	ld	(l2b74),a
+	ld	(l2cab),a
+	ld	hl,(l2d60)	; Get offset
+	ld	de,l2d60	; Get base
+	add	hl,de		; Set pointer
+	ld	(l2b75),hl	; Save it
+l1c30:
+	ld	sp,l2d60	; Set local stack
+	call	l1e66
+	call	l2999		; Clear screen 
+	call	l283b
+	call	l1ea6
+	call	l1cfd
+l1c42:
+	ld	(l2b22),hl
+	ld	hl,(l2b17)
+	ld	(l2b01),hl
+	ld	(l2b15),sp	; Save stack
+	ld	sp,l2d60	; Set local stack
+	push	hl
+	ld	hl,(l2b22)
+	call	l1e0d
+l1c59:
+	ld	a,(l2aff)
+	bit	1,a
+	jp	nz,l2148
+	and	5
+	jp	nz,l2178
+	jr	l1cb6
+;
+; Breakpoint entry
+;
+l1c68:
+	ex	(sp),hl
+	dec	hl
+	ld	(l2b01),hl
+	pop	hl
+	ld	(l2b15),sp	; Save stack
+	ld	sp,l2d60	; Set local stack
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	de,(l2b01)
+	call	l1cc5
+	pop	af
+	pop	bc
+	pop	de
+	ld	hl,(l2b01)
+	ex	(sp),hl
+	call	l1e0d
+	call	l1ba9		; Save refresh register
+	ld	hl,l2aff
+	bit	5,(hl)
+	jp	nz,l2178
+l1c95:
+	ld	hl,l0000
+	call	l2966		; Position cursor
+	ld	hl,l2a9d
+	call	l1be8
+	ld	a,(l2dbd)
+	or	a
+	jr	z,l1caa
+	call	l1bb5		; Put to console
+l1caa:
+	call	l1bc2		; Get character
+	ld	hl,(l2b77)
+	ld	(l2b01),hl
+	call	l283b
+;
+;
+;
+l1cb6:
+	call	l20ed
+	ld	(l2b01),hl
+	call	l1ea6
+	call	l285b
+	call	l1cfd
+l1cc5:
+	ld	a,(l2b74)
+	or	a
+	ret	z
+	ld	hl,(l2b75)
+l1ccd:
+	dec	hl
+	dec	hl
+	ld	b,(hl)
+	dec	hl
+	ld	c,(hl)
+	ex	de,hl
+	or	a
+	sbc	hl,bc
+	add	hl,bc
+	ex	de,hl
+	jr	z,l1cdf
+	dec	a
+	jr	nz,l1ccd
+	or	a
+	ret
+l1cdf:
+	push	hl
+	inc	hl
+	inc	hl
+	ldi
+	ex	de,hl
+	ld	hl,(l2b75)
+	or	a
+	sbc	hl,de
+	ld	b,h
+	ld	c,l
+	ex	de,hl
+	pop	de
+	jr	z,l1cf3
+	ldir
+l1cf3:
+	ld	(l2b75),de
+	ld	hl,l2b74
+	dec	(hl)
+	scf
+	ret
+;
+;
+;
+l1cfd:
+	ld	hl,l2aff
+	bit	6,(hl)
+	jp	nz,l1f65
+	bit	4,(hl)
+	jr	z,l1d0f
+	call	l20ed
+	ld	(l2b01),hl
+l1d0f:
+	ld	b,0ah
+	ld	a,(l2b05)
+	or	a
+	ld	de,lffe0
+	jr	z,l1d31
+	ld	a,(l2dd9)	; Get console page length
+	sub	0eh
+	push	af
+	rra
+	ld	de,lfff8
+	ld	hl,l0000
+	and	'?'
+	ld	b,a
+	jr	z,l1d2f
+l1d2c:
+	add	hl,de
+	djnz	l1d2c
+l1d2f:
+	ex	de,hl
+	pop	bc
+l1d31:
+	ld	hl,(l2b01)
+	add	hl,de
+	ex	de,hl
+	ld	hl,(l2b04)
+l1d39:
+	push	hl
+	call	l2966		; Position cursor
+	ld	c,b
+	call	l2039
+	push	de
+	ld	b,8
+	ld	hl,(l2b01)
+	or	a
+	sbc	hl,de
+	ld	a,' '
+	jr	nz,l1d50
+	ld	a,'>'
+l1d50:
+	call	l1bb5		; Put to console
+	ld	a,(de)
+	call	l2026
+	ld	hl,(l2b01)
+	or	a
+	sbc	hl,de
+	ld	a,' '
+	jr	nz,l1d63
+	ld	a,'<'
+l1d63:
+	inc	de
+	djnz	l1d50
+	call	l252c		; Put blank to console
+	ld	b,8
+	pop	de
+l1d6c:
+	ld	a,(de)
+	call	l1dfe
+	inc	de
+	djnz	l1d6c
+	pop	hl
+	inc	h
+	ld	b,c
+	djnz	l1d39
+	call	l2966		; Position cursor
+	ld	hl,l29e8
+	call	l1be8
+	ld	hl,l2aff
+	res	4,(hl)
+l1d86:
+	ld	hl,l1cfd
+	push	hl
+l1d8a:
+	call	l24e5
+	ld	a,'>'
+	ld	(l2b14),a	; Set prompt character
+	ld	e,1ch
+l1d94:
+	call	l25d4		; Read number from console
+	push	af
+	ld	a,':'
+	ld	(l2b14),a	; Set prompt character
+	pop	af
+	cp	'"'
+	jp	z,l247b
+	ld	b,a
+	cp	'.'
+	jr	z,l1dc6
+	ld	a,c
+	or	a
+	jr	z,l1dc6
+	ld	a,l
+	ld	hl,(l2b01)
+	ld	(hl),a
+	ld	a,b
+	cp	' '
+	jr	nz,l1dc6
+	inc	hl
+	ld	(l2b01),hl
+	xor	a
+	ld	(l2b14),a	; Set no prompt character
+	ld	a,e
+	inc	c
+	sub	c
+	ld	e,a
+	jr	nc,l1d94
+	jr	l1d8a
+l1dc6:
+	push	hl
+	ld	a,b
+	ld	hl,l2d63	; Point to table
+	push	bc
+	ld	d,0
+	ld	b,d
+	ld	c,l2d6b-l2d63	; Set length
+	call	l2073		; Find character in list
+	pop	bc
+	jr	nz,l1de4	; No match
+	ld	hl,(l2b01)
+	ld	bc,lfff0
+	add	hl,bc
+	add	hl,de
+	pop	de
+l1de0:
+	ld	(l2b01),hl
+	ret
+l1de4:
+	cp	5bh
+	jr	c,l1dea
+l1de8:
+	pop	de
+	ret
+l1dea:
+	ld	e,a
+	xor	a
+	cp	(hl)
+	jr	z,l1de8
+	ld	a,e
+	cp	(hl)
+	inc	hl
+	jr	z,l1df8
+	inc	hl
+	inc	hl
+	jr	l1dea
+l1df8:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	push	de
+	ret
+l1dfe:
+	and	7fh
+	cp	7fh
+	jr	z,l1e08
+	cp	' '
+	jr	nc,l1e0a
+l1e08:
+	ld	a,'.'
+l1e0a:
+	jp	l1bb5		; Put to console
+;
+;
+;
+l1e0d:
+	ld	(l2b34),sp
+	push	hl
+	push	de
+	push	af
+	ld	hl,(l2b5a)
+	ld	(l2b38),hl
+	ld	hl,l0008
+	add	hl,sp
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	(l2b36),de
+	pop	af
+	pop	de
+	pop	hl
+	call	l1ba4
+	ld	sp,l2b74
+	push	hl
+	ld	hl,(l2b36)
+	ex	(sp),hl
+	push	hl
+	push	iy
+	push	ix
+	push	hl
+	push	de
+	push	bc
+	push	af
+	exx
+	push	hl
+	push	de
+	push	bc
+	exx
+	ex	af,af'
+	push	af
+	ex	af,af'
+	ld	a,(l2b30)	; Get refresh reg
+	bit	2,a
+	jr	z,l1e4c
+	ei
+l1e4c:
+	ld	(l2b32),sp
+	ld	hl,l0015
+	add	hl,sp
+	ld	de,(l2b15)	; Get stack pointer
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	sp,(l2b34)
+	ld	hl,(l2b38)
+	ld	(l2b5a),hl
+	ret
+;
+;
+;
+l1e66:
+	ld	a,(l2d62)
+	ld	hl,l0c00
+	or	a
+	ld	a,0bh
+	jr	nz,l1e79
+	ld	hl,l0028
+	ld	a,(l2dd9)	; Get console page length
+	sub	2
+l1e79:
+	ld	(l2b04),hl
+	ld	(l2b06),a
+	ret
+;
+; Command 'E'-'@' : Toggle extended mode
+;
+l1e80:
+	call	l2999		; Clear screen 
+	ld	a,(l2d62)
+	cp	2
+	jr	z,l1e92
+	xor	1
+	ld	(l2d62),a
+	call	l1e66
+l1e92:
+	call	l283b
+	call	l1ea6
+	ret
+;
+; Command '.' : 
+;
+l1e99:
+	call	l2059
+	call	l1ea6
+	call	l20ed
+	ld	(l2b01),hl
+	ret
+;
+;
+;
+l1ea6:
+	ld	hl,l2aff
+	set	4,(hl)
+	ld	hl,l0019
+	ld	iy,l1f40
+	ld	ix,l2b72
+	ld	b,9
+l1eb8:
+	ld	a,5
+	cp	b
+	jr	c,l1ecf
+	ld	d,(ix-7)
+	ld	e,(ix-8)
+	dec	b
+	jr	z,l1ece
+	ld	l,18h
+	call	l2966		; Position cursor
+	call	l2039
+l1ece:
+	inc	b
+l1ecf:
+	ld	l,1ch
+	call	l2966		; Position cursor
+	inc	h
+	push	hl
+	ld	a,(l2b03)
+	sra	a
+	cp	b
+	ld	a,' '
+	jr	nz,l1ee2
+	ld	a,'.'
+l1ee2:
+	call	l1bb5		; Put to console
+	call	l2521
+	dec	b
+	jr	z,l1ef1
+	ld	d,(ix+1)
+	ld	e,(ix+0)
+l1ef1:
+	inc	b
+	dec	ix
+	dec	ix
+	call	l2529
+	pop	hl
+	djnz	l1eb8
+	call	l2966		; Position cursor
+	inc	h
+	push	hl
+	call	l251e
+	ld	a,i
+	ld	d,a
+	ld	a,r
+	ld	e,a
+	call	l2039
+	pop	hl
+	ld	l,18h
+	call	l2966		; Position cursor
+	ld	a,(l2b30)	; Get refresh reg
+	bit	2,a
+	ld	a,'I'
+	jr	nz,l1f1e
+	ld	a,' '
+l1f1e:
+	call	l1bb5		; Put to console
+	call	l252c		; Put blank to console
+	ld	a,(ix+4)
+	ld	b,8
+l1f29:
+	rla
+	push	af
+	call	l1f33
+	pop	af
+	djnz	l1f29
+	ret
+;
+;
+;
+l1f32:
+	scf
+l1f33:
+	ld	a,' '
+	jr	nc,l1f3a
+	ld	a,(iy+0)
+l1f3a:
+	call	l1bb5		; Put to console
+	inc	iy
+	ret
+l1f40:
+	db	'PC'
+l1f42:
+	db	'SP','IY','IX','HL','DE','BC','AF','MR','IR','SZ',' H',' V','NC'
+;
+; Command 'S' : Show alternate display
+;
+l1f5c:
+	ld	a,(l2aff)
+	xor	'@'
+	ld	(l2aff),a
+	ret
+l1f65:
+	ld	a,(l2b05)
+	or	a
+	jr	z,l1f7a
+	ld	a,(l2dd9)	; Get console page length
+	cp	11h
+	jr	nc,l1f7a
+	ld	hl,l2aff
+	res	6,(hl)
+	jp	l1d86
+l1f7a:
+	ld	hl,(l2b04)
+	push	hl
+	ld	iy,l1f42
+	ld	b,7
+	call	l2966		; Position cursor
+l1f87:
+	call	l251e
+	call	l252c		; Put blank to console
+	djnz	l1f87
+	call	l252c		; Put blanks to console
+	call	l252c
+	pop	hl
+	inc	h
+	call	l2966		; Position cursor
+	ld	b,7
+	ld	de,l0014
+l1f9f:
+	ld	hl,(l2b32)
+	add	hl,de
+	push	de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	call	l2529
+	pop	de
+	dec	de
+	dec	de
+	djnz	l1f9f
+	call	l252c		; Put blanks to console
+	call	l252c
+	ld	hl,(l2b04)
+	inc	h
+	inc	h
+	ld	a,(l2b05)
+	or	a
+	ld	a,ROWCON
+	jr	z,l1fc5
+	ld	a,(l2dd9)	; Get console page length
+l1fc5:
+	sub	10h
+	ld	b,a
+	call	l2966		; Position cursor
+	push	bc
+	call	l2516
+	pop	bc
+l1fd0:
+	ld	a,(l2b05)
+	or	a
+	ld	a,ROWCON
+	jr	z,l1fdb
+	ld	a,(l2dd9)	; Get console page length
+l1fdb:
+	sub	10h
+	sub	b
+	ld	c,a
+	push	bc
+	inc	h
+	call	l2966		; Position cursor
+	push	hl
+	ld	de,l0014
+	ld	b,7
+l1fea:
+	ld	hl,(l2b32)
+	push	de
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ld	h,0
+	ld	l,c
+	ld	a,7
+	sub	b
+	jr	z,l2009
+	add	hl,de
+	ld	a,(hl)
+	push	af
+	call	l2026
+	call	l252c		; Put blank to console
+	pop	af
+	call	l1dfe
+	jr	l2011
+l2009:
+	add	hl,hl
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	call	l2039
+l2011:
+	call	l252c		; Put blank to console
+	pop	de
+	dec	de
+	dec	de
+	djnz	l1fea
+	call	l252c		; Put blanks to console
+	call	l252c
+	pop	hl
+	pop	bc
+	djnz	l1fd0
+	jp	l1d86
+l2026:
+	push	hl
+	ld	hl,l2b08
+	call	l260a
+	pop	hl
+	ld	a,(l2b08)
+	call	l1bb5		; Put to console
+	ld	a,(l2b09)
+	jr	l2056
+l2039:
+	push	hl
+	ld	hl,l2b08
+	call	l25fa
+	pop	hl
+	ld	a,(l2b08)
+	call	l1bb5		; Put to console
+	ld	a,(l2b09)
+	call	l1bb5		; Put to console
+	ld	a,(l2b0a)
+	call	l1bb5		; Put to console
+	ld	a,(l2b0b)
+l2056:
+	jp	l1bb5		; Put to console
+l2059:
+	xor	a
+	cp	c
+	ld	a,(l2b03)
+	jr	z,l206a
+	push	hl
+	call	l20ed
+	pop	hl
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ret
+l206a:
+	dec	a
+	dec	a
+	jr	nz,l2070
+	ld	a,12h
+l2070:
+	ld	(l2b03),a
+;
+; Find character in list
+; ENTRY	Reg HL points to list
+;	Reg BC holds total length of list
+; EXIT	Zero flag set on match
+;	Accu holds code
+;
+l2073:
+	cpi			; Test character match
+	ld	e,(hl)		; Get code
+	ret	z		; Match
+	cpi			; Skip code
+	ret	po		; End of list
+	jr	l2073		; Try next
+;
+; Command 'M' : Set the memory pointer
+;
+l207c:
+	call	l25d4		; Read number from console
+	ret	z		; End if ESCape
+l2080:
+	jp	l1de0
+;
+; Command 'V' : Reverse extended address
+;
+l2083:
+	ld	hl,(l2b0c)
+	jr	l2080
+;
+; Command 'U' : Reverse relative offset
+;
+l2088:
+	ld	hl,(l2b0e)
+	jr	l2080
+;
+; Input line from keyboard
+; EXIT	Carry reset indicates empty line
+;
+l208d:
+	ld	hl,l2a7a
+	call	l1be5		; Tell name expected
+	ld	hl,l2bb7	; Point to line
+	ld	b,LINLEN	; Set max length
+	call	l253a		; Print prompt
+l209b:
+	call	l1bc2		; Get character
+	call	l25ea		; Test ESCape character
+	scf
+	ret	z		; Yeap
+	call	l295f		; Test DELete character
+	jr	z,l20d4		; Yeap
+	cp	cr		; Test end of input
+	jr	z,l20c6		; Yeap
+	cp	' '		; Test control
+	jr	c,l209b		; Ignore
+	dec	b		; Test still room in buffer
+	inc	b
+	jr	z,l209b		; Nope, ignore
+	call	l1bb5		; Put to console
+	cp	'a'		; Test case
+	jr	c,l20c1
+	cp	'z'+1
+	jr	nc,l20c1
+	res	5,a		; Convert to upper case
+l20c1:
+	ld	(hl),a		; Store character
+	inc	hl		; Update pointer
+	dec	b		; Fix counter
+	jr	l209b
+;
+; End of input detected
+;
+l20c6:
+	call	l24e5
+	ld	a,LINLEN
+	sub	b		; Calculate remainig length
+	inc	b
+l20cd:
+	dec	b		; Test still room
+	ret	z		; Nope
+	ld	(hl),' '	; Blank line
+	inc	hl
+	jr	l20cd
+;
+; DELete charater detected
+;
+l20d4:
+	ld	a,b		; Get count
+	cp	LINLEN		; Test any in line
+	jr	z,l209b		; Nope
+	call	l2500		; Delete character on screen
+	inc	b		; Update counter
+	dec	hl		; Updare pointer
+	jr	l209b
+;
+; Command 'T' : Memory pointer address to register
+;
+l20e0:
+	call	l20ed
+	ld	hl,(l2b01)
+	ex	de,hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	jp	l1ea6
+l20ed:
+	ld	hl,l2b60
+	ld	d,0
+	ld	a,(l2b03)
+	cp	2
+	jr	nz,l20fc
+	ld	a,0fah
+	dec	d
+l20fc:
+	ld	e,a
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	hl
+	ex	de,hl
+	ret
+;
+; Command 'X' : Go to extended address
+;
+l2104:
+	ld	hl,(l2b01)
+	ld	(l2b0c),hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+l210e:
+	jp	l2080
+;
+; Command 'O' : Go to relative offset
+;
+l2111:
+	ld	hl,(l2b01)
+	ld	(l2b0e),hl
+	call	l211c
+	jr	l210e
+l211c:
+	ld	e,(hl)
+	ld	d,0
+	bit	7,e
+	jr	z,l2124
+	dec	d
+l2124:
+	add	hl,de
+	inc	hl
+	ret
+;
+; Command 'Z'-'@' : Execute loop repeatedly
+;
+l2127:
+	ld	hl,l2a7f
+	call	l1be5
+	call	l25d4		; Read number from console
+	ret	z		; End if ESCape
+	ld	a,h
+	or	l
+	jr	nz,l2136
+	inc	hl
+l2136:
+	ld	(l2b26),hl
+	call	l2193
+	ld	(l2b24),de
+	ld	hl,l2aff
+	set	1,(hl)
+	call	l21a2
+l2148:
+	ld	hl,l2aff
+	res	1,(hl)
+	set	5,(hl)
+	ld	hl,(l2b24)
+	jp	l2351
+;
+; Command 'J'-'@' : Interpret to breakpoint
+;
+l2155:
+	call	l25d4		; Read number from console
+	ret	z		; End if ESCape
+	ld	a,h
+	or	l
+	call	nz,l2582
+	ld	hl,l2aff
+	set	2,(hl)
+l2163:
+	call	l1bd6		; Get character
+	jr	c,l2189		; Got one
+	call	l2193
+	call	l1cc5
+	jr	c,l2189
+	ld	hl,l2aff
+	set	5,(hl)
+	call	l21a2
+;
+;
+;
+l2178:
+	ld	hl,l2aff
+	res	5,(hl)
+	bit	2,(hl)
+	jr	nz,l2163
+	ld	hl,(l2b26)
+	dec	hl
+	ld	a,h
+	or	l
+	jr	nz,l2136
+l2189:
+	ld	hl,l2aff
+	res	0,(hl)
+	res	2,(hl)
+	jp	l1c95
+l2193:
+	ld	hl,l0016
+	ld	de,(l2b32)
+	add	hl,de
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ret
+;
+; Command 'S' : Skip over instruction
+;
+l219f:
+	xor	a
+	jr	l21a4
+;
+; Command 'Z' : Single step a program
+;
+l21a2:
+	ld	a,1
+l21a4:
+	push	af
+	call	l2193
+	ld	(l2b01),de
+	push	de
+	ld	hl,l2aff
+	push	hl
+	set	0,(hl)
+	call	l16fb
+	pop	hl
+	res	0,(hl)
+	pop	de
+	push	de
+	ld	hl,l2be0
+	ld	bc,l0000
+	ld	a,' '
+	cpir
+	ld	a,c
+	neg
+	srl	a
+	ld	c,a
+	ld	b,0
+	push	bc
+	ld	hl,l2b19
+	ex	de,hl
+	ldir
+	ex	de,hl
+	ld	(hl),0c3h
+	inc	hl
+	ld	de,l1c42
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	pop	de
+	add	hl,de
+	ld	(l2b17),hl
+	pop	af
+	or	a
+	jr	z,l2206
+	ld	a,(de)
+	ld	hl,l2b30	; Point to refresh reg
+	cp	0fbh
+	jr	nz,l21f2
+	set	2,(hl)
+l21f2:
+	cp	0f3h
+	jr	nz,l21f8
+	res	2,(hl)
+l21f8:
+	ld	hl,l2aad
+	or	a
+	jr	z,l2206
+	ld	b,l2ade-l2aad
+l2200:
+	cp	(hl)
+	inc	hl
+	jr	z,l2230
+	djnz	l2200
+l2206:
+	call	l1ba4
+	ld	sp,(l2b32)
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	exx
+	pop	bc
+	pop	de
+	pop	hl
+	exx
+	ld	a,(l2b30)	; Get refresh reg
+	bit	2,a
+	jr	z,l221d
+	ei
+l221d:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	pop	ix
+	pop	iy
+	ex	(sp),hl
+	pop	hl
+	ex	(sp),hl
+	pop	hl
+	ld	sp,(l2b15)	; Load stack
+	jp	l2b19
+l2230:
+	ld	a,'1'
+	sub	b
+	ld	bc,(l2b32)
+	jr	nz,l224f
+	ld	hl,l000e
+l223c:
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+l2240:
+	ld	hl,l0016
+	add	hl,bc
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ld	(l2b01),de
+	pop	hl
+	jp	l1c59
+l224f:
+	dec	a
+	jr	nz,l2261
+	ld	hl,l000b
+	add	hl,bc
+	ld	a,(hl)
+	dec	a
+	jr	z,l2206
+	ld	(hl),a
+	ld	hl,(l2b17)
+	jp	l22d4
+l2261:
+	dec	a
+	cp	'$'
+	jr	c,l22bf
+	cp	','
+	jr	nc,l2277
+	call	l22ee
+	sub	'$'
+	rlca
+	rlca
+	rlca
+	ld	d,0
+	ld	e,a
+	jr	l2240
+l2277:
+	cp	'.'
+	jr	z,l2291
+	ld	hl,(l2b17)
+	dec	hl
+	ld	a,(hl)
+	cp	0e9h
+	jr	nz,l2206
+	dec	hl
+	ld	a,(hl)
+	ld	hl,l0010
+	cp	0ddh
+	jr	z,l223c
+	inc	hl
+	inc	hl
+	jr	l223c
+l2291:
+	ld	hl,(l2b17)
+	dec	hl
+	ld	a,(hl)
+	cp	'M'
+	jr	z,l229f
+	cp	'E'
+	jp	nz,l2206
+l229f:
+	ld	hl,l0014
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	de
+	inc	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	(l2b20),sp
+	ld	sp,(l2b15)	; Load stack
+	pop	de
+	ld	(l2b15),sp	; Update stack
+	ld	sp,(l2b20)
+l22bc:
+	jp	l2240
+l22bf:
+	ld	e,a
+	call	l230f
+	jp	z,l2206
+	ld	hl,(l2b17)
+	ld	a,e
+	and	3
+	jr	z,l22e3
+	dec	a
+	jr	z,l22e9
+	dec	a
+	jr	z,l229f
+l22d4:
+	dec	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,0
+	ld	a,e
+	or	a
+	jp	p,l22df
+	dec	d
+l22df:
+	add	hl,de
+	ex	de,hl
+	jr	l22bc
+l22e3:
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	jr	l22bc
+l22e9:
+	call	l22ee
+	jr	l22e3
+l22ee:
+	ld	hl,l0014
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	dec	de
+	dec	de
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	ld	hl,(l2b17)
+	ld	(l2b20),sp
+	ld	sp,(l2b15)	; Load stack
+	push	hl
+	ld	(l2b15),sp	; Update stack
+	ld	sp,(l2b20)
+	ret
+l230f:
+	ld	hl,l0008
+	add	hl,bc
+	ld	l,(hl)
+	sub	4
+	ret	c
+	push	bc
+	ld	c,a
+	xor	a
+	bit	7,l
+	jr	z,l2320
+	set	7,a
+l2320:
+	bit	6,l
+	jr	z,l2326
+	set	1,a
+l2326:
+	bit	0,l
+	jr	z,l232c
+	set	3,a
+l232c:
+	bit	2,l
+	jr	z,l2332
+	set	5,a
+l2332:
+	ld	b,4
+l2334:
+	rla
+	jr	c,l2339
+	set	7,a
+l2339:
+	rla
+	djnz	l2334
+	rla
+	ld	b,a
+	ld	d,1
+	ld	a,c
+l2341:
+	sub	4
+	jr	c,l2349
+	rl	d
+	jr	l2341
+l2349:
+	ld	a,b
+	and	d
+	pop	bc
+	ret
+;
+; Command 'J' : Jump to PC
+;
+l234d:
+	call	l25d4		; Read number from console
+	ret	z		; End if ESCape
+l2351:
+	ld	a,h
+	or	l
+	call	nz,l2582
+	call	l1ba4
+	ld	sp,(l2b32)
+	ex	af,af'
+	pop	af
+	ex	af,af'
+	exx
+	pop	bc
+	pop	de
+	pop	hl
+	exx
+	ld	a,(l2b30)	; Get refresh reg
+	bit	2,a
+	jr	z,l236d
+	ei
+l236d:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	pop	ix
+	pop	iy
+	ex	(sp),hl
+	pop	hl
+	ex	(sp),hl
+	ld	(l238b),hl
+	pop	hl
+	push	af
+	ld	a,(l2b30)	; Get refresh reg
+	bit	2,a
+	jr	z,l2385
+	ei
+l2385:
+	pop	af
+	ld	sp,(l2b15)	; Load stack
+l238b	equ	$+1
+	jp	$-$
+;
+; Command 'G' : Get a pattern
+;
+l238d:
+	ld	de,l2ba3
+	ld	(l2b12),de
+	xor	a
+	ld	(l2b00),a
+	call	l25d4		; Read number from console
+	cp	'"'
+	ld	b,l
+	ld	hl,l2aff
+	res	7,(hl)
+	jr	nz,l23c3
+l23a5:
+	ld	h,d
+	ld	l,e
+	ld	b,'$'
+l23a9:
+	push	bc
+	call	l248b
+	jr	z,l23bd
+	pop	af
+	sub	b
+	jr	z,l23a9
+	ld	c,a
+	ld	a,(l2b00)
+	add	a,c
+	ld	(l2b00),a
+	jr	l23a9
+l23bd:
+	pop	bc
+l23be:
+	ld	hl,(l2b01)
+	jr	l23e3
+l23c3:
+	cp	'%'
+	jr	nz,l23cb
+	set	7,(hl)
+	jr	l23a5
+l23cb:
+	ld	a,c
+	or	a
+	jr	z,l23be
+	ld	a,b
+	ld	(de),a
+	inc	de
+	ld	a,(l2b00)
+	inc	a
+	ld	(l2b00),a
+	call	l262a
+	ld	b,l
+	jr	l23cb
+;
+; Command 'N' : Next pattern
+;
+l23df:
+	ld	hl,(l2b01)
+	inc	hl
+l23e3:
+	ld	de,(l2b12)
+	ld	a,(l2aff)
+	bit	7,a
+	jr	nz,l23f4
+	call	l245e
+	ret	z
+	jr	l23df
+l23f4:
+	ld	(l2b01),hl
+	ld	hl,l2a4f
+	call	l1be5
+l23fd:
+	ld	hl,l2aff
+	set	0,(hl)
+	push	hl
+	call	l16fb
+	pop	hl
+	res	0,(hl)
+	call	l1bd6		; Get character
+	jp	c,l1c30		; Got one
+	ld	hl,l2c05
+l2412:
+	dec	hl
+	ld	a,(hl)
+	cp	' '
+	jr	z,l2412
+	inc	hl
+	ld	(hl),eot
+	ld	hl,l2bf0
+	ld	de,l2bf5
+l2421:
+	ld	a,(hl)
+	inc	hl
+	or	a
+	jr	z,l2431
+	cp	' '
+	jr	nz,l2421
+l242a:
+	ld	a,(de)
+	ld	(hl),a
+	inc	de
+	inc	hl
+	or	a
+	jr	nz,l242a
+l2431:
+	ld	hl,l2bf0
+l2434:
+	ld	a,(l2b00)
+	or	a
+	jr	z,l244a
+	ld	de,(l2b12)
+	push	hl
+	ld	c,a
+l2440:
+	ld	a,(de)
+	cp	(hl)
+	jr	nz,l2450
+	inc	de
+	inc	hl
+	dec	c
+	jr	nz,l2440
+	pop	hl
+l244a:
+	ld	hl,l2aff
+	res	0,(hl)
+	ret
+l2450:
+	ld	a,(hl)
+	or	a
+	pop	hl
+	inc	hl
+	jr	nz,l2434
+	ld	hl,(l2b2c)
+	ld	(l2b01),hl
+	jr	l23fd
+l245e:
+	ld	a,(de)
+	ld	bc,l0000
+	cpir
+	dec	hl
+	ld	(l2b01),hl
+	inc	hl
+	ld	a,(l2b00)
+	or	a
+	ret	z
+	dec	a
+	ld	c,a
+l2470:
+	xor	a
+	ld	b,a
+	or	c
+	ret	z
+	inc	de
+	ld	a,(de)
+	cpi
+	ret	nz
+	jr	l2470
+l247b:
+	ld	hl,(l2b01)
+	ld	d,h
+	ld	e,l
+	ld	b,'"'
+l2482:
+	call	l248b
+	ret	z
+	ld	(l2b01),hl
+	jr	l2482
+l248b:
+	call	l1bc2		; Get character
+	cp	cr
+	ret	z
+	call	l295f		; Test DELete character
+	jr	z,l24ab		; Yeap
+	push	af
+	cp	' '
+	jr	nc,l24a5
+	push	af
+	ld	a,'^'
+	call	l1bb5		; Put to console
+	pop	af
+	dec	b
+	add	a,'@'
+l24a5:
+	call	l1bb5		; Put to console
+	pop	af
+	jr	l24bc
+l24ab:
+	sbc	hl,de
+	add	hl,de
+	jr	z,l24c3
+	call	l2500		; Delete character on screen
+	dec	hl
+	ld	a,(hl)
+	cp	' '
+	call	c,l2500		; Delete character on screen
+	inc	b
+	ret
+l24bc:
+	ld	(hl),a
+	ld	a,b
+	or	a
+	ret	z
+	dec	b
+	ret	z
+	inc	hl
+l24c3:
+	or	a
+	ret
+;
+; Command 'I' : Intelligent copy
+;
+l24c5:
+	call	l25af
+	ret	z
+	push	hl
+	ld	hl,l2a56
+	call	l25d1
+	ex	de,hl
+	pop	bc
+	ret	z
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	nc,l24e1
+	add	hl,bc
+	ex	de,hl
+	add	hl,bc
+	ex	de,hl
+	inc	bc
+	lddr
+	ret
+l24e1:
+	inc	bc
+	ldir
+	ret
+;
+;
+;
+l24e5:
+	push	hl
+	push	af
+	ld	hl,l0000
+	ld	a,(l2dd9)	; Get console page length
+	dec	a
+	add	a,h
+	ld	h,a
+	push	hl
+	call	l2966		; Position cursor
+	pop	hl
+	push	bc
+	call	l2512		; Blank line
+	pop	bc
+	call	l2966		; Position cursor
+	pop	af
+	pop	hl
+	ret
+;
+; Delete character on screen
+;
+l2500:
+	push	af
+	ld	a,bs
+	call	l1bb5		; One character back
+	ld	a,' '
+	call	l1bb5		; Blank character
+	ld	a,bs
+	call	l1bb5		; Position to blank
+	pop	af
+	ret
+;
+; Blank line
+;
+l2512:
+	ld	b,36		;;'$'
+	jr	l2518
+l2516:
+	ld	b,'%'
+l2518:
+	call	l252c		; Put blank to console
+	djnz	l2518
+	ret
+l251e:
+	call	l252c		; Put blank to console
+l2521:
+	call	l1f32
+	call	l1f32
+	jr	l252c		; Put blank to console
+l2529:
+	call	l2039
+;
+; Put blank to console
+;
+l252c:
+	ld	a,' '
+l252e:
+	jp	l1bb5		; Put to console
+l2531:
+	ld	a,cr
+	call	l1bb5		; Put to console
+	ld	a,lf
+	jr	l252e
+;
+; Print prompt
+;
+l253a:
+	ld	a,(l2b14)	; Test prompt character
+	or	a		; Test prompt defined
+	ret	z		; Nope
+	jr	l252e		; Print prompt
+;
+; Command 'P' : Fill (put) memory
+;
+l2541:
+	call	l25af
+	ret	z
+	inc	hl
+	push	hl
+	ld	hl,l2a75
+	call	l25d1
+	ld	a,l
+	ex	de,hl
+	pop	bc
+	ret	z
+l2551:
+	ld	(hl),a
+	cpi
+	ret	po
+	jr	l2551
+;
+; Command 'R'-'@' : 
+;
+l2557:
+	ld	a,(l2b74)
+	or	a
+	ret	z
+	ld	b,a
+	ld	hl,(l2d60)
+	ld	de,l2d60
+	add	hl,de
+	push	hl
+	ld	de,l0003
+	ld	a,b
+l2569:
+	add	hl,de
+	djnz	l2569
+	ld	b,a
+l256d:
+	dec	hl
+	ld	a,(hl)
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	ld	(de),a
+	djnz	l256d
+	pop	hl
+	ld	(l2b75),hl
+	xor	a
+	ld	(l2b74),a
+	ret
+;
+; Command 'B'-'@' : Set breakpoint
+;
+l257f:
+	ld	hl,(l2b01)
+l2582:
+	push	de
+	ex	de,hl
+	push	de
+	ld	hl,l2ef0
+	ld	de,(l2b75)
+	sbc	hl,de
+	pop	de
+	jr	c,l25c5
+	ld	a,(l2b74)
+	inc	a
+	ld	(l2b74),a
+	ld	hl,(l2b75)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	ex	de,hl
+	ldi
+	ld	(l2b75),de
+	dec	hl
+	ld	a,(l2dd7)	; Get RST vector bits
+	add	a,.RST		; Make real code
+	ld	(hl),a
+	pop	de
+	ret
+;
+;
+;
+l25af:
+	ld	hl,l2a5f
+	call	l25d1		; Process first
+	ret	z
+	ex	de,hl
+	ld	hl,l2a6b
+	call	l25d1		; Process last
+	ret	z
+	ld	b,h
+	ld	c,l
+	or	a
+	sbc	hl,de
+	jr	nc,l25ea	; Test ESCape character
+l25c5:
+	ld	hl,l2a59
+	call	l1bf1		; Tell error
+	ld	sp,l2d60	; Set local stack
+	call	l1cfd
+;
+;
+;
+l25d1:
+	call	l1be5		; Print message
+;
+; Read number from console
+; EXIT	Reg HL holds number
+;	Accu holds last character read
+;	Zero flag set on ESCape character
+;
+l25d4:
+	push	de
+	call	l2627		; Read number from console
+	bit	_DEC,b		; Test decimal
+	jr	z,l25dd		; Nope
+	inc	c		; Fix count
+l25dd:
+	bit	_SGN,b		; Test negative number
+	jr	z,l25e9		; Nope
+	inc	c		; Fix length
+	or	a
+	ld	de,0
+	ex	de,hl
+	sbc	hl,de		; Negate number
+l25e9:
+	pop	de
+;
+; Test ESCape character
+; EXIT	Zero flag set says match
+;
+l25ea:
+	push	hl
+	ld	hl,l2dbb
+	cp	(hl)		; Compare
+	pop	hl
+	ret
+;
+;
+;
+l25f1:
+	push	hl
+	ld	hl,l0000
+	call	l25fa
+	pop	hl
+	ret
+l25fa:
+	ld	a,d
+	call	l260a
+	ld	a,e
+	jr	l260a
+
+	push	hl
+	ld	hl,l0000
+	call	l260a
+	pop	hl
+	ret
+l260a:
+	push	af
+	rrca
+	rrca
+	rrca
+	rrca
+	call	l2613
+	pop	af
+l2613:
+	and	0fh
+	add	a,90h
+	daa
+	adc	a,'@'
+	daa
+	push	bc
+	ld	b,a
+	ld	a,h
+	or	l
+	ld	a,b
+	pop	bc
+	jp	z,l1bb5		; Put to console
+	ld	(hl),a
+	inc	hl
+	ret
+;
+; Read number from console
+; EXIT	Reg HL holds number
+;
+l2627:
+	call	l253a		; Print prompt
+l262a:
+	ld	hl,0		; Init result
+	ld	c,l		; Set first access
+	ld	b,_HEXlen	; Init hex length
+l2630:
+	call	l1bc2		; Get character
+	push	hl
+	ld	hl,l2dbc
+	cp	(hl)		; Test abort
+	pop	hl
+	jp	z,l1bcf		; Yeap
+	call	l25ea		; Test ESCape character
+	ret	z		; Yeap
+	call	l295f		; Test DELete character
+	jr	z,l26ba		; Yeap
+	cp	' '
+	ret	c
+	call	l1bb5		; Put to console
+	cp	'\'		; Test decimal number requested
+	jr	nz,l2657	; Nope
+	bit	_DEC,b		; Test decimal already selected
+	ret	nz		; Yeap, exit
+	set	_DEC,b		; Set bit
+	inc	b		; Justify length
+	jr	l2630		; Get next character
+l2657:
+	cp	'a'		; Test lower case letter
+	jr	c,l2661
+	cp	'z'+1
+	jr	nc,l2661
+	sub	'a'-'A'		; Make upper case
+l2661:
+	cp	'0'		; Validate digit
+	jp	c,l26f1
+	cp	'9'+1
+	jr	c,l2670
+	cp	'A'
+	ret	c
+	cp	'F'+1
+	ret	nc
+l2670:
+	sub	'0'		; Strip off offset
+	cp	9+1		; Test decimal
+	jr	c,l267b		; Yeap
+	bit	_DEC,b		; Test decimal selected
+	ret	nz		; Then end on hex character
+	sub	'A'-'0'-10	; Fix for hex
+l267b:
+	bit	_DEC,b		; Test decimal
+	jr	z,l268e		; Nope
+	push	de
+	ld	e,a
+	ld	a,b
+	and	00111111b
+	cp	c
+	ld	a,e
+	pop	de
+	jr	nz,l268e
+	call	l2500		; Delete character on screen
+	jr	l2630
+l268e:
+	push	de
+	add	hl,hl
+	ld	e,l
+	ld	d,h
+	add	hl,hl
+	add	hl,hl
+	bit	_DEC,b
+	jr	z,l269b
+	add	hl,de
+	jr	l269c
+l269b:
+	add	hl,hl
+l269c:
+	ld	d,0
+	ld	e,a
+	add	hl,de
+	pop	de
+	ld	a,b
+	and	00111111b
+	cp	c
+	jr	z,l26aa
+	inc	c
+	jr	l2630
+l26aa:
+	push	bc
+	ld	b,a
+	inc	b
+l26ad:
+	call	l2500		; Delete character on screen
+	djnz	l26ad
+	pop	bc
+	ex	de,hl
+	call	l25f1
+	ex	de,hl
+	jr	l26ee
+l26ba:
+	inc	c
+	dec	c
+	jr	nz,l26ca
+	bit	_SGN,b
+	jr	z,l26ee
+	call	l2500		; Delete character on screen
+	res	_SGN,b
+	jp	l2630
+l26ca:
+	call	l2500		; Delete character on screen
+	push	bc
+	bit	_DEC,b
+	jr	z,l26e4
+	push	de
+	ld	de,l000a
+	ld	bc,lffff
+l26d9:
+	inc	bc
+	or	a
+	sbc	hl,de
+	jr	nc,l26d9
+	ld	h,b
+	ld	l,c
+	pop	de
+	jr	l26ec
+l26e4:
+	ld	b,4
+l26e6:
+	srl	h
+	rr	l
+	djnz	l26e6
+l26ec:
+	pop	bc
+	dec	c
+l26ee:
+	jp	l2630
+l26f1:
+	cp	'-'
+	ret	nz
+	inc	c
+	dec	c
+	ret	nz
+	bit	_SGN,b
+	res	_SGN,b
+	jr	nz,l26ee
+	set	7,b
+	jr	l26ee
+;
+; Prepare .COM file for reading
+; EXIT	Carry set on successfull preparation
+;
+l2701:
+	ld	hl,l2ade+_ext
+	ld	(hl),'C'	; Force extension
+	inc	hl
+	ld	(hl),'O'
+	inc	hl
+	ld	(hl),'M'
+	call	l208d		; Get line
+	ret	c		; Empty
+	call	l2890		; Parse FCB
+	scf
+	ret	z
+	or	a
+	ret
+;
+; Command 'W' : Write to file
+;
+l2717:
+	call	l2701		; Prepare .COM file for reading
+	ret	c		; Invalid
+	call	l274a		; Create file
+	ret	z		; Nope
+	call	l25af
+	ret	z
+l2723:
+	ld	h,b
+	ld	l,c
+	or	a
+	sbc	hl,de
+	jr	c,l276c
+	push	bc
+	ld	c,.setdma
+	call	l1b92		; Set disk buffer
+	push	de
+	ld	de,l2ade
+	ld	c,.wrseq
+	call	l1b92		; Write to disk
+	pop	de
+	ld	hl,l0080
+	add	hl,de
+	ex	de,hl
+	pop	bc
+	jr	c,l276c
+	or	a
+	jr	z,l2723
+	ld	hl,l2a90
+	jr	l2769		; Tell write error
+;
+; Create file
+; EXIT	Zero flag set if file cannot be created
+;
+l274a:
+	call	l27f3		; Find file
+	jr	z,l275f		; Not there
+	ld	hl,l2a18	; Tell file exist
+	call	l1bf1
+	call	l1bb5		; Put to console
+	jr	nz,l276c
+	ld	c,.delete
+	call	l1b92		; Delete file
+l275f:
+	ld	c,.make
+	call	l1b92		; Create new one
+	inc	a
+	ret	nz
+	ld	hl,l2a3b	; No directory space
+l2769:
+	call	l1bf1		; Tell it
+l276c:
+	ld	c,.close
+	ld	de,l2ade
+	call	l1b92		; Close file
+l2774:
+	ld	de,l0080
+	ld	c,.setdma
+	call	l1b92		; Reset disk buffer
+	xor	a
+	ret
+;
+; Command 'R' : Read a file
+;
+l277e:
+	call	l2701		; Prepare .COM file for reading
+	ret	c		; Invalid
+	call	l27f3		; Find file
+	ld	hl,l2a2e
+	jr	z,l2769		; Not there
+	call	l252c		; Put blank to console
+	ld	hl,l2a5f
+	call	l1be8		; Tell first
+	call	l25d4		; Read number from console
+	ret	z		; End if ESCape
+	ld	a,h
+	or	l
+	jr	nz,l27a2
+	ld	de,l0100
+	call	l27ed
+	ex	de,hl
+l27a2:
+	push	de
+	ld	de,l107f
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	c,l27b5
+	ld	de,l2ec9
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	c,l27cf
+l27b5:
+	pop	de
+	ex	de,hl
+	ld	c,.setdma
+	call	l1b92		; Set disk buffer
+	ld	c,.rdseq
+	push	de
+	ld	de,l2ade
+	call	l1b92		; Read record from file
+	pop	de
+	or	a
+	jr	nz,l27d8
+	ld	hl,l0080
+	add	hl,de
+	jr	l27a2
+l27cf:
+	ld	hl,l2a59
+	call	l1bf1		; Tell error
+	pop	de
+	jr	l2774
+l27d8:
+	dec	de
+	call	l252c		; Put blank to console
+	ld	hl,l2a6b
+	call	l1be8		; Tell last
+	call	l253a		; Print prompt
+	call	l27ed
+	call	l1bc2		; Get character
+	jr	l2774
+l27ed:
+	push	hl
+	call	l25f1
+	pop	hl
+	ret
+;
+; Reset file for reading
+; EXIT	Zero set on file not found
+;
+l27f3:
+	xor	a
+	ld	(l2ade+_EX),a	; Clear extend
+	ld	(l2ade+_CR),a	; And current record
+	ld	de,l2ade
+	ld	c,.open
+	call	l1b92		; Open file
+	inc	a		; Fix I/O result
+	ret
+;
+; Command 'L' : List from PC
+;
+l2804:
+	call	l283b
+l2807:
+	pop	hl
+	jp	l1d86
+;
+;
+;
+;
+l280b:
+	ld	hl,l0001
+	ld	a,(l2b06)
+	ld	b,a
+	ld	de,l2b77
+	call	l2966		; Position cursor
+l2818:
+	push	bc
+	ex	de,hl
+	ld	de,(l2b01)
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	inc	hl
+	push	hl
+	call	l16fb
+	ld	hl,(l2b2c)
+	ld	(l2b01),hl
+	pop	de
+	pop	bc
+	call	l252c		; Put blank to console
+	djnz	l2818
+	jr	l285b
+;
+; Command 'L'-'@' : Disassemble from memory pointer
+;
+l2835:
+	ld	hl,(l2b01)
+	push	hl
+	jr	l2842
+;
+;
+;
+l283b:
+	ld	hl,(l2b01)
+	push	hl
+	ld	hl,(l2b72)
+l2842:
+	ld	(l2b01),hl
+	call	l280b
+	pop	hl
+	ld	(l2b01),hl
+	ret
+;
+;
+;
+l284d:
+	ld	hl,(l2b01)
+	push	hl
+	ld	hl,(l2b2c)
+	jr	l2842
+;
+; Command 'N'-'@' : Disassemble next page
+;
+l2856:
+	call	l284d
+	jr	l2807
+l285b:
+	ld	hl,l0000
+	push	hl
+	ld	hl,l2b77
+	ld	a,(l2b06)
+	ld	b,a
+l2866:
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ex	(sp),hl
+	call	l2966		; Position cursor
+	inc	h
+	ex	(sp),hl
+	push	hl
+	ld	hl,(l2b72)
+	or	a
+	sbc	hl,de
+	ld	a,' '
+	jr	nz,l287d
+	ld	a,7dh
+l287d:
+	call	l1bb5		; Put to console
+	pop	hl
+	djnz	l2866
+	pop	hl
+	ret
+l2885:
+	push	hl
+	ld	hl,l0000
+	call	l2966		; Position cursor
+	pop	hl
+	jp	l2999		; Clear screen 
+;
+; Parse FCB
+; EXIT	Zero flag ????
+;	Carry flag ????
+;
+l2890:
+	ld	hl,l2bb7
+	ld	de,l2adf
+	call	l28b7
+	or	a
+	jr	z,l28af
+	ld	a,c
+	or	a
+	jr	z,l28aa
+	sub	'A'
+	jr	c,l28a9
+	inc	a
+	cp	11h
+	jr	c,l28aa
+l28a9:
+	xor	a
+l28aa:
+	ld	(l2ade),a
+	inc	a
+	ret
+l28af:
+	ld	hl,l2a0e
+	call	l1bf1		; Tell bad line
+	xor	a
+	ret
+l28b7:
+	call	l2931
+	cp	' '
+	jr	z,l28b7
+	jr	nc,l28c1
+	xor	a
+l28c1:
+	or	a
+	ret	z
+	ld	c,a
+	call	l2931
+	push	af
+	cp	':'
+	jr	z,l28e6
+	ld	a,c
+	cp	'.'
+	jr	z,l28fe
+	ld	(de),a
+	inc	de
+	ld	c,0
+	pop	af
+	jr	nc,l28dd
+	push	bc
+	ld	c,7
+	jr	l28ef
+l28dd:
+	or	a
+	ret	z
+	ld	(de),a
+	inc	de
+	push	bc
+	ld	c,6
+	jr	l28ea
+l28e6:
+	pop	af
+	push	bc
+	ld	c,8
+l28ea:
+	call	l2931
+	jr	nc,l291f
+l28ef:
+	ld	b,a
+	ld	a,' '
+l28f2:
+	ld	(de),a
+	inc	de
+	dec	c
+	jr	nz,l28f2
+	ld	a,b
+l28f8:
+	cp	'.'
+	scf
+	pop	bc
+	ret	nz
+	push	af
+l28fe:
+	pop	af
+	push	bc
+	ld	c,3
+l2902:
+	call	l2931
+	jr	nc,l2912
+l2907:
+	push	af
+	ld	a,' '
+l290a:
+	ld	(de),a
+	inc	de
+	dec	c
+	jr	nz,l290a
+	pop	af
+	pop	bc
+	ret
+l2912:
+	or	a
+	jr	z,l2907
+	ld	(de),a
+	inc	de
+	dec	c
+	jr	nz,l2902
+	pop	bc
+	jr	l2931
+l291d:
+	pop	bc
+	ret
+l291f:
+	or	a
+	jr	z,l291d
+	ld	(de),a
+	inc	de
+	dec	c
+	jr	nz,l28ea
+	pop	bc
+	call	l2931
+	ret	nc
+	or	a
+	ret	z
+	push	bc
+	jr	l28f8
+l2931:
+	ld	a,(hl)
+	inc	hl
+	cp	0dh
+	jr	z,l293f
+	cp	' '
+	jr	c,l295a
+	cp	7fh
+	jr	nc,l295a
+l293f:
+	push	hl
+	ld	b,10h
+	ld	hl,l29d4
+l2945:
+	cp	(hl)
+	jr	z,l2959
+	inc	hl
+	djnz	l2945
+	ld	hl,l29e4
+	ld	b,4
+l2950:
+	cp	(hl)
+	jr	z,l295c
+	inc	hl
+	djnz	l2950
+	or	a
+	jr	l295d
+l2959:
+	pop	hl
+l295a:
+	xor	a
+	ret
+l295c:
+	scf
+l295d:
+	pop	hl
+	ret
+;
+; Test DELete character
+; EXIT	Zero flag set says match
+;
+l295f:
+	push	hl
+	ld	hl,l2dba
+	cp	(hl)		; Compare
+	pop	hl
+	ret
+;
+; Position cursor
+;
+l2966:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	a,(l2dd5)
+	add	a,l
+	ld	c,a
+	ld	a,(l2dd4)
+	add	a,h
+	ld	b,a
+	ld	hl,l2dc0
+	ld	a,(hl)		; Test control defined
+	and	a
+	jr	nz,l2980	; Yeap
+	call	l2df9		; Execute own function
+	jr	l2994
+l2980:
+	call	l29ae		; Print control sequence
+	ld	a,(l2dd6)
+	and	a
+	jr	z,l298c
+	ld	a,b
+	ld	b,c
+	ld	c,a
+l298c:
+	ld	a,c
+	call	l1bb5		; Put to console
+	ld	a,b
+	call	l1bb5
+l2994:
+	pop	af
+	pop	bc
+	pop	de
+	pop	hl
+	ret
+;
+; Clear screen
+;
+l2999:
+	push	hl
+	push	de
+	push	bc
+	push	af
+	ld	hl,l2dc5
+	ld	a,(hl)
+	and	a
+	jr	nz,l29a9
+	call	l2dfb
+	jr	l2994
+l29a9:
+	call	l29ae		; Print control sequence
+	jr	l2994
+;
+; Print control sequence
+; ENTRY	Accu holds length
+;	Reg HL points to control characters
+;
+l29ae:
+	ld	d,a		; Get count
+l29af:
+	inc	hl
+	ld	a,(hl)
+	call	l1bb5		; Put to console
+	dec	d
+	jr	nz,l29af
+	ret
+;
+;
+;
+l29b8:
+	ld	a,(l2dbe)
+	ld	hl,l2dca
+	ld	de,l2dfd
+	jr	l29cc
+l29c3:
+	ld	a,(l2dbf)
+	ld	hl,l2dcf
+	ld	de,l2dff
+l29cc:
+	or	a
+	ret	z
+	ld	a,(hl)
+	or	a
+	jr	nz,l29ae
+	push	de
+	ret
+;
+l29d4:
+	db	'<>,;=?*[]_%|()/\'
+l29e4:
+	db	'.: ',cr
+l29e8:
+	db	'     MON80  1.06 (C) HiSoft 1985     ',eot
+l2a0e:
+	db	'Bad Line!',eot
+l2a18:
+	db	'Exists, delete(Y/N)? ',eot
+l2a2e:
+	db	'File Absent!',0
+l2a3b:
+	db	'No Directory Space!',eot
+l2a4f:
+	db	'Wait..',0
+l2a56:
+	db	'To',0
+l2a59:
+	db	'Error',eot
+l2a5f:
+	db	'First',eot
+	db	'Start',eot
+l2a6b:
+	db	'Last',eot
+	db	'Next',eot
+l2a75:
+	db	'With',0
+l2a7a:
+	db	'Name',eot
+l2a7f:
+	db	'#',0
+l2a81:
+	db	'Printer?',eot
+l2a8a:
+	db	'Disc?',eot
+l2a90:
+	db	'Write error!',eot
+l2a9d:
+	db	'Break',0
+l2aa3:
+	db	'Workspace',0
+l2aad:
+	db	0e9h,010h,0c3h,0cdh,0c9h,018h,0c2h
+	db	0c4h,0c0h,020h,0cah,0cch,0c8h,028h
+	db	0d2h,0d4h,0d0h,030h,0dah,0dch,0d8h
+	db	038h,0e2h,0e4h,0e0h,000h,0eah,0ech
+	db	0e8h,000h,0f2h,0f4h,0f0h,000h,0fah
+	db	0fch,0f8h,000h,0c7h,0cfh,0d7h,0dfh
+	db	0e7h,0efh,0f7h,0ffh,0ddh,0fdh,0edh
+;
+; FCB
+;
+l2ade::
+	db	0
+l2adf:
+	db	'        COM'
+	ds	21
+;
+l2aff:
+	db	0
+l2b00:
+	db	0
+l2b01:
+	db	0,1
+l2b03:
+	db	2
+l2b04:
+	db	0
+l2b05:
+	db	0ch
+l2b06:
+	db	0bh,0
+l2b08:
+	db	0
+l2b09:
+	db	0
+l2b0a:
+	db	0
+l2b0b:
+	db	0
+l2b0c:
+	db	0,0
+l2b0e:
+	db	0,0
+l2b10:
+	db	0,0
+l2b12:
+	db	0,0
+l2b14:
+	db	'>'
+l2b15:
+	dw	0
+l2b17:
+	db	0,0
+l2b19:
+	db	0,0,0,0,0,0,0
+l2b20:
+	db	0,0
+l2b22:
+	db	0,0
+l2b24:
+	db	0,0
+l2b26:
+	db	0,0,0,0
+l2b2a:
+	db	80h,0
+l2b2c:
+	db	0,0
+l2b2e:
+	db	0,0
+l2b30:
+	dw	0		; Refresh reg
+l2b32:
+	db	0,0
+l2b34:
+	db	0,0
+l2b36:
+	db	0,0
+l2b38:
+	db	0,1,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0
+l2b5a:
+	db	0,1
+l2b5c:
+	db	0,0,0,0
+l2b60:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0
+l2b70:
+	dw	0
+l2b72:
+	db	0,1
+l2b74:
+	db	0
+l2b75:
+	db	0,0
+l2b77:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0
+l2ba3:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0
+l2bb7:
+	ds	LINLEN
+	db	' '
+l2bc6:
+	db	0,0
+l2bc8:
+	db	0,0
+l2bca:
+	db	0,0
+l2bcc:
+	db	0,0
+l2bce:
+	db	0,0
+l2bd0:
+	db	0,0
+l2bd2:
+	db	0,0
+l2bd4:
+	db	0,0,0
+l2bd7:
+	db	0,0
+l2bd9:
+	db	0,0
+l2bdb:
+	db	0,0,0,0,0
+l2be0:
+	db	0,0
+l2be2:
+	db	0,0,0,0,0,0,0
+l2be9:
+	db	0,0,0,0,0,0
+l2bef:
+	db	0
+l2bf0:
+	db	0,0
+l2bf2:
+	db	0,0,0
+l2bf5:
+	db	0,0,0,0,0,0,0,0,0,0,0,0
+l2c01:
+	db	0,0,0,0
+l2c05:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0
+l2c2b:
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0
+l2cab:
+	db	0
+l2cac:
+	dw	0
+
+	ds	140+38
+;
+; ^^^^^^ Local stack
+;
+l2d60:
+	dw	l2e01-l2d60	;;00a1h
+l2d62:
+	db	0
+l2d63:
+	db	':',11h
+	db	';',0fh
+	db	'>',18h
+	db	'<',08h
+l2d6b:
+	db	'E'-'@'
+	dw	l1e80		; Toggle extended mode
+	db	'G'
+	dw	l238d		; Get a pattern
+	db	'B'-'@'
+	dw	l257f		; Set breakpoint
+	db	'I'
+	dw	l24c5		; Intelligent copy
+	db	'J'
+	dw	l234d		; Jump tp PC
+	db	'L'
+	dw	l2804		; List from PC
+	db	'M'
+	dw	l207c		; Set the memory pointer
+	db	'N'
+	dw	l23df		; Next pattern
+	db	'O'
+	dw	l2111		; Go to relative offset
+	db	'P'
+	dw	l2541		; Fill (put) memory
+	db	'T'
+	dw	l20e0		; Memory pointer address to register
+	db	'R'
+	dw	l277e		; Read a file
+	db	'W'
+	dw	l2717		; Write to file
+	db	'S'
+	dw	l1f5c		; Show alternate display
+	db	'D'-'@'
+	dw	l1136		; Block disassembly
+	db	'N'-'@'
+	dw	l2856		; Disassemble next page
+	db	'R'-'@'
+	dw	l2557		; 
+	db	'U'
+	dw	l2088		; Reverse relative offset
+	db	'V'
+	dw	l2083		; Reverse extended address
+	db	'L'-'@'
+	dw	l2835		; Disassemble from memory pointer
+	db	'X'
+	dw	l2104		; Go to extended address
+	db	'Z'
+	dw	l21a2		; Single step a program
+	db	'Z'-'@'
+	dw	l2127		; Execute loop repeatedly
+	db	'J'-'@'
+	dw	l2155		; Interpret to breakpoint
+	db	'S'-'@'
+	dw	l219f		; Skip over instruction
+	db	'.'
+	dw	l1e99		; 
+	db	null
+l2dba::
+	db	DEL
+l2dbb:
+	db	esc
+l2dbc:
+	db	'C'-'@'
+l2dbd:
+	db	7
+l2dbe:
+	db	0
+l2dbf:
+	db	0
+l2dc0:
+	db	1,1fh,0,0,0
+l2dc5:
+	db	1,0ch,0,0,0
+l2dca:
+	db	0,0,0,0,0
+l2dcf:
+	db	0,0,0,0,0
+l2dd4:
+	db	1
+l2dd5:
+	db	1
+l2dd6:
+	db	0
+l2dd7:
+	dw	_RST SHL 3	; RST address
+l2dd9:
+	db	ROWCON
+;
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0
+;
+; Execute own function
+;
+l2df9:
+	db	0,0
+;
+; Own control sequence
+;
+l2dfb:
+	db	0,0
+l2dfd:
+	db	0,0
+l2dff:
+	db	0,0
+l2e01:
+	db	0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0,0,0,0
+l2ec9:
+	db	'0',10h,'V#^#',0ebh,0b7h,0edh
+	db	'B',9,'8',9,'DM',0ebh,18h,0e6h
+	db	0b7h,'(',0dah,0c9h,0ebh,'+q+p+s+r###'
+	db	0afh,18h,0d2h,0e5h,'!'
+l2ef0:
+	db	0dbh,0,0,0,0,0,0,0,0,0,0,0,0
+	db	0,0,0
+
+top:
+l2f00::
+	.dephase
+
+	end
+

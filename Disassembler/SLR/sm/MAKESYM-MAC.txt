@@ -1,0 +1,568 @@
+	title	SYM file converter
+	name	('MAKESYM')
+
+; SLR SYM file converter
+; DASMed by W. Cirsovius
+
+.comment	| -> Text from file MAKESYM.DOC:
+
+The MAKESYM program included on this diskette is used to produce a .SYM
+file from the Symbol Table listing provided by Z80ASM or SLRMAC.  MAKESYM
+reads a .LST file, converts the symbol table to a format readable by
+ZSID, DSD80, etc, and writes it to a .SYM file on the same drive.
+
+Since extra information is included in the .LST file, such as CSEG relative
+designations, or COMMON relative, external, etc, MAKESYM allows you to
+specify offsets for any or all of the relative types, while stripping out
+any external symbols (Only one COMMON is supported since there is no dis-
+tinction between different COMMONs in the .LST table).
+
+This is useful for intense debugging of a particular module where you would
+like to have all the internal symbols available at debug time, but don't
+want to go in and declare them all global.  You just tell MAKESYM where the
+PROG and DATA sections were placed at link time, and there you have it.
+
+This is also useful for generating a useable symbol table when you directly
+generate the .COM or .HEX without linking.  In that case you just run MAKESYM
+and don't need to specify any offsets.
+
+To use:
+
+A>MAKESYM FILENAME[.EXT] [/PXXXX] [/DXXXX] [/CXXXX] [/U]
+
+where the brackets surround optional items and are not actually typed.
+
+	/PXXXX		Here XXXX is the HEX offset for PROG relative items.
+
+	/DXXXX		Here XXXX is the HEX offset for DATA relative items.
+
+	/CXXXX		Here XXXX is the HEX offset for COMMON relative items.
+
+	/U		This tells MAKESYM to perform upper-case conversion
+			(Some debuggers allow lower case symbols but don't let
+			you access them).
+
+	.EXT		This is used to overide the default extension of .LST.
+			Don't use .SYM (to convert .SYM to .SYM) because
+			MAKESYM creates a .SYM file immediately, erasing the
+			file it is trying to convert.
+		|
+
+	.z80
+	aseg
+	org	0100h
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+OS	macro
+	rst	0
+	endm
+BDOS	equ	0005h
+FCB	equ	005ch
+CCP	equ	0080h
+
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.make	equ	22
+.setdma	equ	26
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+
+_EX	equ	12
+_CR	equ	32
+
+reclng	equ	128
+
+null	equ	00h
+lf	equ	0ah
+ff	equ	0ch
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+
+LOMASK	equ	00001111b
+UPPER	equ	01011111b
+
+SYMLEN	equ	 7
+StkDep	equ	45
+
+_LSTREC	equ	32
+_SYMREC	equ	32
+
+	ld	sp,LocStk	; Get local stack
+	ld	de,$HEAD
+	ld	c,.string
+	call	BDOS		; Tell ID
+	jr	StrtMS
+;
+	db	'Copyright (C) 1985 by SLR Systems'
+;
+StrtMS:
+	ld	hl,CCP		; Point to CCP line
+	ld	a,(hl)		; Get length
+	or	a		; Test any
+	jr	z,MS.Help	; Nope, give help
+	inc	l
+	ld	e,l
+	ld	c,a
+	ld	b,0
+	add	hl,bc		; Point to end
+	ld	(hl),cr		; Close line
+	ld	l,e		; Get back start pointer
+OptLoop:
+	ld	a,b		; Test end of parse
+	or	c
+	jr	z,MS.Go		; Yeap, start MAKESYM
+	ld	a,'/'
+	cpir			; Test option may follow
+	jr	nz,MS.Go	; Nope, start
+	ld	a,(hl)
+	inc	l
+	ld	de,PrgOff
+	cp	'P'		; Test offset follows
+	jr	z,LdOffs
+	ld	de,DtaOff
+	cp	'D'
+	jr	z,LdOffs
+	ld	de,ComOff
+	cp	'C'
+	jr	z,LdOffs
+	cp	'U'		; Test case conversion
+	jr	nz,MS.Help	; Invalid option, give help
+	ld	a,TRUE
+	ld	(UpCase),a
+	jr	OptLoop
+MS.Help:
+	ld	de,$HELP	; Give help
+	jp	Abort		; And exit
+;
+; Get hex value from ASCII ^HL to ^DE
+;
+LdOffs:
+	push	de
+	ex	de,hl
+	ld	hl,0		; Init result
+LdNxt:
+	ld	a,(de)		; Get character
+	sub	'0'		; Test range
+	jr	c,LdEnd		; End
+	cp	9+1
+	jr	c,LdDec
+	sub	'A'-10-'0'	; Convert to hex
+	cp	15+1
+	jr	nc,LdEnd
+LdDec:
+	add	hl,hl		; Old *16
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	add	a,l		; Insert new one
+	ld	l,a
+	inc	de
+	dec	c
+	jr	nz,LdNxt	; Try next digit
+LdEnd:
+	ex	de,hl
+	ex	(sp),hl
+	ld	(hl),e		; Store result
+	inc	hl
+	ld	(hl),d
+	pop	hl
+	jr	OptLoop		; Try next option
+;
+; Start MAKESYM
+;
+MS.Go:
+	ld	de,FCB+.drv+.nam
+	ld	a,(de)		; Test extension
+	cp	' '
+	jr	nz,GotExt	; Yeap
+	ld	hl,LSText
+	ld	bc,.ext
+	ldir			; Set .LST
+GotExt:
+	xor	a
+	ld	(FCB+_EX),a	; Clear extent
+	ld	de,FCB
+	ld	c,.open
+	call	BDOS		; Open file
+	inc	a		; Test success
+	ld	de,$NO.FILE
+	jp	z,Abort		; Nope, error
+	xor	a
+	ld	(FCB+_CR),a	; Clear current record
+	ld	hl,FCB
+	ld	de,FCBo
+	ld	bc,.drv+.nam
+	ldir			; Unpack file name
+	ld	de,FCBo
+	ld	c,.delete
+	call	BDOS		; Delete old file
+	ld	de,FCBo
+	ld	c,.make
+	call	BDOS		; Create new one
+	inc	a		; Test success
+	ld	de,$NO.DIR
+	jr	z,Abort		; Nope, error
+	xor	a
+	ld	(FCBo+_CR),a
+NxtSync:
+	ld	hl,$SYNC.LINE
+	ld	b,SyncLen
+WtSync:
+	call	fget		; Read character
+	jr	c,EndLST	; End of file
+	cp	(hl)		; Test symbol table line found
+	jr	nz,NxtSync	; Nope, try next
+	inc	hl
+	djnz	WtSync
+NxtWrd:
+	call	RdWord		; Read hex word
+	jr	c,NxtSync	; New page
+	ld	a,(SymType)	; Get symbol type
+	cp	' '		; Test normal one
+	jr	z,NormSym
+	cp	'#'		; Filter special
+	jr	z,NxtWrd
+	ld	hl,(PrgOff)	; Get program offset
+	cp	''''		; Test program relative
+	jr	z,OffsSym
+	ld	hl,(DtaOff)	; Get data offset
+	cp	'"'		; Test data relative
+	jr	z,OffsSym	; Must be common if not
+	ld	hl,(ComOff)	; Get common offset
+OffsSym:
+	ld	de,(SymVal)	; Get current value
+	add	hl,de		; Add offset
+	ld	(SymVal),hl
+NormSym:
+	call	WrSymbol	; Write symbol
+	jr	NxtWrd
+EndLST:
+	ld	de,(WrRemain)	; Get relative pointer
+	ld	hl,_SYMREC*reclng
+	or	a
+	sbc	hl,de		; Test any remaining in buffer
+	jr	z,FClose	; Nope
+	ld	de,reclng-1
+	add	hl,de		; Fox for record boundary
+	add	hl,hl
+	ld	b,h
+	ld	hl,(WrDMAp)	; Get write buffer pointer
+	ld	(hl),eof	; Give end of file
+	call	WrBuff		; Write buffer to file
+FClose:
+	ld	de,FCBo
+	ld	c,.close
+	call	BDOS		; Close file
+	inc	a		; Test success
+	ld	de,$SYSERR
+	jr	z,Abort		; Error
+	ld	de,$SYMRDY	; Else success
+Abort:
+	ld	c,.string
+	call	BDOS		; Give final message
+	OS			; And exit
+;
+; Read character from .LST file into Accu - C set indicates end of file
+;
+fget:
+	push	hl
+	ld	hl,(RdRemain)	; Get remaining length
+	ld	a,h
+	or	l
+	call	z,RdBuff	; Read new buffer if zero
+	jr	c,gotEOFp	; End of file
+	dec	hl
+	ld	(RdRemain),hl	; Update remaining length
+	ld	hl,(RdDMAp)	; Get read buffer pointer
+	ld	a,(hl)		; Get character
+	inc	hl
+	ld	(RdDMAp),hl	; Save updated pointer
+	pop	hl
+	cp	eof		; Test end of file
+	jr	z,gotEOF	; Yeap, indicate it
+	or	a		; Set success
+	ret
+gotEOFp:
+	pop	hl
+gotEOF:
+	scf			; Set end of file
+	ret
+;
+; Read hex word from file - C set says end of file or new page
+;
+RdWord:
+	call	fget		; Read character
+	jr	c,EndLST	; End of input
+	cp	ff		; Test form feed
+	scf
+	ret	z		; Yeap
+	cp	' '+1		; Wait for valid input
+	jr	c,RdWord
+	ld	hl,0		; Reset result
+	ld	b,4		; Set number of digits
+Mul16:
+	add	hl,hl		; Old *16
+	add	hl,hl
+	add	hl,hl
+	add	hl,hl
+	sub	'0'		; Test valid range
+	jr	c,SymErr	; Error decoding symbol table
+	cp	9+1		; Test decimal
+	jr	c,DecDig	; Yeap
+	sub	'A'-10-'0'	; Make hex
+	cp	15+1		; Verify range
+	jr	nc,SymErr	; Error decoding symbol table
+DecDig:
+	add	a,l		; Insert digit
+	ld	l,a
+	call	fget		; Read character
+	jr	c,InvEOF	; End of file
+	djnz	Mul16
+	ld	(SymVal),hl	; Save value
+	ld	(SymType),a	; And type character
+	call	fget		; Read character
+	jr	c,InvEOF	; End of file
+	cp	' '
+	jr	nz,SymErr	; Error decoding symbol table
+	ld	hl,SymName	; Point to symbol name
+RdSymNam:
+	call	fget		; Read character
+	jr	c,InvEOF	; End of file
+	ld	(hl),a		; Unpack symbol
+	inc	hl
+	cp	' '+1		; Find end
+	jr	nc,RdSymNam	; Not yet
+	dec	hl
+	ld	(hl),null	; Close symbol
+	or	a
+	ret
+;
+SymErr:
+	ld	de,$SYMERR	; Error decoding symbol table
+	jr	Abort
+InvEOF:
+	ld	de,$INVEOF	; Unexpected EOF
+	jr	Abort
+;
+; Write buffer to file - Record count in reg B
+;
+WrBuff:
+	ld	de,WrDMA	; Init buffer address
+WrLoop:
+	ld	hl,reclng
+	add	hl,de
+	push	hl
+	push	bc
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCBo
+	ld	c,.wrseq
+	call	BDOS		; Write record
+	or	a		; Verify success
+	jr	nz,DskFull	; Error
+	pop	bc
+	pop	de
+	djnz	WrLoop
+	ret
+DskFull:
+	ld	de,$DSKFUL
+	jp	Abort		; Tell error and exit
+;
+; Write symbol
+;
+WrSymbol:
+	ld	hl,(SymVal)	; Get current value
+	ld	a,h
+	call	putByte		; Put high byte as ASCII to file
+	ld	a,l
+	call	putByte		; Put low byte to file
+	ld	a,' '
+	call	fput		; Put blank to file
+	ld	hl,SymName	; Point to name of symbol
+	jr	WrSym		; Print it
+WrSymLoop:
+	call	toUpper		; Get upper case if requested
+	call	fput		; Put to file
+	inc	hl
+WrSym:
+	ld	a,(hl)		; Get character
+	or	a		; Test end
+	jr	nz,WrSymLoop	; Nope, print
+	ld	a,cr
+	call	fput		; Give new line
+	ld	a,lf
+;
+; Put character in Accu to file
+;
+fput:
+	push	hl
+	ld	hl,(WrDMAp)	; Get write buffer pointer
+	ld	(hl),a		; Store character
+	inc	hl		; Advance pointer
+	ld	(WrDMAp),hl
+	ld	hl,(WrRemain)	; Count down remaining
+	dec	hl
+	ld	(WrRemain),hl
+	ld	a,h
+	or	l		; Test still room in buffer
+	jr	nz,fputOk	; Yeap
+	ld	b,_SYMREC
+	call	WrBuff		; Write buffer to file
+	ld	hl,WrDMA
+	ld	(WrDMAp),hl	; Reset buffer address
+	ld	hl,_SYMREC*reclng
+	ld	(WrRemain),hl	; Reset length
+fputOk:
+	pop	hl
+	ret
+;
+; Put hex byte as ASCII to file
+;
+putByte:
+	push	af
+	rra			; Get hi bits
+	rra
+	rra
+	rra
+	call	putNybble	; Put as ASCII
+	pop	af		; Get low bits
+putNybble:
+	and	LOMASK		; Mask lower bits
+	add	a,90h		; Convert the tricky way
+	daa
+	adc	a,40h
+	daa
+	jr	fput		; Put to file
+;
+; Convert character to upper case if requested
+;
+toUpper:
+	ld	b,a		; Save character
+	ld	a,(UpCase)	; Test conversion to upper case
+	or	a
+	ld	a,b
+	ret	z		; Nope
+	cp	'a'		; Test lower case
+	ret	c		; Nope
+	cp	'z'+1
+	ret	nc
+	and	UPPER		; Convert to upper case
+	ret
+;
+; Read buffer
+; Carry set on end of file
+;
+RdBuff:
+	push	de
+	push	bc
+	ld	de,RdDMA
+	ld	(RdDMAp),de	; Init read buffer
+	ld	b,_LSTREC	; And length
+RdLoop:
+	ld	hl,reclng
+	add	hl,de		; Fix for next read
+	push	hl
+	push	bc
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,FCB
+	ld	c,.rdseq
+	call	BDOS		; Read record
+	or	a		; Test success
+	pop	bc
+	pop	de
+	jr	nz,RdEOF	; End of file
+	djnz	RdLoop
+RdEOF:
+	ld	a,_LSTREC
+	sub	b		; Calculate read result
+	ld	h,a		; Save length
+	ld	l,0
+	srl	h
+	rr	l
+	ld	a,h		; Verify at least one record read
+	or	l
+	pop	bc
+	pop	de
+	ret	nz		; Ok
+	scf			; Indicate end of file
+	ret
+;
+$SYNC.LINE:
+	db	lf,'Symbol Table:'
+SyncLen	equ	$-$SYNC.LINE
+$INVEOF:
+	db	'Unexpected EOF, Aborted',eot
+$DSKFUL:
+	db	'Disk Full!',eot
+$NO.FILE:
+	db	'File Not Found',eot
+$NO.DIR:
+	db	'Directory Full',eot
+$SYSERR:
+	db	'System Error',eot
+$SYMERR:
+	db	'Error Decoding Symbol Value',eot
+$SYMRDY:
+	db	'.SYM created',eot
+$HELP:
+	db	'Filename of list file required, with optional parameters.'
+	db	cr,lf
+	db	'Use:   MAKESYM Filename[.ext][/PXXXX][/DXXXX][/CXXXX][/U]'
+	db	cr,lf
+	db	'where XXXX is a Hex offset to be added to Relocatable items, and'
+	db	cr,lf
+	db	'/U selects upper case conversion'
+	db	eot
+UpCase:
+	db	FALSE
+PrgOff:
+	dw	0
+DtaOff:
+	dw	0
+ComOff:
+	dw	0
+LSText:
+	db	'LST'
+FCBo:
+	db	0,'        SYM'
+	ds	23
+$HEAD:
+	db	'MAKESYM - Copyright (c) 1985 by SLR Systems'
+	db	cr,lf,eot
+WrDMAp:
+	dw	WrDMA		; Current address of write disk buffer
+WrRemain:
+	dw	_SYMREC*reclng
+RdDMAp:
+	dw	0		; Current address of read disk buffer
+RdRemain:
+	dw	0
+SymVal:
+	dw	0
+SymType:
+	db	0
+SymName:
+	ds	SYMLEN
+EndData:
+;
+; Local stack grows down
+;
+LocStk	equ	EndData+2*StkDep
+;
+; Disc buffer grows up
+;
+RdDMA	equ	LocStk
+WrDMA	equ	RdDMA+_LSTREC*reclng
+
+	end
+

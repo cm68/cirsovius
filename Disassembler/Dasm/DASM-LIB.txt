@@ -1,0 +1,147 @@
+;  File:     DASM.LIB
+;
+;  Program:  DASM
+;  Version:  4.1
+;
+vers	equ	41	; Version number
+;
+;  Author:          Werner Cirsovius
+;  Original Author: Richard Conn
+;  Date:  2 Jan 03
+;
+;  Previous Versions:  4.0 (15.Jun 95)
+;  Previous Versions:  3.6 (12.Oct 95)
+;  Previous Versions:  3.5 (13.Feb 95)
+;  Previous Versions:  3.4 (21.Mar 94)
+;  Previous Versions:  3.3 ( 7 Oct 93)
+;  Previous Versions:  3.2 (18 Aug 92)
+;  Previous Versions:  3.1 (12 Apr 91)
+;  Previous Versions:  3.0 (08 Jan 91)
+;
+;  Previous Versions:  2.1 (21 May 90)
+;  Previous Versions:  2.0 (18 Dec 89)
+;
+;  Previous Versions:  1.7 (16 Aug 82)
+;  Previous Versions:  1.3 (23 May 82), 1.4 (12 June 82)
+;  Previous Versions:  1.0 ( 1 May 82), 1.1 (8 May 82), 1.2 (15 May 82)
+;  Derivation:  ZZSOURCE and RESOURCE
+;
+; Original text:
+;
+;	DASM is a TDL/ZILOG Disassembler derived from Dave Barker's
+; ZZSOURCE and Ward Christensen's RESOURCE by Richard Conn.  Refer to
+; the documentation on RESOURCE and the built-in HELP data for information
+; on the commands used for DASM.  A Help file is also being planned for DASM.
+;
+; Currently DASM consists of four files:
+;
+; DASM.LIB	This file: Main description library
+; DASM8080.MAC	The INTEL 8080 Disassmbler part
+; DASMZ80.MAC	The ZILOG Z80 Disassmbler part
+; DASMKRN.MAC	The command manager part
+;
+; To build your favorite version do the following steps:
+;
+; Assemble	M80 =DASM??80	- Build the machine dependent part
+;		M80 =DASMKRN	- Build the kernel
+;	or	SLR80 DASM??80
+;		SLR80 DASMKRN
+; Link		L80 DASM??80,DASMKRN,myname/N/E
+;	or	LINK myname=DASM??80,DASMKRN
+;	or	SLRNK DASM??80,DASMKRN,myname/N/E
+;
+; NOTE: Always link DASMKRN as ** LAST** module
+;
+; Mod history in reversed order:
+;
+;	Allow load address   -- W.Cirsovius, Germany, Hamburg, January 2003
+;	Random I/O on .COM file,
+;	Disable Offset (O)   -- W.Cirsovius, Germany, Hamburg, June 1996
+;	Stat (?) on L, A, B  -- W.Cirsovius, Germany, Hamburg, October 1995
+;	Fixed hex operands   -- W.Cirsovius, Germany, Hamburg, February 1995
+;	Bug fix in COM load  -- W.Cirsovius, Germany, Hamburg, March 1994
+;	Bug fix in heap init
+;	Cosmetic changes     -- W.Cirsovius, Germany, Hamburg, October 1993
+;	Prepare for 8080     -- W.Cirsovius, Germany, Hamburg, August 1992
+;	IX,IY decimal offset -- W.Cirsovius, Germany, Hamburg, April 1991
+;	Dynamic handling     -- W.Cirsovius, Germany, Hamburg, January 1991
+;	Better pointer check -- W.Cirsovius, Germany, Hamburg, May 1990
+;	Handle memory dyn.   -- W.Cirsovius, Germany, Hamburg, December 1989
+;	Fixed the Dump image -- W.Cirsovius, Germany, Hamburg, June 1987
+
+; Character values
+
+null	equ	00h
+ctrlc	equ	03h
+bell	equ	07h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+etx	equ	80h
+
+LoMask	equ	00001111b
+
+; Values for TRUE and FALSE
+
+false	equ	0
+true	equ	not false
+
+; Initial Values for DASM
+
+symmax	 equ	12		;Max number of chars/symbol (<= 12)
+symcol	 equ	27		;Max number of DBs in a line
+initlcnt equ	20		;Number of lines to display via l, a, b
+initdlen equ	128		;Number of bytes to display via d
+initelst equ	-1		;Initial end of list value
+ibuflen	 equ	128		;Length of input line buffer
+
+;  CP/M Constants
+
+CPM.3x	equ	30h
+
+wboot	equ	0000h
+BDOS	equ	0005h
+FCB	equ	005ch
+FCBnam	equ	FCB+1
+FCBtype	equ	FCB+1+.name
+FCBext	equ	FCB+1+.name+.ext
+FCB2nam	equ	FCB+16+1
+FCBex	equ	FCB+12
+FCBcr	equ	FCB+32
+FCBrrn	equ	FCB+RRN
+OSdma	equ	0080h
+TPA	equ	0100h
+;
+.name	equ	8
+.ext	equ	3
+RRN	equ	33
+fcblen	equ	36
+reclen	equ	128
+;
+RECS	equ	4
+FBUFLEN	equ	RECS*reclen	;Length of .COM buffer
+;
+con.in	equ	  1		;Console input
+con.out	equ	  2		;Console output
+con.dir	equ	  6		;Direct console input
+string	equ	  9		;Standard string output
+con.buf	equ	 10		;Console buffer input
+con.sta	equ	 11		;Console status
+version	equ	 12		;Version number
+.open	equ	 15		;Open file
+.close	equ	 16		;Close file
+.delete	equ	 19		;Delete file
+rd.seq	equ	 20		;Read sequential
+wr.seq	equ	 21		;Write sequential
+.make	equ	 22		;Make file
+.dma	equ	 26		;Set DMA
+rd.rnd	equ	 33		;Read random
+f.size	equ	 35		;File size
+con.set	equ	109		;Set console mode
+parse	equ	152		;Parse filename
+
+get.chr	equ	-1		;Get chracter on direct input
+
+

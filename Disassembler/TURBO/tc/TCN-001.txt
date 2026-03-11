@@ -1,0 +1,1392 @@
+;
+; **********************
+; *** Compiler entry ***
+; **********************
+;
+COMPILE:
+	ld	(SavStk),sp	; Save stack
+	ld	hl,(TxtEnd)	; Get end
+	inc	hl
+	ld	(Mem$Top),hl	; Save for memory top
+	inc	h		; .. allow 1k gap
+	inc	h
+	inc	h
+	inc	h
+	ld	(COM$Top),hl	; .. save top of .COM file
+	ld	hl,(DataEnd)	; Get end of data
+	ld	(DataBeg),hl	; .. for start
+	xor	a
+	ld	h,a
+	ld	l,a
+	ld	(l7b91),a	; Clear ????
+	ld	(l7b92),a
+	ld	(l7b94),a
+	ld	(EOFflg),a	; .. end of file flag
+	ld	(BRKmode),a	; .. end break [Option U+]
+	ld	(BackLevel),a	; .. back fix level
+	ld	(IncFlg),a	; .. INCLUDE file
+	ld	(OvlNum),a	; .. overlay number
+	ld	(RRN.stat),a	; .. file access
+	ld	(RRN.off),hl	; .. record base
+	ld	(LinCnt),hl	; .. line count
+	call	ChkAbort	; Test abort
+	dec	hl
+	ld	(FFCB+_rrn),hl
+	ld	a,_Char+1	; Set special type
+	ld	(l7b93),a
+	ld	a,NOT (_Uopt+_Ropt)
+	ld	(Options),a	; Set default options
+	ld	a,2*DefWITH
+	ld	(WithDp),a	; Set depth for WITH
+	ld	hl,(TxtBeg)	; Get start
+	ld	(SrcPtr),hl	; .. init
+	ld	(l7bd9),hl
+	LdaSRC	l79d7		; Init text start
+	LdiSRC	0		; .. set empty
+	ld	hl,(CodeBeg)	; Get start of code
+	call	ChkChn		; Check chaining
+	ld	hl,(TopMem)	; Get top
+	dec	hl
+	ld	(l7b77),hl
+	ld	d,h
+	ld	e,l
+	ld	bc,LenLab	; Get internal table length
+	or	a
+	sbc	hl,bc		; Let some room
+	ld	(LabPtr),hl	; .. init label pointers
+	ld	(PrevLabPtr),hl
+	ld	(CurLab),hl
+	call	ChkOvfl		; Check enough room
+	ld	hl,IntLabTab-1
+	lddr			; Copy internal table
+	call	BegCompile	; Do the compiler task
+	ld	a,(CmpTyp)	; Get type
+	dec	a		; Test compile to file
+	jr	nz,COMP.skp	; .. nope
+	call	FixBack		; Fix back level
+	call	WrRRN		; Write record
+COMP.skp:
+	SavPC	CodeEnd		; Save PC for new top of code
+	xor	a
+	jp	.ERROR		; Set special zero error
+;
+; Do the compiler init task
+;
+BegCompile:
+	call	GetLine		; Fill line from file
+	call	FindStr		; Find optional PROGRAM
+	dw	$PROGRAM
+	jr	nz,No$PROG	; .. nope
+	call	DummyLabel	; Get program name
+	call	IsLeftParen	; Test (
+	jr	nz,No$HEAD	; .. nope
+Samp$HEAD:
+	call	DummyLabel	; Get parameter list
+	call	IsComma		; Test ,
+	jr	z,Samp$HEAD	; .. yeap
+	call	MustRightParen	; Verify )
+No$HEAD:
+	call	MustSemiColon	; Verify ;
+No$PROG:
+	ld	a,.LD.SP
+	ld	hl,TPA
+	call	StCode		; Insert LD SP,0100h
+	ld	a,.LD.A
+	call	StByte		; Set LD A,parlen
+	ld	a,(CCPFlg)	; Test copy CCP
+	cp	.TRUE
+	push	af
+	ld	a,maxparams
+	jr	nz,LimCCP
+	ld	a,RecLng-1
+LimCCP:
+	call	StByte		; Set length
+	ld	a,.LD.HL
+	call	StByte		; .. set LD HL,adr
+	ld	hl,CCPbuf
+	pop	af
+	jr	nz,CCPbufSet
+	PushPC			; Save PC
+CCPbufSet:
+	push	af
+	call	StWrd		; Set buffer address
+	ld	hl,ParamInit
+	call	StCALL@		; Set system call
+	pop	af
+	jr	nz,NoCCP
+	ld	a,.LD.DE
+	call	StByte		; Set LD HL,adr
+	PushPC			; .. save PC
+	call	StWrd
+	call	StImm		; Set up CCP init
+	db	@L0.
+$I0.:
+	LD	HL,CCPBUF
+	LD	BC,RECLNG
+	LDIR
+@L0.	equ	$-$I0.
+;
+NoCCP:
+	ld	hl,l79d7	; Get top for memory compiling
+	ld	a,(CmpTyp)	; Get type
+	or	a		; Test compile to memory
+	jr	z,Comp.Norm	; .. yeap
+	ld	de,RecLng
+	call	VarAlloc	; Allow space for loader
+Comp.Norm:
+	call	StLD.HL		; Set LD HL,top
+	ld	a,(Options)
+	bit	.Copt,a		; Test $C+
+	ld	d,0
+	jr	z,Comp.No$C	; .. nope
+	dec	d
+Comp.No$C:
+	push	de		; .. save flag
+	ld	a,.LD.BC	; LD BC,flag
+	call	StByte
+	PushPC
+	call	StWrd		; .. the flags
+	ld	hl,iniprg
+	call	StCALL@		; Set CALL INIPRG
+	ld	a,.LD.HL	; LD HL,1stFree
+	call	StByte
+	PushPC
+	call	StWrd		; .. the address
+	ld	a,.LD.DE	; LD DE,LastFree
+	call	StByte
+	PushPC
+	call	StWrd		; .. the address
+	ld	hl,(DataEnd)	; Get end of data
+	call	StLD.BC		; Set LD BC,topram
+	ld	a,(CmpTyp)	; Get compile mode
+	ld	h,a
+	ld	l,.LD.A		; LD A,Mode
+	call	StWrd
+	ld	hl,rangchk
+	call	StCALL@		; Set CALL RANGCHK
+	call	Block		; Do a block
+	call	l52fc
+	LdSRC	a		; Get character
+	cp	'.'
+	call	ErrNZ		; '.' expected
+	db	_DotExp
+	ld	hl,halt
+	call	StJP@		; Set JP HALT
+	ld	a,(CCPflg)	; Get flag
+	cp	.TRUE
+	ld	de,RecLng
+	call	z,VarAlloc	; Allocate CCP buffer space
+	pop	hl		; Get PC for data
+	ld	de,(DataBeg)	; Get start of data
+	call	StBack		; .. store
+	pop	hl		; Get PC of 1st free
+	call	StBackPC	; Set current PC
+	pop	hl		; Get PC for flag
+	pop	de		; .. flag
+	ld	a,(BRKmode)	; Get break mode
+	ld	e,a
+	call	StBack		; .. store back
+	ld	a,(CCPflg)
+	cp	.TRUE		; Test more fix
+	ret	nz		; .. nope
+	pop	hl
+	ld	de,(DataBeg)	; Fix two addresses
+	push	de
+	call	StBack
+	pop	de
+	pop	hl
+	jp	StBack
+;
+; Load dummy label
+;
+DummyLabel:
+	ld	hl,(LabPtr)
+	push	hl		; Save current pointer
+	call	GetLabel	; .. get label
+	pop	hl
+	ld	(LabPtr),hl	; Restore pointer
+	ret
+;
+; Perform a block
+;
+Block:
+	ld	a,(WithDp)	; Get depth of WITH
+	push	af
+	add	a,a		; .. *2
+	ld	e,a
+	ld	d,0
+	call	VarAlloc	; Allow as space
+	push	hl
+	call	StJP		; Set JP
+	PushPC			; .. save PC
+	push	hl
+	call	StWrd		; Save word
+Blk.BLKSTRT:
+	call	FndTabStr
+	db	_Byte
+	dw	$LABEL
+	call	ErrNZ		; Block start expected
+	db	_BEGINexp
+	ld	a,(hl)		; Get code
+Blk.Next:
+	cp	_Label		; Test LABEL
+	jr	nz,Blk.CONST?	; .. nope
+	call	ProcLabel	; Process it
+	jr	Blk.BLKSTRT
+Blk.CONST?:
+	cp	_Const		; Test CONST
+	jr	nz,Blk.TYPE?	; .. nope
+	call	ProcConst	; .. process it
+	jr	Blk.Next
+Blk.TYPE?:
+	cp	_Type		; Test TYPE
+	jr	nz,Blk.VAR?	; .. nope
+	call	ProcType	; .. process it
+	jr	Blk.Next
+Blk.VAR?:
+	cp	_Var		; Test VAR
+	jr	nz,Blk.OVRL?	; .. nope
+	call	ProcVar		; .. process it
+	ld	hl,(DataBeg)	; Get start of data
+	ex	(sp),hl
+	jr	Blk.Next
+Blk.OVRL?:
+	cp	_Overly		; Test OVERLAY
+	jp	nz,Blk.BEGIN?	; .. nope
+	ld	a,(CmpTyp)	; Test mode
+	or	a
+	call	ErrZ		; Overlay not allowed on memory
+	db	_OvlDirErr
+	ld	hl,FFCB+1
+	ld	de,OvlFil
+	ld	bc,Fname
+	ldir			; Copy name of file
+	ld	hl,OvlNum
+	ld	a,(hl)		; Get overlay number
+	inc	(hl)		; .. bump it
+	ex	de,hl
+	ld	(hl),'0'	; Init extension
+	inc	hl
+	ld	b,'0'-1
+Blk.Ovl.10:
+	inc	b
+	sub	10		; Get tens
+	jr	nc,Blk.Ovl.10
+	ld	(hl),b		; .. store
+	inc	hl
+	add	a,'9'+1
+	ld	(hl),a		; .. set units
+	ld	hl,overlay
+	call	StCALL@		; Set CALL OVERLAY
+	ld	hl,-1
+	call	StWrd		; Save -1
+	ld	hl,OvlFil
+	ld	b,Fname+Fext
+Blk.Ovl.File:
+	ld	a,(hl)
+	call	StByte		; Store bytes
+	inc	hl
+	djnz	Blk.Ovl.File
+	ld	a,(CmpTyp)
+	dec	a		; Test compile to file
+	jr	nz,Blk.Ovl.Skp1	; .. no
+	call	FixBack		; Fix back level
+	xor	a
+	ld	(BackLevel),a	; Clear back fix level
+	call	WrRRN		; Write record
+Blk.Ovl.Skp1:
+	ld	hl,(RRN.off)	; Save record base
+	push	hl
+	ld	hl,(CodePC)	; .. code pointer
+	push	hl
+	ld	hl,(OVL.len)	; .. length of overlay
+	push	hl
+	SavPC	CodePC		; Set code pointer
+	ld	hl,0
+	ld	(OVL.len),hl	; Clear length of overlay
+	ld	hl,-FCBlen
+	add	hl,sp
+	ld	sp,hl
+	ex	de,hl
+	ld	hl,FFCB
+	ld	bc,FCBlen
+	ldir			; Copy FCB
+	ld	a,(CmpTyp)	; .. test compile to file
+	dec	a
+	jr	nz,Blk.Ovl.Skp2	; .. nope
+	ld	hl,OvlFil
+	ld	de,FFCB+1
+	ld	bc,Fname+Fext
+	ldir			; Copy name of file
+	ex	de,hl
+	ld	b,FCBlen-1-Fname-Fext
+Blk.Ovl.ClrFCB:
+	ld	(hl),0		; .. clear rest of FCB
+	inc	hl
+	djnz	Blk.Ovl.ClrFCB
+	ld	de,FFCB
+	push	de
+	ld	c,.Delete
+	call	.BDOS		; Delete file
+	pop	de
+	ld	c,.Make
+	call	.BDOS		; .. create new one
+	inc	a
+	call	ErrZ		; Cannot create overlay
+	db	_NoOvl
+Blk.Ovl.Skp2:
+	xor	a
+	ld	(RRN.stat),a	; Clear file access
+	ld	(RecPtr),a	; .. and record pointer
+	ld	hl,(DataBeg)	; Get start of data
+	ld	(OVL.dat),hl	; .. for overlay
+Blk.Ovl.Loop:
+	call	FndTabStr
+	db	_Byte
+	dw	$ROUTINE
+	call	ErrNZ		; PROCEDURE/FUNCTION expected
+	db	_SUBexp
+	ld	a,(hl)		; Get key
+	PushPC
+	ld	hl,(FFCB+_rrn)
+	ld	(RRN.off),hl	; Set record base
+	ld	hl,(DataBeg)	; Save start of data
+	push	hl
+	ld	hl,(OVL.dat)	; .. and overlay
+	push	hl
+	ld	e,-1
+	call	ProcSubr	; .. process subroutine
+	ld	b,h
+	ld	c,l
+	pop	de		; Get back overlay data
+	ld	hl,(DataBeg)	; Get new start of data
+	or	a
+	sbc	hl,de		; Test min
+	add	hl,de
+	jr	c,Blk.Ovl.Swap
+	ex	de,hl		; Swap address
+Blk.Ovl.Swap:
+	ld	(OVL.dat),hl	; .. set new data
+	pop	hl
+	ld	(DataBeg),hl	; Set new start of data
+	pop	de
+	push	bc
+	push	de
+	ld	a,(CmpTyp)	; Test compile to file
+	dec	a
+	call	z,FixBack	; .. yeap, fix back levels
+	xor	a
+	ld	(BackLevel),a	; Clear back fix level
+	pop	de
+	push	de
+Blk.Ovl.Zero:
+	CopyPC	hl		; Copy PC
+	or	a
+	sbc	hl,de
+	ld	a,l
+	and	NoMSB		; Test record boundary
+	jr	z,Blk.Ovl.Filld	; .. yeap
+	xor	a
+	call	StByte		; Fill remainder with nulls
+	jr	Blk.Ovl.Zero
+Blk.Ovl.Filld:
+	add	hl,hl		; Calculate record
+	ld	e,h
+	ld	d,0
+	rl	d
+	ld	hl,(OVL.len)	; Get current length of overlay
+	sbc	hl,de		; Check range
+	jr	nc,Blk.Ovl.noSav
+	ld	(OVL.len),de	; Save as new max length
+Blk.Ovl.noSav:
+	PopPC			; Get back PC
+	pop	hl
+	inc	hl
+	ld	(hl),e		; Save record
+	inc	hl
+	ld	(hl),d
+	call	FindStr		; Find more OVERLAY
+	dw	$OVERLAY
+	jp	z,Blk.Ovl.Loop	; .. yeap
+	ld	hl,(OVL.dat)
+	ld	(DataBeg),hl	; Set new start of data
+	ld	a,(CmpTyp)	; Test compile to file
+	dec	a
+	jr	nz,Blk.Ovl.Skp3	; .. nope
+	ld	de,FFCB
+	ld	c,.Close
+	call	.BDOS		; Close file
+Blk.Ovl.Skp3:
+	ld	hl,0
+	add	hl,sp
+	ld	de,FFCB
+	ld	bc,FCBlen
+	ldir			; Copy FCB
+	ld	sp,hl
+	ld	de,(OVL.len)	; Get new overlay length
+	pop	hl
+	ld	(OVL.len),hl	; Restore overlay length
+	pop	hl
+	ld	(CodePC),hl	; .. code pointer
+	pop	hl
+	ld	(RRN.off),hl	; .. record base
+	xor	a
+	ld	(RRN.stat),a	; Clear file access
+	ld	hl,-1
+	ld	(FFCB+_rrn),hl
+	CopyPC	hl		; Copy PC
+	call	ChkChn		; Check chaining
+Blk.Ovl.ClrFil:
+	ld	b,RecLng
+Blk.Ovl.ClrRec:
+	xor	a
+	call	StByte		; Clear record
+	djnz	Blk.Ovl.ClrRec
+	dec	de
+	ld	a,d
+	or	e		; .. till all done
+	jr	nz,Blk.Ovl.ClrFil
+	jp	Blk.BLKSTRT
+Blk.BEGIN?:
+	cp	_Begin		; Test BEGIN
+	jr	z,Blk.BEGIN
+	ld	e,0
+	call	ProcSubr	; Perform PROCEDURE/FUNCTION
+	jp	Blk.BLKSTRT
+Blk.BEGIN:
+	call	ProcBeg		; .. do BEGIN
+	pop	de
+	pop	hl
+	push	de
+	CopyPC	de		; Copy PC
+	dec	de		; .. fix it
+	dec	de
+	or	a
+	sbc	hl,de
+	add	hl,de
+	jr	z,Blk.BEG.Fix
+	call	StBackPC	; Store back current PC
+	jr	Blk.BEG.set
+Blk.BEG.Fix:
+	dec	hl
+	call	ChkChn		; Check chaining
+Blk.BEG.set:
+	pop	de
+	pop	hl
+	ld	(l7bca),hl
+	pop	af
+	ld	(l7bc6),a
+	ret
+;
+; Process LABEL
+;
+ProcLabel:
+	_DE	1,0
+	call	StLabWrd	; Put to table
+	LdSRC	a
+	call	IsItValid	; Test valid character
+	call	SampLabel	; Build label
+	ld	a,(l7b94)
+	call	StLabByte	; Store into label table
+	ld	b,3
+PLb.Loop:
+	ld	a,-1
+	call	StLabByte	; .. set end
+	djnz	PLb.Loop
+	call	SetLabPtr	; Set label pointer
+	call	IsComma		; Test ,
+	jr	z,ProcLabel	; .. yeap, get next
+	jp	MustSemiColon	; Verify ;
+;
+; Process CONST
+;
+ProcConst:
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	ld	de,0
+	call	StLabWrd	; Put to table
+	call	GetLabel	; Get label
+	call	IsEqual		; Test =
+	jr	nz,PrC.ass	; .. must be ':' then
+	call	GetConst	; Get constant
+	ld	a,b
+	call	StLabByte	; Store type into table
+	ld	a,b
+	cp	_Real		; Test real
+	jr	nz,PrC.Str?
+	exx
+	push	hl		; .. save constant
+	push	de
+	push	bc
+	ld	b,3
+PrC.SavReal:
+	pop	de
+	call	StLabWrd	; Put real to table
+	djnz	PrC.SavReal
+	jr	PrC.ComEnd
+PrC.Str?:
+	cp	_String		; Test string
+	jr	nz,PrC.Int
+	ld	hl,l7a57	; Get buffer
+	ld	a,c		; .. and length
+	inc	c
+PrC.SavStrg:
+	call	StLabByte	; Put string to table
+	ld	a,(hl)
+	inc	hl
+	dec	c
+	jr	nz,PrC.SavStrg
+	jr	PrC.ComEnd
+PrC.Int:
+	ex	de,hl
+	call	StLabWrd	; Put integer to table
+PrC.ComEnd:
+	call	SetLabPtr	; Set label pointer
+	ld	d,2
+	jr	PrC.ex
+PrC.ass:
+	call	MustColon	; Verify :
+	xor	a
+	call	StLabByte	; Store into table
+	call	StLabPC		; .. followed by PC
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl		; .. save
+	call	StLabWrd	; Put value to table
+	call	SetLabPtr	; Set label pointer
+	call	GetTYPE		; Get type
+	pop	hl
+	ld	de,(TypeTable)	; Get type table
+	ld	(hl),d		; .. store
+	dec	hl
+	ld	(hl),e
+	call	MustEqual	; Verify =
+	call	PresetConst	; .. assign constant
+	ld	d,4
+PrC.ex:
+	pop	hl
+	ld	(hl),d
+	call	MustSemiColon	; Verify ;
+	call	FndTabStr
+	db	_Byte
+	dw	$LABEL		; Find keyword
+	jr	nz,ProcConst	; .. nope
+	ld	a,(hl)		; Get key
+	ret
+;
+; Process presetted constant
+;
+PresetConst:
+	ld	a,(Type)	; Test valid type
+	cp	_Ptr
+	jr	c,PsC.valid
+	cp	_String
+	jr	nc,PsC.valid
+	call	ERROR		; Files or pointers not allowed
+	db	_InvFilPtr
+PsC.valid:
+	cp	_Array		; Test array constant
+	jr	nz,PsC.Rec?	; .. nope
+	call	SavEnv1		; Save environment
+	ld	hl,(High.Rng)	; Get high set limit
+	call	Get$ENV		; Load name
+	ld	hl,(LastAdr)	; Get last memory address
+	ld	de,(l7b6b)
+	or	a
+	sbc	hl,de
+	inc	hl
+	push	hl
+	ld	hl,(Low.Rng)	; Get lower set limit
+	call	Get$TYPE	; Get name
+	pop	de
+	ld	a,(Type)
+	cp	_Char		; Test character
+	jr	nz,l4978	; .. nope
+	ld	a,d		; Test byte
+	or	a
+	jr	nz,l4978	; .. nope
+	call	IsLeftParen	; Test (
+	jr	nz,l498a	; .. nope
+	jr	l497b
+l4978:
+	call	MustLeftParen	; Verify (
+l497b:
+	push	de
+	call	PresetConst	; .. recursive fetch
+	pop	de
+	dec	de
+	ld	a,d
+	or	e
+	jr	z,l499a
+	call	MustComma	; Verify ,
+	jr	l497b
+l498a:
+	push	de
+	call	.GetStrC	; Get string constant
+	pop	de
+	ld	a,c		; Get length
+	cp	e
+	call	ErrNZ		; Invalid length
+	db	_StrConst
+	call	StConst		; Store string
+	jr	l499d
+l499a:
+	call	MustRightParen	; Verify )
+l499d:
+	call	RestEnv1	; Get back environment
+	ret
+PsC.Rec?:
+	cp	_Record		; Test record constant
+	jr	nz,PsC.Set?
+	call	SavEnv1		; Save environment
+	call	MustLeftParen	; Verify (
+	ld	a,(l7b5d)
+	ld	c,a
+	ld	hl,(TypLen)	; Get length of type
+	push	hl
+	ld	hl,0
+l49b6:
+	push	bc
+	push	hl
+	ld	b,_pointer
+	call	FndLABEL	; Get pointer label
+	call	ErrNZ		; .. undefined
+	db	_Undef
+	call	Get@Table	; Get values and name
+	pop	de
+	ld	hl,(TypVal)	; Get value
+	or	a
+	sbc	hl,de
+	add	hl,de
+	call	ErrNZ		; Invalid set
+	db	_InvSetOrder
+	ld	de,(TypLen)	; Get length of type
+	add	hl,de		; .. fix it
+	push	hl
+	call	MustColon	; Verify :
+	call	PresetConst	; .. recursive fetch
+	pop	hl
+	pop	bc
+	call	IsSemicolon	; Test ;
+	jr	z,l49b6		; .. yeap
+	call	MustRightParen	; Verify )
+	pop	de
+	ex	de,hl
+	or	a
+	sbc	hl,de
+l49eb:
+	ld	a,h
+	or	l
+	jr	z,l49f6
+	xor	a
+	call	StByte		; Fill nulls
+	dec	hl
+	jr	l49eb
+l49f6:
+	call	RestEnv1	; Get back environment
+	ret
+PsC.Set?:
+	cp	_Set		; Test set constant
+	jr	nz,PsC.Strg?
+	call	SavEnv1		; Save environment
+	ld	hl,(TypLen)	; .. save length
+	ld	(l7b6f),hl
+	ld	hl,(Low.Rng)	; Get lower set limit
+	call	Get$TYPE	; Get name
+	call	MustOpen	; Verify [
+	PutSRC	l7ba9		; Save line pointer
+	call	SetInit		; Init set
+	GetSRC	l7ba9
+	call	IsClose		; Test ]
+	jr	z,l4a4b		; .. yeap
+l4a20:
+	call	l4aca
+	push	hl
+	call	FindStr		; Find range
+	dw	$..
+	jr	nz,l4a37	; .. nope
+	call	l4aca
+	PutSRC	l7ba9
+	call	SetContigous	; Set it
+	jr	l4a3f
+l4a37:
+	pop	hl
+	PutSRC	l7ba9
+	call	SetElement	; Set element
+l4a3f:
+	GetSRC	l7ba9
+	call	IsComma		; Test ,
+	jr	z,l4a20		;.. yeap
+	call	MustClose	; Verify ]
+l4a4b:
+	ld	hl,l7a57
+	ld	bc,32
+	PutSRC	l7ba9
+	call	SetAssign	; Assign
+	GetSRC	l7ba9
+	ld	hl,l7a57
+	ld	a,(Low.Rng)	; Get lower set limit
+	rra
+	rra
+	rra
+	and	32-1		; .. modulo 32
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Get pointer
+	ld	a,(l7b6f)	; .. and length
+	ld	b,a
+l4a6f:
+	ld	a,(hl)
+	call	StByte		; Save bytes
+	inc	hl
+	djnz	l4a6f
+	call	RestEnv1	; Get back environment
+	ret
+PsC.Strg?:
+	cp	_String		; Test string constant
+	jr	nz,PsC.real?
+	call	.GetStrC	; Get string constant
+	ld	a,(TypLen)	; Get length of string
+	dec	a
+	sub	c
+	ld	b,a
+	jr	nc,l4a8d
+	add	a,c
+	ld	c,a		; .. set length
+	ld	b,0
+l4a8d:
+	call	StLen		; Put string
+	inc	b
+l4a91:
+	dec	b
+	ret	z
+	xor	a
+	call	StByte		; Fill nulls
+	jr	l4a91
+PsC.real?:
+	cp	_Real		; Test real constant
+	jr	nz,PsC.what?
+	call	.GetConst	; Get constant
+	ld	a,b		; .. test type
+	cp	_Real
+	jr	z,PsC.gotReal	; .. real
+	cp	_Integ
+	call	ErrNZ		; Integer or real expected
+	db	_IntRealCexp
+	call	IntFlt		; Get real
+	exx
+PsC.gotReal:
+	exx
+	push	bc		; Save number
+	push	de
+	push	hl
+	ld	b,3
+l4ab5:
+	pop	hl
+	call	StWrd		; Save real number
+	djnz	l4ab5
+	ret
+PsC.what?:
+	call	l4aca
+	ld	a,(TypLen)	; Get length
+	dec	a
+	ld	a,l
+	jp	z,StByte	; .. set byte
+	jp	StWrd		; .. or word
+;
+;
+;
+l4aca:
+	call	.GetConst	; Get constant
+	ld	a,(Type)	; Test same types
+	cp	b
+	call	ErrNZ		; Invalid types
+	db	_InvType
+	ld	de,(Low.Rng)	; Get low limit
+	call	CmpNum		; ..compare
+	jr	c,l4ae7		; HL < DE
+	ld	de,(High.Rng)	; Get high limit
+	call	CmpNum		; .. compare
+	ret	c		; HL < DE
+	ret	z		; HL = DE
+l4ae7:
+	call	ERROR		; Constant out of range
+	db	_ConstRange
+;
+; Process TYPE
+;
+ProcType:
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+..ProcType:
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	ld	de,0
+	call	StLabWrd	; Put to table
+	call	GetLabel	; Get label
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	call	StLabWrd	; Put value to table
+	call	SetLabPtr	; Set label pointer
+	call	MustEqual	; Verify =
+	call	GetTYPE		; Get type
+	pop	hl
+	ld	de,(TypeTable)	; Get type table
+	ld	(hl),d		; .. store
+	dec	hl
+	ld	(hl),e
+	pop	hl
+	ld	(hl),3		; Set end marker ?????
+	call	MustSemiColon	; Verify ;
+	call	FndTabStr	; Find keyword
+	db	_Byte
+	dw	$LABEL
+	jr	nz,..ProcType	; .. nope, get next
+	ld	a,(hl)		; Get key
+	pop	hl
+	push	af
+	call	l5295
+	pop	af
+	ret
+;
+; Process VAR
+;
+ProcVar:
+	call	l4f35
+	call	MustSemiColon	; Verify ;
+	call	FndTabStr	; Find keyword
+	db	_Byte
+	dw	$LABEL
+	jr	nz,ProcVar	; .. nope
+	ld	a,(hl)		; Return key
+	ret
+;
+; Process PROCEDURE or FUNCTION
+; ENTRY	Accu holds PROCEDURE or FUNCTION
+;	Reg E holds OVERLAY flag (-1)
+;
+ProcSubr:
+	ld	b,a
+	ld	c,0
+	sub	_Proc
+	ld	(l7b97),a	; .. 0 is PROCEDURE
+	ld	a,e
+	ld	(l7b99),a	; .. 0 is normal
+	ld	a,(Options)
+	ld	(LocOpt),a	; Set local options
+	push	bc
+	call	l6ddb
+	jp	z,l4c61
+	pop	de
+	call	StLabWrd	; Put to table
+	call	GetLabel	; Get label
+	ld	hl,(CurLab)	; Get current pointer
+	push	hl
+	ld	hl,(PrevLabPtr)	; Get previous pointer
+	ld	(CurLab),hl	; .. set it
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	call	StLabWrd	; Put to table
+	call	StLabWrd	; .. multiple
+	call	StLabWrd
+	call	StLabWrd
+	ld	de,(RRN.off)	; Get record offset
+	call	StLabWrd	; .. put to table
+	ld	de,0
+	call	StLabWrd	; Put to table
+	call	IsLeftParen	; Test (
+	ld	b,0
+	jr	nz,l4bda	; .. nope
+l4b88:
+	push	bc
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	call	StLabWrd	; Put to table
+	call	StLabWrd	; .. twice
+	call	FindStr		; Find VAR
+	dw	$VAR
+	ld	bc,0
+	jr	nz,l4b9e	; .. nope
+	dec	c
+l4b9e:
+	push	bc
+	call	GetLabel	; Get label
+	pop	bc
+	inc	b
+	call	IsComma		; Test ,
+	jr	z,l4b9e		; .. yeap
+	push	bc
+	call	IsColon		; Test :
+	jr	nz,l4bb8	; .. nope
+	ld	a,c
+	ld	(l7b8f),a
+	call	GetProcVAR	; Get variable
+	jr	l4bc3
+l4bb8:
+	inc	c
+	call	ErrNZ		; ':' expected
+	db	_SemiExp
+	ld	hl,.TYPE+7
+	ld	(TypeTable),hl	; Init type table
+l4bc3:
+	pop	bc
+	pop	hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	de,(TypeTable)	; Get type table
+	dec	hl
+	ld	(hl),d		; .. store
+	dec	hl
+	ld	(hl),e
+	pop	bc
+	inc	b
+	call	IsSemicolon	; Test ;
+	jr	z,l4b88		; .. yeap
+	call	MustRightParen	; Verify )
+l4bda:
+	push	bc
+	ld	a,(l7b97)
+	or	a
+	jr	z,l4c07
+	call	MustColon	; Verify :
+	xor	a
+	ld	(l7b8f),a
+	call	GetProcVAR	; Get variable
+	ld	a,(Type)
+	cp	_String
+	jr	nc,l4bf8
+	cp	_Ptr
+	call	ErrNZ		; Invalid result type
+	db	_InvResult
+l4bf8:
+	pop	bc
+	pop	hl
+	push	hl
+	push	bc
+	ld	de,-4
+	add	hl,de
+	ld	de,(TypeTable)	; Get type table
+	ld	(hl),d		; .. store
+	dec	hl
+	ld	(hl),e
+l4c07:
+	pop	bc
+	pop	de
+	pop	hl
+	ld	(CurLab),hl	; Set current pointer
+	push	de
+	push	bc
+	call	SetLabPtr	; Set label pointer
+	call	MustSemiColon	; Verify ;
+	ld	a,(l7b99)
+	or	a
+	jr	nz,l4c44
+	call	FindStr		; Find FORWARD
+	dw	$FORWARD
+	jr	nz,l4c2c	; .. nope
+	CopyPC	de		; Get PC
+	call	StJP@		; Set JP addr
+	ld	a,-1
+	jr	l4c38
+l4c2c:
+	call	FindStr		; Find EXTERNAL
+	dw	$EXTERNAL
+	jr	nz,l4c44	; .. nope
+	call	.GetIntC	; Get integer constant
+	ex	de,hl
+	xor	a
+l4c38:
+	pop	bc
+	pop	hl
+	ld	(hl),a		; Set values
+	dec	hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),d		; Set address
+	dec	hl
+	ld	(hl),e
+	jp	MustSemiColon	; Verify ;
+l4c44:
+	pop	bc
+	pop	hl
+	push	hl
+	ld	(hl),0
+	dec	hl
+	ld	(hl),b
+	dec	hl
+	CopyPC	de		; Get PC
+	ld	a,(l7b99)
+	or	a
+l4c53:
+	jr	z,l4c5b
+	ex	de,hl
+	ld	bc,-16
+	add	hl,bc
+	ex	de,hl
+l4c5b:
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	pop	hl
+	jr	l4c76
+l4c61:
+	ld	a,(hl)
+	or	a
+	call	ErrZ		; Double label
+	db	_DoubleLab
+	ld	a,(l7b99)
+	or	a
+	call	ErrNZ		; Cannot FORWARD overlay
+	db	_OvlFORW
+	call	SetLine		; .. set new pointer
+	pop	de
+	call	MustSemiColon	; Verify ;
+l4c76:
+	ex	de,hl
+	ld	a,(Options)	; Get options
+	ld	hl,(DataBeg)	; Get start of data
+	bit	.Aopt,a		; Test absolute code
+	jr	z,l4c84		; .. yeap
+	ld	hl,0
+l4c84:
+	ld	(l7b83),hl
+	ld	hl,(CurLab)	; Get current pointer
+	push	hl
+	ld	hl,(LabPtr)	; Get label pointer
+	ld	(CurLab),hl	; .. into current
+	push	hl
+	ex	de,hl
+	ld	a,(hl)
+	ld	(hl),0
+	dec	hl
+	ld	b,(hl)
+	dec	hl
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	or	a
+	jr	z,l4ca7
+	push	hl
+	ex	de,hl
+	inc	hl
+	call	StBackPC	; Store back current PC
+	pop	hl
+l4ca7:
+	ld	a,(l7b97)
+	or	a
+	jr	z,l4cd2
+	ld	d,(hl)
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	hl
+	ex	de,hl
+	call	Get$TYPE	; Get name
+	ld	a,(Type)
+	ld	(l7b87),a
+	ld	hl,(TypLen)	; Get length if type
+	ld	a,l
+	ld	(l7b88),a	; .. save low
+	ex	de,hl
+	call	VarAlloc	; Allocate space for it
+	ld	(l7b89),hl
+	ex	de,hl
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	jr	l4cd6
+l4cd2:
+	ld	de,-4
+	add	hl,de
+l4cd6:
+	ld	de,-4
+	add	hl,de
+	push	hl
+	ld	c,0
+	ld	a,b
+	or	a
+	jr	z,l4d2b
+l4ce1:
+	ld	a,(hl)
+	add	a,c
+	ld	c,a
+	push	bc
+	ld	b,(hl)
+	dec	hl
+	ld	a,(hl)
+	ld	(l7b8f),a
+	dec	hl
+	ld	d,(hl)		; Get type table
+	dec	hl
+	ld	e,(hl)
+	dec	hl
+	push	hl
+	ex	de,hl
+	ld	(TypeTable),hl	; .. save
+	call	Get$TYPE	; Get name
+	ld	hl,(LabPtr)	; Get label pointer
+	ex	(sp),hl
+	push	bc
+l4cfd:
+	push	bc
+	_DE	4,0
+	call	StLabWrd	; Put to table
+l4d04:
+	ld	a,(hl)
+	call	StLabByte	; Store into table
+	bit	_MB,(hl)	; Test end of label
+	dec	hl
+	jr	z,l4d04		; .. nope
+	push	hl
+	call	StLabByte	; Store into table
+	call	StLabWrd	; Put to table
+	call	StLabWrd	; .. twice
+	call	SetLabPtr	; Set label pointer
+	pop	hl
+	pop	bc
+	djnz	l4cfd
+	pop	bc
+	ex	(sp),hl
+	xor	a
+	ld	(l7b90),a
+	call	l4f52
+	pop	hl
+	pop	bc
+	djnz	l4ce1
+l4d2b:
+	ld	b,c
+	push	bc
+	ld	hl,(LabPtr)	; Get label pointer
+	push	hl
+	ld	hl,(l7b83)
+	push	hl
+	ld	hl,(l7b89)
+	push	hl
+	ld	a,(l7b87)
+	push	af
+	ld	a,(l7b88)
+	push	af
+	ld	a,(l7b97)
+	push	af
+	ld	hl,l7b94
+	inc	(hl)
+	call	Block		; Do a block
+	pop	af
+	ld	(l7b97),a
+	pop	af
+	ld	(l7b88),a
+	pop	af
+	ld	(l7b87),a
+	pop	hl
+	ld	(l7b89),hl
+	pop	hl
+	ld	(l7b83),hl
+	ld	(l7b85),de
+	ld	a,h
+	or	l
+	jr	z,l4d79
+	sbc	hl,de
+	jr	z,l4d79
+	call	StLD.BC		; Set LD BC,val16
+	ex	de,hl
+	call	StLD.HL		; Set LD HL,val16
+	ld	hl,RecOn
+	call	StCALL@		; Set call recursive_on
+l4d79:
+	pop	hl
+	pop	bc
+	inc	b
+	dec	b
+	jp	z,l4df3
+	call	StImm
+	db	@L1
+$I1:
+	POP	IY
+@L1	equ	$-$I1
+l4d86:
+	push	bc
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	add	hl,de
+	push	hl
+	dec	hl
+	dec	hl
+l4d8f:
+	bit	_MB,(hl)	; Fix for end of string
+	dec	hl
+	jr	z,l4d8f
+	call	Get@Table	; Get values and name
+	ld	a,(l7b57)
+	or	a
+	jr	nz,l4dd4
+	ld	a,(Type)
+	cp	_Set
+	jr	c,l4dbd
+	jr	z,l4de6
+	cp	_Ptr
+	jr	z,l4de3
+	cp	_String
+	jr	c,l4dbd
+	jr	z,l4de6
+	cp	_Integ
+	jr	nc,l4de3
+	call	StImm
+	db	@L2
+$I2:
+	POP	HL
+	POP	DE
+	POP	BC
+@L2	equ	$-$I2
+	jr	l4de6
+l4dbd:
+;;	call	StPOP		; Set POP HL
+
+	call	RecFix.2	;; Fix code for recursion
+
+	ld	hl,(TypVal)	; Get value
+	call	StLD.DE		; Set LD DE,val16
+	ld	hl,(TypLen)	; Get length of type
+	call	StLD.BC		; Set LD BC,val16
+	call	StImm
+	db	@L3
+$L3:
+	LDIR
+@L3	equ	$-$L3
+	jr	l4de9
+l4dd4:
+
+	call	RecFix.1	;; Set up recursion fix
+
+	xor	a
+	ld	(l7b57),a
+
+;;	ld	a,_Ptr
+;;	ld	(Type),a
+
+	ld	hl,2
+	ld	(TypLen),hl	; Set length of pointer
+
+	jr	l4de6		;; .. skip on fix
+
+l4de3:
+	call	StPOP		; Set POP HL
+l4de6:
+	call	l661b
+l4de9:
+	pop	hl
+	pop	bc
+	djnz	l4d86
+	call	StImm
+	db	@L4
+$L4:
+	PUSH	IY
+@L4	equ	$-$L4
+l4df3:
+	call	l52fc
+	ld	hl,l7b94
+	dec	(hl)
+	ld	a,(l7b97)
+	or	a
+	jr	z,l4e46
+	ld	hl,(l7b89)
+	ld	a,(l7b87)
+	cp	8
+	jr	nz,l4e24
+	ld	b,a
+	call	StImm
+	db	@L5
+$L5:
+	POP	IY
+@L5	equ	$-$L5
+	ld	a,.LD.HL	; LD HL,val16
+	call	StCode
+	ld	hl,assanystring
+	call	StCALL@
+	call	StImm
+	db	@L6
+$L6:
+	PUSH	IY
+@L6	equ	$-$L6
+	jr	l4e46
+l4e24:
+	cp	9
+	jr	nz,l4e35
+	ld	a,.LD.HL	; LD HL,val16
+	call	StCode
+	ld	hl,getreal
+	call	StCALL@
+	jr	l4e46
+l4e35:
+	ld	a,.LD@HL	; LD HL,(addr16)
+	call	StCode
+	ld	a,(l7b88)
+	dec	a
+	jr	nz,l4e46
+	call	StImm
+	db	@L7
+$L7:
+	LD	H,0
+@L7	equ	$-$L7
+l4e46:
+	ld	hl,(l7b83)
+	ld	a,h
+	or	l
+	jr	z,l4e74
+	ld	de,(l7b85)
+	sbc	hl,de
+	jr	z,l4e74
+	ld	a,(l7b97)
+	or	a
+	jr	z,l4e65
+	ld	a,(l7b87)
+	cp	8
+	ld	a,.EXX		; Set EXX
+	call	nz,StByte
+l4e65:
+	call	StLD.BC		; Set LD BC,val16
+	ex	de,hl
+	call	StLD.DE		; Set LD DE,val16
+	ld	hl,RecOff
+	call	StJP@		; Set JP recursive_off
+	jr	l4e79
+l4e74:
+	call	StImm
+	db	@L8
+$L8:
+	RET
+@L8	equ	$-$L8
+l4e79:
+	call	MustSemiColon	; Verify ;
+	pop	de
+	pop	hl
+	ld	(LabPtr),hl	; Set label pointers
+	ld	(PrevLabPtr),hl
+	pop	hl
+	ld	(CurLab),hl	; .. set into current
+	ex	de,hl
+	ret
+;;
+;; Fix routines for recursive calls
+;;
+RecFix.1:
+	ld	a,_Ptr
+	ld	(Type),a	; Set length of type
+RecFix.2:
+	call	StPOP		; Set POP HL
+	ld	hl,(l7b83)
+	ld	a,l
+	or	h
+	ret	z
+	push	de		; Save reg
+	ld	de,(l7b85)
+	sbc	hl,de
+	pop	de
+	ret	z
+	ld	hl,RecExt
+	jp	StCALL@		; .. set routine
+

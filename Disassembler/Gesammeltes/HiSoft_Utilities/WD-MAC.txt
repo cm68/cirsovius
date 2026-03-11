@@ -1,0 +1,290 @@
+	title	File Delete Tool
+	name	('WD')
+
+; DASMed version of HISOFT's small utility WD.COM
+; By W.Cirsovius
+
+; WD.COM deletes files from a disc. It is invoked by typing
+; its name followed by its parameters at the CP/M prompt.
+
+; Call it:
+;		WD <source afn> <destination afn> [-Q]
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+l005c	equ	005ch
+l0080	equ	0080h
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.curdsk	equ	25
+.getRO	equ	29
+
+.drv	equ	1
+.nam	equ	8
+.ext	equ	3
+
+_RO	equ	9
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+	ld	sp,(TPATOP)	; Fetch stack from top of memory
+	ld	de,l0251
+	call	l013a		; Give header
+	ld	hl,l0080	; Point to command line
+	ld	a,(hl)		; Get length
+	and	a		; Test any input
+	jr	nz,l011c	; Yeap
+	ld	hl,l02b8	; Point to wildcard
+	ld	de,l005c
+	ld	bc,.drv+.nam+.ext
+	ldir			; Enable it
+l011c:
+	ld	de,l005c
+	push	de
+	pop	ix		; Copy FCB
+	ld	a,(ix+.drv)	; Get name character
+	cp	' '		; Test defined
+	jr	nz,l013f	; Yeap
+	push	de
+	inc	de
+	ld	hl,l02b8+.drv
+	ld	bc,.nam+.ext
+	ldir			; Set wildcard name
+	pop	de
+	jr	l013f
+;
+; Give final message ^DE and give up
+;
+l0136:
+	call	l013a
+	rst	0
+;
+; Put string ^DE to console
+;
+l013a:
+	ld	c,.string
+	jp	BDOS		; Put it to console
+;
+l013f:
+	xor	a
+	ld	(l02c4),a	; Clear current file count
+	ld	(l02c5),a	; Clear all delete flag
+	ld	a,(de)		; Get disk
+	ld	(l02c6),a	; Save it
+	ld	c,.srcfrs
+	call	BDOS		; Search for first file
+	inc	a		; Test at least one file available
+	jr	nz,l0157	; Yeap
+	ld	de,l0289
+	jr	l0136		; Tell no file and give up
+l0157:
+	push	af
+	ld	a,(l02c6)	; Get disk
+	and	a
+	jr	nz,l0164
+	ld	c,.curdsk
+	call	BDOS		; Get logged disk
+	inc	a		; Make one relative
+l0164:
+	ld	hl,0		; Clear drive bit
+	ld	b,a		; Set count
+	scf			; Start with bit set
+l0169:
+	rl	l		; Shift drive bit into right place
+	rl	h
+	and	a
+	djnz	l0169
+	push	hl
+	ld	c,.getRO
+	call	BDOS		; Get R/O vector
+	pop	de
+	ld	a,l
+	and	e		; Test selected drive R/O
+	ld	l,a
+	ld	a,h
+	and	d
+	or	l
+	jr	z,l0184		; Nope
+	ld	de,l027b
+	jr	l0136		; Tell drive R/O and exit
+l0184:
+	pop	af		; Get back directory code
+l0185:
+	dec	a		; Fix it
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,a		; *16
+	add	a,a		; *32
+	ld	e,a
+	ld	d,0
+	ld	hl,l0080
+	add	hl,de		; Position in record
+	call	l01e2		; Move current filename into buffer
+	ld	c,.srcnxt
+	call	BDOS		; Find next file
+	inc	a		; Test more
+	jr	nz,l0185	; Yeap
+	ld	hl,l02c7	; Init directory buffer
+l01a0:
+	push	hl
+	call	l020b		; Print name of file
+	ld	a,(l02c5)	; Get all delete flag
+	or	a		; Test set
+	jr	nz,l01c8	; Yeap, skip answer
+	ld	de,l02a3
+	call	l013a		; Ask for deletion of this file
+	ld	c,.conin
+	call	BDOS		; Read response
+	or	'a'-'A'		; Make lower case
+	cp	'q'		; Test quit
+	jr	z,l01dc		; Yeap, give up
+	cp	'a'		; Test delete all followers
+	jr	nz,l01c4	; Nope
+	ld	(l02c5),a	; Set all delete flag
+	jr	l01c8
+l01c4:
+	cp	'y'		; Test ok for deletion
+	jr	nz,l01cb	; Nope
+l01c8:
+	call	l022c		; Delete file
+l01cb:
+	ld	de,l0278
+	call	l013a		; Close console line
+	pop	hl
+	ld	de,.drv+.nam+.ext
+	add	hl,de		; Advance to next file
+	ld	a,(l02c4)	; Get current file count
+	dec	a		; Count dow
+	jr	nz,l01dd	; Still more
+l01dc:
+	rst	0
+l01dd:
+	ld	(l02c4),a	; Set current file count
+	jr	l01a0
+;
+; Move current filename into buffer
+;
+l01e2:
+	inc	hl
+	push	hl
+	ld	de,.drv+.nam+.ext
+	ld	hl,0		; Init index
+	ld	a,(l02c4)	; Get current file count
+	or	a		; Test first file
+	jr	z,l01f4		; Yeap
+	ld	b,a
+l01f1:
+	add	hl,de		; Build index
+	djnz	l01f1
+l01f4:
+	ld	de,l02c7	; Init directory buffer
+	add	hl,de		; Position in buffer
+	push	af
+	ld	a,(l02c6)	; Get disk
+	ld	(hl),a		; Put into buffer
+	pop	af
+	inc	hl
+	pop	de
+	ex	de,hl
+	ld	bc,.nam+.ext
+	ldir			; Unpack filename
+	inc	a
+	ld	(l02c4),a	; Update current file count
+	ret
+;
+; Print name of file ^HL
+;
+l020b:
+	ld	b,.nam+.ext	; Init count
+	inc	hl
+l020e:
+	push	hl
+	push	bc
+	ld	a,.ext
+	cp	b		; Test extension position
+	jr	nz,l021e	; Nope
+	push	hl
+	ld	e,'.'
+	ld	c,.conout
+	call	BDOS		; Indicate it
+	pop	hl
+l021e:
+	ld	e,(hl)		; Get character
+	res	7,e		; Strip off attribute
+	ld	c,.conout
+	call	BDOS		; Print it
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l020e
+	ret
+;
+; Delete file
+;
+l022c:
+	pop	de
+	pop	hl
+	push	hl
+	push	de
+	ld	de,l005c
+	ld	bc,.drv+.nam+.ext
+	ldir			; Unpack to FCB
+	ld	de,l005c
+	push	de
+	pop	ix		; Copy FCB
+	bit	7,(ix+_RO)	; Test read only
+	jr	nz,l024b	; Yeap, error
+	ld	c,.delete
+	call	BDOS		; Delete file
+	inc	a		; Verify success
+	ret	nz		; Ok
+l024b:
+	ld	de,l0292
+	jp	l013a		; Cannot delete file
+;
+l0251:
+	db	'WD V1.0 by Adam Denning (C) 1986 HiSoft'
+l0278:
+	db	cr,lf,eot
+l027b:
+	db	'Drive is R/O!',eot
+l0289:
+	db	'No files',eot
+l0292:
+	db	'  Cannot delete!',eot
+l02a3:
+	db	'  Delete (Y/N/A/Q)? ',eot
+l02b8:
+	db	0,'???????????'
+l02c4:
+	db	0fdh		; Current file count
+l02c5:
+	db	0ddh		; All delete flag
+l02c6:
+	db	'u'		; Selected disk
+;
+; Directory buffer starts here
+;
+l02c7:
+	db	0fh,0ddh,'t',0eh,0c9h,0fdh,'!e'
+	db	4,0c5h,':_',4,'G',0ddh,0e5h,0fdh
+	db	0e5h,0e1h,0d1h,0a7h,0edh,'R(',9
+	db	0fdh,0cbh,0,'~',0cch,8,3,'(',0ah
+	db	11h,10h,0,0fdh,19h,10h,0e5h,0afh
+	db	0c1h,0c9h,':X',4,0b7h,'(',0bh
+	db	0ddh,0e5h,0fdh,0e5h,0ddh,0e1h,0cdh
+
+	end
+

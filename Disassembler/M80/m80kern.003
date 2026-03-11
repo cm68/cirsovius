@@ -1,0 +1,1647 @@
+;
+;
+;
+l192b:
+	push	af
+	push	bc
+	push	de
+	push	hl
+	call	err.update	; Fix error count
+	ld	a,(cond.flag)	; Test flags
+	or	a
+	jr	z,l1947
+	ld	a,(l3d29)
+	or	a
+	jr	z,l1947
+	ld	a,(l3d28)
+	or	a
+	jr	z,l194e
+l1947:
+	ld	a,(list.flag)
+	or	a
+	jr	nz,l1953
+l194e:
+	ld	a,(out.line)	; .. test error
+	cp	' '
+l1953:
+	call	nz,l197e	; .. process error
+	ld	a,(out.line)	; Test error
+	cp	' '
+	jr	z,l196f		; .. nope
+	ld	a,(PRNdev)	; Test print enabled
+	inc	a
+	jr	z,l196f		; .. nope
+	ld	(dev.flag),a	; Force device
+	call	l197e
+	xor	a
+	ld	(dev.flag),a	; Set back .PRN
+l196f:
+	inc	a
+	ld	(emp.src),a
+	call	init.line	; Init output line
+	call	l1b31
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	ret
+;
+;
+;
+l197e:
+	ld	a,(l3ffa)
+	or	a
+	jr	z,l19bf
+	dec	a
+	jr	nz,l199f
+	ld	a,(l3ffb)
+	or	a
+	jr	nz,l199f
+	ld	a,(all.flag)
+	or	a
+	jr	nz,l19bf
+	ld	a,'+'
+	ld	(out.l.macro),a	; Indicate macro
+	jr	l19bf
+l199f:
+	ld	a,'+'
+	ld	(out.l.macro),a	; Indicate macro
+	ld	a,(out.line)
+	cp	' '
+	jr	nz,l19bf
+	ld	a,(all.flag)
+	or	a
+	jp	m,l19bf
+	ret	z
+	ld	a,(out.l.PC)
+	cp	' '
+	ret	z
+	ld	a,(l3d31)
+	or	a
+	ret	nz
+l19bf:
+	ld	a,(INC.flag)
+	or	a
+	jr	z,l19cb
+	ld	a,'C'		; Indicate inClude file
+	ld	(out.l.macro-1),a
+l19cb:
+	ld	a,(dev.flag)
+	or	a
+	jr	nz,pr.line
+	ld	a,(list.flag)
+	or	a
+	jr	nz,l19df
+	ld	a,(out.line)
+	cp	' '
+	ret	z
+l19df:
+	ld	hl,page.count	; Bump page count
+	inc	(hl)
+	ld	a,(page.length)
+	cp	(hl)		; Test page filled
+	call	z,new.page
+	ld	a,(dev.flag)
+	or	a
+	jr	nz,pr.line
+	ld	a,(Copt)	; Test cross-reference
+	or	a
+	ld	a,EndItm+MSB
+	call	nz,putPRN
+;
+; ***************** Output line here *****************
+;
+pr.line:
+	ld	hl,out.line	; Point to line
+	ld	b,prf.lin	; .. get prefix length
+	ld	a,(hl)
+	ld	(errmode),a	; Save error
+pr.l.head:
+	ld	a,(hl)
+	inc	hl
+	call	chr.dev		; Give header
+	djnz	pr.l.head
+	ld	a,(emp.src)	; Test code in line
+	or	a
+	jr	nz,crlf..dev	; .. no, end
+	ld	hl,src.line	; Point to source
+pr.l.src.loop:
+	ld	a,(hl)
+	inc	hl
+	cp	cr
+	jr	z,crlf..dev	; Test end of line
+	or	a
+	jr	z,crlf..dev	; Test end of line
+	cp	ff
+	call	nz,chr.dev	; .. skip form feed
+	jr	pr.l.src.loop
+;
+; ***************** End of output line *****************
+;
+; Close line on device
+;
+crlf..dev:
+	call	crlf.dev	; Close line
+	ld	a,' '
+	ld	(errmode),a	; Reset error
+	ret
+crlf.dev:
+	ld	a,cr		; Give CR
+	call	chr.dev
+	ld	a,lf		; .. and LF
+;
+; Print character on device
+; ENTRY	Accu holds character to be printed
+;
+chr.dev:
+	ld	c,a		; Save character
+	ld	a,(Eopt)	; Test error allowed
+	or	a
+	jr	z,noERRlog
+	ld	a,(dev.flag)	; Test selected device
+	or	a
+	jr	z,noERRlog	; Verify console only
+	ld	a,(errmode)	; Test error
+	cp	' '
+	jr	z,noERRlog
+	or	a
+	ld	a,c
+	jp	nz,putERR	; .. put to log file
+noERRlog:
+	ld	a,(dev.flag)	; Test selected device
+	or	a
+	ld	a,c
+	jp	z,putPRN	; .. .PRN
+	jp	conout		; .. console
+;
+; Give new page on print device
+;
+new.page:
+	ld	a,4
+	ld	(page.count),a	; Init header
+	ld	a,(list.flag)	; Test list enabled
+	or	a
+	jr	z,l1a8d		; .. no, skip it
+	ld	a,ff
+	call	putPRN		; Give form feed
+	ld	hl,file.line
+	call	str.PRN		; Print line
+	call	getdate		; Get date into header
+	ld	a,' '
+	call	putPRN		; Delimiter
+	ld	hl,$head1	; Print two parts of header
+	call	str.PRN
+	ld	hl,$head2
+	call	str.PRN
+l1a8d:
+	ld	hl,(pag.cnt)
+	inc	hl
+	ld	a,h
+	or	l
+	dec	hl
+	push	af
+	ld	a,(list.flag)
+	or	a
+	jr	z,l1aa4
+	pop	af
+	push	af
+	jr	z,l1acd		; .. symbol page
+	call	cnv.htd		; Print decimal
+l1aa4:
+	pop	af
+	ld	hl,(page.flag)
+	inc	hl		; Bump
+	ld	(page.flag),hl
+	ld	a,(list.flag)
+	or	a
+	ret	z
+	ld	a,h		; Test 1st time
+	or	l
+	jr	z,l1abe
+	ld	a,'-'
+	call	putPRN
+	call	cnv.htd		; Print decimal
+l1abe:
+	call	crlf.dev
+	ld	hl,SUBTTL.line
+	call	str.PRN
+	call	crlf.dev
+	jp	crlf.dev
+l1acd:
+	ld	a,'S'
+	call	putPRN		; Indicate 'symbol' page
+	jr	l1aa4
+;
+; Print string to .PRN file
+; ENTRY	Reg HL points to string closed by zero
+;
+str.PRN:
+	ld	a,(hl)		; Get character
+	inc	hl
+	or	a		; Test zero
+	ret	z		; .. end if so
+	call	putPRN		; .. else print
+	jr	str.PRN
+;
+; Print decimal value
+; ENTRY	Reg HL holds hex to be converted and printed
+;
+cnv.htd:
+	ld	bc,-10		; Init divisor
+cnv.htd.recur:
+	ld	d,b		; Init result
+	ld	e,b
+cnv.htd.loop:
+	add	hl,bc
+	inc	de		; Divide by ten
+	jr	c,cnv.htd.loop
+	push	hl
+	ex	de,hl
+	ld	a,h		; Test remainder
+	or	l
+	call	nz,cnv.htd.recur; .. recursive call if so
+	ld	a,'9'+1
+	pop	bc
+	add	a,c		; Fix digit for ASCII
+	jp	chr.dev		; .. and print
+;
+; Update error counter
+;
+err.update:
+	ld	a,(out.line)	; Test any error
+	cp	' '
+	ret	z		; .. no
+	cp	'Q'		; Test Q-error
+	jr	z,err.up.warn	; .. it's warning
+	ld	hl,(fatal)
+	inc	hl		; Bump fatal else
+	ld	(fatal),hl
+	ret
+err.up.warn:
+	ld	hl,(warning)
+	inc	hl		; Bump warning
+	ld	(warning),hl
+	ret
+;
+;
+;
+l1b31:
+	call	l1b6a
+l1b34:
+	push	af
+	ld	a,(pass)
+	or	a
+	jr	z,..pop.fl..
+	ld	a,(out.l.PC)
+	cp	' '
+	jr	nz,..pop.fl..
+	pop	af
+	ex	de,hl
+	ld	hl,out.l.PC
+	ld	(code.ptr),hl	; Set pointer
+	call	l18c9		; Get address mode
+	and	11b		; .. mask
+	push	bc
+	ld	c,a
+	ld	b,0
+	ld	hl,$ADR.CH
+	add	hl,bc
+	ld	a,(hl)		; Set indicator
+	ld	hl,(code.ptr)
+	ld	(hl),a
+	ld	hl,out.l.code
+	ld	(code.ptr),hl
+	pop	bc
+	ret
+;
+; Address type indicators
+;
+$ADR.CH:
+	db	' ',$cs,$ds,$com
+;
+;
+;
+l1b6a:
+	ld	hl,(CurPtr)	; Get poimter
+	ld	a,(phase.flag)	; Test phase
+	or	a
+	jr	z,l1b7f		; .. nope
+	push	de
+	ld	de,(PhaseDiff)	; Get phase difference
+	add	hl,de
+	pop	de
+	ld	a,(l3de7)
+	ret
+l1b7f:
+	ld	a,(code.flag)
+	ret
+;
+; ??????????????????????????????
+; ENTRY	Reg B holds address bits
+;
+rel.spec:
+	push	af
+	push	bc
+	ld	a,b		; Get address bits
+	and	@@mod		; .. mask
+	cp	@@com		; Test COMMON
+	jr	nz,l1ba6	; .. nope
+	push	de
+	push	hl
+	ld	de,(l3ddc)	; Get values
+	ld	hl,(l3dde)
+	call	cmp.HL.DE	; fix
+	ld	(BField),hl	; Save pointer
+	ld	(l3ddc),hl
+	ld	c,0001b
+	call	nz,rel.code	; Select COMMON block
+	pop	hl
+	pop	de
+l1ba6:
+	pop	bc
+..pop.fl..:
+	pop	af
+	ret
+;
+; Output rel code
+; ENTRY	Reg C holds four bit special item code
+;	Reg B holds two bits in the value field
+;	Reg DE holds value
+;
+rel.code:
+	push	bc
+	ld	b,0
+	call	rel.ctrl	; Indicate special item
+	ld	b,c
+	ld	a,4
+	call	rel.out		; Give code
+	pop	bc
+	ld	a,c
+	cp	0100b+1		; Test name field only
+	jr	c,name.field
+	cp	1111b		; Test end file
+	ret	z		; .. skip
+	ld	a,2
+	call	rel.out		; Give value code bits
+	ld	b,e
+	call	rel.byte	; Output value
+	ld	b,d
+	call	rel.byte
+	ld	a,c
+	cp	0111b+1		; Test name field follows
+	ret	nc		; .. nope
+name.field:
+	push	hl
+	ld	b,SymLen	; Init length
+	cp	0100b		; Test extension
+	jr	z,name..fix
+	cp	0011b		; Test library request
+	jr	nz,name..go
+name..fix:
+	inc	b		; Fix max
+name..go:
+	ld	hl,(BField)
+	dec	hl		; Point to length
+	ld	a,(hl)
+	cp	b		; Compare against max
+	jr	c,name..ok
+	ld	a,b		; Set max if out of range
+name..ok:
+	ld	b,a
+	ld	d,a
+	ld	a,3
+	call	rel.out		; Give length
+	inc	hl		; Set to string begin
+	inc	hl		; .. skip symbol header
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+	inc	hl
+name..loop:
+	ld	b,(hl)		; Get byte
+	ld	a,c
+	cp	0100b		; Test special item
+	jr	z,name..MSB
+	ld	a,b
+	and	noMSB		; .. mask if not
+	ld	b,a
+name..MSB:
+	call	rel.byte	; Output character
+	inc	hl
+	dec	d
+	jr	nz,name..loop
+	pop	hl
+	ret
+;
+; Output n bits
+; ENTRY	Accu holds bit count
+;	Reg B holds bits to be outputted
+;
+rel.out:
+	push	de
+	ld	d,a
+	ld	a,relbits
+	sub	d		; Test byte boundary
+	jr	z,rel.8.out
+	ld	e,a
+	ld	a,b
+rel.p.out:
+	add	a,a		; Left justify bits
+	dec	e
+	jr	nz,rel.p.out
+	ld	b,a
+rel.8.out:
+	sla	b		; Get bit
+	call	rel.bit		; .. output
+	dec	d
+	jr	nz,rel.8.out
+	pop	de
+	ret
+;
+; Output 8 bits data
+; ENTRY	Reg B holds the byte for output
+;
+rel.data:
+	xor	a
+	call	rel.bit		; Give 0
+;
+; Output 8 bits
+; ENTRY	Reg B holds the byte for output
+;
+rel.byte:
+	push	bc
+	ld	c,8		; Set counter
+rel..byte:
+	rl	b		; Get bit
+	call	rel.bit		; .. output
+	dec	c
+	jr	nz,rel..byte
+	pop	bc
+	ret
+;
+; Output control prefix
+; ENTRY	Reg B holds two bit control
+;
+rel.ctrl:
+	scf
+	call	rel.bit		; Output 1
+	ld	a,b
+	rra			; Get MSB
+	rra
+	call	rel.bit
+	ld	a,b		; Get LSB
+	rra
+;
+; Output one bit
+; ENTRY	Carry indicates bit set
+;
+rel.bit:
+	push	hl
+	ld	hl,bits
+	rl	(hl)		; Shift in new bit
+	ld	a,(hl)		; .. get new
+	inc	hl
+	inc	(hl)		; Bump count
+	jr	nz,rel..bit
+	call	putREL		; Output byte
+	ld	a,-relbits	; Init count
+	ld	(bitcnt),a
+rel..bit:
+	pop	hl
+	ret
+;
+; Check legal operator
+; EXIT	Accu holds operator found
+;	Zero flag set if number constant found
+;
+chk.oper:
+	push	bc
+	call	get.item	; Check label
+	pop	bc
+	jp	z,l1e43		; .. yes
+	jp	p,l1d07		; .. normal character
+	cp	' '
+	jp	z,chk.oper	; Skip blank
+	cp	tab
+	jp	z,chk.oper	; .. and tab
+	cp	''''
+	jr	z,l1cc3		; Check string
+	cp	'"'
+	jr	z,l1cc3
+	cp	'('
+	jr	z,l1cac		; ( -->  2
+	cp	')'
+	jr	z,l1caf		; ) -->  3
+	cp	'+'
+	jr	z,l1cb2		; + -->  8
+	cp	'-'
+	jr	z,l1cb5		; - -->  9
+	cp	'*'
+	jr	z,l1cb8		; * --> 10
+	cp	'/'
+	jr	z,l1cbb		; / --> 11
+	cp	';'
+	jr	z,l1ca8		; End of ... --> 0
+	cp	','
+	jr	z,l1ca8
+	cp	cr
+	call	nz,O.err
+l1ca8:
+	xor	a
+	jr	l1cc0
+l1cac:
+	ld	a,.LftPar
+	jr	l1cc0
+l1caf:
+	ld	a,.RgtPar
+	jr	l1cc0
+l1cb2:
+	ld	a,.PLUS
+	jr	l1cc0
+l1cb5:
+	ld	a,.MINUS
+	jr	l1cc0
+l1cb8:
+	ld	a,.MULT
+	jr	l1cc0
+l1cbb:
+	ld	a,.DIV
+	jr	l1cc0
+l1cbe:
+	ld	a,.Number
+l1cc0:
+	cp	.Number		; Adjust return
+	ret
+l1cc3:
+	ld	hl,0
+	push	bc
+	ld	b,a
+	call	chk.no.NL
+	cp	b
+	jr	nz,l1cd9
+	call	chk.curch	; Get character
+	cp	b		; Test same
+	jr	nz,l1cf9	; .. nope
+	call	chk.no.NL
+l1cd9:
+	ld	l,a
+	ld	(l3de2),a
+	call	chk.no.NL
+	cp	b
+	jr	nz,l1cef
+	call	chk.curch	; Get character
+	cp	b		; Test same
+	ld	a,b
+	jr	nz,l1cf4	; .. nope
+	call	chk.no.NL
+l1cef:
+	ld	h,l
+	ld	l,a
+	call	chk.no.NL
+l1cf4:
+	cp	b
+	pop	bc
+	jr	chk.num.oper
+l1cf9:
+	ld	de,l3de2
+	ld	a,(de)
+	or	a
+	jr	nz,l1d03
+	dec	a
+	ld	(de),a
+l1d03:
+	ld	a,b
+	jr	l1cf4
+l1d07:
+	ld	hl,(actptr)
+	dec	hl
+	push	hl
+l1d0c:
+	call	UPP.char
+	jp	p,l1d0c
+	ld	(l3de2),a
+	ld	hl,(actptr)
+	dec	hl
+	dec	hl
+	ld	(actptr),hl
+	call	UPP.char
+	pop	hl
+	ld	(actptr),hl
+	jp	nz,l1dfb
+	cp	'G'
+	jr	nc,l1d48
+	ld	h,a
+	ld	a,(radix)
+	cp	14
+	jp	nc,l1dfb
+	ld	l,a
+	ld	a,h
+	cp	'D'
+	jr	z,l1d48
+	cp	'B'
+	jp	nz,l1dfb
+	ld	a,l		; Get back radix
+	cp	12
+	jp	nc,l1dfb
+	ld	a,h
+l1d48:
+	cp	'B'		; Test binary
+	jr	z,cnv.bth
+	cp	'D'		; Test decimal
+	jr	z,do.dec
+	cp	'H'		; Test hexadecimal
+	jr	z,do.hex
+	cp	'O'		; Test octal
+	jr	z,do.oc
+	call	nz,O.err
+	jr	nz,do.dec	; .. try decimal
+do.oc:
+	call	cnv.oth		; Do octal
+	cp	'O'		; Test legal end
+chk.num.oper:
+	call	nz,O.err
+..oct.ok:
+	ld	c,' '
+	ex	de,hl
+	jp	l1cbe
+do.dec:
+	call	cnv.dth		; Convert to decimal
+	cp	'D'
+	jr	chk.num.oper
+do.hex:
+	call	cnv.hth
+	cp	'H'
+	jr	chk.num.oper
+;
+; Convert binary ASCII string to hex
+; EXIT	Reg HL holds number
+;	Accu holds non valid end character
+;
+cnv.bth:
+	ld	hl,0		; Init number
+cnv..bth:
+	call	UPP.char	; Get character
+	cp	'B'		; Test closure
+	jr	z,..oct.ok
+	sub	'0'		; Check range 0..1
+	call	m,N.err
+	cp	'1'-'0'+1
+	call	nc,N.err
+	add	hl,hl		; Double old
+	or	a		; Test 0
+	jr	z,cnv..bth	; .. skip
+	inc	hl		; Insert 1
+	jr	cnv..bth
+;
+; Convert decimal ASCII string to hex
+; EXIT	Reg HL holds number
+;	Accu holds non valid end character
+;
+cnv.dth:
+	ld	hl,0		; Init number
+cnv..dth:
+	call	UPP.char	; Get character
+	ret	z		; .. test number
+	ret	m
+	sub	'0'		; Get digit
+	add	hl,hl		; * 2
+	ld	d,h		; .. save
+	ld	e,l
+	add	hl,hl		; * 4
+	add	hl,hl		; * 8
+	add	hl,de		; *10
+	ld	d,0
+	ld	e,a
+	add	hl,de		; Insert digit
+	jr	cnv..dth
+;
+; Convert octal ASCII string to hex
+; EXIT	Reg HL holds number
+;	Accu holds non valid end character
+;
+cnv.oth:
+	ld	hl,0		; Init number
+cnv..oth:
+	call	UPP.char	; Get character
+	ret	z		; .. test number
+	ret	m
+	sub	'0'
+	cp	8		; Check range
+	call	nc,N.err
+	add	hl,hl		; * 2
+	add	hl,hl		; * 4
+	add	hl,hl		; * 8
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Insert digit
+	jr	cnv..oth
+;
+; Convert hex ASCII string to hex
+; EXIT	Reg HL holds number
+;	Accu holds non valid end character
+;
+cnv.hth:
+	ld	hl,0		; Init number
+cnv..hth:
+	call	UPP.char	; Get character
+	ret	m		; .. invalid
+	cp	'F'+1		; Test range A..F
+	jr	nc,cnv.ex.hth	; .. maybe delimiter H
+	sub	'0'		; Strip off offset
+	cp	10		; Check range 0..9
+	jr	c,cnv.hex.hth
+	sub	'A'-'9'-1	; Fix hex
+cnv.hex.hth:
+	add	hl,hl		; * 2
+	add	hl,hl		; * 4
+	add	hl,hl		; * 8
+	add	hl,hl		; *16
+	ld	e,a
+	ld	d,0
+	add	hl,de		; Insert digit
+	jr	cnv..hth
+cnv.ex.hth:
+	cp	'H'		; Verify legal end
+	ret	z
+	jp	N.err		; .. error
+l1dfb:
+	ld	a,(l3cf2)
+	or	a
+	jr	nz,l1e34
+	ld	hl,0
+	push	bc
+l1e06:
+	call	UPP.char
+	jp	m,l1e30
+	sub	'0'
+	cp	10
+	jr	c,l1e18
+	sub	'A'-'9'-1
+	call	c,N.err
+l1e18:
+	ld	c,a
+	ld	b,0
+	ld	a,(radix)	; Get radix
+	dec	a
+	cp	c		; .. compare
+	call	c,N.err		; .. number error
+	inc	a
+	ld	e,a
+	ld	d,b
+	push	bc
+	call	l2463
+	ex	de,hl
+	pop	bc
+	add	hl,bc
+	jr	l1e06
+l1e30:
+	pop	bc
+	jr	l1e3d
+l1e34:
+	call	cnv.dth
+;;	jr	l1e3d
+;;
+;; *** NEVER CALLED ***
+;;
+;;l1e3a:
+;;	call	cnv.oth		; Convert octal to hex
+l1e3d:
+	call	pred.ptr
+	jp	..oct.ok
+l1e43:
+	push	bc
+	call	pred.ptr
+	ld	a,(actbuf)
+	ld	(l3de2),a
+	cp	log.itm+1	; Check length
+	jr	nc,l1ebf	; .. not a logical
+	dec	a
+	jp	z,l1fe4
+	call	GetSymPtr	; Get symbol table pointer
+	jr	z,l1ebf		; .. chain found
+	ld	hl,logical	; Init table
+	ld	bc,log.len+1
+l1e62:
+	dec	c		; Test done
+	jr	z,l1ebf		; .. yeap
+	inc	b		; .. set dummy 1
+l1e67:
+	dec	b		; Test scanned to next
+	jr	z,l1e6f		; .. yeap
+	inc	hl		; Bump over string
+	jr	l1e67
+l1e6f:
+	ld	b,log.itm	; Set item length
+	ld	de,actbuf+1	; .. init buffer
+l1e74:
+	ld	a,(de)
+	cp	(hl)		; Find logical
+	jr	nz,l1e62	; .. nope, skip to next
+	inc	de
+	inc	hl
+	djnz	l1e74
+	ld	hl,log.code-1
+	add	hl,bc
+	ld	a,(hl)		; Get code
+	cp	.XOR		; Test special
+	jr	nz,l1e8c
+	ld	(l3ceb),a	; .. save
+l1e8c:
+	pop	bc
+	or	a		; Test AND (code 0xFF)
+	jp	p,l1cc0		; .. nope, get result
+	call	white.space
+	ld	de,-1
+l1e97:
+	cp	';'
+	jr	z,l1eb9
+	cp	cr
+	jr	z,l1eb9
+	or	a
+	jr	nz,l1eb0
+	call	chk.char
+	cp	'&'
+	call	z,chk.char
+	jr	l1e97
+l1eb0:
+	call	chk.char
+	cp	cr
+	jr	nz,l1eb0
+	inc	de
+l1eb9:
+	call	pred.ptr
+	jp	l1cbe
+l1ebf:
+	ld	hl,(actptr)
+	push	hl
+	call	chk.char	; Test EXTRN via ##
+	cp	'#'
+	jr	nz,l1eed
+	call	chk.char
+	cp	'#'
+	jr	nz,l1eed
+	scf
+	call	PutSymbol	; Put symbol into table
+	call	ChkSymb
+	inc	hl
+	ld	a,(hl)
+	ld	b,a
+	and	_KNOW		; Test defined
+	call	nz,M.err	; .. multiple error
+	ld	a,b
+	and	11b		; Get lower mode bits
+	or	_DEF		; Indicate defined
+	ld	(hl),a
+	pop	bc
+	dec	hl
+	jr	l1f21
+l1eed:
+	pop	hl
+	ld	(actptr),hl
+	call	GetSymPtr	; Get symbol table pointer
+	jr	z,l1f74		; .. chain found
+	ld	a,(CPU.flag)
+	add	a,a
+	jr	z,l1f04		; Skip Z80
+	call	DecodeStmt	; Find 8080 code
+	jp	z,l1fae		; .. found
+l1f04:
+	ld	a,(l3ceb)
+	or	a
+	jr	z,l1f1d
+	scf
+	call	CrossSym	; Mark PUBLIC
+	call	GetSymPtr	; Get symbol table pointer
+	jr	z,l1f21		; .. chain found
+	xor	a
+	ld	hl,(LastMem)
+	ld	(hl),a		; .. clear entry
+	jr	l1f21
+l1f1d:
+	scf
+	call	PutSymbol	; Put symbol into table
+l1f21:
+	and	_KNOW+_DEF+11b	; Mask bits
+	ld	b,a
+	and	_DEF		; Test defined
+	ld	a,b
+	jr	z,l1f32		; .. nope
+	ld	(l3ebe),a
+	ld	b,_DEF
+	ld	(l3ebf),hl
+l1f32:
+	and	_INT		; Test internal
+	call	nz,D.err
+	ld	a,(CPU.flag)
+	add	a,a
+	ld	a,0
+	jr	nz,l1f43
+	ld	a,(hl)
+	and	_PUB		; Test public
+l1f43:
+	or	a
+	ld	a,b
+	inc	hl
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	pop	bc
+	ld	c,a
+	jr	z,l1f51
+	ld	e,0
+l1f51:
+	and	00000011b
+	cp	00000011b
+	jr	nz,l1f62
+	push	de
+	inc	hl
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	ld	(l3dde),hl
+	pop	de
+l1f62:
+	ld	a,c
+	and	_KNOW		; Test known
+	ld	a,c
+	jp	nz,l1cbe	; .. yeap
+	and	_DEF		; Test defined
+	call	z,U.err		; .. should be
+	ld	de,0
+	jp	l1cbe
+l1f74:
+	push	hl
+	push	af
+	scf
+	call	CrossSym	; Mark PUBLIC
+	pop	af
+	pop	hl
+	ld	(BField),hl
+	ld	a,(hl)
+	and	NoMSB
+	cp	'B'
+	jr	c,l1fa8
+	ld	a,(hl)
+	and	r.p
+	push	af
+	ld	a,(Func.Res)	; Get old result
+	or	a
+	call	nz,O.err	; .. should be zero
+	pop	af
+	ld	(Func.Res),a	; Set new
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	ld	(Func.Val),a	; Set value
+	call	l2065
+	call	z,l207a
+	dec	hl		; .. REAL DEC -1
+	dec	hl
+l1fa8:
+	inc	hl
+l1fax:
+	ld	a,(hl)
+	dec	hl
+	jp	l1f21
+l1fae:
+	or	a		; Test mode
+	jp	m,l1f04		; .. pseudo code
+	inc	hl
+	ld	e,(hl)		; Get opcode
+	and	LoMask shl 3	; Mask control
+	rra
+	rra
+	rra
+	ld	c,a
+	ld	d,0
+	ld	b,d
+	ld	hl,l1fda
+	add	hl,bc		; Point to table
+	ld	a,(hl)		; Get 8080 control byte
+	or	a
+	jr	z,l1fd4		; Singel, immediate or address
+	cp	1dh		; Test dual register access
+	jr	nz,l1fce
+	ld	(DualReg),a	; .. set flag
+l1fce:
+	pop	bc
+	ld	c,' '
+	jp	l1cc0
+l1fd4:
+	pop	bc
+	ld	c,' '
+	jp	l1cbe
+;
+; 8080 code type table
+;
+l1fda:
+	db	00h,1bh,1ah,18h,19h,00h,00h,1dh,19h,1ah
+;
+;
+;
+l1fe4:
+	ld	a,(actbuf+1)
+	cp	'X'
+	jr	nz,l2000
+	call	chk.curch	; Get character
+	cp	''''		; Test quote
+	jp	nz,l1ebf	; .. nope
+	call	chk.char	; .. fix
+	call	cnv.hth		; Convert character
+	cp	''''
+	pop	bc
+	jp	chk.num.oper
+l2000:
+	cp	'$'
+	jp	nz,l1ebf
+	call	l1b6a
+	ex	de,hl
+	add	a,' '
+	pop	bc
+	ld	c,a
+	jp	l1cbe
+;
+;
+;
+logical:
+	db	'XOR '		; 01eh
+log.itm	equ	$-logical
+	db	'AND '		; 0ffh
+	db	'NOT '		; 016h
+	db	'MOD '		; 015h
+	db	'SHL '		; 014h
+	db	'SHR '		; 013h
+	db	'OR  '		; 012h
+	db	'EQ  '		; 011h
+	db	'NE  '		; 010h
+	db	'LT  '		; 00fh
+	db	'LE  '		; 004h
+	db	'GT  '		; 00eh
+	db	'GE  '		; 00dh
+	db	'LOW '		; 00ch
+	db	'HIGH'		; 007h
+	db	'NUL '		; 006h
+	db	'TYPE'		; 005h
+;
+; Corresponding value table
+;
+log.code:
+;	db	01eh,0ffh,016h,015h,014h,013h,012h,011h,010h
+	db	.XOR,.AND,.NOT,.MOD,.SHL,.SHR,.OR,.EQ,.NE
+;	db	00fh,004h,00eh,00dh,00ch,007h,006h,005h
+	db	.LT,.LE,.GT,.GE,.LOW,.HIGH,.NUL,.TYPE
+log.len	equ	$-log.code
+;
+l2065:
+	ld	a,(Func.Res)	; Get result
+	cp	20h
+	ret	nz
+	ld	a,(Func.Val)	; Get value
+	cp	6
+	ret	nz
+	ld	a,(last.read)	; Test last character read
+	cp	'A'
+	ret	z
+	cp	'a'
+	ret
+;
+;
+;
+l207a:
+	call	chk.curch	; Get character
+	cp	''''		; Test quote
+	call	z,chk.char	; .. fix if so
+	ret
+;
+; Get complexe function
+;
+Function::
+	xor	a
+	ld	b,a
+	ld	c,' '
+	ld	l,a
+	ld	h,a
+	ld	(DualReg),a	; Get r1,r2 flag
+	ld	(l3ebd),a
+	ld	(l3de2),a
+	ld	(l3ceb),a
+	ld	(line.flag),a	; Clear code
+	ld	(line.flag+1),a	; .. and length
+	ld	(l3ed3),a
+	ld	(Func.Res),a	; Clear result
+	ld	(Func.Val),a
+	add	hl,sp		; Copy stack
+	ld	(rek.stack),hl	; .. save it
+	ex	de,hl
+	ld	hl,(top.data)
+	call	cmp.HL.DE	; Compare against top
+	jp	nc,Stk.Ovl	; .. no room
+	push	bc
+l20b3:
+	call	chk.oper	; Get operator
+	jp	m,l211b		; .. end found
+	jp	z,l215d		; .. number constant
+	cp	.RgtPar
+	jp	m,l217e		; Test paranthesis open
+	jp	z,l21f2		; .. or closed
+	cp	18h		; Test range
+	jr	c,l20ce
+	cp	.XOR		; .. and special
+	call	c,l2166
+l20ce:
+	ld	c,a
+	ld	(MS.Field),a	; Set into special
+	call	l2183		; Get code
+	dec	a
+	cp	b
+	ld	a,c
+	jp	nc,l220c
+	cp	.PLUS		; Test unary
+	jp	z,l2204
+	cp	.MINUS
+	jp	z,l2204
+l20e5:
+	call	l223f
+	ld	a,c
+	ld	(l3f57),a	; Save type
+	call	l218e
+	cp	2
+	jp	z,l213c
+	or	a
+	jr	nz,l2107
+	ld	a,(MS.Field)	; Get special
+	cp	.RgtPar		; Test )
+	jr	nz,l213c
+	call	z,O.err
+	push	bc
+	jr	l213c
+l2107:
+	push	bc
+	call	l2183		; Get code
+	push	af
+	ld	a,(l3f57)	; Get type
+	ld	c,a
+	pop	af
+	call	l2166
+	ld	b,a
+	ld	a,(MS.Field)	; Get special
+	jr	l20ce
+;
+; Found end operator
+;
+l211b:
+	push	af
+	call	pred.ptr
+	call	chk.char
+	cp	','
+	jr	nz,l2138
+	ld	a,(DualReg)	; Test r1,r2
+	or	a
+	jr	z,l2138		; .. nope
+	pop	af
+	xor	a
+	ld	(DualReg),a	; .. clear flag
+	ld	a,1ch		; .. change code
+	jr	l20ce
+l2138:
+	pop	af
+	jr	l219f
+l213c:
+	ld	a,(l3f57)	; Get type
+	ld	c,a
+	ld	a,(MS.Field)	; Get special
+	cp	.RgtPar		; Test )
+	jr	z,l214f
+	push	bc
+	call	l2166
+	jp	l220c
+l214f:
+	pop	bc
+	push	bc
+	ld	a,b
+	call	l2183		; Get code
+	ld	b,a
+	ld	a,(l3f57)	; Get type
+	ld	c,a
+	jr	l2160
+;
+; Found number
+;
+l215d:
+	call	l22c4
+l2160:
+	call	l2166
+	jp	l20b3
+;
+;
+;
+l2166:
+	pop	hl
+	push	de
+	ld	e,a
+	ld	a,c
+	and	00000011b
+	cp	00000011b
+	ld	a,e
+	jr	nz,l2179
+	ex	de,hl
+	ld	hl,(l3dde)
+	ex	(sp),hl
+	push	hl
+	ex	de,hl
+l2179:
+	ld	d,1
+	ld	e,c
+	push	de
+l217d:
+	jp	(hl)
+l217e:
+	ld	b,a
+	push	bc
+	jp	l20b3
+;
+; Get corresponding type code
+; ENTRY	Accu holds special index
+; EXIT	Accu holds type code
+;
+l2183:
+	push	de
+	ld	hl,l22fb
+	ld	e,a
+	ld	d,0
+	add	hl,de
+	ld	a,(hl)
+	pop	de
+	ret
+;
+;
+;
+l218e:
+	pop	hl
+	pop	bc
+	ld	a,b
+	cp	1
+	jr	nz,l219e
+	call	O.err
+	push	bc
+	xor	a
+	ld	b,a
+	cp	1
+l219e:
+	jp	(hl)
+;
+;
+;
+l219f:
+	pop	hl
+	ld	a,h
+	cp	1
+	sbc	a,a
+	ld	(Func.Err),a	; Set return code
+	push	hl
+l21a8:
+	call	l223f
+	ld	a,c
+	ld	(l3f57),a	; Set type
+	call	l218e
+	jp	m,l21cf
+	cp	2
+	jp	z,l2546
+	push	bc
+	ld	a,(l3f57)	; Get type
+	ld	c,a
+	call	l2166
+	jr	l21a8
+;
+;
+;
+l21c5:
+	ld	de,0
+	call	succ.ptr
+	xor	a
+	ld	(l3f57),a	; Clear type
+l21cf:
+	ld	a,(l3f57)	; Get type
+	ld	b,a
+	ld	(AdrMod),a	; Set as address mode
+	and	Mask2		; .. mask
+	ld	c,a
+	jr	z,l21de
+	ld	c,20h
+l21de:
+	ld	a,b
+	and	80h
+	or	c
+	ld	hl,line.flag
+	or	(hl)
+	ld	(hl),a
+	ld	hl,(actptr)
+	dec	hl
+	ld	c,(hl)
+	ld	a,e
+	ld	hl,(rek.stack)	; Get back stack
+	ld	sp,hl		; .. as current
+	ret
+;
+;
+;
+l21f2:
+	ld	(MS.Field),a	; Set special
+	pop	de
+	ld	a,d
+	cp	2
+	call	z,O.err
+	or	a
+	call	z,O.err
+l2200:
+	push	de
+	jp	l20e5
+;
+;
+;
+l2204:
+	ex	(sp),hl
+	ld	a,h
+	ex	(sp),hl
+	dec	a
+	jp	z,l20e5
+	ld	a,c
+l220c:
+	pop	bc
+	ld	d,a
+	push	bc
+	ld	a,b
+	dec	a
+	ld	a,d
+	jr	z,l2236
+	ld	a,d
+	cp	07h
+	jr	z,l2236
+	cp	08h
+	jp	z,l20b3
+	cp	15h
+	jr	z,l2236
+	cp	16h
+	jr	z,l2236
+	cp	1eh
+	jr	z,l2236
+	cp	09h
+	call	nz,O.err
+	ld	a,17h
+l2236:
+	ld	b,a
+	push	bc
+	call	l2183		; Get code
+	ld	b,a
+	jp	l20b3
+;
+;
+;
+l223f:
+	pop	hl		; Get caller
+	ld	(rek.PC),hl	; .. and save it
+	pop	de		; Get code
+	ld	a,d
+	or	a
+	push	de
+	jr	nz,l2252
+	ld	de,0
+	push	de
+	ld	de,1*256+20h
+	push	de
+l2252:
+	call	l22aa
+	ld	(oper.1),hl	; Save operands
+	ld	(oper.2),de
+	ld	a,c
+	ld	(l3f57),a	; Set type
+	call	l218e
+	jp	m,l22a1
+	sub	2
+	jr	z,l22a1
+	ld	(l3f58),a	; Save code
+	cp	7-2		; .. test NOT
+	jr	z,l228b
+	cp	16h-2		; .. HIGH
+	jr	z,l228b
+	cp	15h-2		; .. LOW
+	jr	z,l228b
+	cp	17h-2		; .. unary -
+	jr	z,l228b
+	cp	1eh-2		; .. TYPE
+	call	nz,l22aa
+l228b:
+	ld	a,(l3f58)	; Get back code
+	ld	hl,(rek.PC)	; Save old caller
+	push	hl
+	ld	hl,oper.table-4
+	add	a,a		; Double index
+	add	a,l
+	ld	l,a
+	ld	a,0
+	adc	a,h
+	ld	h,a
+	ld	a,(hl)		; Fetch address
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	jp	(hl)		; .. execute
+l22a1:
+	push	bc
+	ld	a,(l3f57)	; Get type
+	ld	c,a
+	ld	hl,(rek.PC)	; Get back last caller
+	jp	(hl)		; .. bye
+;
+;
+;
+l22aa:
+	pop	hl
+	pop	bc
+	dec	b
+	call	nz,O.err
+	jr	z,l22b6
+	inc	b
+	push	bc
+	jp	(hl)		; .. execute
+l22b6:
+	pop	de
+	ld	a,c
+	and	00000011b
+	cp	00000011b
+	jp	nz,l217d	; .. jump thru HL
+	ex	(sp),hl		; Get result
+	ld	(l3dde),hl
+	ret
+;
+;
+;
+l22c4:
+	push	af
+	push	de
+	push	hl
+	ld	a,c
+	rlca
+	and	00000111b
+	or	10000000b
+	call	l25cc
+	and	00000111b
+	cp	00000110b
+	jr	nz,l22e3
+	push	de
+	ld	hl,(l3dde)
+	ex	de,hl
+	call	l22f3
+	pop	de
+	jr	l22ec
+l22e3:
+	cp	1
+	jr	nz,l22ec
+	ld	hl,(l3ebf)
+	ex	de,hl
+l22ec:
+	call	l22f3
+	pop	hl
+	pop	de
+	pop	af
+	ret
+;
+;
+;
+l22f3:
+	ld	a,e
+	call	l25cc
+	ld	a,d
+	jp	l25cc
+;
+;
+;
+l22fb:
+	db	01h,01h,01h,01h,04h,04h,05h
+	db	06h,08h,08h,09h,09h,09h,09h
+	db	09h,07h,07h,07h,07h,07h,07h
+	db	0ah,0ah,0ah,02h,02h,02h,02h
+	db	03h,02h,0ah
+;
+; Operator table
+;
+oper.table:
+	dw	OR.oper		; 00
+	dw	XOR.oper	; 01
+	dw	AND.oper	; 02
+	dw	NOT.oper	; 03
+	dw	l23cf		; 04
+	dw	l23fe		; 05
+	dw	l244e		; 06
+	dw	l249e		; 07
+	dw	l2517		; 08
+	dw	SHL.oper	; 09
+	dw	SHR.oper	; 0a
+	dw	l2551		; 0b
+	dw	l255c		; 0c
+	dw	l2568		; 0d
+	dw	l2575		; 0e
+	dw	l257b		; 0f
+	dw	l2584		; 10
+	dw	LO.oper		; 11
+	dw	HI.oper		; 12
+	dw	NEG.oper	; 13
+	dw	l25f4		; 14
+	dw	l2600		; 15
+	dw	l260f		; 16
+	dw	l261e		; 17
+	dw	l262d		; 18
+	dw	l2643		; 19
+	dw	TYPE.oper	; 1a
+;
+; Operator Oper.1 OR Oper.2
+;
+OR.oper:
+	call	get.oper.2	; Get 2nd operator
+	ld	a,d
+	or	h		; OR them
+	ld	d,a
+	ld	a,e
+	or	l
+	ld	e,a
+	ret
+;
+; Operator Oper.1 XOR Oper.2
+;
+XOR.oper:
+	call	get.oper.2	; Get 2nd operator
+	ld	a,d
+	xor	h		; XOR them
+	ld	d,a
+	ld	a,e
+	xor	l
+	ld	e,a
+	ret
+;
+; Operator Oper.1 AND Oper.2
+;
+AND.oper:
+	call	get.oper.2	; Get 2nd operator
+	ld	a,d
+	and	h		; AND them
+	ld	d,a
+	ld	a,e
+	and	l
+	ld	e,a
+	ret
+;
+; Operator NOT Oper.2
+;
+NOT.oper:
+	ld	hl,(oper.2)	; Load operand
+	ld	a,h
+	cpl
+	ld	d,a		; .. complement
+	ld	a,l
+	cpl
+	ld	e,a
+	ld	a,(l3f57)	; Get type
+	ld	c,a
+	and	83h
+	ld	a,5
+	jp	nz,l25c2
+	jp	l25cc
+;
+; Operator NEG Oper.2
+;
+NEG.oper:
+	ld	hl,(oper.2)	; Load operand
+	ld	a,h
+	cpl			; .. complement
+	ld	d,a
+	ld	a,l
+	cpl
+	ld	e,a
+	inc	de		; .. negate
+	ld	a,(l3f57)
+	ld	c,a
+	and	83h
+	ld	a,6
+	jp	nz,l25c2
+	jp	l25cc
+;
+; Operator Oper.1 SHL Oper.2
+;
+SHL.oper:
+	call	get.oper.2	; Get 2nd operator
+	ex	de,hl
+	inc	de
+SHL.loop:
+	dec	de
+	ld	a,d
+	or	e
+	jr	z,SHL.end
+	add	hl,hl
+	jr	SHL.loop
+SHL.end:
+	ex	de,hl
+	ret
+

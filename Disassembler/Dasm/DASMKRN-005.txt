@@ -1,0 +1,919 @@
+;
+; Build a symbol in 'inbuf' for the value in DE
+;
+bldsym:
+	ld	hl,inbuf.1	;Pt to inbuf
+	ld	(hl),'L'	;Store leading l
+	inc	hl		;Pt to next char
+	ld	a,d		;Get value in de
+	call	acctoasc	;Store as ascii chars in buffer
+	ld	a,e
+	call	acctoasc
+	ld	hl,inbuf.1	;Pt to symbol
+	ld	b,5		;Symbol is 5 chars long
+;
+; Insert a symbol alphabetically into table
+;
+insert:
+	call	plcsym		;Find symbol
+	jr	c,newsym	;Process as new if not found
+	ld	(hl),e		;If found, set new address for it
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Insert new symbol into table
+; Location to insert at pted to by HL
+;
+newsym:
+	push	hl		;Save pointer
+	push	de		;Save address
+	ld	c,b
+	ld	b,0
+	push	bc		;Save length
+	inc	bc
+	inc	bc
+	inc	bc
+	push	bc
+	ld	hl,(ctl.heap)
+	inc	hl
+	push	hl
+	inc	hl
+	push	hl
+	add	hl,bc		;Get new top
+	ld	de,(comst)
+	sbc	hl,de		;Test room
+	jp	nc,nomem	;;what
+	pop	hl
+	ld	de,(symrkr)	;Get table
+	or	a
+	sbc	hl,de		;Get gap length
+	ld	c,l
+	ld	b,h
+	pop	de		;Get top
+	pop	hl
+	push	hl
+	add	hl,de		;Point to length
+	ex	de,hl
+	lddr			;Move down for a whole
+	pop	de
+	pop	bc
+	ld	ix,(symrkr)
+	ld	(ix+2),c	;Set length
+	pop	hl
+	ld	(ix+0),l	;Set address
+	ld	(ix+1),h
+	pop	hl
+	push	de
+	ld	de,(symrkr)
+	inc	de
+	inc	de
+	inc	de
+Unp.Sym:
+	ldir			;Unpack symbol
+	pop	bc		;Get length
+	ld	hl,(ctl.root)
+	add	hl,bc
+	ld	(ctl.root),hl	;Fix addresses
+	ld	hl,(ctl.heap)
+	add	hl,bc
+	ld	(ctl.heap),hl
+	ld	hl,(sym.heap)
+	add	hl,bc
+	ld	(sym.heap),hl
+	ret
+;
+; Kill the symbol whose value is pted to by HL
+;
+kill0:
+	ld	e,l		;Save destination
+	ld	d,h
+	inc	hl
+	inc	hl
+	ld	a,(hl)
+	push	af
+	call	AddA		;Point to end
+	inc	hl
+	pop	af
+	add	a,3		;Fix length
+	neg
+	ld	c,a		;Save negative length
+	ld	b,-1
+	push	bc
+	push	hl
+	push	de
+	ex	de,hl
+	ld	hl,(ctl.heap)
+	inc	hl
+	inc	hl
+	or	a
+	sbc	hl,de		;Get length
+	ld	c,l
+	ld	b,h
+	pop	de
+	pop	hl
+	jr	Unp.Sym		;Move into gap
+;
+; Find spot for new symbol ptde to by HL,
+; value in DE, B=length of symbol
+; Return: C=0 for match, HL=symbol
+;
+plcsym:
+	push	de		;Save value
+	push	hl		;Save address of symbol
+	ld	hl,(sym.root)	;Pt to symbol table
+anthr:
+	pop	de		;Get symbol address in de
+	push	de
+	inc	hl		;Pt to symbol char count
+	inc	hl
+	push	hl
+	ld	a,(hl)		;Get char count
+	inc	hl		;Pt to first char
+	or	a		;Check for end of symbol table
+	jr	z,none		;Goto none if at end of table
+	cp	b		;Compare symbol lengths
+	jr	c,less		;No match if not same length
+	jr	nz,ntless
+	ld	c,a		;Symbol length in c
+	call	chkstg		;Compare (de) to (hl)
+	jr	z,found
+	jr	c,none
+;
+; Target symbol goes behond current symbol
+;
+later:
+	pop	hl		;Get address of symbol table symbol
+	ld	a,(hl)
+	inc	hl
+	call	AddA		;Skip to next
+	jr	anthr
+;
+; Match of symbols
+;
+found:
+	pop	hl
+	dec	hl
+	dec	hl
+	pop	de
+	pop	de
+	or	a		;Ret with carry clear for match
+	ret
+;
+; Check shorter string for partial match
+;
+less:
+	ld	c,a
+	call	chkstg
+	jr	nc,later
+	jr	none
+ntless:
+	ld	c,b
+	call	chkstg
+	jr	z,none
+	jr	nc,later
+;
+; There is no symbol for this value,
+; so this value should go at HL
+;
+none:
+	pop	hl
+	dec	hl
+	dec	hl
+	ld	(symrkr),hl	;Set marker
+	pop	hl
+	pop	de
+	scf			;Set carry for no match
+	ret
+;
+; Search the symbol table for an entry whose value is DE
+; Match: C=0
+;
+symsch:
+	ld	hl,(sym.root)	;Pt to symbol table
+;
+; (HL) is start of symbol; (B) is length
+;
+more:
+	ld	a,(hl)		;Get and compare symbol table values
+	inc	hl
+	cp	e
+	jr	nz,skpovr
+	ld	a,(hl)
+	cp	d
+	jr	z,fndsym
+;
+; Goto next symbol
+;
+skpovr:
+	inc	hl		;Check char count for done
+	ld	a,(hl)		;0 if done
+	or	a
+	scf			;Set carry for no match if so
+	ret	z
+	inc	hl		;Pt to next symbol
+	call	AddA
+	jr	more
+;
+; Return with no carry and length in B if matched
+;
+fndsym:
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	b,a
+	or	a		;Match
+	ret	nz
+	scf			;No match
+	ret
+;
+; Scan symbol starting at (HL) and return with length in B,
+; ptr to first char of symbol in HL, and ptr to char after
+; last char in symbol in DE
+;
+lngth:
+	inc	hl		;Pt to first char
+	ld	b,0		;Init length
+	push	hl
+charok:
+	inc	b		;Incr length
+	call	IsOff?		;Check for end of symbol mark
+	inc	hl		;Pt to next
+	jr	z,charok
+	cp	'0'
+	jr	c,illsym
+	cp	'9'+1
+	jr	c,charok
+	cp	'A'
+	jr	c,illsym
+	cp	'Z'+1
+	jr	c,charok
+;
+; An illegal character found in a symbol scan, so scan is done
+;
+illsym:
+	dec	b		;Compensate for count
+	jp	z,what		;Error if no symbol chars
+	dec	hl		;Back up
+	ex	de,hl		;Ptr to next char in de
+	pop	hl		;Pt to first char in hl
+	ret
+;
+; Convert the accumulator to hex ASCII in memory pted to by HL
+; (2 bytes)
+;
+acctoasc:
+	push	af
+	call	hinib		;Convert high nybble
+	ld	(hl),a		;Store it
+	inc	hl		;Pt to next
+	pop	af
+	call	lonib		;Convert low nybble
+	ld	(hl),a		;Store it
+	inc	hl		;Pt to next
+	ret
+;
+; Convert the high nibble of A to ASCII char
+;
+hinib:
+	rra			;Rotate high nybble to low nybble
+	rra
+	rra
+	rra
+;
+; Convert the low nibble of A to ASCII char
+;
+lonib:
+	and	LoMask		;Mask out new high nybble
+	add	a,90h		;Convert a bit tricky
+	daa
+	adc	a,40h
+	daa
+	ret
+;
+; Print the hex characters for the value in A
+;
+phex:
+	push	af
+	call	hinib		;Print high nybble
+	call	cout
+	pop	af
+	call	lonib		;Print low nybble
+	jp	cout
+;
+; Print the 4 hex characters for contents of HL
+;
+pvalue:
+	ld	a,h		;Print high byte
+	call	phex
+	ld	a,l		;Print low byte
+	call	phex
+;
+; Print a <SP>
+;
+space:
+	ld	a,' '		;Print <sp>
+	jp	cout
+;
+; Check for an ASCII character in A
+; Return with zero true and no carry for <CR>, <LF>
+; Return with no carry if printable ASCII
+;
+isitasc:
+	cp	cr
+	ret	z		;No carry
+	cp	lf
+	ret	z		;No carry
+	cp	' '
+	ret	c		;Carry if < <sp>
+	cp	'~'+1
+	ccf			;Carry if > 7fh
+	ret
+;
+; Read hex ASCII from command line and convert
+; and place in (DE)
+;
+cnvrt:
+	ld	a,(hl)		;Get first char
+	cp	'.'		;It is a symbol if '.'
+	jr	z,itsasym
+	ld	de,0		;Init value to zero
+again:
+	ld	a,(hl)		;Get char
+	cp	'0'		;In range?
+	ret	c		;Done if not
+	cp	'9'+1		;Range?
+	jr	c,get.num	;Ok if so
+	cp	'A'		;Range?
+	ret	c		;Done if not
+	cp	'F'+1		;Range?
+	ret	nc		;Done if not
+get.num:
+	call	num.get		;Convert for 'a'-'f'
+	inc	hl		;Pt to next char
+	jr	again		;Continue
+;
+; Get number and insert into current one
+;
+num.get:
+	cp	'9'+1		;Within digit range?
+	jr	c,numer		;Is a digit
+	sub	'A'-'0'-10	;Convert 'a' to 'f' to '9'+1 to 'e'+1
+numer:
+	sub	'0'		;Convert to binary in a
+	ex	de,hl		;Old value in hl
+	add	hl,hl		;*2
+	add	hl,hl		;*4
+	add	hl,hl		;*8
+	add	hl,hl		;*16
+	add	a,l		;+a
+	ld	l,a		;Only changes low-order byte
+	ex	de,hl		;Value back in de
+	ret
+;
+; Evaluate the symbol in memory and return with value in DE
+;
+itsasym:
+	call	lngth		;Determine length of symbol
+	push	de
+	call	plcsym		;Find it in table
+	jp	c,what		;Error if not found
+	ld	e,(hl)		;Put its value in de
+	inc	hl
+	ld	d,(hl)
+	pop	hl
+	ld	a,(hl)
+	ret
+;
+; Print decimal value for contents of HL
+;
+pdec:
+	ld	bc,-10		; Init divisor
+pdecrc:
+	ld	d,b		; Init result
+	ld	e,b
+pdeclp:
+	add	hl,bc
+	inc	de		; Divide by ten
+	jr	c,pdeclp
+	push	hl
+	ex	de,hl
+	ld	a,h		; Test remainder
+	or	l
+	call	nz,pdecrc	; .. recursive call if so
+	ld	a,'9'+1
+	pop	bc
+	add	a,c		; Fix digit for ASCII
+	jr	cout		; .. and print
+;
+; Print comment if pted to by 'xcptr'
+;
+dcrlf:
+	ld	hl,(xcptr)
+	ld	a,h
+	or	l		;Look for a comment address
+	jr	z,dcrlf3
+	call	.tab		;Tabulate comment
+	ld	b,(hl)		;Get char count
+	xor	a		;Check for no comment
+	or	b
+	inc	hl
+	call	nz,prnt		;Output comment
+	ld	hl,0		;Set no comment now
+	ld	(xcptr),hl
+dcrlf3:
+	ld	(rplptr),hl	;Set rplptr=0
+;
+; Output <CR> <LF>
+;
+crlf:
+	ld	a,cr
+	call	cout
+	ld	a,lf
+	jr	cout
+;
+; Print the prompt
+;
+prtstar:
+	ld	a,'*'
+;
+; Print the character in A on CON: and/or disk
+; The following flags take effect:
+;   Hush (quiet mode)
+;     -- If =0, CON: output, else no CON: output
+;   Fopen (file open) and wrtenab (write enable)
+;     -- If both <>0, disk output
+;   Cntenab (count enable)
+;     -- If <>0, enable <LF> count (lctr)
+;
+cout:
+	cp	etx		;Test special file type indicator
+	jr	nz,.cout
+	push	bc
+	push	hl
+	ld	hl,tpasm	;Point to type
+	ld	b,.ext		;Get length
+typlop:
+	ld	a,(hl)
+	call	.cout		;Print type
+	inc	hl
+	djnz	typlop
+	pop	hl
+	pop	bc
+	ret
+.cout:
+	push	bc
+	push	de
+	push	hl
+	push	af
+	ld	e,a		;Char in e
+	push	de		;Prep to print char
+	ld	a,(hush)	;Quiet mode?
+	or	a		;0=yes
+	ld	c,con.out	;Use bdos output
+	call	z,BDOS		;Print the char if not quiet mode
+	pop	de
+	ld	a,(File)	;Get file open flag
+	ld	hl,wrtenab	;Pt to file write enabled flag
+	and	(hl)		;If both enabled, write char to disk also
+	ld	a,e		;Char in a, not zero flag = disk output
+	call	nz,put		;Write to disk if ok
+	ld	a,e		;Check for <lf>
+	cp	lf
+	jr	nz,cout1
+	ld	a,(cntenab)	;Decrement the line count if a <lf> was sent
+	or	a		;Check if counting enabled
+	jr	z,cout1
+	ld	hl,lctr		;Pt to line count
+	dec	(hl)		;Decrement it
+cout1:
+	pop	af
+	pop	hl
+	pop	de
+	pop	bc
+	ret
+;
+; Clear pending console input
+; Accu holds character, zero flag reflects state
+;
+conclr:
+	ld	c,con.dir	;Check for key press
+	ld	e,get.chr
+	call	BDOS
+	or	a		;None if zero
+	ret
+;
+; Prompt and read a command line from the keyboard
+;
+prompt:
+	call	conclr		;Clear pending character
+	call	prtstar		;Print prompt
+	ld	de,.inbuf	;Pt to input line buffer
+	ld	c,con.buf	;Read into buffer fct
+	call	BDOS
+	ld	hl,.inbuf+1	;Pt to char count read
+	ld	e,(hl)		;Get it in de
+	ld	d,0
+	add	hl,de		;Pt to after last char in buffer
+	inc	hl
+	ld	(hl),cr		;Store ending <cr>
+	ld	hl,inbuf.1-1	;Pt to char count of buffer
+;
+; Convert line to UPPER case
+;
+uppr:
+	inc	hl		;Pt to next char
+	ld	a,(hl)		;Get it
+	cp	cr		;Done?
+	jp	z,crlf
+	call	UpCase		;Convert to UPPER case
+	ld	(hl),a		;Store
+	jr	uppr		;Continue
+;
+; Convert character to UPPER case
+;
+UpCase:
+	cp	'a'		;Small a?
+	ret	c		;Ok if less
+	cp	'z'+1		;Small z + 1?
+	ret	nc		;Ok if more
+	sub	'a'-'A'		;Capitalize
+	ret
+;
+; Enable console device, disable file and quiet mode
+;
+resCON:
+	xor	a		;Disable quiet mode and disk output
+	ld	(wrtenab),a
+	ld	(hush),a
+	ret
+;
+; Print the string: addr at top of stack, terminated by 0
+;
+pstrng:
+	call	resCON		;Reset console device
+pstg:
+	ex	(sp),hl		;Pt to string in hl and save old hl
+lup5:
+	ld	a,(hl)		;Output chars
+	call	cout
+	inc	hl		;Pt to next
+	ld	a,(hl)		;Get next char
+	or	a		;Done?
+	jr	nz,lup5
+	inc	hl		;Pt to after string
+	ex	(sp),hl		;Restore hl and set new ret adr
+	ret
+;
+; Init text pointer, Zero set if CR
+;
+get.buf:
+	ld	hl,inbuf.2	;Pt to starting address
+	ld	a,(hl)
+	cp	cr		;Set zero flag
+	ret
+;
+; Set table space requirements
+;
+; Initialize symbol table, control table, and comments table
+; set EOL
+;
+IniTables:
+	ld	a,cr		;Set end of input line
+	ld	(inbuf.2),a
+set.tables:
+	call	Clr.Sym		;Clear tables
+set.CTL:
+	call	Clr.Ctl
+	call	Clr.Cmt
+;
+; Initialize special constants
+;
+.init:
+	ld	hl,initelst	;Initial end of listing value
+	ld	(endlst),hl
+	ret
+;
+; Init .COM file window
+;
+ini.win:
+	ld	a,-1
+	ld	(CFCB),a	;Indicate no .COM file
+	ld	hl,0
+	ld	(en@),hl	;Dummy end of file window
+	dec	hl
+	ld	(st@),hl	;.. and start
+	ret
+;
+; Clear .COM space
+;
+Clr.COM:
+	call	ini.win		;Init .COM file window
+	call	PrgTop		;Get top of DASM
+	ld	(virtual),hl	;... as start of .COM buffer
+	ld	de,FBUFLEN
+	add	hl,de
+	ld	de,(LoadAdr)
+	ld	(relend),de
+	ld	(sym.root),hl	;Set symbol base
+	ret
+;
+; Clear symbol table
+;
+Clr.Sym:
+	ld	hl,(sym.root)	;Get base
+	ld	(sym.heap),hl	;... as top
+	inc	hl
+	inc	hl
+	ld	(hl),0		;Indicate end
+	ret
+;
+; Clear control table
+;
+Clr.Ctl:
+	ld	hl,(sym.heap)	;Get symbol top
+	inc	hl
+	inc	hl
+	inc	hl
+	ld	(hl),'I'	;Set previous mode
+	inc	hl
+	ld	(ctl.root),hl	;Set base
+termf:
+	ld	(ctl.heap),hl	;Set top
+	ld	(hl),-1		;Indicate end
+	inc	hl
+	ld	(hl),-1
+	ret
+;
+; Clear commen table
+;
+Clr.Cmt:
+	call	OStop		;Get top of memory
+	dec	hl
+	ld	(hl),-1		;Indicate end
+	dec	hl
+	ld	(hl),-1
+	ld	(comst),hl	;Set base
+	ld	(comend),hl	;... and top
+	ret
+;
+; Get top of memory -- in page boundary
+;
+OSTop:
+	ld	hl,(BDOS+1)
+	ld	l,0
+	ret
+;
+; Get top of DASM -- in page boundary
+;
+PrgTop:
+	ld	hl,top
+	inc	h
+	ld	l,0
+	ret
+;
+; Advance H&L by (A)
+;
+AddA:
+	add	a,l
+	ld	l,a		; Add
+	ret	nc
+	inc	h		; .. remember carry
+	ret
+;
+;Print the value in A as hex
+;with a leading zero if necessary
+;
+pashex:
+	cp	10 SHL 4	; Test range
+	jp	c,phex
+	push	af
+	ld	a,'0'
+	call	cout
+	pop	af
+	jp	phex
+;Print the string at (HL) for (B) characters.
+prnt:
+	ld	a,(hl)
+	call	cout
+	inc	hl
+	djnz	prnt
+	ret
+.tab:
+	ld	a,tab
+	jp	cout
+semi:
+	ld	a,';'
+	jp	cout
+prH:
+	ld	a,'H'
+	call	cout
+	or	a
+	ret
+;
+; File types
+;
+tpall:
+	db	'ALL'	;File type for all (ctl, sym, doc, com, and mac) files
+tpcom:
+	db	'COM'	;Com file type
+tpctl:
+	db	'CTL'	;Ctl file type
+tpsym:
+	db	'SMB'	;Sym file type
+tpdoc:
+	db	'CMT'	;Doc file type
+;
+; Actual file name
+;
+FCBsav:
+	db	'        '
+;
+; Buffers
+;
+LoadAdr:
+	dw	TPA	;Load address of com file
+relend:
+	dw	TPA	;Relative end address of com file
+dmpstrt:
+	dw	0	;Starting address of dump (current addr also)
+dmpend:
+	dw	0	;Ending address of dump
+dmplen:
+	dw	0	;Number of bytes to dump at one time - 1
+virtual:
+	dw	0	;Start of scratch
+st@:
+	dw	0ffffh	;Start of file window
+en@:
+	dw	00000h	;End of file window
+pc:
+	dw	0	;Current value of pc
+endlst:
+	dw	0	;End of listing ptr
+biased:
+	dw	0	;Biased offset
+adb:
+	db	0	;Flag for db build (0=hex, <>0=ascii and hex)
+fndpc:
+	dw	0	;Temp pc for find function
+fndadd:
+	dw	0	;Temp address for find function
+ecnt:
+	db	0	;Temp line counter
+nlines:
+	db	0	;Number of lines for list
+lctr:
+	db	0	;Counter for lines
+cntenab:
+	db	0	;Enable line count if <> 0, else disable line cnt
+wrtenab:
+	db	0	;Output to file is enabled if <> 0, not if 0
+rplptr:
+	dw	0	;Misc ptr
+xcptr:
+	dw	0	;Misc ptr
+xcsw:
+	db	0	;Misc ptr
+File:
+	db	0	;File is open if <> 0, not open if 0
+hush:
+	db	0	;Don't print command result (quiet mode) if 0
+nxtctl:
+	dw	0	;Ptr to next ctl entry
+blngth:
+	db	0	;Buffer length
+symrkr:
+	dw	0	;Symbol marker
+dmaptr:
+	dw	0	;Pt to dma address
+ascbld:
+	db	0	;Flag for a command (0=not a)
+build:
+	db	0	;Flag for b command (0=not b)
+opctp:
+	db	0,0,0
+;
+; .COM file FCB
+;
+CFCB:
+	ds	fcblen
+crecs:
+	dw	0
+;
+; Input line buffer
+;
+.inbuf:
+	db	ibuflen,0	;Size of buffer, real input #
+inbuf.1:
+	ds	ibuflen		;Size of input line and buffer contents
+inbuf.2	equ	inbuf.1+1
+inbuf.3	equ	inbuf.1+2
+;
+; Table pointer
+;
+sym.root:
+	dw	0	;Start of symbol table
+sym.heap:
+	dw	0	;End of symbol table
+ctl.root:
+	dw	0	;Start of control table
+ctl.heap:
+	dw	0	;End of control table
+comst:
+	dw	0	;Start address of comments
+comend:
+	dw	0	;End address of comments
+comtbl:
+	dw	0
+;
+; Stack area
+;
+	ds	2*32		;Stack space
+DASM.stack:
+
+top::
+
+;
+; Next page after program marks beginning of buffer areas
+;
+; ***************************************** ;
+;                                           ;
+;          It is also entry of DASM         ;
+; This section will be cleared after signon ;
+;                                           ;
+; ***************************************** ;
+;                                           ;
+; Print headers
+;
+startDASM:
+	ld	sp,DASM.stack	;Set stack
+	sub	a		;Test Z80
+	jp	pe,ill.CPU
+	ld	c,version
+	call	BDOS		;Get OS version
+	cp	CPM.3x
+	jp	c,ill.OS
+	ld	c,con.set
+	ld	de,1000b
+	call	BDOS		;Set console mode
+	call	pstrng
+	db	cr,lf,'DASM, Version '
+	db	vers/10+'0','.',(vers mod 10)+'0'
+	db	' for CP/M 3.x',cr,lf,null
+	ld	a,initdlen-1	;Initial size of memory dump
+	ld	(dmplen),a
+	ld	a,initlcnt	;Initial size of list display
+	ld	(nlines),a
+	ld	(lctr),a
+	ld	hl,blngth	;Initial ctl ptr
+	ld	(nxtctl),hl
+	ld	hl,FCB2nam
+	ld	a,(hl)		;Test 2nd argument
+	cp	' '
+	ld	de,TPA
+	call	nz,cnvrt	;Yeap, get load address
+	ld	(LoadAdr),de	;Save it
+	call	Clr.COM
+	ld	hl,(LoadAdr)	;Initial value of pc
+	ld	(pc),hl
+	ld	(dmpstrt),hl
+	ld	(dmpend),hl
+;
+; Read in all files if a file was specified
+;
+	ld	hl,FCBnam
+	ld	a,(hl)		;Get first letter of file name
+	cp	' '+1		;Valid char?
+	jp	c,.signon	;Skip read if not valid char
+	call	IsWild?
+	jp	z,.signon	;Wildcard not allowed here
+	ld	de,FCBsav
+	ld	bc,.name
+	ldir			;Save file name
+	call	pstrng
+	db	cr,lf,'Reading in All Files for ',null
+	ld	hl,FCBnam	;Pt to file name
+	call	pr.file		;.. print it
+	ld	hl,..all
+	push	hl
+	jp	IniTables	;Cleanup initialization
+;
+; Print error message and exit
+;
+ill.OS:
+	call	pstrng
+	db	cr,lf,'This version of DASM requires CP/M 3.x'
+	db	bell,cr,lf,null
+	jp	wboot
+ill.CPU:
+	ld	de,Z80req
+	ld	c,string
+	call	BDOS
+	jp	wboot
+Z80req:
+	db	cr,lf,'This version of DASM requires Z80 CPU'
+	db	bell,cr,lf,eot
+
+	end	startDASM
+

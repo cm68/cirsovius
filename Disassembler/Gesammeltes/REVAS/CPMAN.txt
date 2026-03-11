@@ -1,0 +1,190 @@
+                                  REVAS FOR CPM
+
+
+                               Copyright (c) 1978
+                                  A. E. Hawley
+                             Los Angeles, California
+
+        REVAS/CPM
+
+
+                The  CPM environment requires some changes in the command 
+        structure  of  REVAS,  as  well  as the way  in  which  REVAS  is 
+        implemented.   The  following  description  of  new  and  changed 
+        features is an appendix to the REVAS User's  Manual,  V2;  please 
+        refer  to  that manual if you are not already familiar with  it's 
+        contents.
+
+                In  the CPM environment,  REVAS is present as TWO  files: 
+        REVAS.COM  and  REVAS.LOD.  The  first  file,  REVAS.COM,  is  an 
+        executive  program  which  manages  the  loading  of  the  target 
+        program,  REVAS,  and  the symbol tables.  This file is 4  blocks 
+        (pages) long and runs at a location just below CPM's CCP section. 
+        You can,  if you wish,  rename this file using CPM's REN command, 
+        but  it  must  remain a .COM file.  This file  name  defines  the 
+        transient  command used to invoke a disassembly with  REVAS.  The 
+        second  file,   REVAS.LOD,  contains  the  actual  REVAS  program 
+        embedded  in a relocating loader.  It is loaded into  memory  and 
+        executed by REVAS.COM, which contains a reference by filename.ext 
+        to  REVAS.LOD.  Thus,  the  REVAS.LOD file must not  be  renamed. 
+        REVAS.LOD  is 20 blocks (pages) long.  (a block is 256 bytes) All 
+        files are assumed to be on the currently selected disc.
+
+                The program to be disassembled (the target program)  must 
+        coexist with REVAS in your computer's memory space. When REVAS is 
+        invoked,  the  target file is accessed and loaded at the CPM  tpa 
+        (address  100 Hex).  The REVAS disassembler is then loaded  above 
+        the  target  pgm.  If a symbol table file for the target  program 
+        exists  on  the disk,  it is loaded at the end of  REVAS.  If  no 
+        symbol  table  file exists,  then one is  automatically  created. 
+        During the loading process, messages will be typed on the console 
+        to let you know the results of each of these steps.
+
+                REVAS always uses two files:  FN.TBL,  and FN.ASM. FN.TBL 
+        is the file to which REVAS writes its symbol tables (see the  'W' 
+        command).  FN.ASM  is  the file to which REVAS  writes  assembler 
+        mnemonics for editing and/or reassembly. When REVAS is invoked it 
+        searches  the  current  disc directory for these  files.  If  not 
+        found,  they are automatically created. If FN is not specified in 
+        the invoking command,  then FN=### is assumed. If the .EXT is not 
+        specified for the target program, then EXT=COM is assumed.
+
+                A  disassembly  is  invoked  by  typing  a  standard  CPM 
+        transient command (after the CPM prompt) of the following form:
+
+                                   REVAS [ufn]
+
+                'ufn' is an unambiguous file name, as defined in your CPM 
+        manual.  Four  possible forms of this command and  the  resulting 
+        file names involved are shown in the table below.  In this table, 
+        'EXT' means any file extension except 'TBL'.  'FN' stands for any 
+        file name.
+
+
+        Command                 Response
+
+        REVAS          REVAS  is loaded at the tpa.  ###.TBL and  ###.ASM 
+                       are used.
+
+        REVAS FN       FN.COM is loaded at the tpa followed by REVAS. The 
+                       files FN.TBL and FN.ASM are used.
+
+        REVAS FN.EXT   FN.EXT  is loaded at the tpa,  followed by  REVAS. 
+                       The files FN.TBL and FN.ASM are used.
+
+        REVAS FN.TBL   No  target program is loaded.  REVAS is loaded  at 
+                       the tpa, followed by the symbol table file FN.TBL. 
+                       If  FN.TBL  does not exist,  then it  is  created. 
+                       FN.ASM is used.
+
+                After the loading process is completed, control is passed 
+        to REVAS, as indicated by display of the REVAS prompt (#) on your 
+        console. The REVAS command set is now at your disposal.
+
+                           REVAS/CPM Special Commands
+
+                The  'A' and 'I' commands described in the User's  Manual 
+        are  not needed in the CPM environment,  and have been deleted in 
+        the  CPM  version of REVAS.  The 'W' command in the  CPM  version 
+        saves  the current symbol tables on disk in a file named  FN.TBL. 
+        The  'O'  (Output  channel control) command  and  the  'E'  (.END 
+        pseudo-op) commands have been modified for the CPM environment to 
+        OPEN  and  CLOSE the FN.ASM file.  The Punch output option is  no 
+        longer implemented in REVAS/CPM,  since that utility is available 
+        through PIP.
+
+        ^C        Control-C re-boots the CPM system.
+
+        E         Inserts the pseudo-op '.END' into the output stream and 
+                  properly closes the FN.ASM file.  A FN.ASM file that is 
+                  not closed with this command will not contain the final 
+                  record  with  the  end-of-file  mark  required  by  the 
+                  Editor.
+
+        O         The key letter 'P' has been replaced by 'A' (for .ASM). 
+                  Otherwise, the command format is unchanged from that in 
+                  the user's manual.  The command 'OPEN C,A@' results  in 
+                  normal  disassembly  output at the console  and  label, 
+                  opcode,  and  argument  output to the (now  open)  .ASM 
+                  file. A subsequent OC command DOES NOT CLOSE THE FN.ASM 
+                  FILE.  File  closure MUST be accomplished with the  'E' 
+                  command.  The  Console and List devices ARE  deselected 
+                  when  their key letters are ommited from an 'O' command 
+                  argument list.
+
+        W         Write  the  symbol tables into the  FN.TBL  file.  This 
+                  command opens the file,  writes to it,  then closes the 
+                  file.  It  will  not  execute if  the  FN.ASM  file  is 
+                  currently open,  and will print a reminder to close the 
+                  .ASM file if it is open. The command may be repeated as 
+                  often  as  you wish during a disassembly,  so  you  can 
+                  always  have  saved  the latest version  of  the  label 
+                  assignments.
+
+        A <Switch>%<Input>@
+                  The  (new) 'A' command is used for assigning new values 
+                  to the parameters listed in the User's manual under the 
+                  heading  'Patches'.  The table which follows gives  the 
+                  expected Input for each <switch> value.  'HEX' means  a 
+                  hexadecimal value in the range 0 to FF;  'CH' means any 
+                  keyboard  character,  including lower case and  control 
+                  characters.
+
+
+        SWITCH         INPUT          FUNCTION
+        0               HEX             Number  of nulls to send after  a 
+                                        carriage return, line feed to the 
+                                        list device.
+
+        1               HEX             Number  of  null to send after  a 
+                                        carriage return, line feed to the 
+                                        console or punch devices.
+
+        2               HEX             Number of lines in the Top Margin 
+                                        of the List device page.
+
+        3               HEX             Number  of  lines in  the  Bottom 
+                                        Margin of the List device page.
+
+        4               HEX             Number of lines of text per  List 
+                                        page.
+
+        5               AE              Right  justify  labels  in  label 
+                                        field.
+
+        5               EE              Left   justify  labels  in  label 
+                                        field.
+
+        6               CH              Replace  'S'  for  the  immediate 
+                                        command  which suspends  printout 
+                                        and disassembly.
+
+        7               CH              Replace  'R'  for  the  immediate 
+                                        command  which returns  to  REVAS 
+                                        command mode.
+
+        8               CH              Replaces the ':' label terminator
+
+        9               CH              Replaces  the  ';' comment  field 
+                                        delimiter
+
+        A       1 to 4 CH               These   characters  replace   the 
+                                        '.BYTE'  pseudo-op which  defines 
+ 
+                The 'A' command has several restrictions.  First, it only 
+        operates  when no other commands have been  previously  executed. 
+        Second, it only operates after the CPM command:
+
+                                 REVAS REVAS.LOD
+
+             The  changes which are made by the 'A' command occur only in 
+        the copy of REVAS.LOD which is now located at the tpa.  After all 
+        the  changes  have  been made,  the new  REVAS.LOD  is  saved  by 
+        executing  a  re-boot  of the CPM system (^C) and using  the  CPM 
+        command:
+
+                                SAVE 20 REVAS.LOD
+
+             REVAS,  on subsequent invocation,  will contain the changes. 
+        All other commands are as described in the REVAS user's manual.
+

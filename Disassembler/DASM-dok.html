@@ -1,0 +1,590 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 //EN">
+<html>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/DASM-dok.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:07:49 GMT -->
+<head><title>DASM</title>
+<style>
+#lang-toggle { display: none; }
+#lang-toggle:not(:checked) ~ div [lang="de"],
+#lang-toggle:not(:checked) ~ label [lang="de"] { display: none; }
+#lang-toggle:checked ~ div [lang="en"],
+#lang-toggle:checked ~ label [lang="en"] { display: none; }
+</style>
+</head>
+
+<body bgcolor="#999966">
+
+<input type="checkbox" id="lang-toggle">
+<label for="lang-toggle" style="cursor:pointer;padding:4px 12px;border:1px solid #888;border-radius:4px;background:#eee;font-family:sans-serif;font-size:14px;position:fixed;top:8px;right:8px;z-index:999"><span lang="de">DE</span><span lang="en">EN</span> / <span lang="de">EN</span><span lang="en">DE</span></label>
+
+<div>
+
+<center>
+<h4>
+<span lang="de">Disassembler DASM und REZ<br />Copyright (C) Werner Cirsovius, 1989</span>
+<span lang="en">Disassembler DASM and REZ<br />Copyright (C) Werner Cirsovius, 1989</span>
+</h4>
+</center>
+<hr />
+
+<span lang="de">Diese Programme sind ausgelegt, um Bin&auml;rdateien umzuwandeln in Quell texte (Typ .MAC beim DASM, .ASM beim REZ), die dann mit einem Z80 Assembler (DASM) oder 8080 Assembler (REZ) wieder zu lauff&auml;higen Kode gewandelt werden k&ouml;nnen.
+Mit anderen Worten, ist eine .COM Datei vorhanden, die z.B. modifiziert werden soll, von der jedoch der Quelltext fehlt, dann sind dies genau die richtigen Programme.
+W&auml;hrend bei Arbeiten mit REZ die CP/M PLUS Assembler MAC oder RMAC gen&uuml;gen, ben&ouml;tigt man zum Arbeiten mit DASM einen Z80 Assembler, also z.B. den M80 von MICROSOFT oder ZMAC aus dem PD Tool.</span>
+<span lang="en">These programs are designed to convert binary files into source texts (.MAC type for DASM, .ASM for REZ), which can then be reassembled into executable code using a Z80 assembler (DASM) or an 8080 assembler (REZ).
+In other words, if you have a .COM file that needs to be modified but the source code is missing, then these are exactly the right programs.
+While working with REZ the CP/M PLUS assemblers MAC or RMAC are sufficient, working with DASM requires a Z80 assembler, e.g. M80 from MICROSOFT or ZMAC from PD Tools.</span>
+<p></p>
+<span lang="de">Da die Regeln zum Arbeiten mit beiden Programmen gleich sind, wird hier als Beispiel DASM erl&auml;utert.
+Bei Abweichungen wird dies gesondert angedeutet.
+Allgemein gilt, da&szlig; REZ &auml;lter und weniger komfortabel ist als DASM.</span>
+<span lang="en">Since the rules for working with both programs are the same, DASM is used as an example here.
+Any differences will be noted separately.
+In general, REZ is older and less convenient than DASM.</span>
+
+<table border="0">
+<tr><td valign="top" width="100">(</td><td><b><span lang="de">Im Anhang sind einige &Auml;nderungen angegeben, die sich speziell auf eine verbesserten Version von DASM beziehen.</span><span lang="en">The appendix lists some changes that specifically relate to an improved version of DASM.</span></b>)</td></tr>
+</table>
+
+<p></p>
+<span lang="de">Nach dem Aufruf DASM folgt zun&auml;chst eine Meldung, danach befindet sich DASM im Befehlsmodus.
+Mit H kann man sich eine Kurzform der Anleitung auf dem Bildschirm ausgeben lassen.</span>
+<span lang="en">After invoking DASM, a message appears first, then DASM enters command mode.
+With H you can display a short form of the instructions on screen.</span>
+<p></p>
+<span lang="de">Wie ist nun die Arbeitsweise von DASM?</span>
+<span lang="en">How does DASM work?</span>
+<br />
+<span lang="de">Aus der zu bearbeitenden ,COM Datei werden zun&auml;chst drei weitere Dateien erzeugt:</span>
+<span lang="en">From the .COM file to be processed, three additional files are first generated:</span>
+<p></p>
+
+<div style="margin-left:2cm">
+<table border="0" width="70%">
+<tr><td valign="top">-</td><td valign="top">.SYM :</td><td><span lang="de">Diese Datei besteht aus Informationen &uuml;ber Labels</span><span lang="en">This file contains information about labels</span></td></tr>
+<tr><td valign="top">-</td><td valign="top">.CTL :</td><td><span lang="de">Diese Datei besteht aus Informationen &uuml;ber Programmcode oder Konstanten</span><span lang="en">This file contains information about program code or constants</span></td></tr>
+<tr><td valign="top">-</td><td valign="top">.DOC :</td><td><span lang="de">Diese Datei enth&auml;lt optionalen Kommentar</span><span lang="en">This file contains optional comments</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<span lang="de">Der Vorteil dieser Zerlegung in einzelne Dateien ist, da&szlig; diese sehr kurz sind.
+Erst am Ende einer Bearbeitung, die durchaus &uuml;ber mehrere Tage gehen kann, wird die endg&uuml;ltige Quelldatei .MAC erzeugt.
+Diese kann, je nach Umfang der .COM Datei sehr lang sein.
+Realistisch ist ein Faktor 4 bis 8, d.h. eine .COM Datei mit dem Umfang 8kByte erzeugt dann eine .MAC Datei mit 32-64kByte.</span>
+<span lang="en">The advantage of this decomposition into individual files is that they are very short.
+Only at the end of the editing process, which may well span several days, is the final source file .MAC generated.
+This can be very long depending on the size of the .COM file.
+A realistic factor is 4 to 8, i.e. a .COM file of 8kByte will produce a .MAC file of 32-64kByte.</span>
+
+<p></p>
+<span style="text-decoration:underline"><span lang="de">Die erste Sitzung</span><span lang="en">The first session</span></span>
+<p></p>
+<span lang="de">Nach dem Aufruf von DASM wird zun&auml;chst die .COM Datei geladen mit dem Kommando</span>
+<span lang="en">After invoking DASM, the .COM file is first loaded with the command</span>
+<p style="margin-left:2cm">
+Rdatei.COM
+</p>
+<span lang="de">Danach taucht eine Menge Text &uuml;ber Statistik auf.
+DASM l&auml;dt n&auml;mlich die .COM Datei nicht in den Speicher ab 0100H sondern mit einem Versatz, der von der L&auml;nge von DASM abh&auml;ngig ist.
+Hier sollte man sich die h&ouml;chste Adresse merken, diese wird im weiteren Verlauf als HA bezeichnet.
+(Bei der Statistik Ausgabe, durch das Kommando ?, ist dies die .COM End Adresse -1, bei REZ ist das die Endadresse bei der Angabe PRGM).
+Nach dem Einlesen der Datei sollte zun&auml;chst nach vorhandenen ASCII Textstellen, danach dann nach Labels gesucht werden.</span>
+<span lang="en">After that, a lot of statistical text appears.
+DASM does not load the .COM file into memory starting at 0100H but with an offset that depends on the length of DASM.
+You should note the highest address here; it will be referred to as HA in the following.
+(In the statistics output, via the ? command, this is the .COM end address -1; for REZ it is the end address shown under PRGM).
+After reading the file, you should first search for existing ASCII text passages, then search for labels.</span>
+<br />
+<span lang="de">Es werden nun die folgenden Kommandos eingegeben;</span>
+<span lang="en">The following commands are now entered:</span>
+<p style="margin-left:2cm">
+QA100,HA
+<br />
+QB100,HA
+</p>
+<span lang="de">Je nach L&auml;nge der .COM Datei kann die Ausf&uuml;hrung dieser Kommandos dauern!</span>
+<span lang="en">Depending on the length of the .COM file, executing these commands may take some time!</span>
+<br />
+<span lang="de">Q schaltet hier die Ausgabe auf den Bildschirm ab, die Ausgabe w&auml;re bei den beiden Kommandos eher st&ouml;rend.</span>
+<span lang="en">Q here suppresses screen output, which would be rather distracting for these two commands.</span>
+<br />
+<span lang="de">A sucht im angegeben Bereich - von Startadresse 0100H bis Endadresse HA - nach Kombinationen von druckbaren Zeichen.
+DASM ist in der Lage, Texte gr&ouml;&szlig;er als sieben Zeichen fast immer zu finden,</span>
+<span lang="en">A searches the specified range - from start address 0100H to end address HA - for combinations of printable characters.
+DASM is able to find texts longer than seven characters almost always.</span>
+<br />
+<span lang="de">B sucht, im angegebenen Bereich, wie bei A, nach Labels.
+D.h. bei Sprungbefehlen und Unterprogrammaufrufen wird anstelle der Adresse ein Label eingesetzt.
+Das gilt nat&uuml;rlich dann auch f&uuml;r die Adresse selber.
+Das Label hat die Form Lxxxx, wobei xxxx die Adresse in hexadezimaler Form darstellt.</span>
+<span lang="en">B searches the specified range, like A, for labels.
+That is, for jump instructions and subroutine calls, a label is inserted instead of the address.
+This naturally also applies to the address itself.
+The label has the form Lxxxx, where xxxx represents the address in hexadecimal form.</span>
+<br />
+<span lang="de">An dieser Stelle soll die erste Sitzung unterbrochen werden.
+Die Fr&uuml;chte der Arbeit, werden nun gespeichert mit dem Kommando</span>
+<span lang="en">At this point, the first session should be interrupted.
+The fruits of the work are now saved with the command</span>
+<p style="margin-left:2cm">
+Sdatei.ALL
+</p>
+<span lang="de">Jetzt werden die Dateien .CTL, .SYM und .DOC angelegt, wie auch auf dem Bildschirm zu sehen ist.
+Dann fragt DASM, ob eine neue .MAC Datei angelegt werden soll, diese Frage ist an dieser Stelle mit N zu beantworten.</span>
+<span lang="en">Now the files .CTL, .SYM and .DOC are created, as can also be seen on screen.
+Then DASM asks whether a new .MAC file should be created; this question should be answered with N at this point.</span>
+<br />
+<span lang="de">DASM wird beendet mit Ctrl-C, was der STOP Taste auf dem JOYCE entspricht.</span>
+<span lang="en">DASM is terminated with Ctrl-C, which corresponds to the STOP key on the JOYCE.</span>
+
+<p></p>
+<span style="text-decoration:underline"><span lang="de">Die folgenden Sitzungen</span><span lang="en">The following sessions</span></span>
+<p></p>
+<span lang="de">Nach Aufruf von DASM werden nun alle Dateien geladen, entweder einzeln mit</span>
+<span lang="en">After invoking DASM, all files are now loaded, either individually with</span>
+<p style="margin-left:2cm">
+Rdatei.COM
+<br />
+Rdatei.CTL
+<br />
+Rdatei.SYM
+<br />
+Rdatei.DOC
+</p>
+<span lang="de">oder gemeinsam mit</span>
+<span lang="en">or all together with</span>
+<p style="margin-left:2cm">
+Rdatei.ALL
+</p>
+<span lang="de">Um alle Dateien zu laden, kann DASM (nicht REZ) auch aufgerufen werden mit der Zeile <b>DASM&nbsp;datei</b>.</span>
+<span lang="en">To load all files, DASM (not REZ) can also be invoked with the command line <b>DASM&nbsp;file</b>.</span>
+<br />
+<span lang="de">Sollte beim letzten Kommando eine Datei nicht gefunden werden, so wird dies auf dem Bildschirm angezeigt.</span>
+<span lang="en">If a file is not found during the last command, this is displayed on screen.</span>
+<br />
+<span lang="de">Die Arbeit wird sich jetzt auf das Lesbarmachen des Quelltextes richten.
+Mit dem Kommando</span>
+<span lang="en">The work will now focus on making the source text readable.
+With the command</span>
+<p style="margin-left:2cm">
+Ladr
+</p>
+<span lang="de">kann man sich nun den disassemblierten Text auf dem Bildschirm anschauen.</span>
+<span lang="en">you can now view the disassembled text on screen.</span>
+<br />
+<span lang="de">Dies Kommando kann abgewandelt werden mit</span>
+<span lang="en">This command can be modified with</span>
+<p></p>
+
+<div style="margin-left:2cm">
+<table border="0" width="70%">
+<tr><td valign="top" width="30%">Lvon,bis</td><td><span lang="de">Anzeige ab Adresse "von" bis Adresse "bis"</span><span lang="en">Display from address "von" (from) to address "bis" (to)</span></td></tr>
+<tr><td valign="top">L,bis</td><td><span lang="de">Anzeige ab laufender Adresse bis zu "bis"</span><span lang="en">Display from the current address up to "bis" (to)</span></td></tr>
+<tr><td valign="top">L</td><td><span lang="de">Anzeige der n&auml;chsten Adressen</span><span lang="en">Display the next addresses</span></td></tr>
+</table>
+</div>
+
+<p></p>
+
+<span lang="de">Das Kommando</span>
+<span lang="en">The command</span>
+<p style="margin-left:2cm">
+L=nn
+</p>
+<span lang="de">&auml;ndert, die Anzahl Zeilen, wenn nur L eingegeben wird.
+Der voreiligestellte Wert liegt bei 20 Zeilen.</span>
+<span lang="en">changes the number of lines when only L is entered.
+The default value is 20 lines.</span>
+<br />
+
+<table border="0">
+<tr><td valign="top" width="35%"><span lang="de">Zur Beachtung :</span><span lang="en">Note:</span></td><td><span lang="de">"nn" ist eine Hexzahl! - Also f&uuml;r 20 Zeilen gilt die Hexzahl&nbsp;14</span><span lang="en">"nn" is a hex number! - So for 20 lines the hex number is&nbsp;14</span></td></tr>
+</table>
+
+<span lang="de">Das Kommando</span>
+<span lang="en">The command</span>
+<p style="margin-left:2cm">
+L=nn,adr
+</p>
+<span lang="de">entspricht der Kombination von</span>
+<span lang="en">corresponds to the combination of</span>
+<p style="margin-left:2cm">
+L=nn
+<br />
+Ladr
+</p>
+<span lang="de">Das schon erw&auml;hnte Kommando A erlaubt ebenfalls ein Listing, jedoch ohne Textstellen.</span>
+<span lang="en">The previously mentioned command A also allows a listing, but without text passages.</span>
+<br />
+<span lang="de">Auch ein Hex-Dump ist m&ouml;glich, dieser wird aufgerufen mit</span>
+<span lang="en">A hex dump is also possible, invoked with</span>
+<p style="margin-left:2cm">
+Daddr
+<br />
+Dvon,bis
+<br />
+D,bis
+<br />
+D
+<br />
+D=nn
+</p>
+<span lang="de">Die letzte Anweisung setzt die Anzahl Bytes f&uuml;r den Dump.
+Sie ist ebenfalls als Hexzahl einzugeben.
+Der voreingestellte Wert, betr&auml;gt 128, also 80H.</span>
+<span lang="en">The last instruction sets the number of bytes for the dump.
+It must also be entered as a hex number.
+The default value is 128, i.e. 80H.</span>
+<br />
+<span lang="de">Die n&auml;chste Arbeit wird darin bestehen, die etwas aussageschwachen Labels des Typs Lxxxx umzuwandeln in aussagekr&auml;ftige.
+Bei der Arbeit mit CP/M ist die Adresse 0005H ja gerade die BDOS Sprungadresse, um diese Adresse in ein Label zu wandeln wird das Kommando</span>
+<span lang="en">The next task will be to convert the somewhat uninformative labels of the type Lxxxx into meaningful ones.
+When working with CP/M, address 0005H is the BDOS jump address; to convert this address into a label, the command</span>
+<p style="margin-left:2cm">
+E5,.BDOS
+</p>
+<span lang="de">eingegeben.
+Zu beachten ist hierbei der Punkt vor dem symbolischen Namen.
+Es erfolgt eine Meldung, da&szlig; dieses Label gegen L0005 ausgetauscht wurde.</span>
+<span lang="en">is entered.
+Note the dot before the symbolic name.
+A message appears stating that this label has been exchanged for L0005.</span>
+<br />
+<span lang="de">Ebenfalls unter CP/M wird die Adresse 0006H manchmal ben&ouml;tigt, da hier die h&ouml;chste Speicheradresse, die zur Verf&uuml;gung steht, abgespeichert ist.
+Diese Adresse kann nun wie folgt ersetzt werden:</span>
+<span lang="en">Also under CP/M, address 0006H is sometimes needed, as it stores the highest available memory address.
+This address can now be replaced as follows:</span>
+<p style="margin-left:2cm">
+E6,.BDOS+1
+</p>
+<span lang="de">Hieran erkennt man eine angenehme Eigenschaft von DASM, da&szlig; n&auml;mlich nicht f&uuml;r jedes Label Lxxxx auch ein eigenst&auml;ndiges Label ben&ouml;tigt wird.
+Zu beachten ist aber, da&szlig; DASM <b>nicht</b> pr&uuml;ft, ab die Eingabe korrekt ist.
+DASM akzeptiert auch</span>
+<span lang="en">This reveals a convenient feature of DASM: not every label Lxxxx requires its own independent label.
+Note, however, that DASM does <b>not</b> check whether the input is correct.
+DASM also accepts</span>
+<p style="margin-left:2cm">
+E66,.BDOS+1
+</p>
+<span lang="de">Dies kann aber zu Schwierigkeiten f&uuml;hren, wenn der Quelltext, assembliert wird.</span>
+<span lang="en">However, this can lead to difficulties when the source text is assembled.</span>
+<br />
+<span lang="de">F&uuml;r die Labels Lxxxx gilt nat&uuml;rlich das Entsprechende bez&uuml;glich der Namensgebung mit dem Kommando E.</span>
+<span lang="en">For labels Lxxxx, the same applies regarding naming with the E command.</span>
+<br />
+<span lang="de">Zu erw&auml;hnen ist noch, daB auch Symbole in den Kommandos A, D und L erlaubt sind, hier ist allerdings immer ein Punkt vor dem Namen zu verwenden.</span>
+<span lang="en">It should also be mentioned that symbols are allowed in the commands A, D and L, but a dot must always precede the name.</span>
+<p></p>
+<span lang="de">Beispiel:</span>
+<span lang="en">Example:</span>
+<p></p>
+
+<div style="margin-left:2cm">
+<table border="0">
+<tr><td valign="top" width="35%">E100,.TPA</td><td><span lang="de">Symbol 'TPA' an Adresse 0100H einsetzen</span><span lang="en">Insert symbol 'TPA' at address 0100H</span></td></tr>
+<tr><td valign="top">L100</td><td><span lang="de">Disassemblieren ab 0100H</span><span lang="en">Disassemble from 0100H</span></td></tr>
+<tr><td valign="top">L.TPA</td><td><span lang="de">Wie L100</span><span lang="en">Same as L100</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<span lang="de">Man kann sich die gesamte Symboltabelle anzeigen lassen mit dem Kommando</span>
+<span lang="en">You can display the entire symbol table with the command</span>
+<p style="margin-left:2cm">
+DS
+</p>
+<span lang="de">oder von einem bestimmten Symbol an mit</span>
+<span lang="en">or from a specific symbol onward with</span>
+<p style="margin-left:2cm">
+DS.symbol
+</p>
+<span lang="de">Da die Symbole alphabetisch sortiert werden, gibt das Kommando</span>
+<span lang="en">Since the symbols are sorted alphabetically, the command</span>
+<p style="margin-left:2cm">
+DS.X
+</p>
+<span lang="de">alle Symbole von X bis Z aus.</span>
+<span lang="en">outputs all symbols from X to Z.</span>
+<br />
+<span lang="de">Wie auch bei den Kommandos A, D, L kann auch hier die Ausgabe auf den Bildschirm durch Bet&auml;tigen einer beliebigen Taste angehalten werden.
+DASM befindet sich dann wieder im Befehlsmodus.</span>
+<span lang="en">As with the commands A, D, L, the screen output can also be stopped here by pressing any key.
+DASM then returns to command mode.</span>
+<br />
+<span lang="de">Wenn beim Kommando E einmal nicht die Meldung erscheint, da&szlig; ein Symbol Lxxx gel&ouml;scht wurde, kann man davon ausgehen, da&szlig; an der eingegebenen Adresse kein Symbol steht.
+Vielleicht hat sich einfach ein Tippfehler eingeschlichen.</span>
+<span lang="en">If the E command does not produce a message that a symbol Lxxx was deleted, you can assume that no symbol exists at the entered address.
+Perhaps a typo simply crept in.</span>
+<br />
+<span lang="de">Symbole k&ouml;nnen jedoch gel&ouml;scht werden mit dem Kommando</span>
+<span lang="en">However, symbols can be deleted with the command</span>
+<p style="margin-left:2cm">
+K,symbol
+</p>
+<span lang="de">Die Bearbeitung der Symboltabelle ist sp&auml;ter in der Datei .SYM zufinden.
+Nachdem alle Symbole vern&uuml;nftig umbenannt sind, kann nun die Kontrolltabelle bearbeitet werden.
+Diese Tabelle sorgt bei den gewohnten Pseudo-Opcodes f&uuml;r Speicherreservierungen.
+DASM hat einen Teil davon bereits selbst angelegt bei der Ausf&uuml;hrung des Befehls A.</span>
+<span lang="en">The symbol table editing can later be found in the .SYM file.
+After all symbols have been sensibly renamed, the control table can now be edited.
+This table handles the common pseudo-opcodes for memory reservations.
+DASM has already created some of these itself during execution of the A command.</span>
+<br />
+<span lang="de">Das allgemeine Kommando zum Setzen der Kontrolltabelle lautet:</span>
+<span lang="en">The general command for setting the control table is:</span>
+<p style="margin-left:2cm">
+Cadr, wort
+</p>
+<span lang="de">"adr" bezeichent dabei eine beliebige Adresse innerhalb des von der .COM Datei belegten Speichers.
+"wort" ist dann eine Kontroll Information wie folgt:</span>
+<span lang="en">"adr" designates any address within the memory occupied by the .COM file.
+"wort" (word) is then a control information as follows:</span>
+<p></p>
+
+<div style="margin-left:1cm">
+<table border="0" width="90%">
+<tr><td valign="top" width="15%">B</td><td><span lang="de">Erzeugt den Pseudocode "DB", gefolgt von einem oder mehrerer Zeichen</span><span lang="en">Generates the pseudo-opcode "DB", followed by one or more characters</span></td></tr>
+<tr><td valign="top">H</td><td><span lang="de">Erzeugt, den Pseudocode "DB", jedoch sind die Konstanten in Hexformat dargestellt (existiert nicht bei REZ)</span><span lang="en">Generates the pseudo-opcode "DB", but the constants are displayed in hex format (does not exist in REZ)</span></td></tr>
+<tr><td valign="top">W</td><td><span lang="de">Erzeugt den Pseudocode "DW" gefolgt von einer 16 Bit Konstanten</span><span lang="en">Generates the pseudo-opcode "DW" followed by a 16-bit constant</span></td></tr>
+<tr><td valign="top">S</td><td><span lang="de">Erzeugt, den Pseudocode "DS", reserviert also Speicher</span><span lang="en">Generates the pseudo-opcode "DS", i.e. reserves memory</span></td></tr>
+<tr><td valign="top">I</td><td><span lang="de">Schaltet um auf Maschinencode</span><span lang="en">Switches to machine code</span></td></tr>
+<tr><td valign="top">E</td><td><span lang="de">Erzeugt den Pseudocode "END", kennzeichnet also das Ende der Datei</span><span lang="en">Generates the pseudo-opcode "END", i.e. marks the end of the file</span></td></tr>
+<tr><td valign="top">K</td><td><span lang="de">L&ouml;scht den Kontrolleintrag an dieser Stelle</span><span lang="en">Deletes the control entry at this position</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<span lang="de">Neben dem oben angegebenen Format gibt es noch</span>
+<span lang="en">In addition to the format shown above, there is also</span>
+<p></p>
+
+<div style="margin-left:1cm">
+<table border="0" width="90%">
+<tr><td valign="top" width="15%">C</td><td><span lang="de">Ausgabe der gesamten Kontrolltabelle</span><span lang="en">Output of the entire control table</span></td></tr>
+<tr><td valign="top">Cadr</td><td><span lang="de">Ausgabe der Kontrolltabelle ab Adresse "adr"</span><span lang="en">Output of the control table from address "adr"</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<span lang="de">Wichtig ist die Kontrolltabelle bei der Korrektur von Eintr&auml;gen, die DASM erstellt hat.
+Findet man z.B. ab Adresse 035F bis 0467 beim Listen (Kommando L) nur die Anweisung "NOP", so kann man davon ausgehen, da&szlig; hier eine Speicherreservierung vorliegt.
+Die Kontrolleintr&auml;ge sehen wie folgt aus;</span>
+<span lang="en">The control table is important for correcting entries that DASM has created.
+If, for example, from address 035F to 0467 during listing (command L) only "NOP" instructions are found, you can assume that a memory reservation is present here.
+The control entries look as follows:</span>
+<p></p>
+
+<div style="margin-left:2cm">
+<table border="0" width="90%">
+<tr><td valign="top" width="35%">C35F,S</td><td><span lang="de">Definiert Bereich ab hier als Reservierung</span><span lang="en">Defines the area from here as a reservation</span></td></tr>
+<tr><td valign="top">C467,I</td><td><span lang="de">Setzt Bereich zur&uuml;ck auf Maschinencode</span><span lang="en">Resets the area back to machine code</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<span lang="de">Die Bearbeitung findet man sp&auml;ter in der Datei .CTL.</span>
+<span lang="en">The editing can later be found in the .CTL file.</span>
+<br />
+<span lang="de">Die letzte Datei, .DOC, beinhaltet Kommentare.
+DASM erlaubt die Eingabe allerdings nur eingeschr&auml;nkt, n&auml;mlich pro Adresse nur eine Kommentarzeile.
+Au&szlig;erdem steht der Kommentar nicht am Ende sondern jeweils vor einer Zeile.
+Besser ist da vielleicht die Utility <a href="../Assembler/ARCTOOLS/NOTATE/NOTATE.html">NOTATE</a>, welche jeweils den Kommentar an das Ende einer Zeile anh&auml;ngt.
+Diese Utility ist auch als Public Domain Software erh&auml;ltlich.</span>
+<span lang="en">The last file, .DOC, contains comments.
+DASM only allows limited input, namely only one comment line per address.
+Furthermore, the comment is not placed at the end but before each line.
+A better option may be the utility <a href="../Assembler/ARCTOOLS/NOTATE/NOTATE.html">NOTATE</a>, which appends the comment to the end of a line.
+This utility is also available as public domain software.</span>
+<br />
+<span lang="de">Trotzdem soll die M&ouml;glichkeit von DASM diesbez&uuml;glich erl&auml;utert werden.
+Im Gegensatz zu den bisher erarbeiteten Dateien, .SYM und .CTL, mu&szlig; DASM bei der Kommentareingabe ein realer Speicherplatz vorgegeben werden.</span>
+<span lang="en">Nevertheless, DASM's capability in this regard shall be explained.
+In contrast to the previously created files .SYM and .CTL, DASM requires a real memory location to be specified for comment entry.</span>
+<br />
+<span lang="de">&Uuml;ber das Kommando</span>
+<span lang="en">Via the command</span>
+<p style="margin-left:2cm">
+?
+</p>
+<span lang="de">holt man sich dazu die Speicherbelegung auf den Bildschirm und w&auml;hlt die h&ouml;chste verf&uuml;gbare Adresse als Startadresse f&uuml;r Kommentare (Bei REZ ist dies die h&ouml;chste Adresse bei PRGM zuz&uuml;glich dem OFFSET).
+Lautet die Adresse z.B. 3500H, so wird der Start der Kommentartabelle gesetzt mit</span>
+<span lang="en">you retrieve the memory layout on screen and choose the highest available address as the start address for comments (for REZ, this is the highest address under PRGM plus the OFFSET).
+If the address is e.g. 3500H, then the start of the comment table is set with</span>
+<p style="margin-left:2cm">
+U3500
+</p>
+<span lang="de">Danach k&ouml;nnen Kommentare bearbeitet werden mit den Kommandos</span>
+<span lang="en">After that, comments can be edited with the commands</span>
+<p></p>
+
+<div style="margin-left:1cm">
+<table border="0" width="90%">
+<tr><td valign="top" width="25%">;adr,komm</td><td><span lang="de">Einf&uuml;gen eines Kommentars "komm" an Adresse "adr"</span><span lang="en">Insert a comment "komm" at address "adr"</span></td></tr>
+<tr><td valign="top">;adr</td><td><span lang="de">Anzeigen des Kommentars an Adresse "adr"</span><span lang="en">Display the comment at address "adr"</span></td></tr>
+<tr><td valign="top">;</td><td><span lang="de">Anzeigen der gesamten Kommentare</span><span lang="en">Display all comments</span></td></tr>
+<tr><td valign="top">;adr,OFF</td><td><span lang="de">Ausschalten der Adresskommentare ab Adresse "adr"</span><span lang="en">Turn off address comments starting from address "adr"</span></td></tr>
+<tr><td valign="top">;adr,ON</td><td><span lang="de">Einschalten der Adresskommentare ab Adresse "adr"</span><span lang="en">Turn on address comments starting from address "adr"</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<table border="0">
+<tr><td valign="top" width="100">(</td><td>
+<span lang="de">Der Ausdruck "Adresskommentare" besagt, da&szlig; hinter den Labels die Originalhexadresse als Kommentar angezeigt wird.
+Der Grundzustand ist OFF)</span>
+<span lang="en">The term "address comments" means that behind the labels the original hex address is displayed as a comment.
+The default state is OFF)</span></td></tr>
+</table>
+
+<p></p>
+<span lang="de">Sind alle Bearbeitungen w&auml;hrend dieser Sitzung abgeschlossen, so speicher man alle Dateien mit</span>
+<span lang="en">Once all editing during this session is complete, save all files with</span>
+<p style="margin-left:2cm">
+Sdatei.ALL
+</p>
+<span lang="de">oder aber einzeln mit</span>
+<span lang="en">or individually with</span>
+<p style="margin-left:2cm">
+Sdatei.CTL<br />
+Sdatei.SYM<br />
+Sdatei.DOC
+</p>
+<span lang="de">DASM fragt dann wieder, ob eine neue .MAC Datei angelegt werden soll, diese Frage ist an dieser Stelle ebenfalls mit N zu beantworten</span>
+<span lang="en">DASM then asks again whether a new .MAC file should be created; this question should also be answered with N at this point</span>
+<p></p>
+<span lang="de">Sind m&ouml;glichst alle Labels Lxxxx umgewande lt in "sinnvolle" Labels, alle Felder deklariert als konstante Bytes (DB), Worte (DW) oder Reservierungen (DS), so kann der letzte Akt beginnen.</span>
+<span lang="en">Once as many labels Lxxxx as possible have been converted to "meaningful" labels, and all fields declared as constant bytes (DB), words (DW) or reservations (DS), the final act can begin.</span>
+
+<p></p>
+<span style="text-decoration:underline"><span lang="de">Die letzte Sitzung</span><span lang="en">The last session</span></span>
+<p></p>
+<span lang="de">In dieser Sitzung wird nun endlich eine Quelldatei .MAC erzeugt.
+Wie erw&auml;hnt, ist eine gr&uuml;ndliche Vorarbeit unerl&auml;&szlig;lich, um den Quellkode m&ouml;glichst optimal zu gestalten.
+Zun&auml;chst werden alle Dateien wieder eingelesen mit</span>
+<span lang="en">In this session, a .MAC source file is finally generated.
+As mentioned, thorough preparatory work is essential to make the source code as optimal as possible.
+First, all files are read in again with</span>
+<p style="margin-left:2cm">
+Rdatei.ALL
+</p>
+<span lang="de">Nach einer vielleicht letzten Bearbeitung mu&szlig; auf jeden Fall der Befehl</span>
+<span lang="en">After a perhaps final editing pass, the command</span>
+<p style="margin-left:2cm">
+Sdatei.ALL
+</p>
+<span lang="de">eingegeben werden.
+Im Gegensatz zu vorher ist alerdings nun die Frage von DASM, ob eine .MAC Datei erstellt werden soll, mit Y zu beantworten.
+Dies bedeutet momentan nur, da&szlig; eine Datei datei.MAC erzeugt wird und alle Daten, die auf dem Bildschirm erscheinen nun auch in diese Datei geschrieben werden,.</span>
+<span lang="en">must be entered.
+Unlike before, DASM's question whether a .MAC file should be created must now be answered with Y.
+This currently only means that a file datei.MAC is created and all data appearing on screen is also written to this file.</span>
+<p></p>
+<span lang="de">Zuerst m&uuml;ssen alle Labels, die au&szlig;erhalb des Programms liegen (wie z.B. BDOS), als Konstante (EQU) dem System mitgeteilt werden.
+Dies geschieht mit dem Befehl</span>
+<span lang="en">First, all labels that lie outside the program (such as BDOS) must be declared as constants (EQU) to the system.
+This is done with the command</span>
+<p style="margin-left:2cm">
+QP100,HA
+</p>
+<span lang="de">wobei HA wieder die h&ouml;chste .COM Adresse ist (s.o.).
+Will man den Vorspann auch auf den Bildschirm ausgeben, so ist das Q wegzulassen.
+Vor den Konstanten wird als Vorspann noch in die Datei geschrieben</span>
+<span lang="en">where HA is again the highest .COM address (see above).
+If you want the preamble to also appear on screen, omit the Q.
+Before the constants, the following preamble is written to the file</span>
+<p></p>
+
+<div style="margin-left:2cm">
+<table border="0" width="90%">
+<tr><td valign="top" width="25%">.Z80</td><td><span lang="de">Umschalten M80 auf Z80 Kode</span><span lang="en">Switch M80 to Z80 code</span></td></tr>
+<tr><td valign="top">ASEG</td><td><span lang="de">Absolutes Segment setzen</span><span lang="en">Set absolute segment</span></td></tr>
+<tr><td valign="top">ORG 0100H</td><td><span lang="de">Programm startet ab 0100H</span><span lang="en">Program starts at 0100H</span></td></tr>
+</table>
+</div>
+
+<p></p>
+<span lang="de">Falls die Datei sp&auml;ter in mehrere Teile zerlegt werden sollte, um dann mit dem Linker L80 gebunden zu werden, sind die Anweisungen <b>ASEG</b> und <b>ORG&nbsp;0100H</b> mit dem Editor zu entfernen.</span>
+<span lang="en">If the file is later to be split into multiple parts to be linked with the linker L80, the directives <b>ASEG</b> and <b>ORG&nbsp;0100H</b> must be removed with the editor.</span>
+<br />
+<span lang="de">Beim REZ Programm besteht der Vorspann nur aus 'ORG&nbsp;0100H', jedoch kann auch dieser Vorspann auf Wunsch weggelassen werden (bei Verwendung von RMAC empfiehlt sich das).</span>
+<span lang="en">For the REZ program, the preamble consists only of 'ORG&nbsp;0100H', but this preamble can also be omitted if desired (recommended when using RMAC).</span>
+<br />
+<span lang="de">Nach dem Vorpann wird dann der Quelltext eingef&uuml;gt mit dem schon bekannten Kommando</span>
+<span lang="en">After the preamble, the source text is then inserted with the already known command</span>
+<p style="margin-left:2cm">
+QL100,HA
+</p>
+<span lang="de">Das Q schaltet wieder die Ausgabe auf den Bildschirm ab.</span>
+<span lang="en">The Q again suppresses screen output.</span>
+<br />
+<span lang="de">Ist vorher das Ende mit "Cadr,E" definiert worden, so wird jetzt die Datei .MAC geschlossen und DASM kann mit Ctrl-C beendet werden.
+War dies nicht der Fall, so mu&szlig; die Datei geschlossen werden mit</span>
+<span lang="en">If the end was previously defined with "Cadr,E", the .MAC file is now closed and DASM can be terminated with Ctrl-C.
+If this was not the case, the file must be closed with</span>
+<p style="margin-left:2cm">
+Z
+</p>
+<span lang="de">Abschliessend liegt nun die Datei datei.MAC vor.
+Diese kann jetzt mit einem Editor modifiziert und anschliessend, bis das Programm "steht", assembliert werden.</span>
+<span lang="en">Finally, the file datei.MAC is now available.
+It can now be modified with an editor and then assembled until the program "works".</span>
+
+<p></p>
+<span style="text-decoration:underline"><span lang="de">Letzte Hinweise</span><span lang="en">Final notes</span></span>
+<p></p>
+<span lang="de">Neben den besprochenen Befehlen verf&uuml;gt DASM noch &uuml;ber weitere Kommandos, deren Gebrauch allerdings nicht so oft vorkommen d&uuml;rfte.
+Diese sind</span>
+<span lang="en">In addition to the commands discussed, DASM has further commands, although their use may not occur very often.
+These are</span>
+<p></p>
+
+<div style="margin-left:2cm">
+<table border="0" width="90%">
+<tr><td valign="top" width="25%">Fwort,adr</td><td><span lang="de">Suchen einer 16 Bit Konstanten "wort" ab Adresse "adr". Ausgabe der Adressen, wo "wort" gefunden wurde. Abbruch mit beliebiger Taste.</span><span lang="en">Search for a 16-bit constant "wort" (word) starting from address "adr". Output of addresses where "wort" was found. Abort with any key.</span></td></tr>
+<tr><td valign="top">Fwort</td><td><span lang="de">Suchen von "wort" ab letzter Adresse</span><span lang="en">Search for "wort" from the last address</span></td></tr>
+<tr><td valign="top">F</td><td><span lang="de">Fortsetzung der Suche</span><span lang="en">Continue the search</span></td></tr>
+<tr><td valign="top">O</td><td><span lang="de">Anzeige des aktuellen Offsets</span><span lang="en">Display the current offset</span></td></tr>
+<tr><td valign="top">Oadr</td><td><span lang="de">Offset neu setzen auf Adresse "adr"</span><span lang="en">Set the offset to address "adr"</span></td></tr>
+<tr><td valign="top">X</td><td><span lang="de">L&ouml;schen aller Tabellen und Restart DASM. Dadurch wird der Weg frei f&uuml;r eine neue Arbeit mit DASM</span><span lang="en">Delete all tables and restart DASM. This clears the way for new work with DASM</span></td></tr>
+<tr><td valign="top">Iadr,off</td><td><span lang="de">Addiert, den Wert "off" zur Symboltabelle ab Adresse "adr", so da&szlig; alle betroffenen Symbole beim Listen mit diesem Offset versehen angezeigt werden (Dieser Befehl existiert nicht bei REZ).</span><span lang="en">Adds the value "off" to the symbol table from address "adr", so that all affected symbols are displayed with this offset during listing (this command does not exist in REZ).</span>
+</td></tr>
+</table>
+</div>
+<p></p>
+
+<span lang="de">Mit dem Kommando 'Sdatei.MAC' bei DASM bzw. 'Sdatei.ASM' bei REZ kann auch gezielt eine Quelldatei erstellt werden.</span>
+<span lang="en">With the command 'Sdatei.MAC' for DASM or 'Sdatei.ASM' for REZ, a source file can also be specifically created.</span>
+<p></p>
+<span lang="de">REZ ist in der Lage, Z80 Kode zu erkennen.
+In diesem Falle wird im Quelltext der Hinweis</span>
+<span lang="en">REZ is able to recognize Z80 code.
+In this case, the notice</span>
+<p style="margin-left:4cm">
+?Z80?
+</p>
+<span lang="de">eingef&uuml;gt.</span>
+<span lang="en">is inserted into the source text.</span>
+
+<p></p>
+<span style="text-decoration:underline"><span lang="de">Neue DASM Version</span><span lang="en">New DASM version</span></span>
+<p></p>
+<span lang="de">Es existiert eine neuere Version von DASM, die sich in einigen Punkten von der beschriebenen Version unterscheidet:</span>
+<span lang="en">A newer version of DASM exists that differs in some points from the described version:</span>
+<ol>
+<li><span lang="de">Die Labeldatei erh&auml;lt anstelle der Extension .SYM die neue Extension .SMB. Dadurch wird das &uuml;beschreiben der Labeldatei durch den CP/M Linker LINK verhindert, der als Labeldatei ebenfalls die Extension .SYM verwendet.</span><span lang="en">The label file receives the new extension .SMB instead of .SYM. This prevents the label file from being overwritten by the CP/M linker LINK, which also uses the extension .SYM for its label file.</span></li>
+<li><span lang="de">DASM kann nicht mehr &uuml;ber Ctrl-C abgebrochen werden. Hierf&uuml;r mu&szlig; das neue Kommando # eingegeben werden. Dadurch wird ein irrt&uuml;mliches Abbrechen von DASM verhindert.</span><span lang="en">DASM can no longer be terminated via Ctrl-C. The new command # must be entered instead. This prevents accidental termination of DASM.</span></li>
+<li><span lang="de">Wurde schon mit einer Datei gearbeitet, so k&ouml;nnen die Kommandos zum Abspeichern und Einlesen von Dateien vereinfacht werden zu z.B:</span><span lang="en">If a file has already been worked with, the commands for saving and loading files can be simplified to e.g.:</span>
+<p style="margin-left:2cm">
+S*.CTL
+</p>
+<span lang="de">Hiermit wird die Kontrolldatei der aktuellen Datei geschrieben.
+Ob eine aktuelle Datei existiert, wird durch das Kommando ? angezeigt.</span><span lang="en">This writes the control file of the current file.
+Whether a current file exists is indicated by the ? command.</span></li>
+</ol>
+
+</div>
+
+</body>
+
+<!-- Mirrored from www.cirsovius.de/CPM/Projekte/Disassembler/DASM-dok.html by HTTrack Website Copier/3.x [XR&CO'2014], Tue, 16 Aug 2016 11:07:49 GMT -->
+</html>

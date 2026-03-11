@@ -1,0 +1,3211 @@
+	title	PUT
+	name	('PUT')
+
+; Modified version of DASMed version of DRs PUT.COM
+; By W. Cirsovius
+
+; 1. Allows appending of data to capture file
+; 2. Disables wildcard in file name
+; 3. Give help on keyword HELP
+
+_PRG	macro
+	db	'PUT'
+	endm
+
+FALSE	equ	0
+TRUE	equ	NOT FALSE
+
+.false	equ	0
+.true	equ	1
+
+;$APPND	equ	FALSE		; Original code
+$APPND	equ	TRUE		; APPEND implemented
+
+;$WILD	equ	FALSE		; Original code
+$WILD	equ	TRUE		; Wild card check implemented
+
+;$HELP	equ	FALSE		; Original code
+$HELP	equ	TRUE		; HELP implemented
+
+BDOS	equ	0005h
+OS	equ	0000h
+
+IF	$APPND
+l005c	equ	l1549
+ELSE
+l005c	equ	005ch
+ENDIF	;$APPND
+
+.conin	equ	  1
+.conout	equ	  2
+.lstout	equ	  5
+.condir	equ	  6
+.string	equ	  9
+.rdkbd	equ	 10
+.consta	equ	 11
+.resdsk	equ	 13
+.setdma	equ	 26
+.rndred	equ	 33
+.filsiz	equ	 35
+.resdrv	equ	 37
+.trunc	equ	 99
+.conblk	equ	111
+.lstblk	equ	112
+.no	equ	-2
+.end	equ	-1
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_RRN	equ	33
+_PW	equ	 6
+_DIR	equ	16
+
+reclng	equ	128
+
+_Page	equ	1ch		; Console length
+
+null	equ	00h
+tab	equ	09h
+lf	equ	0ah
+cr	equ	0dh
+eof	equ	1ah
+eot	equ	'$'
+nlc	equ	-1
+CtrlC	equ	'C'-'@'
+
+MIN$MEM	equ	2000h
+
+l0000	equ	00h
+l0001	equ	01h
+l0005	equ	05h
+l0009	equ	09h
+l0020	equ	20h
+l0080	equ	80h
+l00fd	equ	0fdh
+
+l8685	equ	8685h
+l8a89	equ	8a89h
+l8e8d	equ	8e8dh
+
+lffff	equ	0ffffh
+
+	ex	de,hl
+	rlca
+	ld	sp,l161d
+	jp	l03e4
+;
+	nop
+	call	l0020
+	ds	52
+;
+	db	'CP/M Version 3.0'
+	db	'Copyright 1998, Caldera, Inc.   101198'
+	db	0,0,0,0,'654321'
+l0180:
+	db	'WARNING:'
+	db	cr,lf,eot
+l018b:
+F$1	equ	$-l018b
+	db	'OUTPUT~'
+F$2	equ	$-l018b
+	db	'TO~'
+F$3	equ	$-l018b
+	db	'FILE~'
+F$4	equ	$-l018b
+	db	'CONSOLE~'
+F$5	equ	$-l018b
+	db	'CONOUT:~'
+F$6	equ	$-l018b
+	db	'AUXILIARY~'
+F$7	equ	$-l018b
+	db	'AUXOUT:~'
+F$8	equ	$-l018b
+	db	'END~'
+F$9	equ	$-l018b
+	db	'CON:~'
+F$10	equ	$-l018b
+	db	'AUX:~'
+F$11	equ	$-l018b
+	db	'LIST~'
+F$12	equ	$-l018b
+	db	'LST:~'
+F$13	equ	$-l018b
+	db	'PRINTER~'
+F$14	equ	$-l018b
+IF	$HELP
+	db	'INPUT~'
+F$15	equ	$-l018b
+	db	'HELP'
+F$16	equ	$-l018b
+ELSE
+	db	'INPUT'
+F$15	equ	$-l018b
+ENDIF	;$HELP
+	db	0ffh
+l01e2:
+	db	F$1,F$2,F$3,F$4,F$5,F$6,F$7,F$8,F$9
+	db	F$10,F$11,F$12,F$13,F$14,F$15
+IF	$HELP
+	db	F$16
+ENDIF	;$HELP
+l01f1:
+O$1	equ	$-l01f1
+	db	'NOT~'
+O$2	equ	$-l01f1
+	db	'ECHO~'
+O$3	equ	$-l01f1
+	db	'RAW~'
+O$4	equ	$-l01f1
+	db	'FILTERED~'
+O$5	equ	$-l01f1
+	db	'SYSTEM~'
+O$6	equ	$-l01f1
+	db	'PROGRAM'
+O$7	equ	$-l01f1
+	db	0ffh
+l0216:
+	db	O$1,O$2,O$3,O$4,O$5,O$6,O$7
+l021d:
+	db	0ffh
+l021e:
+	db	0,'[]=, ./;',0,0ffh
+l0229:
+	db	5		; Number for delimiter ,
+l022a:
+	db	'Error at the ''^'': ',eot
+l023d:
+	db	'Error at end of line: ',eot
+l0254:
+	db	'Invalid option or modifier',eot
+l026f:
+	db	'End of line expected',eot
+l0284:
+	db	'Invalid file specification',eot
+l029f:
+	db	'Invalid command',eot
+l02af:
+	db	'Invalid delimiter',eot
+l02c1:
+	db	'File is Read Only',eot
+IF	$WILD
+l02w1:
+	db	'Wildcard not allowed in file name',eot
+ENDIF	;$WILD
+l02d3:
+	db	' (Y/N)? ',eot
+IF	$APPND
+ll02d3:
+	db	' (A/D)? ',eot
+ENDIF	;$APPND
+l02dc:
+	_PRG
+	db	' aborted',eot
+l02e8:
+	db	'Enter Password: ',eot
+l02f9:
+	db	'Putting ',eot
+l0302:
+	db	'list',eot
+l0307:
+	db	'console',eot
+l030f:
+	db	' input to ',eot
+l031a:
+	db	' output to ',eot
+l0326:
+	db	'file: ',eot
+l032d:
+	db	cr,lf	
+	db	'Do you want another file',eot
+l0348:
+	db	'File already exists; '
+IF	$APPND
+	db	'append or delete it',eot
+ELSE
+	db	'Delete it',eot
+ENDIF	;$APPND
+l0367:
+	_PRG
+	db	' completed for ',eot
+l037a:
+	db	'printer',eot
+l0382:
+	db	'console',eot
+l038a:
+	db	'Requires CP/M 3.0',eot
+l039c:
+	db	'CP/M 3 '
+	_PRG
+	db	' Version 3.0'
+	db	cr,lf,eot
+l03b5:
+	db	'Put console output to a file',eot
+l03d2:
+	db	cr,lf,'Enter file: ',eot
+;
+	ld	sp,l161d
+;
+; &&&&&&&&&&&&&&&&&
+; &&& ENTER PUT &&&
+; &&&&&&&&&&&&&&&&&
+;
+l03e4:
+	ld	sp,l161d	; Load local stack
+	call	l0766		; Get OS version
+	ld	a,l
+	sub	'0'
+	sbc	a,a
+	push	af
+	call	l0766		; Get OS version again
+	ld	a,h
+	sub	1
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra			; Verify at least CP/M 3
+	jp	nc,l040d
+	ld	bc,l038a
+	call	l072f		; Tell invalid OS
+	ld	de,l0000
+	ld	c,0
+	call	l0005		; Exit
+l040d:
+	ld	bc,l0080+1
+	call	l10f9		; Skip blanks
+	rra
+	jp	c,l049e		; Ok
+	ld	bc,l039c
+	call	l072f		; Give ID
+	ld	bc,l03b5
+	call	l072f		; Tell file name expected
+	ld	bc,l03d2
+	call	l072f		; Request file name
+	ld	e,80h
+	ld	bc,l0080
+	call	l073f		; Read line from console
+	ld	(l1623),a	; Save length
+	call	l0aad		; Give new line
+	ld	hl,l0080+1
+	ld	(hl),' '	; Overwrite length
+	push	hl
+	ld	hl,(l1623)	; Get length of line
+	ld	h,0
+	pop	bc
+	inc	bc
+	add	hl,bc		; Point to end
+	ld	(hl),null	; Close it
+	ld	bc,l0080+1
+	call	l10f9		; Skip blanks
+	rra
+	jp	c,l0459		; Ok
+	ld	de,l0000
+	ld	c,0
+	call	l0005		; Exit if empty
+l0459:
+	ld	hl,l161f
+	ld	(hl),1		; Init count
+l045e:
+	ld	a,(l1623)	; Get length of line
+	ld	hl,l161f
+	cp	(hl)		; Test line done
+	jp	c,l0486		; Yeap
+	ld	hl,(l161f)
+	ld	h,0
+	ld	bc,l0080+1
+	add	hl,bc		; Position in line
+	ld	c,(hl)		; Get character
+	call	l0cc3		; Convert to upper case
+	ld	hl,(l161f)
+	ld	h,0
+	ld	bc,l0080+1
+	add	hl,bc
+	ld	(hl),a		; Write back
+	ld	hl,l161f
+	inc	(hl)
+	jp	nz,l045e
+l0486:
+	ld	hl,l0080+2
+	ld	(l1620),hl	; Init command line pointer
+	ld	a,(l1623)	; Get length of line
+	ld	(l1622),a	; Save it
+	ld	(l1627),hl	; Init another command line pointer
+	ld	bc,l0080+2
+	call	l1081		; Parse file
+	jp	l070b		; Exit
+;
+; Got CCP argument
+;
+l049e::
+	ld	hl,l161f
+	ld	(hl),1
+l04a3:
+	ld	hl,(l161f)
+	ld	h,0
+	ld	bc,l0080
+	add	hl,bc		; Position in line
+	ld	a,(hl)
+	cp	' '		; Test blank
+	jp	nz,l04b9	; Nope
+	ld	hl,l161f
+	inc	(hl)		; Skip it
+	jp	l04a3
+l04b9:
+	ld	hl,l0080+1
+	ld	(l1620),hl	; Init command line pointer
+	dec	hl
+	ld	a,(hl)
+	ld	(l1622),a	; Set length of line
+	push	hl
+	ld	hl,(l161f)
+	ld	h,0
+	pop	bc
+	add	hl,bc
+	ld	(l1627),hl	; Init another command line pointer
+	ld	hl,l1629
+	ld	(hl),0
+	ld	hl,l162b
+	ld	(hl),1		; Set end of line
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+IF	$HELP
+	ld	a,(l1629)
+	sub	15		; Test HELP
+	jp	z,prHELP
+ENDIF	;$HELP
+	ld	a,(l1629)
+	sub	6		; Test AUXILIARY
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	7		; Test AUXOUT:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	push	af
+	ld	a,(l1629)
+	sub	10		; Test AUX:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l058b	; Neither
+;
+; Process PUT AUXILIARY ...
+;
+	ld	hl,l1631
+	ld	(hl),1
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+	ld	a,(l1629)
+	cp	1		; Test OUTPUT
+	jp	nz,l0531	; Nope
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+l0531:
+	ld	a,(l1629)
+	cp	2		; Test TO
+	jp	nz,l0546
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+l0546:
+	ld	a,(l1629)
+	cp	3		; Test FILE
+	jp	nz,l0559
+	ld	hl,(l1627)	; Get command line pointer
+	ld	b,h
+	ld	c,l
+	call	l1081		; Parse file
+	jp	l0588
+l0559:
+	ld	a,(l1629)
+	sub	6		; Test AUXILIARY
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	7		; Test AUXOUT:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	push	af
+	ld	a,(l1629)
+	sub	10		; Test AUX:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0583	; Neither
+	call	l0f21
+	jp	l0588
+l0583:
+	ld	c,3
+	call	l0ae3		; Invalid command
+l0588:
+	jp	l070b		; Exit
+;
+; Process PUT LIST ...
+;
+l058b:
+	ld	a,(l1629)
+	sub	11		; Test LIST
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	12		; Test LST:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	push	af
+	ld	a,(l1629)
+	sub	13		; Test PRINTER
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0638	; Neither
+	ld	hl,l1631
+	ld	(hl),2
+	inc	hl
+	ld	(hl),0
+	ld	hl,l1625
+	ld	(hl),8ah
+	dec	hl
+	ld	(hl),89h
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+	ld	a,(l1629)
+	cp	1		; Test OUTPUT
+	jp	nz,l05e1
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+l05e1:
+	ld	a,(l1629)
+	cp	2		; Test TO
+	jp	nz,l05f6
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+l05f6:
+	ld	a,(l1629)
+	cp	3		; Test FILE
+	jp	nz,l0606
+	ld	hl,(l1627)	; Get command line pointer
+	ld	b,h
+	ld	c,l
+	call	l1081		; Parse file
+l0606:
+	ld	a,(l1629)
+	sub	11		; Test LIST
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	12		; Test LST:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	push	af
+	ld	a,(l1629)
+	sub	13		; Test PRINTER
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0630	; Neither
+	call	l0f21
+	jp	l0635
+l0630:
+	ld	c,3
+	call	l0ae3		; Invalid command
+l0635:
+	jp	l070b		; Exit
+;
+; Process PUT CONSOLE ...
+;
+l0638:
+	ld	a,(l1629)
+	sub	4		; Test CONSOLE
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	5		; Test CONOUT:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	push	af
+	ld	a,(l1629)
+	sub	9		; Test CON:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0677	; Neither
+	ld	a,(l162b)
+	cp	9		; Test ;
+	jp	nz,l066a
+	call	l0f21
+	jp	l0677
+l066a:
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+;
+; Process PUT OUTPUT ...
+;
+l0677:
+	ld	a,(l1629)
+	cp	1		; Test OUTPUT
+	jp	nz,l068f
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+	jp	l06b7
+;
+; Process PUT INPUT ...
+;
+l068f:
+	ld	a,(l1629)
+	cp	14		; Test INPUT
+	jp	nz,l06b7
+	ld	hl,l1631
+	ld	(hl),3
+	inc	hl
+	ld	(hl),1
+	inc	hl
+	ld	(hl),0
+	ld	hl,l1625
+	ld	(hl),8eh
+	dec	hl
+	ld	(hl),8dh
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+l06b7:
+	ld	a,(l1629)
+	cp	2		; Test TO
+	jp	nz,l06cc
+	ld	bc,l018b
+	push	bc
+	ld	de,l1629
+	ld	bc,l01e2
+	call	l0852		; Find keyword
+l06cc:
+	ld	a,(l1629)
+	cp	3		; Test FILE
+	jp	nz,l06dc
+	ld	hl,(l1627)	; Get command line pointer
+	ld	b,h
+	ld	c,l
+	call	l1081		; Parse file
+l06dc:
+	ld	a,(l1629)
+	sub	4		; Test CONSOLE
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	5		; Test CONOUT:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	push	af
+	ld	a,(l1629)
+	sub	9		; Test CON:
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0706	; Neither
+	call	l0f21
+	jp	l070b		; Exit
+l0706:
+	ld	c,3
+	call	l0ae3		; Invalid command
+l070b:
+	ei
+	halt
+;
+; Get character from console
+;
+l070d:
+	ld	de,l0000
+	ld	c,1
+	call	l0005		; Read character
+	ret
+;
+; Put character in reg C to console
+;
+l0716:
+	ld	hl,l1641
+	ld	(hl),c
+	ld	hl,(l1641)
+	ld	h,0
+	ex	de,hl
+	ld	c,2
+	call	l0005		; Write character
+	ret
+;
+; Get character from console without echo
+;
+l0726:
+	ld	de,l00fd
+	ld	c,6
+	call	l0005		; Read character
+	ret
+;
+; Put string ^BC to console
+;
+l072f:
+	ld	hl,l1642+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1642)
+	ex	de,hl
+	ld	c,9
+	call	l0005		; Write string
+	ret
+;
+; Read line ^BC from console with length in reg E
+;
+l073f:
+	ld	hl,l1646
+	ld	(hl),e
+	dec	hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1644)
+	ld	a,(l1646)
+	ld	(hl),a
+	inc	hl
+	ld	(hl),null
+	ld	hl,(l1644)
+	ex	de,hl
+	ld	c,10
+	call	l0005		; Read line
+	ld	hl,(l1644)
+	inc	hl
+	ld	(l1644),hl
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+	ld	a,c		; Get length
+	ret
+;
+; Get OS version
+;
+l0766:
+	ld	de,l0000
+	ld	c,12
+	call	l0005		; Get version
+	ret
+;
+; Get state of console
+;
+Constat:
+	ld	de,l0000
+	ld	c,11
+	call	l0005
+	ret
+;
+; Delete file ^BC
+;
+l0778:
+	ld	hl,l1647+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1647)
+	ex	de,hl
+	ld	c,19
+	call	l0005
+	ret
+;
+; Create file ^BC
+;
+l0788:
+	ld	hl,l1649+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1649)
+	ex	de,hl
+	ld	c,22
+	call	l0005
+	ret
+;
+; Set disk buffer ^BC
+;
+l0798:
+	ld	hl,l164b+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l164b)
+	ex	de,hl
+	ld	c,.setdma
+	call	l0005
+	ret
+;
+; Set error function ^BC
+;
+l07a8:
+	ld	hl,l164d
+	ld	(hl),c
+	ld	hl,(l164d)
+	ld	h,0
+	ex	de,hl
+	ld	c,45
+	call	l0005
+	ret
+;
+; Get SCB value in reg C
+;
+l07b8:
+	ld	hl,l164e
+	ld	(hl),c
+	ld	a,(l164e)
+	ld	(l162d),a
+	ld	hl,l162d+1
+	ld	(hl),0
+	ld	de,l162d
+	ld	c,'1'
+	call	l0005
+	ret
+
+	ld	hl,l1650
+	ld	(hl),e
+	dec	hl
+	ld	(hl),c
+	ld	a,(l164f)
+	ld	(l162d),a
+	ld	hl,l162d+1
+	ld	(hl),0ffh
+	ld	hl,(l1650)
+	ld	h,0
+	ld	(l162f),hl
+	ld	de,l162d
+	ld	c,'1'
+	call	l0005
+	ret
+;
+; Call RSX with ^BC parameter
+;
+l07f2:
+	ld	hl,l1651+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1651)
+	ex	de,hl
+	ld	c,60
+	call	l0005		; Call RSX
+	ret
+
+	ld	de,lffff
+	ld	c,6dh
+	call	l0005
+	ret
+
+	ld	hl,l1653+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1653)
+	ex	de,hl
+	ld	c,6dh
+	call	l0005
+	ret
+;
+; Test delimiter in reg C
+;
+l081b:
+	ld	hl,l1655
+	ld	(hl),c		; Save character
+	ld	hl,l1656
+	ld	(hl),1		; Init count
+l0824:
+	ld	hl,(l1656)
+	ld	h,0
+	ld	bc,l021e
+	add	hl,bc		; Position in character list
+	dec	bc		; Position to end delimiter
+	ld	a,(bc)
+	cp	(hl)		; Test end
+	jp	nz,l0836
+	ld	a,0
+	ret
+l0836:
+	ld	hl,(l1656)
+	ld	h,0
+	ld	bc,l021e
+	add	hl,bc		; Position in character list
+	ld	a,(l1655)
+	cp	(hl)		; Test match
+	jp	nz,l084a
+	ld	a,(l1656)	; Return value for match
+	ret
+l084a:
+	ld	hl,l1656
+	inc	(hl)
+	jp	l0824
+;
+	ret
+;
+; Find item in command line
+;
+; ^DE points to result		-> l165b
+; ^BC points to list index	-> l1659
+; <SP> points to list		-> l1657
+;
+l0852:
+	ld	hl,l165b+1
+	ld	(hl),d
+	dec	hl
+	ld	(hl),e
+	dec	hl
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	pop	de
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	push	de
+	ld	a,(l162b)
+	cp	9		; Test ;
+	jp	nz,l086c
+	ret
+l086c:
+	call	l0a91		; Skip comma
+	ld	hl,l1663
+	ld	(hl),0		; Clear line index
+	call	l09d7		; Decode first character and get next
+l0877:
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(hl)
+	cp	0
+	jp	z,l08c1
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(hl)		; Get index
+	ld	(l1663),a	; Unpack it
+	ld	hl,(l1660)	; Get command character
+	ld	c,l
+	call	l081b		; Test delimiter
+	ld	(l162b),a
+	ld	hl,l1667
+	ld	(hl),1
+l0896:
+	ld	a,(l162b)
+	cp	0		; Test delimiter
+	jp	nz,l08b8	; Nope
+	call	l09f5
+	ld	a,(l1667)
+	rra
+	jp	c,l08ab
+	jp	l08bb
+l08ab:
+	ld	hl,(l1660)	; Get command character
+	ld	c,l
+	call	l081b		; Test delimiter
+	ld	(l162b),a
+	jp	l0896
+l08b8:
+	jp	l08cb
+l08bb:
+	call	l09d7		; Decode first character and get next
+	jp	l0877
+l08c1:
+	ld	a,(l165d)	; Get index
+	ld	(l162a),a
+	call	l0a35
+	ret
+l08cb:
+	ld	a,(l165d)	; Get index
+	ld	(l162a),a
+	ld	(l1666),a
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(hl)
+	ld	(l1664),a
+	ld	hl,l1667
+	ld	(hl),0
+l08e0:
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(hl)		; Get index
+	ld	(l1663),a	; Unpack it
+	call	l09d7		; Decode first character and get next
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(hl)
+	cp	0
+	jp	nz,l08f6
+	jp	l0951
+l08f6:
+	ld	hl,(l165b)	; Get result pointer
+	ld	c,(hl)
+	ld	b,0
+	push	hl
+	ld	hl,l0001
+	add	hl,bc
+	ex	de,hl
+	ld	hl,(l1659)	; Get list index pointer
+	add	hl,de
+	push	hl
+	ld	hl,(l1659)
+	add	hl,bc
+	pop	bc
+	ld	a,(bc)
+	sub	(hl)
+	dec	a
+	ld	(l1665),a
+	ld	hl,l1666
+	cp	(hl)
+	pop	hl
+	jp	nz,l0945
+	ld	hl,l1667
+	ld	(hl),1
+	ld	hl,l165e
+	ld	(hl),1
+l0924:
+	ld	a,(l1666)
+	ld	hl,l165e
+	cp	(hl)
+	jp	c,l0942
+	call	l09f5
+	ld	a,(l1667)
+	rra
+	jp	c,l093b
+	jp	l08e0
+l093b:
+	ld	hl,l165e
+	inc	(hl)
+	jp	nz,l0924
+l0942:
+	jp	l0948
+l0945:
+	jp	l08e0
+l0948:
+	ld	hl,(l165b)	; Get result pointer
+	ld	(hl),0
+	call	l0a35
+	ret
+l0951:
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(l1664)
+	ld	(hl),a
+	ld	a,(l162a)
+	ld	de,l1627	; Init command line pointer
+	call	l156b		; HL:=^DE+ACCU
+	ex	de,hl
+	dec	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	call	l0a91		; Skip comma
+	ld	a,(l162b)
+	cp	0		; Test delimiter
+	jp	z,l097b		; Yeap
+	ld	hl,(l1627)	; Get command line pointer
+	inc	hl
+	ld	(l1627),hl
+	jp	l0980
+l097b:
+	ld	hl,l162b
+	ld	(hl),5		; Set ,
+l0980:
+	ret
+;
+; Find first character in option list
+;
+l0981:
+	ld	a,(l1663)	; Get index
+	ld	(l1668),a	; Save it 
+	ld	c,a
+	ld	b,0
+	ld	hl,(l1659)	; Get list index pointer
+	add	hl,bc		; Position into list
+	ld	a,(hl)		; Get index
+	ld	(l165f),a	; Store it
+l0992:
+	ld	hl,(l165f)	; Get index
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l1657)	; Get list pointer
+	add	hl,de		; Point into list item
+	ld	a,(l021d)	; Get end character
+	cp	(hl)		; Test end of list
+	jp	z,l09d1		; Yeap, not found
+	ld	hl,l1668
+	inc	(hl)		; Advance index
+	ld	hl,(l165b)	; Get result pointer
+	ld	a,(l1668)	; Get index
+	ld	(hl),a		; Store it
+	ld	hl,(l165f)	; Get index
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l1657)	; Get list pointer
+	add	hl,de		; Point into list
+	ld	a,(l1660)	; Get command character
+	cp	(hl)		; Test match
+	jp	nz,l09c0	; Nope, try next
+	ret
+l09c0:
+	ld	hl,(l1668)	; Get index
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l1659)	; Get list index pointer
+	add	hl,de		; Position in 
+	ld	a,(hl)
+	ld	(l165f),a	; Set index
+	jp	l0992
+l09d1:
+	ld	hl,(l165b)	; Get result pointer
+	ld	(hl),0		; Indicate no success
+	ret
+;
+; Decode first character and get next from command line
+;
+l09d7:
+	ld	hl,(l1627)	; Get command line pointer
+	ld	a,(hl)		; Get character
+	ld	(l1660),a	; Unpack it
+	call	l0981		; Find first character in option list
+	ld	a,(l165f)	; Get index found
+	ld	(l1661),a	; Save it
+	ld	hl,l165d
+	ld	(hl),1		; Init index
+	ld	hl,(l1627)	; Get command line pointer
+	inc	hl
+	ld	a,(hl)
+	ld	(l1660),a	; Save next character
+	ret
+;
+;
+;
+l09f5:
+	ld	hl,l1661	; Point to index found
+	inc	(hl)
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,(l1657)	; Get list pointer
+	add	hl,bc
+	ld	a,(l162c)
+	cp	(hl)
+	jp	nz,l0a0f
+	ld	hl,l1667
+	ld	(hl),0
+	jp	l0a25
+l0a0f:
+	ld	hl,(l1661)	; Get index found
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l1657)	; Get list pointer
+	add	hl,de
+	ld	a,(l1660)	; Get command character
+	cp	(hl)
+	jp	z,l0a25
+	ld	hl,l1667
+	ld	(hl),0
+l0a25:
+	ld	hl,l165d
+	inc	(hl)		; Advance index
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,(l1627)	; Get command line pointer
+	add	hl,bc
+	ld	a,(hl)
+	ld	(l1660),a	; Save command character
+	ret
+l0a35:
+	ld	hl,(l165d)	; Get index
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l1627)	; Get command line pointer
+	add	hl,de
+	ld	a,(hl)
+	ld	(l1660),a	; Save command character
+	ld	hl,(l1660)	; Get command character
+	ld	c,l
+	call	l081b		; Test delimiter
+	ld	(l162b),a
+l0a4d:
+	ld	a,(l162b)
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,9
+	ld	hl,l162b
+	sub	(hl)
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra			; Test delimiter
+	jp	nc,l0a7e	; Yeap
+	ld	hl,l165d
+	inc	(hl)		; Advance index
+	ld	c,(hl)
+	ld	b,0
+	ld	hl,(l1627)	; Get command line pointer
+	add	hl,bc
+	ld	a,(hl)
+	ld	(l1660),a	; Save command character
+	ld	hl,(l1660)	; Get command character
+	ld	c,l
+	call	l081b		; Test delimiter
+	ld	(l162b),a
+	jp	l0a4d
+l0a7e:
+	ld	a,(l165d)	; Get index
+	ld	(l162a),a
+	ld	de,l1627	; Init command line pointer
+	call	l156b		; HL:=^DE+ACCU
+	inc	hl
+	ex	de,hl
+	dec	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+	ret
+;
+; Skip comma
+;
+l0a91:
+	ld	hl,(l1627)	; Get command line pointer
+	ld	c,(hl)
+	call	l081b		; Test delimiter
+	ld	(l162b),a
+	ld	hl,l0229
+	cp	(hl)		; Test comma
+	jp	nz,l0aac	; Nope
+	ld	hl,(l1627)	; Get command line pointer
+	inc	hl		; Skip over comma
+	ld	(l1627),hl
+	jp	l0a91
+l0aac:
+	ret
+;
+; Give new line on console
+;
+l0aad:
+	ld	c,cr
+	call	l0716		; Simple one
+	ld	c,lf
+	call	l0716
+	ret
+l0ab8:
+	ld	hl,l166c
+	ld	(hl),e
+	dec	hl
+	ld	(hl),c
+	dec	hl
+	pop	de
+	pop	bc
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	push	de
+l0ac5:
+	ld	a,(l166c)
+	dec	a
+	ld	(l166c),a
+	cp	0ffh
+	jp	z,l0ae2
+	ld	hl,(l1669)
+	ld	a,(l166b)
+	ld	(hl),a
+	ld	hl,(l1669)
+	inc	hl
+	ld	(l1669),hl
+	jp	l0ac5
+l0ae2:
+	ret
+;
+; Process error number in reg C
+;
+l0ae3:
+	ld	hl,l166d
+	ld	(hl),c		; Save error number
+	ld	hl,l1676
+	ld	(hl),0
+	ld	hl,(l1620)	; Get command line pointer
+	ld	(l1672),hl
+	ld	(l1674),hl
+	ld	c,1ah
+	call	l07b8		; Get console width
+	ld	(l161e),a
+	ld	a,(l161e)
+	cp	'('
+	jp	nc,l0b0a
+	ld	hl,l161e
+	ld	(hl),'('
+l0b0a:
+	ld	hl,(l1622)	; Get length of line
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l161e)
+	ld	h,0
+	call	l1578		; DE:=DE DIV HL
+	ld	hl,l1670
+	ld	(hl),e
+	ld	hl,(l1622)	; Get length of line
+	ld	h,0
+	ex	de,hl
+	call	l157a		; HL:=DE MOD BC (was previous HL)
+	ex	de,hl
+	ld	hl,l1671
+	ld	(hl),e
+	ld	a,(l166d)
+	cp	2
+	jp	z,l0b6b
+	ld	a,(l166d)
+	sub	1
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l166d)
+	sub	4
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0b54
+	ld	hl,(l1627)	; Get command line pointer
+	dec	hl
+	ld	(l1627),hl
+	jp	l0b6b
+l0b54:
+	ld	a,(l166d)
+	cp	5
+IF	$WILD
+	jp	nc,l0b6b
+ELSE
+	jp	z,l0b6b
+ENDIF	;$WILD
+	ld	a,(l162a)
+	ld	de,l1627	; Init command line pointer
+	call	l15ae		; HL:=^DE-ACCU
+	dec	hl
+	ex	de,hl
+	dec	hl
+	ld	(hl),e
+	inc	hl
+	ld	(hl),d
+l0b6b:
+	call	l0aad		; Give new line
+	ld	hl,l166e
+	ld	(hl),1
+l0b73:
+	ld	a,(l1670)
+	ld	hl,l166e
+	cp	(hl)
+	jp	c,l0b91
+	ld	hl,(l1672)
+	ld	(l1674),hl
+	ld	hl,(l161e)
+	ld	c,l
+	call	l0c14
+	ld	hl,l166e
+	inc	(hl)
+	jp	nz,l0b73
+l0b91:
+	ld	hl,(l1671)
+	ld	c,l
+	call	l0c14
+	ld	a,(l1676)
+	rra
+	jp	nc,l0ba8
+	ld	bc,l022a
+	call	l072f		; Tell location of error
+	jp	l0bae
+l0ba8:
+	ld	bc,l023d
+	call	l072f		; Tell error at end of line
+l0bae:
+	ld	a,(l161e)
+	cp	'A'
+	jp	nc,l0bb9
+	call	l0aad		; Give new line
+l0bb9:
+	ld	hl,(l166d)
+	ld	c,l
+	ld	b,0
+	ld	hl,l0bff
+	add	hl,bc
+	add	hl,bc
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	ex	de,hl
+	jp	(hl)
+;
+; Error 0: Invalid option or modifier
+;
+l0bc9:
+	ld	bc,l0254
+	call	l072f
+	jp	l0c0b
+;
+; Error 1: End of line expected
+;
+l0bd2:
+	ld	bc,l026f
+	call	l072f
+	jp	l0c0b
+;
+; Error 2: Invalid file specification
+;
+l0bdb:
+	ld	bc,l0284
+	call	l072f
+	jp	l0c0b
+;
+; Error 3: Invalid command
+;
+l0be4:
+	ld	bc,l029f
+	call	l072f
+	jp	l0c0b
+;
+; Error 4: Invalid delimiter
+;
+l0bed:
+	ld	bc,l02af
+	call	l072f
+	jp	l0c0b
+;
+; Error 5: File is Read Only
+;
+l0bf6:
+	ld	bc,l02c1
+	call	l072f
+	jp	l0c0b
+IF	$WILD
+;
+; Error 6: File contains Wild Card
+;
+l0wf6:
+	ld	bc,l02w1
+	call	l072f
+	jp	l0c0b
+ENDIF	;$WILD
+;
+l0bff:
+	dw	l0bc9,l0bd2,l0bdb,l0be4,l0bed,l0bf6
+IF	$WILD
+	dw	l0wf6
+ENDIF	;$WILD
+;
+l0c0b:
+	ld	de,l0000
+	ld	c,0
+	call	l0005		; Exit
+	ret
+l0c14:
+	ld	hl,l1677
+	ld	(hl),c
+	ld	hl,l166f
+	ld	(hl),1
+l0c1d:
+	ld	a,(l1677)
+	ld	hl,l166f
+	cp	(hl)
+	jp	c,l0c3c
+	ld	hl,(l1672)
+	ld	c,(hl)
+	call	l0716		; Put character to console
+	ld	hl,(l1672)
+	inc	hl
+	ld	(l1672),hl
+	ld	hl,l166f
+	inc	(hl)
+	jp	nz,l0c1d
+l0c3c:
+	call	l0aad		; Give new line
+	ld	hl,l166f
+	ld	(hl),1
+l0c44:
+	ld	a,(l1677)
+	ld	hl,l166f
+	cp	(hl)
+	jp	c,l0c7b
+	ld	hl,(l1674)
+	ld	de,l1627	; Init command line pointer
+	call	l15b1		; HL:=^DE-HL
+	or	l
+	jp	nz,l0c68
+	ld	hl,l1676
+	ld	(hl),1
+	ld	c,5eh
+	call	l0716		; Put character to console
+	jp	l0c6d
+l0c68:
+	ld	c,' '
+	call	l0716		; Put character to console
+l0c6d:
+	ld	hl,(l1674)
+	inc	hl
+	ld	(l1674),hl
+	ld	hl,l166f
+	inc	(hl)
+	jp	nz,l0c44
+l0c7b:
+	call	l0aad		; Give new line
+	ret
+IF	$APPND
+;
+; Tell delete or append file
+;
+ll0c7f:
+	ld	hl,l1678+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1678)
+	ld	b,h
+	ld	c,l
+	call	l072f
+	ld	bc,ll02d3
+	call	l072f		; Ask for APPEND or DELETE
+	call	l070d		; Get character from console
+	ld	(l167a),a
+	call	l0aad		; Give new line
+	ld	a,(l167a)
+	cp	'a'		; Test append
+	ret	z
+	cp	'A'
+	ret
+ENDIF	;$APPND
+;
+;
+;
+l0c7f:
+	ld	hl,l1678+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l1678)
+	ld	b,h
+	ld	c,l
+	call	l072f
+	ld	bc,l02d3
+	call	l072f		; Ask for YES or NO
+	call	l070d		; Get character from console
+	ld	(l167a),a
+	call	l0aad		; Give new line
+	ld	a,(l167a)
+	sub	'y'
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l167a)
+	sub	'Y'
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	c,l0cc2
+	ld	bc,l02dc
+	call	l072f		; Tell aborted
+	ld	de,l0000
+	ld	c,0
+	call	l0005		; Exit
+l0cc2:
+	ret
+;
+; Convert character in reg C to upper case
+;
+l0cc3:
+	ld	hl,l167b
+	ld	(hl),c
+	ld	a,(l167b)
+	cp	'a'
+	jp	c,l0cdd
+	ld	a,(l167b)
+	cp	'z'+1
+	jp	nc,l0cdd
+	ld	a,(l167b)
+	sub	'a'-'A'
+	ret
+l0cdd:
+	ld	a,(l167b)
+	ret
+l0ce1:
+	call	l0726		; Get character from console
+	ld	c,a
+	call	l0cc3		; Convert to upper case
+	ld	(l167c),a
+	ld	a,(l167c)
+	ret
+l0cef:
+	call	l0aad		; Give new line
+	call	l0aad
+	ld	bc,l02e8
+	call	l072f		; Tell to enter password
+l0cfb:
+	ld	bc,l1639
+	push	bc
+	ld	e,8
+	ld	c,' '
+	call	l0ab8
+	ld	hl,l167d
+	ld	(hl),0
+l0d0b:
+	ld	a,7
+	ld	hl,l167d
+	cp	(hl)
+	jp	c,l0d7d
+l0d14:
+	call	l0ce1
+	ld	(l167e),a
+	cp	' '
+	jp	c,l0d2c
+	ld	hl,(l167d)
+	ld	h,0
+	ld	bc,l1639
+	add	hl,bc
+	ld	a,(l167e)
+	ld	(hl),a
+l0d2c:
+	ld	a,(l167e)
+	cp	0dh
+	jp	nz,l0d35
+	ret
+l0d35:
+	ld	a,(l167e)
+	cp	18h
+	jp	nz,l0d40
+	jp	l0cfb
+l0d40:
+	ld	a,(l167e)
+	cp	8
+	jp	nz,l0d66
+	ld	a,(l167d)
+	cp	1
+	jp	nc,l0d53
+	jp	l0cfb
+l0d53:
+	ld	a,(l167d)
+	dec	a
+	ld	(l167d),a
+	ld	c,a
+	ld	b,0
+	ld	hl,l1639
+	add	hl,bc
+	ld	(hl),' '
+	jp	l0d14
+l0d66:
+	ld	a,(l167e)
+	cp	3
+	jp	nz,l0d76
+	ld	de,l0000
+	ld	c,0
+	call	l0005		; Exit
+l0d76:
+	ld	hl,l167d
+	inc	(hl)
+	jp	nz,l0d0b
+l0d7d:
+	ret
+;
+;
+;
+l0d7e:
+	ld	bc,l02f9
+	call	l072f		; Tell putting ...
+	ld	a,(l1631)
+	cp	2
+	jp	nz,l0d95
+	ld	bc,l0302
+	call	l072f		; Tell ... list ..
+	jp	l0d9b
+l0d95:
+	ld	bc,l0307
+	call	l072f		; Tell ... console ...
+l0d9b:
+	ld	a,(l1631)
+	cp	3
+	jp	nz,l0dac
+	ld	bc,l030f
+	call	l072f		; Tell ... input to ...
+	jp	l0db2
+l0dac:
+	ld	bc,l031a
+	call	l072f		; Tell ... output to ...
+l0db2:
+	ret
+;
+;
+;
+l0db3:
+	ld	hl,l1680
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	c,1ah
+	call	l07b8		; Get console width
+	cp	'0'
+	jp	nc,l0dc6
+	call	l0aad		; Give new line
+l0dc6:
+	ld	bc,l0326
+	call	l072f		; Tell file
+	ld	hl,(l167f)
+	ld	a,(hl)
+	cp	0
+	jp	z,l0de4
+	ld	hl,(l167f)
+	ld	a,(hl)
+	add	a,'@'
+	ld	c,a
+	call	l0716		; Put character to console
+	ld	c,':'
+	call	l0716		; Put character to console
+l0de4:
+	ld	hl,l1681
+	ld	(hl),1
+l0de9:
+	ld	a,0bh
+	ld	hl,l1681
+	cp	(hl)
+	jp	c,l0e24
+	ld	a,(l1681)
+	cp	9
+	jp	nz,l0dff
+	ld	c,'.'
+	call	l0716		; Put character to console
+l0dff:
+	ld	hl,(l1681)
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l167f)
+	add	hl,de
+	ld	a,(hl)
+	cp	' '
+	jp	z,l0e1d
+	ld	hl,(l1681)
+	ld	h,0
+	ex	de,hl
+	ld	hl,(l167f)
+	add	hl,de
+	ld	c,(hl)
+	call	l0716		; Put character to console
+l0e1d:
+	ld	hl,l1681
+	inc	(hl)
+	jp	nz,l0de9
+l0e24:
+	ret
+;
+;
+;
+l0e25:
+IF	$WILD
+	ld	hl,l005c+.drv
+	ld	bc,.nam+.ext
+	ld	a,'?'
+	call	_cpir		; Test wild card
+	jp	nz,ll0e25	; Ok if not
+	ld	c,6
+	call	l0ae3		; Invalid wild card
+;
+_cpir:
+	cp	(hl)		; Test wild card
+	ret	z		; Yeap
+	inc	hl
+	dec	bc
+	ld	a,b
+	or	c		; Test end
+	jp	nz,_cpir	; Nope
+	inc	a
+	ret
+;
+ll0e25:
+ENDIF	;$WILD
+	ld	bc,l1625
+	call	l07f2		; Call RSX
+	ld	(l1682),hl
+	ld	a,0ffh
+	ld	de,l1682
+	call	l15ae		; HL:=^DE-ACCU
+	or	l
+	jp	z,l0e6a
+	ld	hl,(l1682)
+	dec	hl
+	dec	hl
+	ld	(l1684),hl
+	ld	a,(hl)
+	rra
+	jp	nc,l0e53
+	ld	bc,l1624
+	call	l07f2		; Call RSX
+	ld	(l1684),hl
+	jp	l0e6a
+l0e53:
+	ld	bc,l0180
+	call	l072f		; Tell warning
+	call	l0d7e
+	ld	hl,(l1682)
+	ld	b,h
+	ld	c,l
+	call	l0db3
+	ld	bc,l032d
+	call	l0c7f		; Ask for another file
+l0e6a:
+	ld	c,0ffh
+	call	l07a8		; Set return error number only
+	ld	bc,l1639
+	call	l0798		; Set disk buffer
+	ld	a,(l1639)
+	cp	' '
+	jp	z,l0e85
+	ld	a,(l005c+_PW)
+	or	80h
+	ld	(l005c+_PW),a
+l0e85:
+	ld	bc,l005c
+	call	l0788		; Create file
+	ld	(l1682),hl
+	ld	hl,(l1682)
+	ld	a,l
+	cp	0ffh
+	jp	nz,l0f0c
+	ld	hl,(l1682)
+	ld	a,h
+	ld	(l1686),a
+	cp	8
+	jp	nz,l0eee
+	ld	bc,l0180
+	call	l072f		; Tell warning
+	ld	bc,l0348
+IF	$APPND
+	call	ll0c7f		; Tell file does exist
+	jp	z,l0e25.Append
+l0e25.Force:
+ELSE
+	call	l0c7f		; Tell file does exist
+ENDIF	;$APPND
+	ld	bc,l005c
+	call	l0778		; Delete file
+	ld	(l1682),hl
+	ld	hl,(l1682)
+	ld	a,l
+	cp	0ffh
+	jp	nz,l0eee
+	ld	hl,(l1682)
+	ld	a,h
+	ld	(l1686),a
+	cp	3
+	jp	nz,l0ed2
+	ld	c,5
+	call	l0ae3		; File is Read Only
+l0ed2:
+	ld	a,(l1686)
+	cp	7
+	jp	nz,l0ee0
+	call	l0cef
+	call	l0aad		; Give new line
+l0ee0:
+	ld	c,0
+	call	l07a8		; Set normal error function
+	ld	bc,l005c
+	call	l0778		; Delete file
+	ld	(l1682),hl
+l0eee:
+	ld	c,0
+	call	l07a8		; Set normal error function
+	ld	a,(l1639)
+	cp	' '
+	jp	z,l0f03
+	ld	a,(l005c+_PW)
+	or	80h
+	ld	(l005c+_PW),a
+l0f03:
+	ld	bc,l005c
+	call	l0788		; Create file
+	ld	(l1682),hl
+l0f0c:
+	ld	c,0
+	call	l07a8		; Set normal error function
+	call	l0d7e
+	ld	bc,l005c
+	call	l0db3
+	ld	bc,l1631
+	call	l127d
+	ret
+IF	$APPND
+l0e25.Append:
+	ld	de,l005c
+	call	FilSiz		; Get size of file
+	ld	hl,l005c+_RRN	; Init record
+	ld	a,(hl)
+	sub	1		; Count down one record
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	sbc	a,0
+	ld	(hl),a
+	inc	hl
+	ld	a,(hl)
+	sbc	a,0
+	ld	(hl),a
+	jp	m,l0e25.Force	; Delete on underflow
+	ld	bc,@DMA
+	call	l0798		; Point to record
+	ld	de,l005c
+	call	RndRed		; Read record
+	ld	hl,@DMA
+	ld	bc,reclng*256+0
+l0e25.FndEOF:
+	ld	a,(hl)		; Find EOF
+	cp	eof
+	jp	z,l0e25.GotEOF
+	inc	hl
+	inc	c
+	dec	b
+	jp	nz,l0e25.FndEOF
+l0e25.GotEOF:
+	ld	a,c
+	ld	(l156a),a	; Set pointer
+	ld	bc,l1639
+	call	l0798		; Point to password
+	jp	l0f0c
+;
+; Get size of file
+; ENTRY	Reg DE holds FCB
+; EXIT	Random record position filled
+;
+FilSiz:
+	ld	c,.filsiz
+	call	BDOS		; Get it
+	ret
+;
+; Read random record of file
+; ENTRY	Reg DE holds FCB
+; EXIT	Accu holds error code
+;	Reg H holds extended error code
+;
+RndRed:
+	ld	c,.rndred
+	call	BDOS		; Read it
+	ret
+ENDIF	;$APPND
+;
+; Close PUT after running
+;
+l0f21:
+	ld	a,(l162b)
+	sub	9
+	add	a,0ffh
+	sbc	a,a
+	push	af
+	ld	a,(l162b)
+	sub	2
+	add	a,0ffh
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra			; Test [ or ;
+	jp	nc,l0f3e	; Yeap
+	ld	c,1
+	call	l0ae3		; End of line expected
+l0f3e:
+	ld	bc,l1625
+	call	l07f2		; Call RSX
+	ld	(l1687),hl
+	ld	a,0ffh
+	call	l1597		; HL:=ACCU-HL
+	or	l
+	jp	z,l0f6d
+	ld	bc,l1624
+	call	l07f2		; Call RSX
+	ld	(l1689),hl
+	ld	bc,l0367
+	call	l072f		; Tell PUT completed for ...
+	ld	hl,(l1687)
+	ld	b,h
+	ld	c,l
+	call	l0db3
+	call	l0aad		; Give new line
+	jp	l0f3e
+l0f6d:
+	call	l0d7e
+	ld	a,(l1631)
+	cp	2
+	jp	nz,l0f81
+	ld	bc,l037a
+	call	l072f		; Tell ... printer
+	jp	l0f87
+l0f81:
+	ld	bc,l0382
+	call	l072f		; Tell .. console
+l0f87:
+	ld	de,l0000
+	ld	c,0
+	call	l0005		; Exit
+	ret
+;
+; Get option [...]
+;
+l0f90:
+	ld	a,(l162b)
+	sub	2
+	add	a,0ffh
+	sbc	a,a
+	push	af
+	ld	a,(l162b)
+	sub	9
+	add	a,0ffh
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	and	c
+	rra			; Test [ or ;
+	jp	nc,l1080	; Yeap
+	ld	hl,l168b
+	ld	(hl),0
+	ld	bc,l01f1
+	push	bc
+	ld	de,l1629
+	ld	bc,l0216
+	call	l0852		; Find keyword
+	ld	a,(l1629)
+	cp	1		; Test NOT
+	jp	nz,l0fd4
+	ld	hl,l168b
+	ld	(hl),1
+	ld	bc,l01f1
+	push	bc
+	ld	de,l1629
+	ld	bc,l0216
+	call	l0852		; Find keyword
+l0fd4:
+	ld	a,(l1629)
+	sub	0		; Test any
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(l1629)
+	sub	1		; Test NOT
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l0ff1	; Neither
+	ld	c,0
+	call	l0ae3		; Invalid option or modifier
+l0ff1:
+	ld	a,(l1629)
+	cp	2		; Test ECHO
+	jp	nz,l100d
+	ld	a,(l168b)
+	rra
+	jp	nc,l1008
+	ld	hl,l1632
+	ld	(hl),0
+	jp	l100d
+l1008:
+	ld	hl,l1632
+	ld	(hl),1
+l100d:
+	ld	a,(l1629)
+	cp	3		; Test RAW
+	jp	nz,l1029
+	ld	a,(l168b)
+	rra
+	jp	nc,l1024
+	ld	hl,l1633
+	ld	(hl),1
+	jp	l1029
+l1024:
+	ld	hl,l1633
+	ld	(hl),0
+l1029:
+	ld	a,(l1629)
+	cp	4		; Test FILTERED
+	jp	nz,l1045
+	ld	a,(l168b)
+	rra
+	jp	nc,l1040
+	ld	hl,l1633
+	ld	(hl),0
+	jp	l1045
+l1040:
+	ld	hl,l1633
+	ld	(hl),1
+l1045:
+	ld	a,(l1629)
+	cp	5		; Test SYSTEM
+	jp	nz,l1061
+	ld	a,(l168b)
+	rra
+	jp	nc,l105c
+	ld	hl,l1634
+	ld	(hl),1
+	jp	l1061
+l105c:
+	ld	hl,l1634
+	ld	(hl),0
+l1061:
+	ld	a,(l1629)
+	cp	6		; Test PROGRAM
+	jp	nz,l107d
+	ld	a,(l168b)
+	rra
+	jp	nc,l1078
+	ld	hl,l1634
+	ld	(hl),0
+	jp	l107d
+l1078:
+	ld	hl,l1634
+	ld	(hl),1
+l107d:
+	jp	l0f90
+l1080:
+	ret
+;
+; Parse file ^BC
+;
+l1081:
+	ld	hl,l168c+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+	ld	hl,(l168c)
+	ld	(l1635),hl
+	ld	hl,l005c
+	ld	(l1635+2),hl
+	ld	bc,l1635
+	call	l1130		; Parse file
+	ld	(l168e),hl
+	ld	bc,lffff
+	ld	de,l168e
+	call	l15a6		; HL:=^DE-BC
+	or	l
+	jp	nz,l10b4
+	ld	hl,(l1635)
+	ld	(l1627),hl	; Set command line pointer
+	ld	c,2
+	call	l0ae3		; Invalid file specification
+l10b4:
+	ld	l,8
+	ld	de,l1639
+	ld	bc,l005c+_DIR
+	inc	l
+	jp	l10c4
+l10c0:
+	ld	a,(bc)
+	ld	(de),a
+	inc	bc
+	inc	de
+l10c4:
+	dec	l
+	jp	nz,l10c0
+	ld	a,0
+	ld	de,l168e
+	call	l15ae		; HL:=^DE-ACCU
+	or	l
+	jp	nz,l10da
+	call	l0e25
+	jp	l10f8
+l10da:
+	ld	hl,(l168e)
+	inc	hl
+	ld	(l1627),hl	; Set command line pointer
+	ld	hl,(l168e)
+	ld	a,(hl)
+	cp	'['		; Test option
+	jp	z,l10f2
+	ld	c,4
+	call	l0ae3		; Invalid delimiter
+	jp	l10f8
+l10f2:
+	call	l0f90		; Get option
+	call	l0e25
+l10f8:
+	ret
+;
+; Skip blanks ^BC - Returns FALSE if end of line
+;
+l10f9:
+	ld	hl,l1690+1
+	ld	(hl),b
+	dec	hl
+	ld	(hl),c
+l10ff:
+	ld	hl,(l1690)
+	ld	a,(hl)
+	sub	' '		; Test blank
+	sub	1
+	sbc	a,a
+	push	af
+	ld	a,(hl)
+	sub	tab		; Test tab
+	sub	1
+	sbc	a,a
+	pop	bc
+	ld	c,b
+	or	c
+	rra
+	jp	nc,l1120	; Neither
+	ld	hl,(l1690)
+	inc	hl		; Bump pointer
+	ld	(l1690),hl
+	jp	l10ff
+l1120:
+	ld	hl,(l1690)
+	ld	a,(hl)		; Get non blank
+	cp	null		; Test end of line
+	jp	nz,l112c	; Nope
+	ld	a,.false
+	ret
+l112c:
+	ld	a,.true
+	ret
+;
+	ret
+;
+;
+;
+l1130:
+	ld	hl,l0000
+	push	hl
+	push	hl
+	ld	h,b
+	ld	l,c
+	ld	e,(hl)
+	inc	hl
+	ld	d,(hl)
+	inc	hl
+	ld	a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld	l,a
+	call	l126d
+	call	l122b
+	jp	nz,l1151
+	ld	a,c
+	or	a
+	jp	nz,l11d3
+	ld	(hl),a
+	jp	l1182
+l1151:
+	ld	b,a
+	inc	de
+	ld	a,(de)
+	cp	':'
+	jp	nz,l117f
+	ld	a,b
+	sub	'A'
+	jp	c,l11d3
+	cp	10h
+	jp	nc,l11d3
+	inc	a
+	ld	(hl),a
+	inc	de
+	call	l122b
+	jp	nz,l1182
+	cp	'.'
+	jp	z,l11d3
+	cp	':'
+	jp	z,l11d3
+	cp	';'
+	jp	z,l11d3
+	jp	l1182
+l117f:
+	dec	de
+	ld	(hl),0
+l1182:
+	ld	b,8
+	call	l11d9
+	ld	b,3
+	cp	'.'
+	jp	z,l1194
+	call	l1223
+	jp	l1198
+l1194:
+	inc	de
+	call	l11d9
+l1198:
+	ld	b,4
+l119a:
+	inc	hl
+	ld	(hl),0
+	dec	b
+	jp	nz,l119a
+	ld	b,8
+	cp	';'
+	jp	z,l11ae
+	call	l1223
+	jp	l11b2
+l11ae:
+	inc	de
+	call	l11fc
+l11b2:
+	push	de
+	call	l126d
+	call	l122b
+	jp	nz,l11c1
+	inc	sp
+	inc	sp
+	jp	l11c2
+l11c1:
+	pop	de
+l11c2:
+	ld	a,c
+	or	a
+	pop	bc
+	ld	a,c
+	pop	bc
+	inc	hl
+	ld	(hl),c
+	inc	hl
+	ld	(hl),b
+	inc	hl
+	ld	(hl),a
+	ex	de,hl
+	ret	nz
+	ld	hl,l0000
+	ret
+l11d3:
+	pop	hl
+	pop	hl
+	ld	hl,lffff
+	ret
+l11d9:
+	call	l122b
+	jp	z,l1223
+	inc	hl
+	cp	'*'
+	jp	nz,l11ee
+	ld	(hl),'?'
+	dec	b
+	jp	nz,l11d9
+	jp	l11f0
+l11ee:
+	ld	(hl),a
+	dec	b
+l11f0:
+	inc	de
+	jp	nz,l11d9
+l11f4:
+	call	l122b
+	ret	z
+	pop	hl
+	jp	l11d3
+l11fc:
+	call	l122b
+	jp	z,l1223
+	inc	sp
+	inc	sp
+	inc	sp
+	inc	sp
+	inc	sp
+	inc	sp
+	push	de
+	push	hl
+	ld	l,0
+	ex	(sp),hl
+	dec	sp
+	dec	sp
+l120f:
+	inc	sp
+	inc	sp
+	ex	(sp),hl
+	inc	l
+	ex	(sp),hl
+	dec	sp
+	dec	sp
+	inc	hl
+	ld	(hl),a
+	inc	de
+	dec	b
+	jp	z,l11f4
+	call	l122b
+	jp	nz,l120f
+l1223:
+	inc	hl
+	ld	(hl),' '
+	dec	b
+	jp	nz,l1223
+	ret
+l122b:
+	ld	a,(de)
+	ld	c,a
+	or	a
+	ret	z
+	ld	c,0
+	cp	0dh
+	ret	z
+	ld	c,a
+	cp	9
+	ret	z
+	cp	' '
+	jp	c,l1269
+	ret	z
+	cp	'.'
+	ret	z
+	cp	':'
+	ret	z
+	cp	';'
+	ret	z
+	cp	'='
+	ret	z
+	cp	','
+	ret	z
+	cp	'/'
+	ret	z
+	cp	5bh
+	ret	z
+	cp	5dh
+	ret	z
+	cp	'<'
+	ret	z
+	cp	'>'
+	ret	z
+	cp	61h
+	ret	c
+	cp	7bh
+	jp	nc,l1266
+	and	5fh
+l1266:
+	and	7fh
+	ret
+l1269:
+	pop	hl
+	jp	l11d3
+l126d:
+	ld	a,(de)
+	cp	' '
+	jp	z,l1279
+	cp	9
+	jp	z,l1279
+	ret
+l1279:
+	inc	de
+	jp	l126d
+;
+;
+;
+l127d:
+	ld	h,b
+	ld	l,c
+	ld	a,(hl)
+	cp	1
+	jp	z,l13e4		; Auxiliary device redirection not implemented
+	cp	3
+	jp	nz,l128e
+	ld	(l153f),a	; Set no console device
+	xor	a
+l128e:
+	ld	(l1540),a	; Re-set input redirection
+	inc	hl
+	ld	a,(hl)
+	ld	(l1541),a	; Set echo flag
+	inc	hl
+	ld	a,(hl)
+	ld	(l1542),a	; Set filter flag
+	inc	hl
+	ld	a,(hl)
+	ld	(l1547),a	; Set system flag
+	ld	hl,(l0005+1)
+	ld	a,h
+	cp	MIN$MEM SHR 8	; Test enough memory
+	ld	de,l14b0	; ERROR: Insufficient Memory
+	jp	c,l13e7
+	ld	hl,l005c
+	ld	a,(hl)
+	dec	a
+	jp	p,l12bd
+	ld	c,19h
+	push	hl
+	call	l0005		; Get logged disk
+	pop	hl
+	ld	(hl),a
+	inc	(hl)
+l12bd:
+	ld	e,a
+	ld	c,0eh
+	push	hl
+	call	l0005		; Log disk
+	pop	hl
+IF	NOT $APPND
+	ld	de,l1549
+	ld	bc,l0020
+	call	l142a		; LDIR
+ENDIF	;NOT $APPND
+	call	l1418		; Get current user
+	ld	(l1548),a	; Save it
+	call	l1420		; Get address of SCB
+	ld	(l151f),hl	; Save it
+	ld	c,1fh
+	call	l0005		; Get disk DPB
+	inc	hl		; Advance to block mask
+	inc	hl
+	inc	hl
+	ld	a,(hl)		; Get mask
+	ld	(l1546),a	; Save it
+	ld	a,(l1540)	; Test input redirection
+	or	a
+	ld	bc,l1442-l1435
+	ld	de,l1532
+	ld	hl,l8685
+	jp	z,l1311		; No input redirection
+	ld	hl,l1435
+	call	l142a		; LDIR - unpack printer filter
+	ld	a,.lstout
+	ld	(l1530),a	; Set BDOS function
+	ld	a,80h
+	ld	(l151b),a	; Set printer offset
+	ld	a,0ch
+	ld	(l151c),a	; Set BIOS printer offset
+	ld	hl,l8a89
+	jp	l1341
+l1311:
+	ld	a,(l153f)	; Get console device
+	or	a
+	jp	z,l1341		; Got it
+	ld	hl,l1442
+	call	l142a		; LDIR - unpack console filter
+	ld	a,.conin
+	ld	(l1530),a	; Set BDOS function
+	ld	a,74h
+	ld	(l151b),a	; Set console input offset
+	ld	a,6
+	ld	(l151c),a	; Set BIOS console input offset
+	ld	(l1541),a	; Set echo flag
+	ld	hl,(l151f)	; Get address of SCB
+	ld	l,0b4h		; Point to CCP bits
+	ld	a,(hl)
+	and	01000000b	; Test .COM
+	ld	de,l14cf
+	jp	nz,l13e7	; Yeap, cannot PUT INPUT to a file on GET or SUBMIT
+	ld	hl,l8e8d
+l1341:
+	ld	(l1543),hl
+	ld	c,'<'
+	ld	de,l144f
+	call	l0005		; Call RSX
+	ld	c,'<'
+	ld	de,l1450
+	call	l0005		; Call RSX, fetching data structure
+	push	hl		; Save address of data structure
+	ld	e,(hl)		; Fetch address of remove flag
+	inc	hl
+	ld	d,(hl)
+	push	de
+	inc	hl		; Position to data structure +4
+	inc	hl
+	inc	hl
+	push	hl
+	ld	hl,(l151c)	; Get BIOS device offset
+	ex	de,hl
+	ld	hl,(l0001)
+	ld	a,(hl)
+	cp	0c3h
+	add	hl,de
+	ld	a,(hl)
+	cp	0c3h
+	jp	nz,l1407
+	ld	hl,(l151f)	; Get address of SCB
+	ld	l,0fah		; Point to COMMON page
+	ld	a,(hl)
+	or	a		; Test banked system
+	jp	nz,l1380	; Yeap
+	ld	a,7fh
+	ld	(l1531),a	; Set no redirection possible
+	jp	l13a6
+l1380:
+	ld	l,68h		; Point to warm start vector
+	ld	(l152e),hl	; Save SCB pointer
+	ld	a,(hl)
+	cp	0c3h		; Test original code
+	jp	z,l1390		; Yeap
+	ld	a,7fh
+	ld	(l1531),a	; Set no redirection possible
+l1390:
+	ld	(hl),021h	; Change for LD HL,...
+	ld	a,(l151b)	; Get device offset
+	ld	l,a
+	ld	(l1527),hl	; Save it
+	ld	a,(hl)
+	cp	0c3h		; Test original code
+	jp	z,l13ff		; Yeap
+	ld	a,7fh
+	ld	(l1531),a	; Set no redirection possible
+l13a4:
+	ld	(hl),021h	; Change for LD HL,...
+l13a6:
+	pop	hl		; Get back pointer to data structure +4
+	ld	c,(hl)		; Fetch address of device routine
+	inc	hl
+	ld	b,(hl)
+	push	hl		; Save position to data structure +5
+	ld	hl,(l151c)	; Get BIOS device offset
+	ex	de,hl
+	ld	hl,(l0001)
+	add	hl,de
+	inc	hl
+	ld	(l1525),hl	; Save device address
+	ld	e,(hl)		; Get old entry
+	ld	(hl),c		; Change to address from RSX
+	inc	hl
+	ld	d,(hl)
+	ld	(hl),b
+	ex	de,hl
+	ld	(l1522+1),hl	; Save device address
+	pop	hl		; Get position to data structure +5
+	inc	hl		; Position to data structure +6
+	ld	c,(hl)		; Fetch address of warm start routine
+	inc	hl
+	ld	b,(hl)
+	ld	hl,(l0001)
+	inc	hl
+	ld	(l152c),hl	; Save address of warm start
+	ld	e,(hl)		; Get old entry
+	ld	(hl),c		; Change to address from RSX
+	inc	hl
+	ld	d,(hl)
+	ld	(hl),b
+	ex	de,hl
+	ld	(l1529+1),hl	; Save warms tart
+l13d5:
+	pop	hl		; Get address of remove flag
+	inc	(hl)		; Set to permanent
+	ld	hl,l151f	; Get address of SCB
+	pop	de		; Get address of data structure
+	ld	bc,l156b-l151f	;;l004c
+	call	l142a		; LDIR
+IF	$APPND
+	ld	a,(l156a)	; Get record pointer
+	or	a
+	ld	hl,@DMA
+	ld	bc,reclng
+	call	z,l142a		; LDIR - unpack buffer if any data in there
+ENDIF	;$APPND
+	jp	l0000
+;
+;
+;
+l13e4:
+	ld	de,l1478	; ERROR: Auxiliary device redirection not implemented
+l13e7:
+	ld	c,9
+	call	l0005
+	ld	c,10h
+	ld	de,l005c
+	call	l0005
+	ld	c,13h
+	ld	de,l005c
+	call	l0005
+	jp	l0000
+;
+;
+;
+l13ff:
+	ld	a,(l1531)
+	cp	7fh		; Test redirection possible
+	jp	nz,l13a4	; Yeap
+l1407:
+	ld	de,l1451
+	ld	c,9
+	call	l0005		; WARNING: Cannot redirect from BIOS
+	ld	hl,l1531
+	ld	(hl),0ffh
+	pop	hl
+	jp	l13d5
+;
+; Get current user
+;
+l1418:
+	ld	a,0ffh
+	ld	e,a
+	ld	c,' '
+	jp	l0005
+;
+; Get address of SCB
+;
+l1420:
+	ld	c,'1'
+	ld	de,l1428
+	jp	l0005
+;
+l1428:
+	db	3ah
+	db	0
+;
+; LDIR
+;
+l142a:
+	ld	a,(hl)
+	ld	(de),a		; Unpack
+	inc	hl
+	inc	de
+	dec	bc
+	ld	a,c
+	or	b
+	jp	nz,l142a
+	ret
+;
+; Printer filter
+;
+l1435:
+	db	.lstout,.lstblk,.conout
+	db	.consta,.condir,.string
+	db	.conin,.rdkbd,.resdsk
+	db	.resdrv,.trunc,.conblk
+	db	.end
+;
+; Console filter
+;
+l1442:
+	db	.no,.no,.no
+	db	.no,.condir,.no
+	db	.conin,.rdkbd,.resdsk
+	db	.resdrv,.trunc,.end
+	db	.no
+l144f:
+	db	0a0h
+l1450:
+	db	84h
+l1451:
+	db	cr,lf
+	db	'WARNING: Cannot redirect from BIOS'
+	db	cr,lf,eot
+l1478:
+	db	cr,lf
+	db	'ERROR: Auxiliary device redirection not implemented'
+	db	cr,lf,eot
+l14b0:
+	db	cr,lf
+	db	'ERROR: Insufficient Memory'
+	db	cr,lf,eot
+l14cf:
+	db	cr,lf
+	db	'ERROR: You cannot PUT INPUT to a file'
+	db	cr,lf
+	db	'       when using GET or SUBMIT.'
+	db	cr,lf,eot
+l151b:
+	db	07ah		; Console output offset
+l151c:
+	dw	l0009		; BIOS console output offset
+	db	0
+;
+; >>>>>>>>>>>> MOVED INTO RSX <<<<<<<<<<<<
+;
+l151f:
+	dw	0		; + 0 (0x00) : SCB base goes here
+	ld	c,e		; + 2 (0x02) : BIOS entry
+l1522:
+	jp	0		; + 3 (0x03) : Jump to BIOS device address
+l1525:
+	dw	0		; + 6 (0x06) : BIOS device vector
+l1527:
+	dw	0		; + 8 (0x08) : SCB device vector
+l1529:
+	jp	$-$		; +10 (0x0A) : BIOS warmstart
+l152c:
+	dw	0		; +13 (0x0D) : Address of BIOS warm start
+l152e:
+	dw	0		; +15 (0x0F) : SCB pointer of warm start
+l1530:
+	db	.conout		; +17 (0x11) : BDOS function
+l1531:
+	db	0		; +18 (0x12) : Redirection flag
+l1532:
+	db	.no,.no,.conout	; +19 (0x13) : BDOS filtered functions
+	db	.consta,.condir,.string
+	db	.conin,.rdkbd,.resdsk
+	db	.resdrv,.trunc,.conblk
+	db	.end
+l153f:
+	db	0		; +32 (0x20) : Console device
+l1540:
+	db	0		; +33 (0x21) : Input redirection
+l1541:
+	db	1		; +34 (0x22) : Echo flag
+l1542:
+	db	0		; +35 (0x23) : Filter flag
+;
+; RSX numbers
+;
+l1543:
+	db	0ffh		; +36 (0x24) : LST: 0x89, Def. 0x85, CONIN 0x8D
+	db	0ffh		; +37 (0x25) : LST: 0x8a, Def. 0x86, CONIN 0x8D
+	db	0		; +38 (0x26) : Block mask - preset to 0
+l1546:
+	db	0		; +39 (0x27) : Disk block mask
+l1547:
+	db	0		; +40 (0x28) : System flag
+l1548:
+	db	0		; +41 (0x29) : Current user
+l1549:
+	db	1,'SYSOUT  $$$'	; +42 (0x2A) : SYS file FCB
+	ds	21
+l156a:
+	db	0		; +75 (0x4B) : Record pointer - preset to 0
+;
+; >>>>>>>>>>>>>>>>>>>><<<<<<<<<<<<<<<<<<<<
+;
+; HL:=^DE+ACCU
+;
+l156b:
+	ex	de,hl
+	ld	e,a
+	ld	d,0
+	ex	de,hl
+	ld	a,(de)
+	add	a,l
+	ld	l,a
+	inc	de
+	ld	a,(de)
+	adc	a,h
+	ld	h,a
+	ret
+;
+; DE:=DE DIV HL
+; HL:=DE MOD HL
+;
+l1578:
+	ld	b,h
+	ld	c,l
+;
+; DE:=DE DIV BC
+; HL:=DE MOD BC
+;
+l157a:
+	ld	hl,0
+	ld	a,16
+l157f:
+	push	af
+	add	hl,hl
+	ex	de,hl
+	sub	a
+	add	hl,hl
+	ex	de,hl
+	adc	a,l
+	sub	c
+	ld	l,a
+	ld	a,h
+	sbc	a,b
+	ld	h,a
+	inc	de
+	jp	nc,l1591
+	add	hl,bc
+	dec	de
+l1591:
+	pop	af
+	dec	a
+	jp	nz,l157f
+	ret
+;
+; HL:=ACCU-HL
+;
+l1597:
+	ld	e,a
+	ld	d,0
+	ld	a,e
+	sub	l
+	ld	l,a
+	ld	a,d
+	sbc	a,h
+	ld	h,a
+	ret
+
+	ld	l,c
+	ld	h,b
+	ld	c,(hl)
+	inc	hl
+	ld	b,(hl)
+;
+; HL:=^DE-BC
+;
+l15a6:
+	ld	a,(de)
+	sub	c
+	ld	l,a
+	inc	de
+	ld	a,(de)
+	sbc	a,b
+	ld	h,a
+	ret
+;
+; HL:=^DE-ACCU
+;
+l15ae:
+	ld	l,a
+	ld	h,0
+;
+; HL:=^DE-HL
+;
+l15b1:
+	ld	a,(de)
+	sub	l
+	ld	l,a
+	inc	de
+	ld	a,(de)
+	sbc	a,h
+	ld	h,a
+	ret
+IF	$HELP
+;
+; Give help for PUT
+;
+prHELP:
+	ld	c,_Page
+	call	l07b8		; Get screen page length
+	ld	(MaxLin),a	; Save it
+	ld	hl,$HELPTX	; Init text
+HlpIni:
+	ld	a,(MaxLin)
+	dec	a		; Fix line count
+	ld	(Lines),a
+HlpLoop:
+	ld	a,(hl)		; Get character
+	inc	hl
+	cp	eot		; Test end of text
+	jp	z,OS
+	cp	nlc		; Test special new line
+	jp	z,.NL
+	call	Conout		; Print it
+	jp	HlpLoop
+.NL:
+	call	NL		; Give new line
+	ld	a,(Lines)
+	dec	a		; Decrement line count
+	ld	(Lines),a
+	jp	nz,HlpLoop	; Still any remaining
+	push	hl
+	ld	bc,$MORE
+	call	l072f		; Tell MORE
+wt.help:
+	call	Constat		; Wait for key
+	rra
+	jp	nc,wt.help
+	call	l0726
+	push	af
+	ld	bc,$NO.MORE
+	call	l072f
+	pop	af
+	pop	hl
+	cp	CtrlC		; Test break
+	jp	nz,HlpIni	; Get next part if not
+	jp	OS		; Else break
+;
+; Close line
+;
+NL:
+	ld	a,cr
+	call	Conout		; Give CR
+	ld	a,lf		; And LF
+;
+; Put character to console
+;
+Conout:
+	push	bc
+	push	hl
+	ld	c,a
+	call	l0716		; Put it
+	pop	hl
+	pop	bc
+	ret
+;
+MaxLin:
+	ds	1
+Lines:
+	ds	1
+;
+$MORE:
+	db	'<<<MORE>>>',eot
+$NO.MORE:
+	db	cr,'          ',cr,eot
+$HELPTX:
+	db	'  '
+	_PRG
+	db	' utility',nlc,nlc
+	db	'Syntax:',nlc,nlc
+	db	'    '
+	_PRG
+	db	' CONSOLE {OUTPUT TO} FILE filespec {option} | CONSOLE',nlc
+	db	'    '
+	_PRG
+	db	' PRINTER {OUTPUT TO} FILE filespec {option} | PRINTER',nlc
+	db	'    '
+	_PRG
+	db	' CONSOLE {OUTPUT TO} CONSOLE',nlc
+	db	'    '
+	_PRG
+	db	' PRINTER {OUTPUT TO} PRINTER',nlc,nlc
+	db	'    '
+	_PRG
+	db	' HELP',nlc,nlc
+	_PRG
+	db	' puts console or printer output to a file for the next command entered at',nlc
+	db	'the console, until the program terminates. Then console output reverts to the',nlc
+	db	'console. Printer output is directed to a file until the program',nlc
+	db	'terminates. Then printer output is put back to the printer.',nlc,nlc
+	_PRG
+	db	' with the SYSTEM option directs all subsequent console/printer output to the',nlc
+	db	'specified file. This option terminates when you enter the  '
+	_PRG
+	db	' CONSOLE or  '
+	_PRG
+	db	nlc
+	db	'PRINTER command.',nlc,nlc
+	db	'CONOUT: and CON: are synonymous for CONSOLE while LIST and LST: are for PRINTER',nlc,nlc
+	db	'    OPTIONS',nlc,nlc
+	db	'           [ {ECHO | NO ECHO} {FILTER | NO FILTER} | {SYSTEM} ]',nlc
+	db	'or         [                  {NO RAW | RAW}'
+	db	'        | {NO PROGRAM} ]',nlc,nlc
+	db	'ECHO         specifies that output is echoed to the console. This is the',nlc
+	db	'	     default option when you direct console output to a file.',nlc,nlc
+	db	'NO ECHO      specifies that file output is not echoed to the console.',nlc
+	db	'	     NO ECHO is the default for the '
+	_PRG
+	db	' PRINTER command.',nlc,nlc
+	db	'FILTER       specifies filtering of control characters, which means that',nlc
+	db	'(NO RAW)     control characters are translated  to printable  characters.',nlc
+	db	'             For example, an ESCape character is translated to ^[.',nlc
+	db	nlc
+	db	'NO FILTER    means that '
+	_PRG
+	db	' does not translate control characters. This is the'
+	db	nlc
+	db	'(RAW)        default option.',nlc,nlc
+	db	'SYSTEM       specifies that system output as well as program output is written',nlc
+	db	'(NO PROGRAM) to the file specified by filespec. Output is written to the',nlc
+	db	'             file until a subsequent  '
+	_PRG
+	db	'  CONSOLE command redirects console',nlc
+	db	'             output back to the console.',eot
+ENDIF	;$HELP
+;
+; Stack area
+;
+	ds	2*50
+l161d:
+	db	0
+l161e:
+	db	0
+l161f:
+	db	0
+l1620:
+	dw	0
+l1622:
+	db	0
+l1623:
+	db	0
+l1624:				; PRINTER: 89h
+	db	85h		; INPUT:   8eh
+l1625:				; PRINTER: 8ah
+	db	86h		; INPUT:   8dh
+	db	0
+l1627:
+	dw	0
+l1629:
+	db	0		; Command scan function
+l162a:
+	db	0
+l162b:
+	db	0
+l162c:
+	db	'~'
+l162d:
+	dw	0
+l162f:
+	dw	0
+l1631:
+	db	0
+l1632:
+	db	1
+l1633:
+	db	1
+l1634:
+	db	1
+;
+; #### DYNAMIC DATA ####
+;
+l1635:				; File parse block - name, FCB
+	db	0c3h,0bh
+	db	007h,03ah
+l1639:				; Password
+	db	029h,016h,0d6h,004h,0d6h,001h,09fh,0f5h
+l1641:
+	db	03ah
+l1642:
+	db	029h,016h	; DS 2
+l1644:
+	db	0d6h,005h
+l1646:
+	db	0d6h
+l1647:
+	db	001h,09fh
+l1649:
+	db	0c1h,048h
+l164b:
+	db	0b1h,0f5h
+l164d:
+	db	03ah
+l164e:
+	db	029h
+l164f:
+	db	016h
+l1650:
+	db	0d6h
+l1651:
+	db	009h,0d6h
+l1653:
+	db	001h,09fh
+l1655:
+	db	0c1h
+l1656:
+	db	048h
+l1657:
+	db	0b1h,01fh
+l1659:
+	db	0d2h,077h
+l165b:
+	db	006h,03ah
+l165d:
+	db	02bh
+l165e:
+	db	016h
+l165f:
+	db	0feh
+l1660:
+	db	009h
+l1661:
+	db	0c2h
+	db	06ah
+l1663:
+	db	006h
+l1664:
+	db	0cdh
+l1665:
+	db	021h
+l1666:
+	db	00fh
+l1667:
+	db	0c3h
+l1668:
+	db	077h
+l1669:
+	db	006h,001h
+l166b:
+	db	08bh
+l166c:
+	db	001h
+l166d:
+	db	0c5h
+l166e:
+	db	011h
+l166f:
+	db	029h
+l1670:
+	db	016h
+l1671:
+	db	001h
+l1672:
+	db	0e2h,001h
+l1674:
+	db	0cdh,052h
+l1676:
+	db	008h
+l1677:
+	db	03ah
+l1678:
+	db	029h,016h
+l167a:
+	db	0feh
+l167b:
+	db	001h
+l167c:
+	db	0c2h
+l167d:
+	db	08fh
+l167e:
+	db	006h
+l167f:
+	db	001h
+
+l1680	equ	$
+l1681	equ	l1680+1
+l1682	equ	l1681+1
+l1684	equ	l1682+2
+l1686	equ	l1684+2
+l1687	equ	l1686+1
+l1689	equ	l1687+2
+l168b	equ	l1689+2
+l168c	equ	l168b+1
+l168e	equ	l168c+2
+l1690	equ	l168e+2
+@DMA	equ	l1690+2
+
+	end
+

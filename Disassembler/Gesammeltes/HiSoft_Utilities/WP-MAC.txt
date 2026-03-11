@@ -1,0 +1,497 @@
+	title	Small File Copy Tool
+	name	('WP')
+
+; DASMed version of HISOFT's small utility WP.COM
+; By W.Cirsovius
+
+; WP.COM copies files from one disc to another. It is invoked
+; by typlng its name followed by its parameters at the CP/M prompt.
+
+; Call it:
+;		WP <afn>
+
+	.z80
+	aseg
+	org	0100h
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+
+.conin	equ	 1
+.conout	equ	 2
+.string	equ	 9
+.open	equ	15
+.close	equ	16
+.srcfrs	equ	17
+.srcnxt	equ	18
+.delete	equ	19
+.rdseq	equ	20
+.wrseq	equ	21
+.create	equ	22
+.curdsk	equ	25
+.setdma	equ	26
+
+.drv	equ	 1
+.nam	equ	 8
+.ext	equ	 3
+_DIR	equ	16
+_CR	equ	32
+
+FCBlen	equ	36
+reclng	equ	128
+
+lf	equ	0ah
+cr	equ	0dh
+eot	equ	'$'
+
+MEMSPC	equ	256		; Free space on top og memory
+
+l0000	equ	00h
+l0005	equ	05h
+l005c	equ	5ch
+l0080	equ	80h
+
+	ld	hl,(TPATOP)	; Fetch top of memory
+	ld	sp,hl
+	ld	de,-MEMSPC
+	add	hl,de		; Let some space
+	ld	(l0401),hl	; Save last memory address available
+	ld	de,l1029
+	and	a
+	sbc	hl,de		; Calculate free memory pages
+	ld	a,h
+	rra			; Divide by 4
+	rra
+	and	00111111b	; Mask it
+	inc	a
+	push	af
+	ld	de,l0377
+	call	l026a		; Give header and tell buffer size
+	call	l034e		; Find option -Q
+	pop	af
+	call	l02ff		; Print decimal buffer size
+	ld	a,'K'
+	call	l026f		; Type K
+	ld	de,l039e
+	call	l026a		; Give new line on console
+	ld	a,(l005c)	; Get disk
+	or	a		; Test default
+	jr	nz,l0139	; Nope
+	call	l0154		; Get logged disk
+l0139:
+	ld	(l03fd),a	; Save source disk
+	push	af		; Save it
+	ld	a,(l005c+_DIR)	; Get destination disk
+	or	a		; Test defined
+	jr	nz,l0146	; Yeap
+	call	l0154		; Get logged disk
+l0146:
+	ld	(l03fc),a	; Save destination disk
+	pop	bc		; Get back source disk
+	cp	b		; Verify not same
+	jr	nz,l015b
+	ld	de,l03a1	; Tell bad destination drive
+l0150:
+	call	l026a
+	rst	0
+;
+; Get logged disk
+;
+l0154:
+	ld	c,.curdsk
+	call	BDOS		; Get disk
+	inc	a
+	ret
+;
+; WP cont'd
+;
+l015b:
+	ld	de,l005c
+	push	de
+	pop	ix		; Copy FCB
+	ld	a,(ix+.drv)	; Get first character of name
+	cp	' '		; Test name given
+	jr	nz,l0173	; Yeap
+	push	de
+	inc	de
+	ld	hl,l03f1
+	ld	bc,.nam+.ext
+	ldir			; Set wildcard if blank name
+	pop	de
+l0173:
+	ld	c,.srcfrs
+	call	BDOS		; Search for first file
+	inc	a		; Test any there
+	jr	nz,l0180	; Yeap
+	ld	de,l03b7
+	jr	l0150		; Tell no file found
+l0180:
+	dec	a		; Fix directory code
+	add	a,a		; * 2
+	add	a,a		; * 4
+	add	a,a		; * 8
+	add	a,a		; *16
+	add	a,a		; *32
+	ld	e,a
+	ld	d,0
+	ld	hl,l0080
+	add	hl,de		; Position in record
+	ld	a,(l03fe)	; Get current file count
+	push	af
+	push	hl
+	ld	hl,l0429	; Init directory buffer
+	or	a		; Test first file
+	jr	z,l019f
+	ld	b,a
+	ld	de,.nam+.ext	; Set increment
+l019c:
+	add	hl,de		; Position in buffer
+	djnz	l019c
+l019f:
+	pop	de
+	inc	de
+	ld	bc,.nam+.ext
+	ex	de,hl
+	ldir			; Unpack filename
+	pop	af
+	inc	a
+	ld	(l03fe),a	; Update current file count
+	ld	c,.srcnxt
+	call	BDOS		; Find next file
+	inc	a		; Test more
+	jr	nz,l0180	; Yeap
+	ld	hl,l0429	; Init directory buffer
+l01b7:
+	push	hl
+	call	l0274		; Print name of file
+	ld	a,(l03ff)	; Get prompt flag
+	or	a		; Test enable prompt
+	jr	nz,l01e0	; Nope
+	ld	de,l03dd
+	call	l026a		; Ask for copy
+	ld	c,.conin
+	call	BDOS		; Get answer
+	or	'a'-'A'		; Make lower case
+	cp	'q'		; Test quit
+l01d0:
+	jp	z,l0000		; Yeap, exit
+	cp	'a'		; Test copy all followers
+	jr	nz,l01dc	; Yeap
+	ld	(l03ff),a	; Set disable prompt
+	jr	l01e0
+l01dc:
+	cp	'y'		; Test copy ok
+	jr	nz,l01e3	; Nope
+l01e0:
+	call	l0208		; Copy file
+l01e3:
+	ld	de,l039e
+	call	l026a		; Give new line on console
+	pop	hl
+	ld	de,.nam+.ext
+	add	hl,de
+	ld	a,(l03fe)	; Get current file count
+	dec	a		; Count down
+	jr	z,l01d0		; End if no more in buffer
+	ld	(l03fe),a	; Update count
+	jr	l01b7
+;
+; Clear entire FCB ^DE
+;
+l01f9:
+	ld	bc,FCBlen-1	; Set length
+	push	hl
+	push	de
+	push	de
+	pop	hl
+	inc	de
+	ld	(hl),0		; Init entry
+	ldir			; Clear subsequent memory
+	pop	de
+	pop	hl
+	ret
+;
+; Copy file
+;
+l0208:
+	pop	de		; Get caller
+	pop	hl		; Get current filename
+	push	hl
+	push	de		; Bring back caller
+	push	hl
+	ld	de,l005c
+	call	l01f9		; Clear entire FCB
+	ld	a,(l03fd)	; Get logged source disk
+	ld	(de),a		; Put into FCB
+	inc	de
+	ld	bc,.nam+.ext
+	ldir			; Copy filename
+	ld	de,l0405	; Point to destination FCB
+	call	l01f9		; Clear entire FCB
+	ld	a,(l03fc)	; Get destination disk
+	ld	(de),a		; Put into FCB
+	inc	de
+	pop	hl
+	ld	bc,.nam+.ext
+	ldir			; Copy filename, too
+	ld	de,l005c
+	ld	c,.open
+	call	BDOS		; Open source file
+	inc	a		; Verify found
+	jr	z,l0267		; Nope, error
+	xor	a
+	ld	(l005c+_CR),a	; Clear current record
+	ld	de,l0405
+	push	de
+	ld	c,.delete
+	call	BDOS		; Delete destination file
+	pop	de
+	ld	c,.create
+	call	BDOS		; Create new one
+	inc	a		; Verify success
+	jr	z,l0267		; Nope, error
+	call	l0291		; Copy file
+	ret	nz		; Success
+	ld	de,l0405
+	push	de
+	ld	c,.close
+	call	BDOS		; Close destination file
+	pop	de
+	ld	c,.delete
+	call	BDOS		; Delet it
+	ld	de,l03cd
+	jr	l026a		; Tell disk error
+l0267:
+	ld	de,l03c0	; Tell open failed
+;
+; Print string ^DE on console
+;
+l026a:
+	ld	c,.string
+l026c:
+	jp	BDOS
+;
+; Print character on console
+;
+l026f:
+	ld	e,a		; Get from Accu
+l0270:
+	ld	c,.conout
+	jr	l026c
+;
+; Print name of file ^HL on console
+;
+l0274:
+	ld	b,.nam+.ext	; Init count
+l0276:
+	push	hl
+	push	bc
+	ld	a,.ext
+	cp	b		; Test extension position
+	jr	nz,l0284	; Nope
+	push	hl
+	ld	e,'.'
+	call	l0270		; Indicate it
+	pop	hl
+l0284:
+	ld	e,(hl)		; Get character
+	res	7,e		; Strip off attribute
+	ld	(hl),e
+	call	l0270		; Print it on console
+	pop	bc
+	pop	hl
+	inc	hl
+	djnz	l0276
+	ret
+;
+; Copy file - Z set on success
+;
+l0291:
+	xor	a
+	ld	(l0400),a	; Indicate memory empty
+	ld	h,a
+	ld	l,a
+	ld	(l0403),hl	; Init record count
+	ld	de,l1029	; Init disk buffer
+l029d:
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l005c
+	ld	c,.rdseq
+	call	BDOS		; Read record
+	pop	de
+	and	a		; Test end of file
+	jr	nz,l02c8	; Yeap
+	ld	hl,(l0403)
+	inc	hl		; Advance record count
+	ld	(l0403),hl
+	ld	hl,reclng
+	add	hl,de		; Advance to next address
+	ld	de,(l0401)	; Get last memory address available
+	ex	de,hl
+	sbc	hl,de		; Test still in range
+	jr	nc,l029d	; Yeap, read next
+	ld	a,1
+	ld	(l0400),a	; Indicate memory filled
+l02c8:
+	ld	bc,(l0403)	; Get record count
+	ld	de,l1029	; Init disk buffer
+l02cf:
+	push	bc
+	push	de
+	ld	c,.setdma
+	call	BDOS		; Set disk buffer
+	ld	de,l0405
+	ld	c,.wrseq
+	call	BDOS		; Write record
+	pop	de
+	pop	bc
+	and	a		; Test success
+	jr	z,l02e5		; Yeap
+	xor	a		; Set zero indicating error
+	ret
+l02e5:
+	ld	hl,reclng
+	add	hl,de		; Point to next address
+	ex	de,hl
+	dec	bc		; Count down records read
+	ld	a,b
+	or	c		; Test end
+	jr	nz,l02cf	; Nope, write next record
+	ld	a,(l0400)	; Get memory fill flag
+	and	a		; Test filled
+	jr	nz,l0291	; Yeap, read next part of file
+	ld	de,l0405
+	ld	c,.close
+	call	BDOS		; Close file
+	inc	a		; Zero flag set on error
+	ret
+;
+; Print two digit decimal number in Accu (0..99)
+;
+l02ff:
+	ld	c,a		; Get number
+	xor	a		; Clear result
+	ld	hl,l0080+1	; Set digit pointer
+	ld	e,2		; Set digit count
+l0306:
+	push	de
+	push	hl
+	ld	de,10		; Set divisor
+	ld	hl,0		; Init result
+	ld	b,16		; Set bit count
+l0310:
+	rl	c		; Now divide by 10
+	rla
+	adc	hl,hl
+	sbc	hl,de
+	jr	nc,l031a
+	add	hl,de
+l031a:
+	ccf
+	djnz	l0310
+	rl	c
+	rla
+	ld	d,l		; Get resulting units
+	pop	hl
+	ld	(hl),d
+	dec	hl
+	pop	de
+	dec	e
+	jr	nz,l0306
+	ld	b,2
+	res	0,c
+l032c:
+	ld	a,b
+	cp	1
+	jr	nz,l0333
+	set	0,c
+l0333:
+	inc	hl
+	ld	a,(hl)
+	or	a
+	jr	nz,l0340
+	bit	0,c
+	jr	nz,l0340
+	ld	a,' '
+	jr	l0344
+l0340:
+	set	0,c
+	add	a,'0'
+l0344:
+	push	hl
+	push	bc
+	call	l026f		; Put to console
+	pop	bc
+	pop	hl
+	djnz	l032c
+	ret
+;
+; Find option -Q
+;
+l034e:
+	xor	a
+	ld	(l03ff),a	; Set enable prompt
+	ld	(l03fe),a	; Init current file count
+	ld	b,a
+	ld	a,(l0080)	; Get length of command
+	ld	c,a
+	ld	hl,l0080+1	; Init command pointer
+l035d:
+	ld	a,'-'
+	cpir			; Test option delimiter
+	ret	nz		; Nope
+	ld	a,'Q'
+	cp	(hl)		; Test disable prompt
+	jr	nz,l035d	; Nope, try next
+	dec	hl		; Position to delimiter
+	dec	hl		; Back one character more
+	ld	a,' '
+	cp	(hl)		; Verify option
+	jr	z,l0371		; Yeap
+	inc	hl
+	jr	l035d
+l0371:
+	ld	a,1
+	ld	(l03ff),a	; Set disable prompt
+	ret
+;
+l0377:
+	db	'WP V1.0 (C) 1986 HiSoft'
+	db	cr,lf
+	db	'Buffer size: ',eot
+l039e:
+	db	cr,lf,eot
+l03a1:
+	db	'Bad destination drive',eot
+l03b7:
+	db	'No files',eot
+l03c0:
+	db	' Open failed',eot
+l03cd:
+	db	' Disc I/O error',eot
+l03dd:
+	db	'  Copy (Y/N/A/Q)? ',eot
+
+	db	0
+l03f1:
+	db	'???????????'
+l03fc:
+	db	' '		; Logged destination disk
+l03fd:
+	db	'f'		; Logged source disk
+l03fe:
+	db	'o'		; Current file count
+l03ff:
+	db	0f2h		; Prompt flag [0 is enable]
+
+l0400	equ	$		; Memory fill flag
+l0401	equ	l0400+1		; Last memory address available
+l0403	equ	l0401+2		; Record count
+l0405	equ	l0403+2		; Destination FCB
+l0429	equ	l0405+FCBlen	; Directory buffer
+l1029	equ	1029h
+
+	end
+

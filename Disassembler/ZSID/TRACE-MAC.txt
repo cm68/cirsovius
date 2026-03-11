@@ -1,0 +1,391 @@
+	title	Debugger Trace Utility
+	name	('TRACE')
+
+; DASMed version of TRACE.UTL
+; By W. Cirsovius
+
+BDOS	equ	0005h
+TPATOP	equ	BDOS+1
+
+RSTsel	equ	6		; RST number
+RSTadr	equ	RSTsel SHL 3	; RST address vector
+
+_CO	equ	 9		; Put to console
+_DSB	equ	12		; Display byte
+_DSS	equ	27		; Display symbol
+
+null	equ	00h
+lf	equ	0ah
+cr	equ	0dh
+
+	.z80
+	aseg
+	org	0100h
+
+	ld	bc,l0500-l0200	; Set length of code
+	push	bc
+	ld	hl,TPATOP+1
+	ld	a,c
+	or	a		; Test length boundary
+	ld	a,(hl)		; Get top page
+	jp	z,l010e
+	dec	a		; Fix if not
+l010e:
+	sub	b		; Calculate start address of code
+	ld	d,a
+	ld	e,0
+	push	de
+	ld	hl,l0200	; Point to code
+l0116:
+	ld	a,b		; Test end
+	or	c
+	jp	z,l0123		; Code moved
+	dec	bc
+	ld	a,(hl)
+	ld	(de),a		; Move code
+	inc	de
+	inc	hl
+	jp	l0116
+l0123:
+	pop	de
+	pop	bc
+	push	hl
+	ld	h,d		; Get page
+l0127:
+	ld	a,b		; Test done
+	or	c
+	jp	z,l0145		; Code relocated
+	dec	bc
+	ld	a,e		; Get code pointer
+	and	00000111b	; Test byte boundary
+	jp	nz,l0138
+	ex	(sp),hl
+	ld	a,(hl)		; Get new bit map
+	inc	hl
+	ex	(sp),hl
+	ld	l,a
+l0138:
+	ld	a,l
+	rla			; Shift bit map
+	ld	l,a
+	jp	nc,l0141	; Nothing to do
+	ld	a,(de)
+	add	a,h		; Add page
+	ld	(de),a
+l0141:
+	inc	de
+	jp	l0127
+l0145:
+	pop	de
+	ld	l,0		; Set page boundary
+	jp	(hl)		; Enter TRACE
+;
+; Filler to page boundary
+;
+	ds	183
+;
+; PAGE BOUNDARY REQUIRED
+;
+l0200:
+	ds	768
+l0500:
+;
+; Bit map
+;
+ll0500:
+	db	00100000b,00001000b,00000010b,00000000b
+	db	10010010b,01000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000010b,00001000b
+	db	01000000b,00000000b,00010001b,00000010b
+	db	00010000b,00001001b,00000100b,10010010b
+	db	01001001b,00100100b,10010010b,00010010b
+	db	01000010b,00100100b,10010000b,10010000b
+	db	00100001b,00010000b,00100001b,00000010b
+	db	01000100b,00100001b,00100100b,10000100b
+	db	00000000b,00100010b,00000100b,10000100b
+	db	10010010b,00010010b,00010000b,01001000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000001b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+	db	00000000b,00000000b,00000000b,00000000b
+;
+; End of bit map
+;
+ll0560:
+	ds	160
+;
+; PAGE BOUNDARY REQUIRED
+;
+; Relocated part of TRACE - Base address ist 0600H, original is 0000H
+;
+l0600:
+	jp	l0687		; Enter TRACE
+;
+; Internal symbols - Reversed order
+;
+$$1:
+	db	'YALPSID'	; DISPLAY
+$$1L	equ	$-$$1
+	db	$$1L
+	dw	l0627
+;
+$$2:
+	db	'TCELLOC'	; COLLECT
+$$2L	equ	$-$$2
+	db	$$2L
+	dw	l0624
+;
+$$3:
+	db	'LAITINI'	; INITIAL
+$$3L	equ	$-$$3
+l061e:
+	db	$$3L
+	dw	l0621
+;
+l0621:
+	jp	l0693		; INITIAL
+l0624:
+	jp	l06e0		; COLLECT
+l0627:
+	jp	l06f5		; DISPLAY
+;
+	db	'COPYRIGHT (C) 1977, DIGITAL RESEARCH   '
+;
+; Display symbol
+;
+l0651:
+	ld	bc,_DSS		; Set index
+	jp	l0667
+;
+; Put character in Accu to console
+;
+l0657:
+	ld	bc,_CO		; Set index
+	jp	l0667
+;
+; Display word in reg DE
+;
+l065d:
+	push	de
+	ld	a,d
+	call	l0664		; Display hi byte
+	pop	de
+	ld	a,e		; Then lo byte
+;
+; Display byte in Accu
+;
+l0664:
+	ld	bc,_DSB		; Set index
+;
+; Execute breakpoint related instruction
+; Reg BC holds index
+;
+l0667:
+	ld	hl,(RSTadr+1)	; Fetch base of vector
+	add	hl,bc
+	jp	(hl)
+;
+; Put zero closed string ^DE to console
+;
+l066c:
+	ld	a,(de)		; Get character
+	or	a		; Test end
+	ret	z		; Yeap
+	inc	de
+	push	de
+	call	l0657		; Put to console
+	pop	de
+	jp	l066c
+;
+; Give new line on console
+;
+l0678:
+	push	bc
+	push	de
+	ld	a,cr
+	call	l0657		; Put to console
+	ld	a,lf
+	call	l0657
+	pop	de
+	pop	bc
+	ret
+;
+; %%%%%%%%%%%%%%%%%%%%%%
+; %%% START OF TRACE %%%
+; %%%%%%%%%%%%%%%%%%%%%%
+;
+l0687:
+	ld	hl,(BDOS+1)	; Get old OS address
+	ld	(l0600+1),hl	; Into TRACE entry
+	ld	hl,l0600	; Get TRACE entry
+	ld	(BDOS+1),hl	; For new os address
+;
+; INITIAL entry point
+;
+l0693:
+	ld	de,l075e
+	call	l066c		; Display internal symbol table
+	ld	de,l0621
+	call	l065d
+	ld	de,l076b
+	call	l066c
+	ld	de,l0624
+	call	l065d
+	ld	de,l0778
+	call	l066c
+	ld	de,l0627
+	call	l065d
+	ld	a,(RSTadr+2)	; Get breakpoint page
+	cp	HIGH l0900	; Test disassembly active
+	jp	nz,l06c7	; Yeap
+	ld	de,l0785	; Tell address backtrace only
+	ld	a,1
+	jp	l06cb
+l06c7:
+	xor	a
+	ld	de,l07a9	; Tell symbolic backtrace
+l06cb:
+	ld	(l07da),a	; Set flag
+	call	l066c		; Tell backtrace mode
+	ld	hl,l07d5
+	ld	(hl),0
+	ld	hl,l0800
+	ld	(l07d6),hl	; Init array pointer
+	ld	de,l061e-l0600	; Return symbol pointer
+	ret
+;
+; COLLECT entry point
+;
+l06e0:
+	ld	hl,l07d5
+	ld	a,(hl)
+	or	a
+	jp	m,l06e9
+	inc	(hl)
+l06e9:
+	ld	hl,(l07d6)
+	ld	(hl),e
+	inc	l
+	ld	(hl),d
+	inc	l
+	ld	(l07d6),hl
+	xor	a
+	ret
+;
+; DISPLAY entry point
+;
+l06f5:
+	ld	hl,l07da
+	ld	a,(hl)		; Get backtrace flag (0 symbolic)
+	or	c
+	ld	c,a
+	push	bc
+	ld	de,l07c8
+	call	l066c		; Indicate backtrace
+	pop	bc
+	ld	hl,l07d5
+	ld	b,(hl)
+	xor	a
+	ld	(l07db),a
+	ld	a,c
+	or	a
+	jp	nz,l0716
+	ld	hl,(l090c)	; Get current disassembly address
+	ld	(l07d8),hl
+l0716:
+	ld	hl,(l07d6)
+l0719:
+	ld	a,b
+	or	a
+	jp	z,l0754
+	dec	b
+	push	bc
+	dec	l
+	ld	d,(hl)
+	dec	l
+	ld	e,(hl)
+	push	hl
+	ex	de,hl
+	ld	a,c
+	or	a
+	jp	z,l0741
+	ex	de,hl
+	ld	hl,l07db
+	ld	a,(hl)
+	inc	(hl)
+	and	00000111b
+	call	z,l0678		; Give new line
+	call	l065d		; Display word
+	ld	a,' '
+	call	l0657		; Put to console
+	jp	l074f
+l0741:
+	ld	(l090c),hl	; Set current disassembly address
+	call	l0651		; Display symbol
+	ld	a,2
+	ld	(l0910),a
+	call	l0906		; Execute L (disassembly) command
+l074f:
+	pop	hl
+	pop	bc
+	jp	l0719
+l0754:
+	ld	a,c
+	or	a
+	ret	z
+	ld	hl,(l07d8)
+	ld	(l090c),hl	; Set current disassembly address
+	ret
+;
+l075e:
+	db	cr,lf,'INITIAL = ',null
+l076b:
+	db	cr,lf,'COLLECT = ',null
+l0778:
+	db	cr,lf,'DISPLAY = ',null
+l0785:
+	db	cr,lf,'"-A" IN EFFECT, ADDRESS BACKTRACE',null
+l07a9:
+	db	cr,lf,'READY FOR SYMBOLIC BACKTRACE',null
+l07c8:
+	db	cr,lf,'BACKTRACE:',null
+l07d5:
+	db	0
+l07d6:
+	dw	l0800
+l07d8:
+	ds	2
+l07da:				; Backtrace flag (0 symbolic, 1 address)
+	ds	1
+l07db:
+	ds	1
+;
+; Filler to page boundary
+;
+	ds	36
+;
+; PAGE BOUNDARY REQUIRED
+;
+l0800:
+	ds	256
+;
+; PAGE BOUNDARY REQUIRED
+;
+; Debugger starts here
+;
+l0900	equ	$
+l0906	equ	l0900+6		; Execute L (disassembly) command
+l090c	equ	l0900+12	; Current address for A and L command
+l0910	equ	l0900+16	; Disassembler line count
+
+	end
+
